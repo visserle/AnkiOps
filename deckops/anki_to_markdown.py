@@ -23,7 +23,7 @@ class DeckExportResult:
 
     deck_name: str
     file_path: Path | None
-    total_cards: int
+    total_notes: int
     updated: int
     created: int
     deleted: int
@@ -100,7 +100,7 @@ def transcribe_deck(
         return DeckExportResult(
             deck_name=deck_name,
             file_path=None,
-            total_cards=0,
+            total_notes=0,
             updated=0,
             created=0,
             deleted=0,
@@ -171,7 +171,7 @@ def transcribe_deck(
     return DeckExportResult(
         deck_name=deck_name,
         file_path=output_path,
-        total_cards=len(markdown_blocks),
+        total_notes=len(markdown_blocks),
         updated=updated,
         created=created,
         deleted=deleted,
@@ -220,7 +220,7 @@ def transcribe_collection(output_dir: str = ".") -> list[DeckExportResult]:
         if result.file_path:
             results.append(result)
 
-        if result.total_cards > 0:
+        if result.total_notes > 0:
             logger.info(
                 f"  Updated: {result.updated}, Created: {result.created}, "
                 f"Deleted: {result.deleted}, Skipped: {result.skipped}"

@@ -28,7 +28,7 @@ class FileImportResult:
     """Result of importing an entire file."""
 
     file_path: Path
-    total_cards: int
+    total_notes: int
     updated: int
     created: int
     deleted: int
@@ -636,7 +636,7 @@ def import_file(
 
     result = FileImportResult(
         file_path=file_path,
-        total_cards=len(cards),
+        total_notes=len(cards),
         updated=0,
         created=0,
         deleted=0,

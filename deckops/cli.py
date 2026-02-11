@@ -77,7 +77,7 @@ def run_am(args):
         renamed_files = rename_markdown_files(output_dir=str(collection_dir))
         results = transcribe_collection(output_dir=str(collection_dir))
 
-    total = sum(r.total_cards for r in results)
+    total = sum(r.total_notes for r in results)
     updated = sum(r.updated for r in results)
     created = sum(r.created for r in results)
     deleted = sum(r.deleted for r in results)
@@ -92,7 +92,7 @@ def run_am(args):
 
     logger.info(f"{'=' * 60}")
     logger.info(f"Export complete: {len(results)} files processed")
-    logger.info(f"Total cards: {total}")
+    logger.info(f"Total notes: {total}")
     logger.info(
         f"Updated: {updated}, Created: {created}, "
         f"Deleted: {deleted + deleted_cards}, Skipped: {skipped}"
@@ -129,7 +129,7 @@ def run_ma(args):
         results = import_collection(str(collection_dir), only_add_new=args.only_add_new)
         deleted_notes = delete_untracked_notes(collection_dir=str(collection_dir))
 
-    total = sum(r.total_cards for r in results)
+    total = sum(r.total_notes for r in results)
     updated = sum(r.updated for r in results)
     created = sum(r.created for r in results)
     deleted = sum(r.deleted for r in results)
@@ -138,7 +138,7 @@ def run_ma(args):
 
     logger.info(f"{'=' * 60}")
     logger.info(f"Import complete: {len(results)} files processed")
-    logger.info(f"Total cards: {total}")
+    logger.info(f"Total notes: {total}")
     logger.info(
         f"Updated: {updated}, Created: {created}, "
         f"Deleted: {deleted}, Skipped: {skipped}, "
