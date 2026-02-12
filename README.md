@@ -15,8 +15,9 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 ## Features
 
 - Fully round-trip, bidirectional sync that handles note identities, moves, deletions, drifts, and conflicts.
-- Support for Base (Q&A) and Cloze notes using DeckOps templates
+- Thoroughly tested bidirectional conversion between Markdown and Anki-compatible HTML
 - Markdown support with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
+- Support for Base (Q&A) and Cloze notes using DeckOps templates
 - Built-in Git integration with autocommit for tracking all changes
 - Image support via VS Code where images are directly copied into your Anki media folder (automatically set up)
 - Simple CLI interface: after initialization, only two commands are needed for daily use
@@ -91,8 +92,6 @@ We recommend using VS Code. It has excellent AI integration, a great [add-on](ht
 You can either export your deck using Anki's native export feature (`.apkg` file) and share that, or directly share your Markdown files along with the `media/DeckOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
 
 ### How can I migrate my existing notes into DeckOps?
-
-**Important:** DeckOps only works with its custom note types (`DeckOpsQA` and `DeckOpsCloze`). Running `deckops am` on existing Anki notes with other note types will not export anything.
 
 While migration is doable, it can be tricky. The process requires:
 
