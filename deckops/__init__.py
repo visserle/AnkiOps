@@ -1,4 +1,6 @@
+from importlib.metadata import version
+
 from deckops.cli import main
 
-__version__ = "1.0.6"
+__version__ = version("deckops")
 __all__ = ["main", "__version__"]

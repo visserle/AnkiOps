@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deckops"
-version = "1.0.6"
-description = "Manage Anki decks as Markdown files."
+version = "1.0.7"
+description = "Anki decks ↔ Markdown files, in perfect sync"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
