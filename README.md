@@ -4,9 +4,9 @@
 
 **Anki decks ↔ Markdown files, in perfect sync**
 
-Editing flashcards in Anki's UI is tedious when you could be using your text editor, AI tools, and Git. Currently available Markdown → Anki tools only go one way, where edits in Anki don't sync back. 
+Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. Currently available Markdown → Anki tools only go one way, where edits in Anki don't sync back. 
 
-**DeckOps** is a fully bidirectional Anki ↔ Markdown bridge. Each deck becomes a single Markdown file that you can edit with your favorite tools. Changes sync both ways, so you can work in Anki or your editor and always stay in sync. This brings AI assistance, batch editing, and version control to your flashcard workflow:
+**DeckOps** is a bidirectional Anki ↔ Markdown bridge. Each deck is a Markdown file. Changes sync bidirectionally, allowing work in either Anki or your text editor. This brings AI assistance, batch editing, and version control to your flashcard workflow:
 
 <video src="https://github.com/user-attachments/assets/f0b12979-f41a-4da9-b7fb-8587ca48329a" controls width="100%">
   Your browser does not support the video tag. Please refer to showcase.mp4.
@@ -15,10 +15,10 @@ Editing flashcards in Anki's UI is tedious when you could be using your text edi
 ## Features
 
 - Fully round-trip, bidirectional sync that handles cards identites, moves, deletions, drifts, and conflicts.
+- Support for Base (Q&A) and Cloze notes using DeckOps templates
 - Markdown support with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
 - Built-in Git integration with autocommit for tracking all changes
 - Image support via VS Code where images are directly copied into your Anki media folder (automatically set up)
-- Support for Base (Q&A) and Cloze notes
 - Simple CLI interface: after initialization, only two commands are needed for daily use
 
 ## Getting Started
@@ -45,7 +45,7 @@ deckops am # anki to markdown (export)
 
 ### How is this different from other Markdown or Obsidian tools?
 
-Available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. DeckOps is fully bidirectional: you can edit in either Anki or Markdown and sync in both directions. Additionally, DeckOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card.
+Available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. DeckOps is fully bidirectional: you can edit in either Anki or Markdown and sync in both directions. Additionally, DeckOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card. Note that DeckOps requires custom note types (`DeckOpsQA` and `DeckOpsCloze`).
 
 ### Is it safe to use?
 
@@ -77,7 +77,7 @@ Since cards are separated by horizontal lines (`---`), they cannot be used withi
 
 ### How does it work?
 
-On first import, DeckOps assigns IDs from Anki to each deck/note/card for tracking. They are represented by a single-line HTML tag (e.g., `<!-- card_id: 1770487991522 -->`) above a card in the Markdown. With the IDs in place, we can track what is new, changed, moved between decks, or deleted, and DeckOps will sync accordingly. Note that one DeckOps folder represents an entire Anki profile.
+On first import, DeckOps assigns IDs from Anki to each deck/note/card for tracking. They are represented by a single-line HTML tag (e.g., `<!-- card_id: 1770487991522 -->`) above a card in the Markdown. With the IDs in place, we can track what is new, changed, moved between decks, or deleted, and DeckOps will sync accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. Note that one DeckOps folder represents an entire Anki profile.
 
 ### Why do some cards have a `card_id` and others a `note_id`?
 
