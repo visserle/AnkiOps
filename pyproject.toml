@@ -20,13 +20,13 @@ classifiers = [
     "Topic :: Education",
 ]
 dependencies = [
-    "requests>=2.28.0",
+    "beautifulsoup4>=4.12.0",
+    "colorama>=0.4.4",
     "html-to-markdown>=2.24.5",
     "mistune>=3.2.0",
     "pygments>=2.14.0",
-    "colorama>=0.4.4",
+    "requests>=2.28.0",
 ]
-
 [project.urls]
 Repository = "https://github.com/visserle/DeckOps"
 Issues = "https://github.com/visserle/DeckOps/issues"
