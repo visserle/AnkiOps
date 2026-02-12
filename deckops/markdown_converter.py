@@ -13,7 +13,7 @@ from pygments.util import ClassNotFound
 
 _IMG_WIDTH_RE = re.compile(r'(<img src="[^"]*" alt="[^"]*")>\{width=(\d+)\}')
 # Rewrite [text](url_with_(parens)) to [text](<url>) so mistune doesn't
-# misparse balanced parentheses in link destinations.
+# misparse balanced parentheses in link destinations
 _LINK_WITH_PARENS_RE = re.compile(
     r"\[([^\]]*)\]\("
     r"([^)<>]*\([^)]*\)[^)<>]*)"
@@ -143,9 +143,9 @@ class MarkdownToHTML:
         # Convert $$ and $ delimiters to \[...\] and \(...\) format
         # Anki only supports backslash delimiters, not dollar signs
         # Block math: $$...$$ -> \[...\]
-        markdown = re.sub(r'\$\$(.*?)\$\$', r'\\[\1\\]', markdown, flags=re.DOTALL)
+        markdown = re.sub(r"\$\$(.*?)\$\$", r"\\[\1\\]", markdown, flags=re.DOTALL)
         # Inline math: $...$ -> \(...\) (but not $$)
-        markdown = re.sub(r'(?<!\$)\$(?!\$)(.*?)(?<!\$)\$(?!\$)', r'\\(\1\\)', markdown)
+        markdown = re.sub(r"(?<!\$)\$(?!\$)(.*?)(?<!\$)\$(?!\$)", r"\\(\1\\)", markdown)
 
         markdown = _LINK_WITH_PARENS_RE.sub(r"[\1](<\2>)", markdown)
         html: str = self._md(markdown)  # type: ignore[assignment]
@@ -154,18 +154,12 @@ class MarkdownToHTML:
         # Fix blank line preservation after lists
         # Mistune loses blank lines after lists - add extra <br> to compensate
         # Pattern: </ol> or </ul> followed by newline then <br>, make it <br><br>
-        html = re.sub(
-            r'(</(?:ol|ul)>)\n(<br>)',
-            r'\1\n<br>\2',
-            html
-        )
+        html = re.sub(r"(</(?:ol|ul)>)\n(<br>)", r"\1\n<br>\2", html)
 
         # Unescape brackets that were escaped in markdown, but NOT math delimiters
         # Only unescape \[ and \] if they don't contain LaTeX-like content
         # Math expressions have backslash commands, underscores, braces, etc.
         def replace_non_math_brackets(text):
-            import re
-
             # Pattern to match \[...\] and check if it's math or not
             # Math typically contains: \commands, _, ^, {, }, etc.
             def is_math_content(content):

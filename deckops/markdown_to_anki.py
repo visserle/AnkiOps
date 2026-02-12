@@ -4,10 +4,15 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckops.anki_client import extract_deck_id, invoke
+from deckops.anki_client import invoke
 from deckops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES
 from deckops.markdown_converter import MarkdownToHTML
-from deckops.markdown_helpers import ParsedNote, parse_note_block, validate_note
+from deckops.markdown_helpers import (
+    ParsedNote,
+    extract_deck_id,
+    parse_note_block,
+    validate_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,8 +177,7 @@ def _import_existing_notes(
     except Exception as e:
         for parsed_note, _ in existing_notes:
             result.errors.append(
-                f"Note {parsed_note.note_id} "
-                f"(line {parsed_note.line_number}): {e}"
+                f"Note {parsed_note.note_id} (line {parsed_note.line_number}): {e}"
             )
         return []
 
@@ -224,8 +228,7 @@ def _import_existing_notes(
         except Exception as e:
             for parsed_note, _ in existing_notes:
                 result.errors.append(
-                    f"Note {parsed_note.note_id}: "
-                    f"failed to move deck: {e}"
+                    f"Note {parsed_note.note_id}: failed to move deck: {e}"
                 )
 
     updates: list[dict] = []
@@ -276,8 +279,7 @@ def _import_existing_notes(
         except Exception as e:
             for parsed_note in notes_to_update:
                 result.errors.append(
-                    f"Note {parsed_note.note_id} "
-                    f"(line {parsed_note.line_number}): {e}"
+                    f"Note {parsed_note.note_id} (line {parsed_note.line_number}): {e}"
                 )
 
     return stale
@@ -314,9 +316,7 @@ def _create_new_notes(
         create_results = invoke("multi", actions=create_actions)
     except Exception as e:
         for parsed_note, _ in new_notes:
-            result.errors.append(
-                f"Note new (line {parsed_note.line_number}): {e}"
-            )
+            result.errors.append(f"Note new (line {parsed_note.line_number}): {e}")
         return []
 
     note_id_assignments: list[tuple[ParsedNote, int]] = []
@@ -446,9 +446,7 @@ def import_file(
             continue
 
         try:
-            html_fields = convert_fields_to_html(
-                parsed_note.fields, converter
-            )
+            html_fields = convert_fields_to_html(parsed_note.fields, converter)
         except Exception as e:
             result.errors.append(
                 f"Note {parsed_note.note_id or 'new'} "

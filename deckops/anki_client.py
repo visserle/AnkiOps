@@ -22,11 +22,3 @@ def invoke(action: str, **params) -> Any:
     if result.get("error"):
         raise Exception(f"AnkiConnect error: {result['error']}")
     return result["result"]
-
-
-def extract_deck_id(content: str) -> tuple[int | None, str]:
-    """Extract deck_id from the first line and return (deck_id, remaining content)."""
-    match = re.match(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?", content)
-    if match:
-        return int(match.group(1)), content[match.end() :]
-    return None, content

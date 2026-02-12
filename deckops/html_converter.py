@@ -51,7 +51,6 @@ def _protect_literal_chars(html: str) -> str:
         # Math delimiters: \(...\) or $...$ for inline, \[...\] or $$...$$ for block
         if r"\(" in text or r"\[" in text or "$" in text:
             # Check if this looks like it contains math
-            import re
             # Pattern for inline math: \(...\) or $...$
             # Pattern for block math: \[...\] or $$...$$
             # Only match explicit math delimiters with backslashes or dollar signs
@@ -62,7 +61,7 @@ def _protect_literal_chars(html: str) -> str:
             last_end = 0
             for match in re.finditer(math_pattern, text, re.DOTALL):
                 # Add text before math (with escaping)
-                before = text[last_end:match.start()]
+                before = text[last_end : match.start()]
                 for char, placeholder in _MD_SPECIAL_CHARS.items():
                     before = before.replace(char, placeholder)
                 parts.append(before)

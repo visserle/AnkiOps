@@ -9,7 +9,6 @@ import logging
 import re
 from dataclasses import dataclass
 
-from deckops.anki_client import extract_deck_id
 from deckops.config import (
     ALL_PREFIX_TO_FIELD,
     NOTE_SEPARATOR,
@@ -29,7 +28,31 @@ class ParsedNote:
     line_number: int
 
 
-CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
+def extract_deck_id(content: str) -> tuple[int | None, str]:
+    """Extract deck_id from the first line and return (deck_id, remaining content)."""
+    match = re.match(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?", content)
+    if match:
+        return int(match.group(1)), content[match.end() :]
+    return None, content
+
+
+def extract_note_blocks(content: str) -> dict[str, str]:
+    """Extract identified note blocks from content.
+
+    Keys are ID strings like "note_id: 123".
+    """
+    _, content = extract_deck_id(content)
+    blocks = content.split(NOTE_SEPARATOR)
+    notes: dict[str, str] = {}
+    for block in blocks:
+        stripped = block.strip()
+        if not stripped:
+            continue
+        match = re.match(r"<!--\s*(note_id:\s*\d+)\s*-->", stripped)
+        if match:
+            key = re.sub(r"\s+", " ", match.group(1))
+            notes[key] = stripped
+    return notes
 
 
 def _detect_note_type(fields):
@@ -136,23 +159,51 @@ def parse_note_block(block: str, line_number: int) -> ParsedNote:
     )
 
 
-def extract_note_blocks(content: str) -> dict[str, str]:
-    """Extract identified note blocks from content.
+def validate_note(note: ParsedNote) -> list[str]:
+    """Validate that all mandatory fields for the note type are present.
 
-    Keys are ID strings like "note_id: 123".
+    Returns a list of error messages (empty if valid).
     """
-    _, content = extract_deck_id(content)
-    blocks = content.split(NOTE_SEPARATOR)
-    notes: dict[str, str] = {}
-    for block in blocks:
-        stripped = block.strip()
-        if not stripped:
-            continue
-        match = re.match(r"<!--\s*(note_id:\s*\d+)\s*-->", stripped)
-        if match:
-            key = re.sub(r"\s+", " ", match.group(1))
-            notes[key] = stripped
-    return notes
+    errors: list[str] = []
+    note_config = NOTE_TYPES.get(note.note_type)
+    if not note_config:
+        errors.append(f"Unknown note type '{note.note_type}'")
+        return errors
+
+    for field_name, prefix, mandatory in note_config["field_mappings"]:
+        if mandatory and not note.fields.get(field_name):
+            errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
+
+    # Cloze notes must contain at least one cloze deletion in the Text field
+    cloze_pattern = re.compile(r"\{\{c\d+::")
+    if note.note_type == "DeckOpsCloze":
+        text = note.fields.get("Text", "")
+        if text and not cloze_pattern.search(text):
+            errors.append(
+                "DeckOpsCloze note must contain cloze syntax "
+                "(e.g. {{c1::answer}}) in the T: field"
+            )
+
+    return errors
+
+
+def format_note(
+    note_id: int, note: dict, converter, note_type: str = "DeckOpsQA"
+) -> str:
+    note_config = NOTE_TYPES[note_type]
+    field_mappings = note_config["field_mappings"]
+
+    lines = [f"<!-- note_id: {note_id} -->"]
+    fields = note["fields"]
+
+    for field_name, prefix, mandatory in field_mappings:
+        field_data = fields.get(field_name)
+        if field_data:
+            markdown = converter.convert(field_data.get("value", ""))
+            if markdown or mandatory:
+                lines.append(f"{prefix} {markdown}")
+
+    return "\n".join(lines)
 
 
 def sanitize_filename(deck_name: str) -> str:
@@ -206,49 +257,3 @@ def sanitize_filename(deck_name: str) -> str:
         )
 
     return deck_name.replace("::", "__")
-
-
-def validate_note(note: ParsedNote) -> list[str]:
-    """Validate that all mandatory fields for the note type are present.
-
-    Returns a list of error messages (empty if valid).
-    """
-    errors: list[str] = []
-    note_config = NOTE_TYPES.get(note.note_type)
-    if not note_config:
-        errors.append(f"Unknown note type '{note.note_type}'")
-        return errors
-
-    for field_name, prefix, mandatory in note_config["field_mappings"]:
-        if mandatory and not note.fields.get(field_name):
-            errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
-
-    # Cloze notes must contain at least one cloze deletion in the Text field
-    if note.note_type == "DeckOpsCloze":
-        text = note.fields.get("Text", "")
-        if text and not CLOZE_PATTERN.search(text):
-            errors.append(
-                "DeckOpsCloze note must contain cloze syntax "
-                "(e.g. {{c1::answer}}) in the T: field"
-            )
-
-    return errors
-
-
-def format_note(
-    note_id: int, note: dict, converter, note_type: str = "DeckOpsQA"
-) -> str:
-    note_config = NOTE_TYPES[note_type]
-    field_mappings = note_config["field_mappings"]
-
-    lines = [f"<!-- note_id: {note_id} -->"]
-    fields = note["fields"]
-
-    for field_name, prefix, mandatory in field_mappings:
-        field_data = fields.get(field_name)
-        if field_data:
-            markdown = converter.convert(field_data.get("value", ""))
-            if markdown or mandatory:
-                lines.append(f"{prefix} {markdown}")
-
-    return "\n".join(lines)

@@ -5,10 +5,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckops.anki_client import extract_deck_id, invoke
+from deckops.anki_client import invoke
 from deckops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES
 from deckops.html_converter import HTMLToMarkdown
 from deckops.markdown_helpers import (
+    extract_deck_id,
     extract_note_blocks,
     format_note,
     sanitize_filename,
