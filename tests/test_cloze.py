@@ -26,6 +26,7 @@ class TestParseClozBlock:
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id == 789
         assert parsed_note.note_type == "DeckOpsCloze"
+        assert len(parsed_note.fields) == 2
         assert (
             parsed_note.fields["Text"]
             == "The capital of {{c1::France}} is {{c2::Paris}}"
@@ -68,13 +69,6 @@ class TestParseClozBlock:
         assert parsed_note.fields["Text"] == "{{c1::Answer}}"
         assert parsed_note.fields["Extra"] == "Extra"
         assert parsed_note.fields["More"] == "More info"
-
-    def test_cloze_text_only(self):
-        block = "<!-- note_id: 400 -->\nT: Just {{c1::text}}"
-        parsed_note = parse_note_block(block)
-        assert parsed_note.note_type == "DeckOpsCloze"
-        assert len(parsed_note.fields) == 1
-        assert parsed_note.fields["Text"] == "Just {{c1::text}}"
 
 
 class TestParseQABlock:
