@@ -31,13 +31,21 @@ NOTE_TYPES = {
             ("More", "M:", False),
         ],
     },
-}
-
-# Unique prefixes that identify a note type
-NOTE_TYPE_UNIQUE_PREFIXES = {
-    "Q:": "DeckOpsQA",
-    "A:": "DeckOpsQA",
-    "T:": "DeckOpsCloze",
+    "DeckOpsChoice": {
+        "field_mappings": [
+            ("Question", "Q:", True),
+            ("Choice 1", "C1:", True),
+            ("Choice 2", "C2:", False),
+            ("Choice 3", "C3:", False),
+            ("Choice 4", "C4:", False),
+            ("Choice 5", "C5:", False),
+            ("Choice 6", "C6:", False),
+            ("Choice 7", "C7:", False),
+            ("Answer", "A:", True),
+            ("Extra", "E:", False),
+            ("More", "M:", False),
+        ],
+    },
 }
 
 SUPPORTED_NOTE_TYPES = list(NOTE_TYPES.keys())

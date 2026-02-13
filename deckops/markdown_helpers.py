@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from deckops.config import (
     ALL_PREFIX_TO_FIELD,
     NOTE_SEPARATOR,
-    NOTE_TYPE_UNIQUE_PREFIXES,
     NOTE_TYPES,
 )
 
@@ -58,14 +57,21 @@ def extract_note_blocks(content: str) -> dict[str, str]:
 def _detect_note_type(fields):
     """Detect note type from unique field prefixes.
 
-    Raises ValueError if no unique prefix (Q:, A:, T:) is found.
+    Checks for most specific prefixes first (C1: > T: > Q:/A:).
+    Raises ValueError if no unique prefix is found.
     """
-    for field_name in fields:
-        for prefix, note_type in NOTE_TYPE_UNIQUE_PREFIXES.items():
-            if ALL_PREFIX_TO_FIELD.get(prefix) == field_name:
-                return note_type
+    # Check for Choice note first (most specific - has C1:)
+    if "Choice 1" in fields:
+        return "DeckOpsChoice"
+    # Then check for Cloze note (has T:)
+    if "Text" in fields:
+        return "DeckOpsCloze"
+    # Finally check for QA note (has Q: or A:)
+    if "Question" in fields or "Answer" in fields:
+        return "DeckOpsQA"
+
     raise ValueError(
-        "Cannot determine note type: no Q:, A:, or T: field found. "
+        "Cannot determine note type: no Q:, A:, T:, or C1: field found. "
         "Every note must have at least one unique field prefix."
     )
 
@@ -183,6 +189,41 @@ def validate_note(note: ParsedNote) -> list[str]:
                 "DeckOpsCloze note must contain cloze syntax "
                 "(e.g. {{c1::answer}}) in the T: field"
             )
+
+    # Choice notes must have valid answer format and at least one choice
+    if note.note_type == "DeckOpsChoice":
+        answer = note.fields.get("Answer", "")
+        if answer:
+            # Parse answer field - should be int(s) like "1" or "1, 2, 3"
+            answer_stripped = answer.strip()
+            # Split by comma and strip whitespace
+            answer_parts = [part.strip() for part in answer_stripped.split(",")]
+
+            # Validate that all parts are integers
+            try:
+                answer_ints = [int(part) for part in answer_parts]
+            except ValueError:
+                errors.append(
+                    "DeckOpsChoice answer (A:) must contain integers "
+                    "(e.g. '1' for single choice or '1, 2, 3' for multiple choice)"
+                )
+                return errors
+
+            # Count how many choices are provided
+            max_choice = 0
+            for i in range(1, 8):  # Choice 1 through Choice 7
+                if note.fields.get(f"Choice {i}"):
+                    max_choice = i
+
+            # Validate that answer integers are within valid range
+            for ans_num in answer_ints:
+                if ans_num < 1 or ans_num > max_choice:
+                    errors.append(
+                        f"DeckOpsChoice answer contains '{ans_num}' but only "
+                        f"{max_choice} choice(s) are provided "
+                        f"(C1: through C{max_choice}:)"
+                    )
+                    break
 
     return errors
 

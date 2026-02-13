@@ -1,5 +1,5 @@
-"""Ensure DeckOpsQA and DeckOpsCloze note types exist in Anki and are up to date with our
-templates."""
+"""Ensure DeckOpsQA, DeckOpsCloze, and DeckOpsChoice note types exist in Anki and are up
+to date with our templates."""
 
 import logging
 from importlib import resources
@@ -97,3 +97,8 @@ def ensure_models() -> None:
         _create_model("DeckOpsCloze", is_cloze=True)
     elif not _is_model_up_to_date("DeckOpsCloze"):
         _update_model("DeckOpsCloze")
+
+    if "DeckOpsChoice" not in existing:
+        _create_model("DeckOpsChoice", is_cloze=False)
+    elif not _is_model_up_to_date("DeckOpsChoice"):
+        _update_model("DeckOpsChoice")

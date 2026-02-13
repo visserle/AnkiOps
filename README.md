@@ -17,13 +17,13 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Fully round-trip, bidirectional sync that handles note identities, moves, deletions, drifts, and conflicts.
 - Thoroughly tested, bidirectional conversion between Markdown and Anki-compatible HTML
 - Markdown support with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Support for Base (Q&A) and Cloze notes using DeckOps templates
+- Support for Base (Q&A), Cloze, Single and Multiple Choice notes using custom DeckOps templates
 - Built-in Git integration with autocommit for tracking all changes
 - Image support via VS Code where images are directly copied into your Anki media folder (automatically set up)
 - Simple CLI interface: after initialization, only two commands are needed for daily use
 
 > [!NOTE]
-> DeckOps only syncs the `DeckOpsQA` and `DeckOpsCloze` note types. Other note types will not be synced.
+> DeckOps only syncs `DeckOpsQA`, `DeckOpsCloze`, and `DeckOpsChoice` note types. Other note types will not be synced.
 
 
 ## Getting Started
