@@ -75,23 +75,50 @@ def extract_note_blocks(content: str) -> dict[str, str]:
 def _detect_note_type(fields):
     """Detect note type from unique field prefixes.
 
-    Checks for most specific prefixes first (C1: > T: > Q:/A:).
-    Raises ValueError if no unique prefix is found.
+    Checks most specific prefixes first: C1: > T: > Q:/A:
     """
-    # Check for Choice note first (most specific - has C1:)
     if "Choice 1" in fields:
         return "DeckOpsChoice"
-    # Then check for Cloze note (has T:)
     if "Text" in fields:
         return "DeckOpsCloze"
-    # Finally check for QA note (has Q: or A:)
     if "Question" in fields or "Answer" in fields:
         return "DeckOpsQA"
 
     raise ValueError(
-        "Cannot determine note type: no Q:, A:, T:, or C1: field found. "
-        "Every note must have at least one unique field prefix."
+        "Cannot determine note type: no Q:, A:, T:, or C1: field found"
     )
+
+
+def _validate_unique_field(
+    field_name: str,
+    prefix: str,
+    seen_fields: dict[str, bool],
+    note_id: int | None,
+) -> None:
+    """Raise ValueError if field was already seen in this note block.
+
+    Args:
+        field_name: The field name (e.g., "Question", "Answer")
+        prefix: The markdown prefix (e.g., "Q:", "A:")
+        seen_fields: Dictionary tracking which fields have been seen
+        note_id: Optional note ID for error context
+    """
+    if field_name not in seen_fields:
+        return
+
+    # Build context for error message
+    if note_id:
+        context = f"in note_id: {note_id}"
+    else:
+        context = "in this note"
+
+    msg = (
+        f"Duplicate field '{prefix}' {context}. "
+        f"Did you forget to end the previous note with '\\n\\n---\\n\\n' "
+        f"or is there an accidental duplicate prefix?"
+    )
+    logger.error(msg)
+    raise ValueError(msg)
 
 
 def parse_note_block(block: str) -> ParsedNote:
@@ -132,20 +159,7 @@ def parse_note_block(block: str) -> ParsedNote:
                 and len(line) == len(prefix)
             ):
                 # Check for duplicate field marker
-                if field_name in seen_fields:
-                    # Build context for error message
-                    if note_id:
-                        context = f"in note_id: {note_id}"
-                    else:
-                        context = "in this note"
-
-                    msg = (
-                        f"Duplicate field '{prefix}' {context}. "
-                        f"Did you forget to end the previous note with '\\n\\n---\\n\\n' "
-                        f"or is there an accidental duplicate prefix?"
-                    )
-                    logger.error(msg)
-                    raise ValueError(msg)
+                _validate_unique_field(field_name, prefix, seen_fields, note_id)
 
                 new_field = field_name
                 seen_fields[field_name] = True
@@ -175,6 +189,47 @@ def parse_note_block(block: str) -> ParsedNote:
     )
 
 
+def _validate_choice_note(note: ParsedNote) -> list[str]:
+    """Validate DeckOpsChoice note answer format and range.
+
+    Returns list of error messages (empty if valid).
+    """
+    errors: list[str] = []
+    answer = note.fields.get("Answer", "")
+    if not answer:
+        return errors
+
+    # Parse answer field - should be int(s) like "1" or "1, 2, 3"
+    answer_parts = [part.strip() for part in answer.strip().split(",")]
+
+    # Validate that all parts are integers
+    try:
+        answer_ints = [int(part) for part in answer_parts]
+    except ValueError:
+        errors.append(
+            "DeckOpsChoice answer (A:) must contain integers "
+            "(e.g. '1' for single choice or '1, 2, 3' for multiple choice)"
+        )
+        return errors
+
+    # Count available choices
+    max_choice = max(
+        (i for i in range(1, 8) if note.fields.get(f"Choice {i}")),
+        default=0
+    )
+
+    # Validate answer range
+    for ans_num in answer_ints:
+        if ans_num < 1 or ans_num > max_choice:
+            errors.append(
+                f"DeckOpsChoice answer contains '{ans_num}' but only "
+                f"{max_choice} choice(s) are provided"
+            )
+            break
+
+    return errors
+
+
 def validate_note(note: ParsedNote) -> list[str]:
     """Validate that all mandatory fields for the note type are present.
 
@@ -201,38 +256,7 @@ def validate_note(note: ParsedNote) -> list[str]:
 
     # Choice notes must have valid answer format and at least one choice
     if note.note_type == "DeckOpsChoice":
-        answer = note.fields.get("Answer", "")
-        if answer:
-            # Parse answer field - should be int(s) like "1" or "1, 2, 3"
-            answer_stripped = answer.strip()
-            # Split by comma and strip whitespace
-            answer_parts = [part.strip() for part in answer_stripped.split(",")]
-
-            # Validate that all parts are integers
-            try:
-                answer_ints = [int(part) for part in answer_parts]
-            except ValueError:
-                errors.append(
-                    "DeckOpsChoice answer (A:) must contain integers "
-                    "(e.g. '1' for single choice or '1, 2, 3' for multiple choice)"
-                )
-                return errors
-
-            # Count how many choices are provided
-            max_choice = 0
-            for i in range(1, 8):  # Choice 1 through Choice 7
-                if note.fields.get(f"Choice {i}"):
-                    max_choice = i
-
-            # Validate that answer integers are within valid range
-            for ans_num in answer_ints:
-                if ans_num < 1 or ans_num > max_choice:
-                    errors.append(
-                        f"DeckOpsChoice answer contains '{ans_num}' but only "
-                        f"{max_choice} choice(s) are provided "
-                        f"(C1: through C{max_choice}:)"
-                    )
-                    break
+        errors.extend(_validate_choice_note(note))
 
     return errors
 

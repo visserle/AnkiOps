@@ -209,7 +209,10 @@ def _import_existing_notes(
     # Safety check: Ensure note types in markdown match note types in Anki
     # AnkiConnect does not support changing note types
     for parsed_note, _ in existing_notes:
-        assert parsed_note.note_id is not None
+        if parsed_note.note_id is None:
+            raise ValueError(
+                "Internal error: note_id is None for note in existing_notes list"
+            )
         anki_note_type = note_id_to_model.get(parsed_note.note_id)
         if anki_note_type and anki_note_type != parsed_note.note_type:
             raise ValueError(
@@ -258,7 +261,10 @@ def _import_existing_notes(
     stale: list[tuple[ParsedNote, dict[str, str]]] = []
 
     for parsed_note, html_fields in existing_notes:
-        assert parsed_note.note_id is not None
+        if parsed_note.note_id is None:
+            raise ValueError(
+                "Internal error: note_id is None for note in existing_notes list"
+            )
         current = note_fields.get(parsed_note.note_id, {})
         if not current:
             logger.info(
@@ -433,7 +439,10 @@ def import_file(
     if deck_name is None:
         if deck_names_and_ids is None:
             deck_names_and_ids = invoke("deckNamesAndIds")
-        assert deck_names_and_ids is not None
+        if deck_names_and_ids is None:
+            raise ValueError(
+                "Internal error: deck_names_and_ids required when deck_name is None"
+            )
         id_to_name = {v: k for k, v in deck_names_and_ids.items()}
 
         file_deck_id = parse_deck_id(file_path)
