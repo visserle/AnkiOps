@@ -1,6 +1,5 @@
 """Shared AnkiConnect client and helpers used by both import/export scripts."""
 
-import re
 from typing import Any
 
 import requests
