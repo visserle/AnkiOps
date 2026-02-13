@@ -88,6 +88,8 @@ choices.forEach(function(choice) {
     // Highlight correct answers
     if (correctAnswers.indexOf(String(choice.num)) !== -1) {
         div.classList.add('choice-correct');
+    } else {
+        div.classList.add('choice-incorrect');
     }
 
     container.appendChild(div);

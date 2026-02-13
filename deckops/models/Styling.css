@@ -55,6 +55,14 @@
 	font-weight: bold;
 }
 
+.choice-incorrect {
+	opacity: 0.5;
+}
+
+.night-mode .choice-incorrect {
+	opacity: 0.5;
+}
+
 body ul,
 body ol,
 body dl {
