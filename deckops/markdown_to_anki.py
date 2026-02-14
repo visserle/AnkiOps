@@ -11,10 +11,10 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from deckops.anki_client import AnkiState, invoke
-from deckops.log import format_changes
-from deckops.markdown_converter import MarkdownToHTML
-from deckops.markdown_helpers import (
+from ankiops.anki_client import AnkiState, invoke
+from ankiops.log import format_changes
+from ankiops.markdown_converter import MarkdownToHTML
+from ankiops.markdown_helpers import (
     FileState,
     InvalidID,
     ParsedNote,
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class UntrackedDeck:
-    """An Anki deck with DeckOps notes but no matching markdown file."""
+    """An Anki deck with AnkiOps notes but no matching markdown file."""
 
     deck_name: str
     deck_id: int
@@ -106,8 +106,6 @@ def _validate_no_duplicate_first_lines(
             "Cannot safely assign IDs. Please ensure each note has a unique first line."
         )
         raise ValueError(msg)
-
-
 
 
 def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> None:

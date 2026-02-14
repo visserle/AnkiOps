@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 ANKI_CONNECT_URL = "http://localhost:8765"
 
-MARKER_FILE = ".deckops"
+MARKER_FILE = ".ankiops"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -16,7 +16,7 @@ AUTO_COMMIT_DEFAULT = True
 
 # Per-note-type configuration
 NOTE_TYPES = {
-    "DeckOpsQA": {
+    "AnkiOpsQA": {
         "field_mappings": [
             ("Question", "Q:", True),
             ("Answer", "A:", True),
@@ -24,14 +24,14 @@ NOTE_TYPES = {
             ("More", "M:", False),
         ],
     },
-    "DeckOpsCloze": {
+    "AnkiOpsCloze": {
         "field_mappings": [
             ("Text", "T:", True),
             ("Extra", "E:", False),
             ("More", "M:", False),
         ],
     },
-    "DeckOpsChoice": {
+    "AnkiOpsChoice": {
         "field_mappings": [
             ("Question", "Q:", True),
             ("Choice 1", "C1:", True),
@@ -58,12 +58,12 @@ for _cfg in NOTE_TYPES.values():
 
 
 def _is_development_mode() -> bool:
-    """Check if running from the DeckOps source tree."""
+    """Check if running from the AnkiOps source tree."""
     pyproject = Path.cwd() / "pyproject.toml"
     if not pyproject.exists():
         return False
     try:
-        return 'name = "deckops"' in pyproject.read_text()
+        return 'name = "ankiops"' in pyproject.read_text()
     except OSError:
         return False
 
@@ -92,18 +92,18 @@ def require_collection_dir(active_profile: str) -> Path:
     marker = collection_dir / MARKER_FILE
     if not marker.exists():
         logger.error(
-            f"Not an DeckOps collection ({collection_dir}). Run 'deckops init' first."
+            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
         )
         raise SystemExit(1)
 
     config = _read_marker(marker)
-    expected_profile = config.get("deckops", "profile", fallback=None)
+    expected_profile = config.get("ankiops", "profile", fallback=None)
     if expected_profile and expected_profile != active_profile:
         logger.error(
             f"Profile mismatch: collection in {collection_dir} is linked to "
             f"'{expected_profile}', but Anki has '{active_profile}' "
             f"open. Switch profiles in Anki, or re-run "
-            f"'deckops init' to re-link."
+            f"'ankiops init' to re-link."
         )
         raise SystemExit(1)
 
@@ -116,4 +116,4 @@ def get_auto_commit(collection_dir: Path) -> bool:
     if not marker.exists():
         return AUTO_COMMIT_DEFAULT
     config = _read_marker(marker)
-    return config.getboolean("deckops", "auto_commit", fallback=AUTO_COMMIT_DEFAULT)
+    return config.getboolean("ankiops", "auto_commit", fallback=AUTO_COMMIT_DEFAULT)

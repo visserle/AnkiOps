@@ -1,4 +1,4 @@
-"""Collection initialization for DeckOps."""
+"""Collection initialization for AnkiOps."""
 
 import configparser
 import json
@@ -7,7 +7,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from deckops.config import MARKER_FILE, get_collection_dir
+from ankiops.config import MARKER_FILE, get_collection_dir
 
 logger = logging.getLogger(__name__)
 
@@ -15,16 +15,16 @@ logger = logging.getLogger(__name__)
 def _setup_marker(
     collection_dir: Path, profile: str, media_dir: str, auto_commit: bool = True
 ):
-    """Write the .deckops marker file with the active profile name and media path."""
+    """Write the .ankiops marker file with the active profile name and media path."""
     marker = collection_dir / MARKER_FILE
     config = configparser.ConfigParser()
-    config["deckops"] = {
+    config["ankiops"] = {
         "profile": profile,
         "media_dir": media_dir,
         "auto_commit": str(auto_commit).lower(),
     }
     with open(marker, "w") as f:
-        f.write("# DeckOps collection \u2014 do not delete this file.\n\n")
+        f.write("# AnkiOps collection \u2014 do not delete this file.\n\n")
         config.write(f)
 
 
@@ -111,7 +111,7 @@ def _setup_vscode_settings(collection_dir: Path):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    settings["markdown.copyFiles.destination"] = {"**/*.md": "media/DeckOpsMedia/"}
+    settings["markdown.copyFiles.destination"] = {"**/*.md": "media/AnkiOpsMedia/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 
@@ -140,7 +140,7 @@ def _setup_git(collection_dir: Path):
 def initialize_collection(
     profile: str, media_dir: str, auto_commit: bool = True
 ) -> Path:
-    """Initialize the current directory as an DeckOps collection.
+    """Initialize the current directory as an AnkiOps collection.
 
     Creates the collection directory (if needed), writes the marker file,
     sets up the media symlink, and configures VSCode settings.
@@ -151,7 +151,7 @@ def initialize_collection(
 
     _setup_marker(collection_dir, profile, media_dir, auto_commit)
     _setup_media_symlink(collection_dir, media_dir)
-    (collection_dir / "media" / "DeckOpsMedia").mkdir(exist_ok=True)
+    (collection_dir / "media" / "AnkiOpsMedia").mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
     if auto_commit:
         _setup_git(collection_dir)
@@ -163,11 +163,11 @@ def create_tutorial(collection_dir: Path) -> Path:
     """Copy the tutorial markdown file to the collection directory."""
     from importlib import resources
 
-    tutorial_dst = collection_dir / "DeckOps Tutorial.md"
+    tutorial_dst = collection_dir / "AnkiOps Tutorial.md"
 
     try:
         # Python 3.9+ style
-        ref = resources.files("deckops.data").joinpath("DeckOps Tutorial.md")
+        ref = resources.files("ankiops.data").joinpath("AnkiOps Tutorial.md")
         tutorial_dst.write_text(ref.read_text(encoding="utf-8"), encoding="utf-8")
         logger.info(f"Tutorial file created: {tutorial_dst}")
     except Exception as e:

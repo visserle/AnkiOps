@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckops.config import (
+from ankiops.config import (
     ALL_PREFIX_TO_FIELD,
     NOTE_SEPARATOR,
     NOTE_TYPES,
@@ -22,7 +22,10 @@ _DECK_ID_PATTERN = re.compile(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 _WINDOWS_RESERVED = {
-    "CON", "PRN", "AUX", "NUL",
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
     *(f"COM{i}" for i in range(1, 10)),
     *(f"LPT{i}" for i in range(1, 10)),
 }
@@ -91,7 +94,7 @@ def extract_deck_id(content: str) -> tuple[int | None, str]:
     """Extract deck_id from the first line and return (deck_id, remaining)."""
     match = _DECK_ID_PATTERN.match(content)
     if match:
-        return int(match.group(1)), content[match.end():]
+        return int(match.group(1)), content[match.end() :]
     return None, content
 
 
@@ -143,14 +146,12 @@ def has_untracked_notes(cards_content: str) -> bool:
 def _detect_note_type(fields: dict[str, str]) -> str:
     """Detect note type from parsed fields (most specific first)."""
     if "Choice 1" in fields:
-        return "DeckOpsChoice"
+        return "AnkiOpsChoice"
     if "Text" in fields:
-        return "DeckOpsCloze"
+        return "AnkiOpsCloze"
     if "Question" in fields or "Answer" in fields:
-        return "DeckOpsQA"
-    raise ValueError(
-        "Cannot determine note type: no Q:, A:, T:, or C1: field found"
-    )
+        return "AnkiOpsQA"
+    raise ValueError("Cannot determine note type: no Q:, A:, T:, or C1: field found")
 
 
 def parse_note_block(block: str) -> ParsedNote:
@@ -207,8 +208,7 @@ def parse_note_block(block: str) -> ParsedNote:
 
                 matched_field = field_name
                 current_content = (
-                    [line[len(prefix) + 1:]] if line.startswith(prefix + " ")
-                    else []
+                    [line[len(prefix) + 1 :]] if line.startswith(prefix + " ") else []
                 )
                 current_field = field_name
                 break
@@ -247,22 +247,22 @@ def validate_note(note: ParsedNote) -> list[str]:
         if mandatory and not note.fields.get(field_name):
             errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
 
-    if note.note_type == "DeckOpsCloze":
+    if note.note_type == "AnkiOpsCloze":
         text = note.fields.get("Text", "")
         if text and not _CLOZE_PATTERN.search(text):
             errors.append(
-                "DeckOpsCloze note must contain cloze syntax "
+                "AnkiOpsCloze note must contain cloze syntax "
                 "(e.g. {{c1::answer}}) in the T: field"
             )
 
-    if note.note_type == "DeckOpsChoice":
+    if note.note_type == "AnkiOpsChoice":
         errors.extend(_validate_choice_answers(note))
 
     return errors
 
 
 def _validate_choice_answers(note: ParsedNote) -> list[str]:
-    """Validate DeckOpsChoice answer format and range."""
+    """Validate AnkiOpsChoice answer format and range."""
     answer = note.fields.get("Answer", "")
     if not answer:
         return []
@@ -272,7 +272,7 @@ def _validate_choice_answers(note: ParsedNote) -> list[str]:
         answer_ints = [int(p) for p in parts]
     except ValueError:
         return [
-            "DeckOpsChoice answer (A:) must contain integers "
+            "AnkiOpsChoice answer (A:) must contain integers "
             "(e.g. '1' for single choice or '1, 2, 3' for multiple choice)"
         ]
 
@@ -283,7 +283,7 @@ def _validate_choice_answers(note: ParsedNote) -> list[str]:
     for n in answer_ints:
         if n < 1 or n > max_choice:
             return [
-                f"DeckOpsChoice answer contains '{n}' but only "
+                f"AnkiOpsChoice answer contains '{n}' but only "
                 f"{max_choice} choice(s) are provided"
             ]
     return []
@@ -342,7 +342,7 @@ def format_note(
     note_id: int,
     note: dict,
     converter,
-    note_type: str = "DeckOpsQA",
+    note_type: str = "AnkiOpsQA",
 ) -> str:
     """Format an Anki note dict into a markdown block.
 

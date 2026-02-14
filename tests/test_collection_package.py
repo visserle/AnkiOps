@@ -7,8 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
-from deckops.collection_package import (
+from ankiops.collection_package import (
     compute_file_hash,
     compute_zipfile_hash,
     extract_media_references,
@@ -151,7 +150,7 @@ class TestUnpackageMediaConflicts:
                     "notes": [
                         {
                             "note_id": "1111111111",
-                            "note_type": "DeckOpsQA",
+                            "note_type": "AnkiOpsQA",
                             "fields": {
                                 "Question": "What is this? ![](media/test.png)",
                                 "Answer": "An image",
@@ -178,7 +177,7 @@ class TestUnpackageMediaConflicts:
         unpackage_collection_from_json(package_file, collection_dir)
 
         # Verify media file was extracted
-        media_file = collection_dir / "media" / "DeckOpsMedia" / "test.png"
+        media_file = collection_dir / "media" / "AnkiOpsMedia" / "test.png"
         assert media_file.exists()
         assert media_file.read_bytes() == b"image data"
 
@@ -193,7 +192,7 @@ class TestUnpackageMediaConflicts:
         collection_dir = tmp_path / "collection"
 
         # Create existing media file with same content
-        media_dir = collection_dir / "media" / "DeckOpsMedia"
+        media_dir = collection_dir / "media" / "AnkiOpsMedia"
         media_dir.mkdir(parents=True, exist_ok=True)
         existing_file = media_dir / "test.png"
         existing_file.write_bytes(b"image data")
@@ -215,7 +214,7 @@ class TestUnpackageMediaConflicts:
         collection_dir = tmp_path / "collection"
 
         # Create existing media file with different content
-        media_dir = collection_dir / "media" / "DeckOpsMedia"
+        media_dir = collection_dir / "media" / "AnkiOpsMedia"
         media_dir.mkdir(parents=True, exist_ok=True)
         existing_file = media_dir / "test.png"
         existing_file.write_bytes(b"old image data")
@@ -243,7 +242,7 @@ class TestUnpackageMediaConflicts:
         collection_dir = tmp_path / "collection"
 
         # Create existing media files
-        media_dir = collection_dir / "media" / "DeckOpsMedia"
+        media_dir = collection_dir / "media" / "AnkiOpsMedia"
         media_dir.mkdir(parents=True, exist_ok=True)
         (media_dir / "test.png").write_bytes(b"original data")
         (media_dir / "test_1.png").write_bytes(b"first rename")

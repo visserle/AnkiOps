@@ -1,4 +1,4 @@
-"""Package and unpackage DeckOps collections to/from JSON format."""
+"""Package and unpackage AnkiOps collections to/from JSON format."""
 
 import hashlib
 import json
@@ -9,8 +9,8 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from deckops.config import MARKER_FILE
-from deckops.markdown_helpers import (
+from ankiops.config import MARKER_FILE
+from ankiops.markdown_helpers import (
     extract_deck_id,
     parse_note_block,
 )
@@ -172,9 +172,9 @@ def package_collection_to_json(
     # Read collection config
     marker_path = collection_dir / MARKER_FILE
     if not marker_path.exists():
-        raise ValueError(f"Not a DeckOps collection: {collection_dir}")
+        raise ValueError(f"Not a AnkiOps collection: {collection_dir}")
 
-    # Parse .deckops config file
+    # Parse .ankiops config file
     config_content = marker_path.read_text()
     profile = None
     media_dir_path = None
@@ -294,7 +294,7 @@ def package_collection_to_json(
                 # Add media files to ZIP
                 copied_count = 0
                 for media_file in all_media_files:
-                    # Media file path preserves structure (e.g., DeckOpsMedia/image.png)
+                    # Media file path preserves structure (e.g., AnkiOpsMedia/image.png)
                     media_path = media_base_dir / media_file
                     if media_path.exists() and media_path.is_file():
                         zipf.write(media_path, f"media/{media_file}")
@@ -357,7 +357,7 @@ def unpackage_collection_from_json(
 
             if media_files:
                 # Create media directory
-                media_dir = collection_dir / "media" / "DeckOpsMedia"
+                media_dir = collection_dir / "media" / "AnkiOpsMedia"
                 media_dir.mkdir(parents=True, exist_ok=True)
 
                 # Extract media files with conflict handling
@@ -383,9 +383,7 @@ def unpackage_collection_from_json(
 
                         if existing_hash == new_hash:
                             # Same file, skip extraction
-                            logger.debug(
-                                f"Skipping {filename} (identical file exists)"
-                            )
+                            logger.debug(f"Skipping {filename} (identical file exists)")
                             skipped_count += 1
                             continue
                         else:
@@ -435,15 +433,15 @@ def unpackage_collection_from_json(
     # Create collection directory if it doesn't exist
     collection_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write .deckops config file
+    # Write .ankiops config file
     marker_path = collection_dir / MARKER_FILE
     if overwrite or not marker_path.exists():
         profile = data["collection"].get("profile", "default")
         auto_commit = data["collection"].get("auto_commit", True)
 
-        config_content = f"""# DeckOps collection — do not delete this file.
+        config_content = f"""# AnkiOps collection — do not delete this file.
 
-[deckops]
+[ankiops]
 profile = {profile}
 auto_commit = {str(auto_commit).lower()}
 
@@ -452,7 +450,7 @@ auto_commit = {str(auto_commit).lower()}
         logger.debug(f"Created collection config for profile '{profile}'")
 
     # Process each deck
-    from deckops.config import NOTE_TYPES
+    from ankiops.config import NOTE_TYPES
 
     total_decks = 0
     total_notes = 0

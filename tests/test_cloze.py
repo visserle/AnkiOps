@@ -1,11 +1,10 @@
 """Tests for note parsing, formatting, and round-trip (both QA and Cloze)."""
 
 import pytest
-
-from deckops.config import NOTE_SEPARATOR, NOTE_TYPES
-from deckops.html_converter import HTMLToMarkdown
-from deckops.markdown_converter import MarkdownToHTML
-from deckops.markdown_helpers import (
+from ankiops.config import NOTE_SEPARATOR, NOTE_TYPES
+from ankiops.html_converter import HTMLToMarkdown
+from ankiops.markdown_converter import MarkdownToHTML
+from ankiops.markdown_helpers import (
     ParsedNote,
     extract_note_blocks,
     format_note,
@@ -15,7 +14,7 @@ from deckops.markdown_helpers import (
 
 
 class TestParseClozBlock:
-    """Test parse_note_block with DeckOpsCloze blocks."""
+    """Test parse_note_block with AnkiOpsCloze blocks."""
 
     def test_cloze_with_note_id(self):
         block = (
@@ -25,7 +24,7 @@ class TestParseClozBlock:
         )
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id == 789
-        assert parsed_note.note_type == "DeckOpsCloze"
+        assert parsed_note.note_type == "AnkiOpsCloze"
         assert len(parsed_note.fields) == 2
         assert (
             parsed_note.fields["Text"]
@@ -37,7 +36,7 @@ class TestParseClozBlock:
         block = "T: This is a {{c1::cloze}} test\nE: Extra"
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id is None
-        assert parsed_note.note_type == "DeckOpsCloze"
+        assert parsed_note.note_type == "AnkiOpsCloze"
         assert parsed_note.fields["Text"] == "This is a {{c1::cloze}} test"
 
     def test_cloze_with_hint(self):
@@ -46,7 +45,7 @@ class TestParseClozBlock:
             "T: The {{c1::mitochondria::organelle}} is the powerhouse of the cell"
         )
         parsed_note = parse_note_block(block)
-        assert parsed_note.note_type == "DeckOpsCloze"
+        assert parsed_note.note_type == "AnkiOpsCloze"
         assert "{{c1::mitochondria::organelle}}" in parsed_note.fields["Text"]
 
     def test_cloze_multiline_text(self):
@@ -57,7 +56,7 @@ class TestParseClozBlock:
             "E: Some extra info"
         )
         parsed_note = parse_note_block(block)
-        assert parsed_note.note_type == "DeckOpsCloze"
+        assert parsed_note.note_type == "AnkiOpsCloze"
         assert (
             "First line with {{c1::cloze}}\nSecond line continues"
             == parsed_note.fields["Text"]
@@ -72,20 +71,20 @@ class TestParseClozBlock:
 
 
 class TestParseQABlock:
-    """Verify DeckOpsQA parsing."""
+    """Verify AnkiOpsQA parsing."""
 
     def test_qa_with_note_id(self):
         block = "<!-- note_id: 123 -->\nQ: What?\nA: This"
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id == 123
-        assert parsed_note.note_type == "DeckOpsQA"
+        assert parsed_note.note_type == "AnkiOpsQA"
         assert parsed_note.fields["Question"] == "What?"
         assert parsed_note.fields["Answer"] == "This"
 
     def test_qa_without_id(self):
         block = "Q: New question\nA: New answer"
         parsed_note = parse_note_block(block)
-        assert parsed_note.note_type == "DeckOpsQA"
+        assert parsed_note.note_type == "AnkiOpsQA"
         assert parsed_note.note_id is None
 
 
@@ -104,7 +103,7 @@ class TestFormatNote:
                 "More": {"value": ""},
             }
         }
-        result = format_note(789, note, converter, note_type="DeckOpsCloze")
+        result = format_note(789, note, converter, note_type="AnkiOpsCloze")
         assert "<!-- note_id: 789 -->" in result
         assert "T: The {{c1::answer}} is here" in result
         assert "E: Extra info" in result
@@ -119,7 +118,7 @@ class TestFormatNote:
                 "More": {"value": ""},
             }
         }
-        result = format_note(123, note, converter, note_type="DeckOpsQA")
+        result = format_note(123, note, converter, note_type="AnkiOpsQA")
         assert "<!-- note_id: 123 -->" in result
         assert "Q: What?" in result
         assert "A: This" in result
@@ -186,12 +185,12 @@ class TestValidateNote:
         # Construct directly since T: without cloze syntax would fail validation
         parsed_note = ParsedNote(
             note_id=1,
-            note_type="DeckOpsCloze",
+            note_type="AnkiOpsCloze",
             fields={"Extra": "Only extra"},
             raw_content="<!-- note_id: 1 -->\nE: Only extra",
         )
         errors = validate_note(parsed_note)
-        for field_name, prefix in self._mandatory_fields("DeckOpsCloze"):
+        for field_name, prefix in self._mandatory_fields("AnkiOpsCloze"):
             assert any(field_name in e and prefix in e for e in errors)
 
     def test_no_unique_prefix_raises(self):

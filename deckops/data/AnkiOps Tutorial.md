@@ -1,11 +1,11 @@
-Q: Welcome to DeckOps!
+Q: Welcome to AnkiOps!
 A: Anki decks ↔ Markdown files, in perfect sync
 E: Edit in your text editor, review in Anki.
 M: Neat!
 
 ---
 
-T: DeckOps supports {{c1::cloze deletions}} and even {{c1::multiple}} {{c2::clozes}} in one card.
+T: AnkiOps supports {{c1::cloze deletions}} and even {{c1::multiple}} {{c2::clozes}} in one card.
 
 ---
 
@@ -14,7 +14,7 @@ C1: A multiple choice question
 C2: with
 C3: automatically randomized answers.
 A: 1,3
-E: The order changes dynamically with every review.
+E: The order changes dynamically between each review.
 
 ---
 
@@ -35,7 +35,7 @@ A: **Bold text**, *italic text*, ==highlighted text==, ~~strikethrough~~, `inlin
 
 ```python
 def truth():
-    print("DeckOps is awesome")
+    print("AnkiOps is awesome")
 
 ```
 E: *Everything renders beautifully on desktop and mobile.*
@@ -43,7 +43,7 @@ E: *Everything renders beautifully on desktop and mobile.*
 ---
 
 Q: How do I get started?
-A: Run `deckops ma` to import Markdown --> Anki
+A: Run `ankiops ma` to import Markdown --> Anki
 
-Run `deckops am` to export Anki --> Markdown
+Run `ankiops am` to export Anki --> Markdown
 E: Check the README for detailed documentation!

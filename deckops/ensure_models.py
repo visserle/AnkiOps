@@ -1,11 +1,11 @@
-"""Ensure DeckOpsQA, DeckOpsCloze, and DeckOpsChoice note types exist in Anki and are up
+"""Ensure AnkiOpsQA, AnkiOpsCloze, and AnkiOpsChoice note types exist in Anki and are up
 to date with our templates."""
 
 import logging
 from importlib import resources
 
-from deckops.anki_client import invoke
-from deckops.config import NOTE_TYPES
+from ankiops.anki_client import invoke
+from ankiops.config import NOTE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def _load_template(filename: str) -> str:
     """Read a template file from the models directory."""
     return (
-        resources.files("deckops.models").joinpath(filename).read_text(encoding="utf-8")
+        resources.files("ankiops.models").joinpath(filename).read_text(encoding="utf-8")
     )
 
 
@@ -88,17 +88,17 @@ def ensure_models() -> None:
     """Ensure all required note types exist in Anki and are up to date."""
     existing = set(invoke("modelNames"))
 
-    if "DeckOpsQA" not in existing:
-        _create_model("DeckOpsQA", is_cloze=False)
-    elif not _is_model_up_to_date("DeckOpsQA"):
-        _update_model("DeckOpsQA")
+    if "AnkiOpsQA" not in existing:
+        _create_model("AnkiOpsQA", is_cloze=False)
+    elif not _is_model_up_to_date("AnkiOpsQA"):
+        _update_model("AnkiOpsQA")
 
-    if "DeckOpsCloze" not in existing:
-        _create_model("DeckOpsCloze", is_cloze=True)
-    elif not _is_model_up_to_date("DeckOpsCloze"):
-        _update_model("DeckOpsCloze")
+    if "AnkiOpsCloze" not in existing:
+        _create_model("AnkiOpsCloze", is_cloze=True)
+    elif not _is_model_up_to_date("AnkiOpsCloze"):
+        _update_model("AnkiOpsCloze")
 
-    if "DeckOpsChoice" not in existing:
-        _create_model("DeckOpsChoice", is_cloze=False)
-    elif not _is_model_up_to_date("DeckOpsChoice"):
-        _update_model("DeckOpsChoice")
+    if "AnkiOpsChoice" not in existing:
+        _create_model("AnkiOpsChoice", is_cloze=False)
+    elif not _is_model_up_to_date("AnkiOpsChoice"):
+        _update_model("AnkiOpsChoice")

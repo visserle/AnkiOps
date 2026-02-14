@@ -5,9 +5,8 @@ and verify the round-trip produces equivalent HTML.
 """
 
 import pytest
-
-from deckops.html_converter import HTMLToMarkdown
-from deckops.markdown_converter import MarkdownToHTML
+from ankiops.html_converter import HTMLToMarkdown
+from ankiops.markdown_converter import MarkdownToHTML
 
 
 @pytest.fixture
@@ -358,7 +357,9 @@ class TestRoundTripBlockquotes:
 
     def test_separate_blockquotes_roundtrip(self, md_to_html, html_to_md):
         """Test that two separate blockquotes separated by a blank line round-trip correctly."""
-        original_html = "<blockquote>xxx</blockquote><br><br><blockquote>xxx</blockquote>"
+        original_html = (
+            "<blockquote>xxx</blockquote><br><br><blockquote>xxx</blockquote>"
+        )
         md = html_to_md.convert(original_html)
         restored_html = md_to_html.convert(md)
 
@@ -423,7 +424,7 @@ class TestRoundTripSpecialCharacters:
         assert "3" in restored_html
 
     def test_html_entities_quotes_roundtrip(self, md_to_html, html_to_md):
-        original_html = 'He said &quot;Hello&quot;'
+        original_html = "He said &quot;Hello&quot;"
         md = html_to_md.convert(original_html)
         restored_html = md_to_html.convert(md)
         assert "Hello" in restored_html
@@ -559,9 +560,7 @@ class TestRoundTripEscapedCharacters:
         assert "<blockquote>" in restored_html
         assert "This text" in restored_html
 
-    def test_multiline_greater_than_becomes_blockquote(
-        self, md_to_html, html_to_md
-    ):
+    def test_multiline_greater_than_becomes_blockquote(self, md_to_html, html_to_md):
         """Multiple lines starting with > become a blockquote after round-trip."""
         original_html = "> Line 1<br>> Line 2<br>> Line 3"
         md = html_to_md.convert(original_html)
@@ -587,8 +586,7 @@ class TestRoundTripComplexScenarios:
 
     def test_medical_terminology_roundtrip(self, md_to_html, html_to_md):
         original_html = (
-            "<mark>Derealisation</mark> (S)<br>"
-            "Umwelt wird als unwirklich wahrgenommen"
+            "<mark>Derealisation</mark> (S)<br>Umwelt wird als unwirklich wahrgenommen"
         )
         md = html_to_md.convert(original_html)
         restored_html = md_to_html.convert(md)
@@ -816,7 +814,10 @@ class TestDirectMarkdownConversion:
         md = r"\> This is not a blockquote"
         result = md_to_html.convert(md)
         # Should render as literal >
-        assert "> This is not a blockquote" in result or "&gt; This is not a blockquote" in result
+        assert (
+            "> This is not a blockquote" in result
+            or "&gt; This is not a blockquote" in result
+        )
         # Should NOT create a blockquote
         assert "<blockquote>" not in result
 

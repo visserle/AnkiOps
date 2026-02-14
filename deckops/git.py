@@ -45,7 +45,7 @@ def git_snapshot(collection_dir: Path, label: str) -> bool:
 
         # Commit the snapshot
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        message = f"DeckOps: pre-{label} snapshot ({timestamp})"
+        message = f"AnkiOps: pre-{label} snapshot ({timestamp})"
         subprocess.run(
             ["git", "commit", "-m", message],
             cwd=collection_dir,

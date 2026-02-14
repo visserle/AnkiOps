@@ -9,7 +9,7 @@ var answerText = "{{Answer}}";
 var correctAnswers = answerText.split(',').map(function(s) { return s.trim(); });
 var numCorrect = correctAnswers.length;
 
-// Display hint about number of correct answers (for alignment with front)
+// Display hint about number of correct answers
 var hintDiv = document.getElementById('answer-count-hint');
 if (numCorrect > 1) {
     hintDiv.textContent = 'Select ' + numCorrect + ' answers.';
@@ -41,12 +41,14 @@ choices.push({num: 6, text: `{{Choice 6}}`});
 choices.push({num: 7, text: `{{Choice 7}}`});
 {{/Choice 7}}
 
-// Get card ID and review counter for consistent shuffle matching front
+// Get card ID and review counter for consistent but varying shuffle
 var cardId = document.documentElement.dataset.cid || '0';
-var storageKey = 'deckops_review_' + cardId;
+var storageKey = 'ankiops_review_' + cardId;
 
-// Read current review counter (incremented on front side)
+// Increment review counter on front side
 var reviewCount = parseInt(localStorage.getItem(storageKey) || '0', 10);
+reviewCount += 1;
+localStorage.setItem(storageKey, reviewCount.toString());
 
 // Create seed from card ID and review count with proper hashing
 var seed = 0;
@@ -77,36 +79,13 @@ for (var i = choices.length - 1; i > 0; i--) {
     choices[j] = temp;
 }
 
-// Create and append choice elements with styling
+// Create and append choice elements
 var container = document.getElementById('choices');
 choices.forEach(function(choice) {
     var div = document.createElement('div');
     div.className = 'choice-item';
     div.setAttribute('data-num', choice.num);
     div.innerHTML = choice.text;
-
-    // Highlight correct answers
-    if (correctAnswers.indexOf(String(choice.num)) !== -1) {
-        div.classList.add('choice-correct');
-    } else {
-        div.classList.add('choice-incorrect');
-    }
-
     container.appendChild(div);
 });
 </script>
-
-{{#Extra}}
-<hr>
-{{edit:Extra}}
-{{/Extra}}
-
-{{#More}}
-<hr>
-<div class="more more-button" href="#"
-    onclick="this.style.display='none';document.getElementById('more_back').style.display='inline-block';return false;">
-    More</div>
-<div id="more_back" class="more more-content" style="display: none">
-    <div id="more">{{edit:More}}</div>
-</div>
-{{/More}}

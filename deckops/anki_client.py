@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
-
-from deckops.config import ANKI_CONNECT_URL, SUPPORTED_NOTE_TYPES
+from ankiops.config import ANKI_CONNECT_URL, SUPPORTED_NOTE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class AnkiState:
 
     Built by ``AnkiState.fetch()`` with 3-4 API calls:
       1. deckNamesAndIds
-      2. findCards  (all DeckOps cards)
+      2. findCards  (all AnkiOps cards)
       3. cardsInfo  (details for found cards)
       4. notesInfo  (details for discovered note IDs)
 
@@ -73,8 +72,8 @@ class AnkiState:
                 if model and model not in SUPPORTED_NOTE_TYPES:
                     raise ValueError(
                         f"Safety check failed: Note {note['noteId']} has template "
-                        f"'{model}' but expected a DeckOps template. "
-                        f"DeckOps will never modify notes with non-DeckOps templates."
+                        f"'{model}' but expected a AnkiOps template. "
+                        f"AnkiOps will never modify notes with non-AnkiOps templates."
                     )
                 notes[note["noteId"]] = note
 

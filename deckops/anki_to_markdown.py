@@ -12,11 +12,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from deckops.anki_client import AnkiState
-from deckops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES
-from deckops.html_converter import HTMLToMarkdown
-from deckops.log import format_changes
-from deckops.markdown_helpers import (
+from ankiops.anki_client import AnkiState
+from ankiops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES
+from ankiops.html_converter import HTMLToMarkdown
+from ankiops.log import format_changes
+from ankiops.markdown_helpers import (
     extract_deck_id,
     extract_note_blocks,
     format_note,
@@ -233,7 +233,7 @@ def export_deck(
             "if you continue with the export."
         )
         logger.warning(
-            "\nTo preserve them, first run:\n  deckops markdown-to-anki --only-add-new"
+            "\nTo preserve them, first run:\n  ankiops markdown-to-anki --only-add-new"
         )
         answer = (
             input("\nContinue with export anyway (new notes will be lost)? [y/N] ")
@@ -308,7 +308,7 @@ def export_collection(
             "if you continue with the export."
         )
         logger.warning(
-            "\nTo preserve them, first run:\n  deckops markdown-to-anki --only-add-new"
+            "\nTo preserve them, first run:\n  ankiops markdown-to-anki --only-add-new"
         )
         answer = (
             input("\nContinue with export anyway (new notes will be lost)? [y/N] ")
@@ -342,7 +342,7 @@ def export_collection(
             renamed_files += 1
 
     # Phase 4: Determine relevant decks
-    # A deck is relevant if it has DeckOps notes OR has an existing file
+    # A deck is relevant if it has AnkiOps notes OR has an existing file
     relevant_decks: set[str] = set()
     for deck_name in anki.deck_note_ids:
         relevant_decks.add(deck_name)

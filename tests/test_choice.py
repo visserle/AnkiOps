@@ -1,12 +1,11 @@
-"""Tests for DeckOpsChoice note type parsing and validation."""
+"""Tests for AnkiOpsChoice note type parsing and validation."""
 
 import pytest
-
-from deckops.markdown_helpers import ParsedNote, parse_note_block, validate_note
+from ankiops.markdown_helpers import ParsedNote, parse_note_block, validate_note
 
 
 class TestParseChoiceBlock:
-    """Test parse_note_block with DeckOpsChoice blocks."""
+    """Test parse_note_block with AnkiOpsChoice blocks."""
 
     def test_choice_with_note_id(self):
         block = (
@@ -19,7 +18,7 @@ class TestParseChoiceBlock:
         )
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id == 789
-        assert parsed_note.note_type == "DeckOpsChoice"
+        assert parsed_note.note_type == "AnkiOpsChoice"
         assert parsed_note.fields["Question"] == "What is the capital of France?"
         assert parsed_note.fields["Choice 1"] == "Paris"
         assert parsed_note.fields["Choice 2"] == "London"
@@ -30,7 +29,7 @@ class TestParseChoiceBlock:
         block = "Q: Test\nC1: Choice 1\nC2: Choice 2\nA: 1"
         parsed_note = parse_note_block(block)
         assert parsed_note.note_id is None
-        assert parsed_note.note_type == "DeckOpsChoice"
+        assert parsed_note.note_type == "AnkiOpsChoice"
 
     def test_choice_with_all_fields(self):
         block = (
@@ -42,23 +41,19 @@ class TestParseChoiceBlock:
             "M: More info"
         )
         parsed_note = parse_note_block(block)
-        assert parsed_note.note_type == "DeckOpsChoice"
+        assert parsed_note.note_type == "AnkiOpsChoice"
         assert parsed_note.fields["Choice 7"] == "G"
         assert parsed_note.fields["Extra"] == "Extra info"
         assert parsed_note.fields["More"] == "More info"
 
     def test_choice_multiline_question(self):
-        block = (
-            "Q: First line\nSecond line\n"
-            "C1: Choice 1\n"
-            "A: 1"
-        )
+        block = "Q: First line\nSecond line\nC1: Choice 1\nA: 1"
         parsed_note = parse_note_block(block)
         assert parsed_note.fields["Question"] == "First line\nSecond line"
 
 
 class TestValidateChoiceNote:
-    """Test validate_note for DeckOpsChoice notes."""
+    """Test validate_note for AnkiOpsChoice notes."""
 
     def test_valid_single_choice(self):
         block = "Q: Question?\nC1: Choice 1\nC2: Choice 2\nA: 1"
@@ -89,7 +84,7 @@ class TestValidateChoiceNote:
         block = "C1: Choice 1\nC2: Choice 2\nA: 1"
         parsed_note = ParsedNote(
             note_id=1,
-            note_type="DeckOpsChoice",
+            note_type="AnkiOpsChoice",
             fields={"Choice 1": "A", "Choice 2": "B", "Answer": "1"},
             raw_content=block,
         )
@@ -100,7 +95,7 @@ class TestValidateChoiceNote:
         block = "Q: Question?\nA: 1"
         parsed_note = ParsedNote(
             note_id=1,
-            note_type="DeckOpsChoice",
+            note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Answer": "1"},
             raw_content=block,
         )
@@ -111,7 +106,7 @@ class TestValidateChoiceNote:
         block = "Q: Question?\nC1: Choice 1\nC2: Choice 2"
         parsed_note = ParsedNote(
             note_id=1,
-            note_type="DeckOpsChoice",
+            note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Choice 1": "A", "Choice 2": "B"},
             raw_content=block,
         )
@@ -153,11 +148,7 @@ class TestValidateChoiceNote:
 
     def test_valid_with_seven_choices(self):
         """All 7 choices can be used."""
-        block = (
-            "Q: Question?\n"
-            "C1: A\nC2: B\nC3: C\nC4: D\nC5: E\nC6: F\nC7: G\n"
-            "A: 7"
-        )
+        block = "Q: Question?\nC1: A\nC2: B\nC3: C\nC4: D\nC5: E\nC6: F\nC7: G\nA: 7"
         parsed_note = parse_note_block(block)
         errors = validate_note(parsed_note)
         assert errors == []

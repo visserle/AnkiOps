@@ -5,9 +5,8 @@ and verify the round-trip produces equivalent markdown.
 """
 
 import pytest
-
-from deckops.html_converter import HTMLToMarkdown
-from deckops.markdown_converter import MarkdownToHTML
+from ankiops.html_converter import HTMLToMarkdown
+from ankiops.markdown_converter import MarkdownToHTML
 
 
 @pytest.fixture

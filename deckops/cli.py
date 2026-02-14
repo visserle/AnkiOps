@@ -2,21 +2,21 @@ import argparse
 import logging
 from pathlib import Path
 
-from deckops.anki_client import invoke
-from deckops.anki_to_markdown import (
+from ankiops.anki_client import invoke
+from ankiops.anki_to_markdown import (
     export_collection,
     export_deck,
 )
-from deckops.collection_package import (
+from ankiops.collection_package import (
     package_collection_to_json,
     unpackage_collection_from_json,
 )
-from deckops.config import get_auto_commit, require_collection_dir
-from deckops.ensure_models import ensure_models
-from deckops.git import git_snapshot
-from deckops.init import create_tutorial, initialize_collection
-from deckops.log import configure_logging, format_changes
-from deckops.markdown_to_anki import (
+from ankiops.config import get_auto_commit, require_collection_dir
+from ankiops.ensure_models import ensure_models
+from ankiops.git import git_snapshot
+from ankiops.init import create_tutorial, initialize_collection
+from ankiops.log import configure_logging, format_changes
+from ankiops.markdown_to_anki import (
     import_collection,
     import_file,
 )
@@ -36,7 +36,7 @@ def connect_or_exit():
 
 
 def run_init(args):
-    """Initialize the current directory as an DeckOps collection."""
+    """Initialize the current directory as an AnkiOps collection."""
     connect_or_exit()
     profile = invoke("getActiveProfile")
     media_dir = invoke("getMediaDirPath")
@@ -48,7 +48,7 @@ def run_init(args):
         create_tutorial(collection_dir)
 
     logger.info(
-        f"Initialized DeckOps collection in {collection_dir} (profile: {profile})"
+        f"Initialized AnkiOps collection in {collection_dir} (profile: {profile})"
     )
 
 
@@ -122,10 +122,10 @@ def run_ma(args):
         summary = import_collection(str(collection_dir), only_add_new=args.only_add_new)
         results = summary.file_results
 
-        # Handle untracked decks (DeckOps notes in Anki with no markdown file)
+        # Handle untracked decks (AnkiOps notes in Anki with no markdown file)
         if summary.untracked_decks:
             logger.warning(
-                "The following Anki decks with DeckOps notes inside "
+                "The following Anki decks with AnkiOps notes inside "
                 "have no matching markdown file:"
             )
             for ud in summary.untracked_decks:
@@ -136,7 +136,7 @@ def run_ma(args):
             answer = (
                 input(
                     "Delete these managed notes from Anki "
-                    "(only DeckOps notes will be removed)? [y/N] "
+                    "(only AnkiOps notes will be removed)? [y/N] "
                 )
                 .strip()
                 .lower()
@@ -228,7 +228,7 @@ def run_unpackage(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="DeckOps – Manage Anki decks as Markdown files.",
+        description="AnkiOps – Manage Anki decks as Markdown files.",
     )
     parser.add_argument(
         "--debug",
@@ -241,7 +241,7 @@ def main():
     # Init parser
     init_parser = subparsers.add_parser(
         "init",
-        help="Initialize current directory as an DeckOps collection",
+        help="Initialize current directory as an AnkiOps collection",
     )
     init_parser.add_argument(
         "--no-auto-commit",
@@ -306,7 +306,7 @@ def main():
     # Package parser
     package_parser = subparsers.add_parser(
         "package",
-        help="Export your DeckOps collection to a portable JSON/ZIP file",
+        help="Export your AnkiOps collection to a portable JSON/ZIP file",
     )
     package_parser.add_argument(
         "--output",
@@ -328,7 +328,7 @@ def main():
     # Unpackage parser
     unpackage_parser = subparsers.add_parser(
         "unpackage",
-        help="Import a packaged collection (JSON/ZIP) into a local DeckOps directory",
+        help="Import a packaged collection (JSON/ZIP) into a local AnkiOps directory",
     )
     unpackage_parser.add_argument(
         "package_file",
@@ -358,28 +358,28 @@ def main():
     else:
         # Show welcome screen when no command is provided
         print("=" * 60)
-        print("DeckOps – Manage Anki decks as Markdown files")
+        print("AnkiOps – Manage Anki decks as Markdown files")
         print("=" * 60)
         print()
         print("Available commands:")
         print(
-            "  init              Initialize current directory as a DeckOps collection"
+            "  init              Initialize current directory as a AnkiOps collection"
         )
         print("  anki-to-markdown  Export Anki decks to Markdown files (alias: am)")
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  package           Export collection to a portable JSON/ZIP package")
-        print("  unpackage         Import a package into a local DeckOps directory")
+        print("  unpackage         Import a package into a local AnkiOps directory")
         print()
         print("Usage examples:")
-        print("  deckops init --tutorial          # Initialize with tutorial")
-        print("  deckops am                       # Export all decks to Markdown")
-        print("  deckops ma                       # Import all Markdown files to Anki")
-        print("  deckops package -o my-deck.json  # Export collection to package")
-        print("  deckops unpackage my-deck.json   # Import package to local directory")
+        print("  ankiops init --tutorial          # Initialize with tutorial")
+        print("  ankiops am                       # Export all decks to Markdown")
+        print("  ankiops ma                       # Import all Markdown files to Anki")
+        print("  ankiops package -o my-deck.json  # Export collection to package")
+        print("  ankiops unpackage my-deck.json   # Import package to local directory")
         print()
         print("For more information:")
-        print("  deckops --help                 # Show general help")
-        print("  deckops <command> --help       # Show help for a specific command")
+        print("  ankiops --help                 # Show general help")
+        print("  ankiops <command> --help       # Show help for a specific command")
         print("=" * 60)
 
 

@@ -1,6 +1,6 @@
 from importlib.metadata import version
 
-from deckops.cli import main
+from ankiops.cli import main
 
-__version__ = version("deckops")
+__version__ = version("ankiops")
 __all__ = ["main", "__version__"]

@@ -1,12 +1,12 @@
-# DeckOps
+# AnkiOps
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://badge.fury.io/py/deckops.svg)](https://badge.fury.io/py/deckops) 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://badge.fury.io/py/ankiops.svg)](https://badge.fury.io/py/ankiops) 
 
 **Anki decks ↔ Markdown files, in perfect sync**
 
 Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. Currently available Markdown → Anki tools only go one way, where edits in Anki don't sync back. 
 
-**DeckOps** is a bidirectional Anki ↔ Markdown bridge. Each deck is a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
+**AnkiOps** is a bidirectional Anki ↔ Markdown bridge. Each deck is a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
 
 ## Features
 
@@ -21,42 +21,42 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Simple CLI interface: after initialization, only two commands are needed for daily use
 
 > [!NOTE]
-> DeckOps only syncs the `DeckOpsQA`, `DeckOpsCloze`, and `DeckOpsChoice` note types.
+> AnkiOps only syncs the `AnkiOpsQA`, `AnkiOpsCloze`, and `AnkiOpsChoice` note types.
 
 
 ## Getting Started
 
 
-1. **Install DeckOps via [pipx](https://github.com/pypa/pipx)**: Pipx will make DeckOps globally available in your terminal.
+1. **Install AnkiOps via [pipx](https://github.com/pypa/pipx)**: Pipx will make AnkiOps globally available in your terminal.
 ```bash
-pipx install deckops
+pipx install ankiops
 ```
-2. **Initialize DeckOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize DeckOps in any empty directory of your choosing. This is where your text-based decks will live. The additional tutorial flag creates a sample Markdown deck.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize AnkiOps in any empty directory of your choosing. This is where your text-based decks will live. The additional tutorial flag creates a sample Markdown deck.
 ```bash
-deckops init --tutorial
+ankiops init --tutorial
 ```
-3. **Execute DeckOps**: Import the tutorial deck into Anki using:
+3. **Execute AnkiOps**: Import the tutorial deck into Anki using:
 ```bash
-deckops ma # markdown to anki (import)
+ankiops ma # markdown to anki (import)
 ```
 4. **Keep everything in sync**: When editing your Markdown files, sync Markdown → Anki (and vice versa), as each sync makes one side match the other. After reviewing and editing your cards in Anki, you can sync Anki → Markdown using the following command:
 ```bash
-deckops am # anki to markdown (export)
+ankiops am # anki to markdown (export)
 ```
 
 ## FAQ
 
 ### How is this different from other Markdown or Obsidian tools?
 
-Available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. DeckOps is bidirectional: you can edit in either Anki or Markdown and sync in both directions. Additionally, DeckOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card.
+Available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bidirectional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card.
 
 ### Is it safe to use?
 
-Yes, DeckOps will never modify notes with non-DeckOps note types. Your existing collection won't be affected and you can safely mix managed and unmanaged notes in the same deck. Further, DeckOps only syncs if the activated profiles matches the one it was initialized with. When orphaned DeckOps notes are detected, you will be prompted to confirm their deletion. Concerning your Markdown files, DeckOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
+Yes, AnkiOps will never modify notes with non-AnkiOps note types. Your existing collection won't be affected and you can safely mix managed and unmanaged notes in the same deck. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. When orphaned AnkiOps notes are detected, you will be prompted to confirm their deletion. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized DeckOps folder. For the first import, the file name will act as the deck name. Subdecks are supported via two underscores `__` (Anki's `::` is not supported in the file system). Start by writing your notes in Markdown. For each note, you can decide whether to use the QA or cloze format. Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name will act as the deck name. Subdecks are supported via two underscores `__` (Anki's `::` is not supported in the file system). Start by writing your notes in Markdown. For each note, you can decide whether to use the QA or cloze format. Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
 
 ```markdown
 Q: Question text here
@@ -88,33 +88,33 @@ Since notes are separated by horizontal lines (`---`), they cannot be used withi
 
 ### How does it work?
 
-On first import, DeckOps assigns IDs from Anki to each deck and note for tracking. They are represented by a single-line HTML tag (e.g., `<!-- note_id: 1770487991522 -->`) above a note in the Markdown. With the IDs in place, we can track what is new, changed, moved between decks, or deleted, and DeckOps will sync accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. Note that one DeckOps folder represents an entire Anki profile.
+On first import, AnkiOps assigns IDs from Anki to each deck and note for tracking. They are represented by a single-line HTML tag (e.g., `<!-- note_id: 1770487991522 -->`) above a note in the Markdown. With the IDs in place, we can track what is new, changed, moved between decks, or deleted, and AnkiOps will sync accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. Note that one AnkiOps folder represents an entire Anki profile.
 
 ### What is the recommended workflow?
 
 We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting (which will be saved in your Anki media folder by default).
 
-### How can I share my DeckOps collection?
+### How can I share my AnkiOps collection?
 
-Use `deckops package --no-ids` to export your local DeckOps collection to a clean JSON package file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `deckops unpackage <package-file>`, which creates a new local DeckOps directory on their machine and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/DeckOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
+Use `ankiops package --no-ids` to export your local AnkiOps collection to a clean JSON package file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops unpackage <package-file>`, which creates a new local AnkiOps directory on their machine and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
 
-### How can I migrate my existing notes into DeckOps?
+### How can I migrate my existing notes into AnkiOps?
 
 While migration is doable, it can be tricky. The process requires:
 
-1. **Converting note types**: Your existing notes must be converted to DeckOps note types (`DeckOpsQA` or `DeckOpsCloze`). This must be done manually in Anki or by adapting the DeckOps code.
-2. **Exporting to Markdown**: Once converted, use `deckops am` to export your notes from Anki to Markdown.
+1. **Converting note types**: Your existing notes must be converted to AnkiOps note types (`AnkiOpsQA` or `AnkiOpsCloze`). This must be done manually in Anki or by adapting the AnkiOps code.
+2. **Exporting to Markdown**: Once converted, use `ankiops am` to export your notes from Anki to Markdown.
 3. **Formatting adjustments**: In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard.
 
-If your existing note format doesn't map cleanly to the DeckOps format (e.g., notes with additional or custom fields), you'll need to adapt the code to your specific needs.
+If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code to your specific needs.
 
-### How can I develop DeckOps locally?
+### How can I develop AnkiOps locally?
 
-Fork this repository and initialize the tutorial in your root folder (make sure Anki is running). This will create a folder called `collection` with the sample Markdown in it. Paths will adapt automatically to the development environment. You can run DeckOps locally using the main script.
+Fork this repository and initialize the tutorial in your root folder (make sure Anki is running). This will create a folder called `collection` with the sample Markdown in it. Paths will adapt automatically to the development environment. You can run AnkiOps locally using the main script.
 
 ```bash
-git clone https://github.com/visserle/deckops.git
-cd deckops
+git clone https://github.com/visserle/ankiops.git
+cd ankiops
 uv sync
 uv run python -m main init --tutorial
 uv run python -m main ma
