@@ -1,4 +1,4 @@
-"""Tests for collection packaging and unpackaging."""
+"""Tests for collection serialization and deserialization."""
 
 import hashlib
 import json
@@ -7,12 +7,12 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from ankiops.collection_package import (
+from ankiops.collection_serializer import (
     compute_file_hash,
     compute_zipfile_hash,
     extract_media_references,
-    package_collection_to_json,
-    unpackage_collection_from_json,
+    serialize_collection_to_json,
+    deserialize_collection_from_json,
     update_media_references,
 )
 
@@ -130,18 +130,18 @@ class TestMediaReferences:
         assert updated == text
 
 
-class TestUnpackageMediaConflicts:
-    """Test media file conflict handling during unpackage."""
+class TestDeserializeMediaConflicts:
+    """Test media file conflict handling during deserialization."""
 
-    def create_test_package(self, tmp_path, media_content):
-        """Helper to create a test package with media."""
-        package_file = tmp_path / "test.zip"
+    def create_test_serialized(self, tmp_path, media_content):
+        """Helper to create a test serialized file with media."""
+        serialized_file = tmp_path / "test.zip"
 
-        package_data = {
+        serialized_data = {
             "collection": {
                 "profile": "test",
                 "auto_commit": True,
-                "packaged_at": "2024-01-01T00:00:00Z",
+                "serialized_at": "2024-01-01T00:00:00Z",
             },
             "decks": [
                 {
@@ -150,7 +150,6 @@ class TestUnpackageMediaConflicts:
                     "notes": [
                         {
                             "note_id": "1111111111",
-                            "note_type": "AnkiOpsQA",
                             "fields": {
                                 "Question": "What is this? ![](media/test.png)",
                                 "Answer": "An image",
@@ -161,20 +160,20 @@ class TestUnpackageMediaConflicts:
             ],
         }
 
-        with zipfile.ZipFile(package_file, "w") as zipf:
+        with zipfile.ZipFile(serialized_file, "w") as zipf:
             # Add JSON
-            zipf.writestr("collection.json", json.dumps(package_data, indent=2))
+            zipf.writestr("collection.json", json.dumps(serialized_data, indent=2))
             # Add media file
             zipf.writestr("media/test.png", media_content)
 
-        return package_file
+        return serialized_file
 
-    def test_unpackage_with_no_existing_media(self, tmp_path):
-        """Test normal unpackage with no conflicts."""
-        package_file = self.create_test_package(tmp_path, b"image data")
+    def test_deserialize_with_no_existing_media(self, tmp_path):
+        """Test normal deserialization with no conflicts."""
+        serialized_file = self.create_test_serialized(tmp_path, b"image data")
         collection_dir = tmp_path / "collection"
 
-        unpackage_collection_from_json(package_file, collection_dir)
+        deserialize_collection_from_json(serialized_file, collection_dir)
 
         # Verify media file was extracted
         media_file = collection_dir / "media" / "AnkiOpsMedia" / "test.png"
@@ -186,9 +185,9 @@ class TestUnpackageMediaConflicts:
         content = deck_file.read_text()
         assert "![](media/test.png)" in content
 
-    def test_unpackage_with_identical_existing_media(self, tmp_path):
-        """Test unpackage skips identical media files."""
-        package_file = self.create_test_package(tmp_path, b"image data")
+    def test_deserialize_with_identical_existing_media(self, tmp_path):
+        """Test deserialization skips identical media files."""
+        serialized_file = self.create_test_serialized(tmp_path, b"image data")
         collection_dir = tmp_path / "collection"
 
         # Create existing media file with same content
@@ -197,8 +196,8 @@ class TestUnpackageMediaConflicts:
         existing_file = media_dir / "test.png"
         existing_file.write_bytes(b"image data")
 
-        # Unpackage
-        unpackage_collection_from_json(package_file, collection_dir)
+        # Deserialize
+        deserialize_collection_from_json(serialized_file, collection_dir)
 
         # Verify file still has original content (not overwritten)
         assert existing_file.read_bytes() == b"image data"
@@ -208,9 +207,9 @@ class TestUnpackageMediaConflicts:
         content = deck_file.read_text()
         assert "![](media/test.png)" in content
 
-    def test_unpackage_with_different_existing_media(self, tmp_path):
-        """Test unpackage renames conflicting media files."""
-        package_file = self.create_test_package(tmp_path, b"new image data")
+    def test_deserialize_with_different_existing_media(self, tmp_path):
+        """Test deserialization renames conflicting media files."""
+        serialized_file = self.create_test_serialized(tmp_path, b"new image data")
         collection_dir = tmp_path / "collection"
 
         # Create existing media file with different content
@@ -219,8 +218,8 @@ class TestUnpackageMediaConflicts:
         existing_file = media_dir / "test.png"
         existing_file.write_bytes(b"old image data")
 
-        # Unpackage
-        unpackage_collection_from_json(package_file, collection_dir)
+        # Deserialize
+        deserialize_collection_from_json(serialized_file, collection_dir)
 
         # Verify original file unchanged
         assert existing_file.read_bytes() == b"old image data"
@@ -236,9 +235,9 @@ class TestUnpackageMediaConflicts:
         assert "![](media/test_1.png)" in content
         assert "![](media/test.png)" not in content
 
-    def test_unpackage_with_multiple_conflicts(self, tmp_path):
-        """Test unpackage handles multiple renamed files."""
-        package_file = self.create_test_package(tmp_path, b"newest data")
+    def test_deserialize_with_multiple_conflicts(self, tmp_path):
+        """Test deserialization handles multiple renamed files."""
+        serialized_file = self.create_test_serialized(tmp_path, b"newest data")
         collection_dir = tmp_path / "collection"
 
         # Create existing media files
@@ -247,8 +246,8 @@ class TestUnpackageMediaConflicts:
         (media_dir / "test.png").write_bytes(b"original data")
         (media_dir / "test_1.png").write_bytes(b"first rename")
 
-        # Unpackage
-        unpackage_collection_from_json(package_file, collection_dir)
+        # Deserialize
+        deserialize_collection_from_json(serialized_file, collection_dir)
 
         # Verify files unchanged
         assert (media_dir / "test.png").read_bytes() == b"original data"

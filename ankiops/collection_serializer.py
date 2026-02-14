@@ -1,4 +1,4 @@
-"""Package and unpackage AnkiOps collections to/from JSON format."""
+"""Serialize and deserialize AnkiOps collections to/from JSON format."""
 
 import hashlib
 import json
@@ -9,13 +9,41 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import MARKER_FILE
+from ankiops.config import MARKER_FILE, NOTE_TYPES
 from ankiops.markdown_helpers import (
     extract_deck_id,
     parse_note_block,
 )
 
 logger = logging.getLogger(__name__)
+
+# Regex patterns for media file references
+MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?"
+ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
+HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
+
+
+def infer_note_type(fields: dict[str, str]) -> str:
+    """Infer note type from field structure.
+
+    Args:
+        fields: Dictionary of field names to values
+
+    Returns:
+        Note type name
+
+    Raises:
+        ValueError: If note type cannot be determined from fields
+    """
+    if "Text" in fields:
+        return "AnkiOpsCloze"
+    elif "Choice 1" in fields:
+        return "AnkiOpsChoice"
+    elif "Question" in fields:
+        return "AnkiOpsQA"
+    else:
+        field_list = list(fields.keys())
+        raise ValueError(f"Cannot determine note type from fields: {field_list}")
 
 
 def compute_file_hash(file_path: Path) -> str:
@@ -77,9 +105,7 @@ def update_media_references(text: str, rename_map: dict[str, str]) -> str:
             return match.group(0).replace(original_path, f"media/{new_path}")
         return match.group(0)
 
-    updated_text = re.sub(
-        r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?", replace_md_image, updated_text
-    )
+    updated_text = re.sub(MARKDOWN_IMAGE_PATTERN, replace_md_image, updated_text)
 
     # Update Anki sound tags: [sound:audio.mp3]
     def replace_sound(match):
@@ -92,7 +118,7 @@ def update_media_references(text: str, rename_map: dict[str, str]) -> str:
             return match.group(0).replace(original_path, new_path)
         return match.group(0)
 
-    updated_text = re.sub(r"\[sound:([^\]]+)\]", replace_sound, updated_text)
+    updated_text = re.sub(ANKI_SOUND_PATTERN, replace_sound, updated_text)
 
     # Update HTML img tags: <img src="file.jpg">
     def replace_html_img(match):
@@ -105,9 +131,7 @@ def update_media_references(text: str, rename_map: dict[str, str]) -> str:
             return match.group(0).replace(original_path, f"media/{new_path}")
         return match.group(0)
 
-    updated_text = re.sub(
-        r'<img[^>]+src=["\']([^"\']+)["\']', replace_html_img, updated_text
-    )
+    updated_text = re.sub(HTML_IMG_PATTERN, replace_html_img, updated_text)
 
     return updated_text
 
@@ -126,7 +150,7 @@ def extract_media_references(text: str) -> set[str]:
     media_files = set()
 
     # Markdown images: ![alt](filename.png) or ![alt](filename.png){width=500}
-    for match in re.finditer(r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?", text):
+    for match in re.finditer(MARKDOWN_IMAGE_PATTERN, text):
         path = match.group(1)
         # Strip angle brackets if present (markdown URL syntax)
         path = path.strip("<>")
@@ -136,14 +160,14 @@ def extract_media_references(text: str) -> set[str]:
         media_files.add(path)
 
     # Anki sound tags: [sound:audio.mp3]
-    for match in re.finditer(r"\[sound:([^\]]+)\]", text):
+    for match in re.finditer(ANKI_SOUND_PATTERN, text):
         path = match.group(1).strip("<>")
         if path.startswith("media/"):
             path = path[6:]
         media_files.add(path)
 
     # HTML img tags: <img src="file.jpg">
-    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', text):
+    for match in re.finditer(HTML_IMG_PATTERN, text):
         path = match.group(1).strip("<>")
         if path.startswith("media/"):
             path = path[6:]
@@ -152,22 +176,22 @@ def extract_media_references(text: str) -> set[str]:
     return media_files
 
 
-def package_collection_to_json(
+def serialize_collection_to_json(
     collection_dir: Path,
     output_file: Path,
     include_ids: bool = True,
     include_media: bool = False,
 ) -> dict:
-    """Package entire collection to JSON format.
+    """Serialize entire collection to JSON format.
 
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
-        include_ids: If False, exclude note_id and deck_id from package
+        include_ids: If False, exclude note_id and deck_id from serialized output
         include_media: If True, create ZIP with JSON and media files
 
     Returns:
-        Dictionary containing the packaged data
+        Dictionary containing the serialized data
     """
     # Read collection config
     marker_path = collection_dir / MARKER_FILE
@@ -190,21 +214,23 @@ def package_collection_to_json(
             auto_commit = line.split("=", 1)[1].strip().lower() == "true"
 
     # Build JSON structure
-    package_data = {
+    serialized_data = {
         "collection": {
             "profile": profile,
             "auto_commit": auto_commit,
-            "packaged_at": datetime.now(timezone.utc).isoformat(),
+            "serialized_at": datetime.now(timezone.utc).isoformat(),
         },
         "decks": [],
     }
 
     # Track all media files referenced in notes
     all_media_files = set()
+    # Track errors during serialization
+    errors = []
 
     # Process all markdown files in collection
     md_files = sorted(collection_dir.glob("*.md"))
-    logger.debug(f"Found {len(md_files)} deck file(s) to package")
+    logger.debug(f"Found {len(md_files)} deck file(s) to serialize")
 
     for md_file in md_files:
         logger.debug(f"Processing {md_file.name}...")
@@ -234,11 +260,8 @@ def package_collection_to_json(
             try:
                 parsed = parse_note_block(block_text)
 
-                # Convert to JSON-friendly format
-                note_data = {
-                    "note_type": parsed.note_type,
-                    "fields": parsed.fields,
-                }
+                # Convert to JSON-friendly format (note_type inferred from fields)
+                note_data = {"fields": parsed.fields}
 
                 # Only include note_id if requested
                 if include_ids:
@@ -259,14 +282,15 @@ def package_collection_to_json(
                     f"Error parsing note in {md_file.name} at line {line_number}: {e}"
                 )
                 logger.error(error_msg)
+                errors.append(error_msg)
                 # Continue processing other notes
                 line_number += block_text.count("\n") + 3
 
         if deck_data["notes"]:
-            package_data["decks"].append(deck_data)
+            serialized_data["decks"].append(deck_data)
 
-    total_notes = sum(len(deck["notes"]) for deck in package_data["decks"])
-    total_decks = len(package_data["decks"])
+    total_notes = sum(len(deck["notes"]) for deck in serialized_data["decks"])
+    total_decks = len(serialized_data["decks"])
 
     if include_media and all_media_files:
         # Create ZIP with JSON and media files
@@ -288,7 +312,7 @@ def package_collection_to_json(
             media_base_dir = Path(media_dir_path)
             with zipfile.ZipFile(output_file, "w", zipfile.ZIP_DEFLATED) as zipf:
                 # Add JSON to ZIP
-                json_content = json.dumps(package_data, indent=2, ensure_ascii=False)
+                json_content = json.dumps(serialized_data, indent=2, ensure_ascii=False)
                 zipf.writestr("collection.json", json_content)
 
                 # Add media files to ZIP
@@ -306,7 +330,7 @@ def package_collection_to_json(
                 logger.debug(f"Included {copied_count}/{total_media} media files")
 
             logger.info(
-                f"Packaged {total_decks} deck(s), {total_notes} note(s), "
+                f"Serialized {total_decks} deck(s), {total_notes} note(s), "
                 f"{copied_count} media file(s) to {output_file}"
             )
 
@@ -316,22 +340,29 @@ def package_collection_to_json(
             logger.debug("No media files found, creating JSON only")
 
         with output_file.open("w", encoding="utf-8") as f:
-            json.dump(package_data, f, indent=2, ensure_ascii=False)
+            json.dump(serialized_data, f, indent=2, ensure_ascii=False)
 
         logger.info(
-            f"Packaged {total_decks} deck(s), {total_notes} note(s) to {output_file}"
+            f"Serialized {total_decks} deck(s), {total_notes} note(s) to {output_file}"
         )
 
-    return package_data
+    # Report any errors encountered during serialization
+    if errors:
+        logger.warning(
+            f"Serialization completed with {len(errors)} error(s). "
+            "Some notes were skipped. Review errors above."
+        )
+
+    return serialized_data
 
 
-def unpackage_collection_from_json(
+def deserialize_collection_from_json(
     json_file: Path, collection_dir: Path, overwrite: bool = False
 ) -> None:
-    """Unpackage collection from JSON or ZIP format.
+    """Deserialize collection from JSON or ZIP format.
 
     Args:
-        json_file: Path to JSON or ZIP file to unpackage
+        json_file: Path to JSON or ZIP file to deserialize
         collection_dir: Path to collection directory (will be created if doesn't exist)
         overwrite: If True, overwrite existing collection; if False, merge with existing
     """
@@ -430,9 +461,6 @@ def unpackage_collection_from_json(
         # No media files in JSON-only format
         media_rename_map = {}
 
-    # Create collection directory if it doesn't exist
-    collection_dir.mkdir(parents=True, exist_ok=True)
-
     # Write .ankiops config file
     marker_path = collection_dir / MARKER_FILE
     if overwrite or not marker_path.exists():
@@ -450,8 +478,6 @@ auto_commit = {str(auto_commit).lower()}
         logger.debug(f"Created collection config for profile '{profile}'")
 
     # Process each deck
-    from ankiops.config import NOTE_TYPES
-
     total_decks = 0
     total_notes = 0
 
@@ -474,8 +500,16 @@ auto_commit = {str(auto_commit).lower()}
         # Process each note
         for note in notes:
             note_id = note.get("note_id")
-            note_type = note["note_type"]
             fields = note["fields"]
+
+            # Infer note type from fields
+            try:
+                note_type = infer_note_type(fields)
+            except ValueError as e:
+                logger.warning(
+                    f"Cannot infer note type in deck '{deck_name}': {e}, skipping note"
+                )
+                continue
 
             # Add note_id if present
             if note_id:
@@ -523,6 +557,6 @@ auto_commit = {str(auto_commit).lower()}
 
     media_part = f", {total_media} media file(s)" if total_media else ""
     logger.info(
-        f"Unpackaged {total_decks} deck(s), {total_notes} note(s){media_part}"
+        f"Deserialized {total_decks} deck(s), {total_notes} note(s){media_part}"
         f" to {collection_dir}"
     )
