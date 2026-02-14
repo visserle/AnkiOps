@@ -12,14 +12,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from deckops.anki_client import AnkiState, invoke
-from deckops.config import NOTE_SEPARATOR
 from deckops.log import format_changes
 from deckops.markdown_converter import MarkdownToHTML
 from deckops.markdown_helpers import (
+    FileState,
+    InvalidID,
     ParsedNote,
+    convert_fields_to_html,
     extract_deck_id,
     note_identifier,
-    parse_note_block,
+    validate_markdown_ids,
     validate_note,
 )
 
@@ -29,29 +31,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class FileState:
-    """All data parsed from one markdown file in a single read."""
-
-    file_path: Path
-    raw_content: str
-    deck_id: int | None
-    parsed_notes: list[ParsedNote]
-
-    @staticmethod
-    def from_file(file_path: Path) -> "FileState":
-        raw_content = file_path.read_text(encoding="utf-8")
-        deck_id, remaining = extract_deck_id(raw_content)
-        blocks = remaining.split(NOTE_SEPARATOR)
-        parsed_notes = [parse_note_block(block) for block in blocks if block.strip()]
-        return FileState(
-            file_path=file_path,
-            raw_content=raw_content,
-            deck_id=deck_id,
-            parsed_notes=parsed_notes,
-        )
 
 
 @dataclass
@@ -106,14 +85,6 @@ def _extract_fields(raw_note: dict) -> dict[str, str]:
     return {name: data["value"] for name, data in raw_note["fields"].items()}
 
 
-def convert_fields_to_html(
-    fields: dict[str, str],
-    converter: MarkdownToHTML,
-) -> dict[str, str]:
-    """Convert all field values from markdown to HTML."""
-    return {name: converter.convert(content) for name, content in fields.items()}
-
-
 def _validate_no_duplicate_first_lines(
     file_path: Path,
     id_assignments: list[tuple[ParsedNote, int]],
@@ -135,6 +106,55 @@ def _validate_no_duplicate_first_lines(
             "Cannot safely assign IDs. Please ensure each note has a unique first line."
         )
         raise ValueError(msg)
+
+
+
+
+def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> None:
+    """Prompt user about invalid IDs and exit if they decline to continue.
+
+    Args:
+        invalid_ids: List of IDs that don't exist in Anki
+        is_collection: True if importing a collection (plural), False for single file
+    """
+    if not invalid_ids:
+        return
+
+    deck_ids = [x for x in invalid_ids if x.id_type == "deck_id"]
+    note_ids = [x for x in invalid_ids if x.id_type == "note_id"]
+
+    file_text = "markdown files" if is_collection else "the markdown file"
+    logger.warning(
+        f"Found IDs in {file_text} that do not exist in your Anki collection:"
+    )
+
+    if deck_ids:
+        logger.warning(f"\n  Deck IDs ({len(deck_ids)}):")
+        for inv_id in deck_ids[:5]:
+            if is_collection:
+                logger.warning(f"    - {inv_id.id_value} in {inv_id.file_path.name}")
+            else:
+                logger.warning(f"    - {inv_id.id_value}")
+        if len(deck_ids) > 5:
+            logger.warning(f"    ... and {len(deck_ids) - 5} more")
+
+    if note_ids:
+        logger.warning(f"\n  Note IDs ({len(note_ids)}):")
+        for inv_id in note_ids[:5]:
+            logger.warning(f"    - {inv_id.id_value} ({inv_id.context})")
+        if len(note_ids) > 5:
+            logger.warning(f"    ... and {len(note_ids) - 5} more")
+
+    logger.warning("\nThese IDs cannot be used (they don't exist in Anki).")
+    logger.warning(
+        "New items will be created in Anki with new IDs, "
+        "and your markdown files will be updated."
+    )
+
+    answer = input("\nContinue with import? [y/N] ").strip().lower()
+    if answer != "y":
+        logger.info("Import cancelled.")
+        raise SystemExit(0)
 
 
 def _flush_writes(writes: list[_PendingWrite]) -> None:
@@ -425,6 +445,14 @@ def import_file(
     anki = AnkiState.fetch()
     converter = MarkdownToHTML()
 
+    # Check for invalid IDs and prompt user
+    invalid_ids = validate_markdown_ids(
+        [fs],
+        valid_deck_ids=set(anki.id_to_deck_name.keys()),
+        valid_note_ids=set(anki.notes.keys()),
+    )
+    _prompt_invalid_ids(invalid_ids, is_collection=False)
+
     result, pending = _sync_file(fs, anki, converter, only_add_new=only_add_new)
     _flush_writes([pending])
 
@@ -441,9 +469,10 @@ def import_collection(
       1. Parse all files (one read each)
       2. Cross-file validation (duplicate IDs)
       3. Fetch all Anki state (3-4 API calls)
-      4. Sync each file
-      5. Flush all file writes
-      6. Detect untracked decks (returned for CLI confirmation)
+      4. Validate IDs and prompt if needed
+      5. Sync each file
+      6. Flush all file writes
+      7. Detect untracked decks (returned for CLI confirmation)
     """
     collection_path = Path(collection_dir)
     md_files = sorted(collection_path.glob("*.md"))
@@ -500,7 +529,15 @@ def import_collection(
     anki = AnkiState.fetch()
     converter = MarkdownToHTML()
 
-    # Phase 4: Sync each file
+    # Phase 4: Validate IDs and prompt if needed
+    invalid_ids = validate_markdown_ids(
+        file_states,
+        valid_deck_ids=set(anki.id_to_deck_name.keys()),
+        valid_note_ids=set(anki.notes.keys()),
+    )
+    _prompt_invalid_ids(invalid_ids, is_collection=True)
+
+    # Phase 5: Sync each file
     results: list[FileImportResult] = []
     pending_writes: list[_PendingWrite] = []
 
@@ -528,10 +565,10 @@ def import_collection(
         for error in file_result.errors:
             logger.error(f"  {error}")
 
-    # Phase 5: Flush all file writes
+    # Phase 6: Flush all file writes
     _flush_writes(pending_writes)
 
-    # Phase 6: Detect untracked decks
+    # Phase 7: Detect untracked decks
     untracked_decks: list[UntrackedDeck] = []
     for deck_name, note_ids in anki.deck_note_ids.items():
         deck_id = anki.deck_names_and_ids.get(deck_name)

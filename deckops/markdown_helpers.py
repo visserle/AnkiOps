@@ -6,6 +6,7 @@ Used by both import (markdown_to_anki) and export (anki_to_markdown) paths.
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from deckops.config import (
     ALL_PREFIX_TO_FIELD,
@@ -38,6 +39,39 @@ class ParsedNote:
     note_type: str
     fields: dict[str, str]
     raw_content: str
+
+
+@dataclass
+class InvalidID:
+    """An ID from markdown that cannot be matched to an existing Anki entity."""
+
+    id_value: int
+    id_type: str  # "deck_id" or "note_id"
+    file_path: Path
+    context: str  # additional context (e.g., note identifier)
+
+
+@dataclass
+class FileState:
+    """All data parsed from one markdown file in a single read."""
+
+    file_path: Path
+    raw_content: str
+    deck_id: int | None
+    parsed_notes: list[ParsedNote]
+
+    @staticmethod
+    def from_file(file_path: Path) -> "FileState":
+        raw_content = file_path.read_text(encoding="utf-8")
+        deck_id, remaining = extract_deck_id(raw_content)
+        blocks = remaining.split(NOTE_SEPARATOR)
+        parsed_notes = [parse_note_block(block) for block in blocks if block.strip()]
+        return FileState(
+            file_path=file_path,
+            raw_content=raw_content,
+            deck_id=deck_id,
+            parsed_notes=parsed_notes,
+        )
 
 
 def note_identifier(note: ParsedNote) -> str:
@@ -255,6 +289,50 @@ def _validate_choice_answers(note: ParsedNote) -> list[str]:
     return []
 
 
+def validate_markdown_ids(
+    file_states: list[FileState],
+    valid_deck_ids: set[int],
+    valid_note_ids: set[int],
+) -> list[InvalidID]:
+    """Check all deck and note IDs in markdown files against valid ID sets.
+
+    Args:
+        file_states: List of parsed file states
+        valid_deck_ids: Set of deck IDs that exist in Anki
+        valid_note_ids: Set of note IDs that exist in Anki
+
+    Returns:
+        List of IDs that exist in markdown but not in the valid sets
+    """
+    invalid_ids: list[InvalidID] = []
+
+    for fs in file_states:
+        # Check deck_id
+        if fs.deck_id is not None and fs.deck_id not in valid_deck_ids:
+            invalid_ids.append(
+                InvalidID(
+                    id_value=fs.deck_id,
+                    id_type="deck_id",
+                    file_path=fs.file_path,
+                    context=f"deck_id in {fs.file_path.name}",
+                )
+            )
+
+        # Check note_ids
+        for note in fs.parsed_notes:
+            if note.note_id is not None and note.note_id not in valid_note_ids:
+                invalid_ids.append(
+                    InvalidID(
+                        id_value=note.note_id,
+                        id_type="note_id",
+                        file_path=fs.file_path,
+                        context=f"{note_identifier(note)} in {fs.file_path.name}",
+                    )
+                )
+
+    return invalid_ids
+
+
 # ---------------------------------------------------------------------------
 # Formatting (Anki → Markdown)
 # ---------------------------------------------------------------------------
@@ -282,6 +360,22 @@ def format_note(
                 lines.append(f"{prefix} {md}")
 
     return "\n".join(lines)
+
+
+def convert_fields_to_html(
+    fields: dict[str, str],
+    converter,
+) -> dict[str, str]:
+    """Convert all field values from markdown to HTML.
+
+    Args:
+        fields: Dictionary mapping field names to markdown content
+        converter: MarkdownToHTML converter instance
+
+    Returns:
+        Dictionary mapping field names to HTML content
+    """
+    return {name: converter.convert(content) for name, content in fields.items()}
 
 
 def sanitize_filename(deck_name: str) -> str:

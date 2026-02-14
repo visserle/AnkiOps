@@ -117,6 +117,7 @@ def run_ma(args):
                 only_add_new=args.only_add_new,
             )
         ]
+        summary = None
     else:
         summary = import_collection(str(collection_dir), only_add_new=args.only_add_new)
         results = summary.file_results
