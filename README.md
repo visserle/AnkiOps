@@ -4,21 +4,19 @@
 
 **Anki decks ↔ Markdown files, in perfect sync**
 
-Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. Currently available Markdown → Anki tools only go one way, where edits in Anki don't sync back. 
-
-**AnkiOps** is a bidirectional Anki ↔ Markdown bridge. Each deck is a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
+Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge. Each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
 
 ## Features
 
-- Fully round-trip, bidirectional sync that handles note creations, deletions, movements, and conflicts
-- High-performance processing: handles thousands of cards across hundreds of decks in seconds
+- Simple CLI interface: after initialization, only two commands are needed for daily use
+- Fully round-trip, bi-directional sync that handles note creations, deletions, movements across decks, and conflicts
 - Markdown rendering with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Thoroughly tested, bidirectional conversion between Markdown and Anki-compatible HTML
 - Support for Basic (Q&A), Cloze, Single & Multiple Choice note types
 - Embed images via VS Code where they are directly copied into your Anki media folder (automatically set up)
 - Built-in Git integration with autocommit for tracking all changes
-- Package/unpackage entire collections to JSON format for backup, sharing, or automated AI processing
-- Simple CLI interface: after initialization, only two commands are needed for daily use
+- High-performance processing: handles thousands of cards across hundreds of decks in seconds
+- Thoroughly tested, bi-directional conversion between Markdown and Anki-compatible HTML
+- Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
 > [!NOTE]
 > AnkiOps only syncs the `AnkiOpsQA`, `AnkiOpsCloze`, and `AnkiOpsChoice` note types.
@@ -48,7 +46,7 @@ ankiops am # anki to markdown (export)
 
 ### How is this different from other Markdown or Obsidian tools?
 
-Available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bidirectional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card.
+Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card. This essentially lets you manage your entire Anki collection from your favorite text editor.
 
 ### Is it safe to use?
 
@@ -96,7 +94,7 @@ We recommend using VS Code. It has excellent AI integration, a great [add-on](ht
 
 ### How can I share my AnkiOps collection?
 
-Use `ankiops package --no-ids` to export your local AnkiOps collection to a clean JSON package file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops unpackage <package-file>`, which creates a new local AnkiOps directory on their machine and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
+Use `ankiops serialize --no-ids` to export your local AnkiOps collection to a clean JSON file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops deserialize <file>`, which creates a new local AnkiOps directory on their machine and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
 
 ### How can I migrate my existing notes into AnkiOps?
 
@@ -140,14 +138,14 @@ uv run python -m main ma
 - `--only-add-new` - Only add new notes, skip existing
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
-**`package`:**
-- `--output`, `-o` - Output package file path (default: `<collection-name>.json`)
-- `--no-ids` - Exclude note_id and deck_id from package (useful for templates/sharing)
+**`serialize`:**
+- `--output`, `-o` - Output file path (default: `<collection-name>.json`)
+- `--no-ids` - Exclude note_id and deck_id from serialized output (useful for templates/sharing)
 - `--include-media` - Bundle media files into a ZIP archive (creates .zip instead of .json)
 
-**`unpackage`:**
-- `PACKAGE` - Package file to import: .json or .zip (required)
-- `--directory`, `-d` - Local collection directory to create/update (default: use package filename)
+**`deserialize`:**
+- `FILE` - Serialized file to import: .json or .zip (required)
+- `--directory`, `-d` - Local collection directory to create/update (default: use file name)
 - `--overwrite` - Overwrite existing markdown files (media uses smart conflict resolution)
 
 ---
