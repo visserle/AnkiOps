@@ -130,7 +130,6 @@ class TestExtractNoteBlocks:
 
     def test_mixed_qa_and_cloze(self):
         content = (
-            "<!-- deck_id: 1 -->\n"
             "<!-- note_id: 10 -->\n"
             "Q: Question\n"
             "A: Answer\n"
@@ -145,7 +144,6 @@ class TestExtractNoteBlocks:
 
     def test_only_cloze_blocks(self):
         content = (
-            "<!-- deck_id: 1 -->\n"
             "<!-- note_id: 100 -->\n"
             "T: {{c1::First}}\n"
             f"{NOTE_SEPARATOR}"
