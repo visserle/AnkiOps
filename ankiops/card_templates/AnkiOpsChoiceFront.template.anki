@@ -40,6 +40,8 @@ choices.push({num: 6, text: `{{Choice 6}}`});
 {{#Choice 7}}
 choices.push({num: 7, text: `{{Choice 7}}`});
 {{/Choice 7}}
+choices.push({num: 8, text: `{{Choice 8}}`});
+{{/Choice 8}}
 
 // Get card ID and review counter for consistent but varying shuffle
 var cardId = document.documentElement.dataset.cid || '0';

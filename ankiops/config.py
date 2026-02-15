@@ -58,6 +58,7 @@ NOTE_TYPES = {
             ("Choice 5", "C5:", False),
             ("Choice 6", "C6:", False),
             ("Choice 7", "C7:", False),
+            ("Choice 8", "C8:", False),
             ("Answer", "A:", True),
             ("Extra", "E:", False),
             ("More", "M:", False),

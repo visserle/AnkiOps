@@ -91,7 +91,7 @@ Each note type is identified by its field prefixes. `E:` (Extra) and `M:` (More,
 | **AnkiOpsReversed** | `F:`, `B:` |
 | **AnkiOpsCloze** | `T:` |
 | **AnkiOpsInput** | `Q:`, `I:` |
-| **AnkiOpsChoice** | `Q:`, `C1:`,–`C7:` `A:` |
+| **AnkiOpsChoice** | `Q:`, `C1:`,–`C8:` `A:` |
 
 ### Which characters or symbols cannot be used?
 

@@ -297,7 +297,7 @@ def _validate_choice_answers(note: ParsedNote) -> list[str]:
         ]
 
     max_choice = max(
-        (i for i in range(1, 8) if note.fields.get(f"Choice {i}")),
+        (i for i in range(1, 9) if note.fields.get(f"Choice {i}")),
         default=0,
     )
     for n in answer_ints:
@@ -407,9 +407,7 @@ def convert_fields_to_html(
     if note_type:
         from ankiops.config import NOTE_TYPES
 
-        for field_name, _, _ in NOTE_TYPES.get(note_type, {}).get(
-            "field_mappings", []
-        ):
+        for field_name, _, _ in NOTE_TYPES.get(note_type, {}).get("field_mappings", []):
             html.setdefault(field_name, "")
 
     return html
