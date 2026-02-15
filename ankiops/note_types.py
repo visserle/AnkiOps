@@ -28,6 +28,8 @@ def _get_card_templates(model_name: str) -> list[dict[str, str]]:
     back = _load_template(f"{model_name}Back.template.anki")
 
     templates = [{"Name": "Card 1", "Front": front, "Back": back}]
+    if model_name == "AnkiOpsCloze":
+        templates[0]["Name"] = "Cloze"
 
     # AnkiOpsReversed has a second card for the reverse direction
     if model_name == "AnkiOpsReversed":
@@ -58,66 +60,113 @@ def _create_model(model_name: str, is_cloze: bool) -> None:
 
 
 def _is_model_up_to_date(model_name: str) -> bool:
-    """Check if a model's templates and styling match our template files."""
+    """Check if a model's fields, templates, and styling match our config."""
+    cfg = NOTE_TYPES[model_name]
+    expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
 
-    # Get current model info
+    # Get current model info from Anki
+    current_fields = invoke("modelFieldNames", modelName=model_name)
     current_styling = invoke("modelStyling", modelName=model_name)
     current_templates = invoke("modelTemplates", modelName=model_name)
+
+    # Compare fields
+    if current_fields != expected_fields:
+        return False
 
     # Compare styling
     if current_styling.get("css", "").strip() != css.strip():
         return False
 
-    # Check if number of templates matches
-    if len(current_templates) != len(expected_templates):
+    # Compare card templates by position
+    current_names = list(current_templates.keys())
+    current_template_list = list(current_templates.values())
+    if len(current_template_list) != len(expected_templates):
         return False
 
-    # Compare each template (AnkiConnect returns dict with card names as keys)
-    current_templates_list = list(current_templates.values())
-    for i, expected in enumerate(expected_templates):
-        if i >= len(current_templates_list):
+    for i, (current, expected) in enumerate(
+        zip(current_template_list, expected_templates)
+    ):
+        if current_names[i] != expected["Name"]:
             return False
-
-        current = current_templates_list[i]
-        current_front = current.get("Front", "").strip()
-        current_back = current.get("Back", "").strip()
-        expected_front = expected["Front"].strip()
-        expected_back = expected["Back"].strip()
-
-        if current_front != expected_front or current_back != expected_back:
+        if current.get("Front", "").strip() != expected["Front"].strip():
+            return False
+        if current.get("Back", "").strip() != expected["Back"].strip():
             return False
 
     return True
 
 
 def _update_model(model_name: str) -> None:
-    """Update an existing note type's card templates and styling."""
+    """Update an existing note type's fields, card templates, and styling."""
+    cfg = NOTE_TYPES[model_name]
+    expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
+
+    # Update fields — add missing, remove stale, reposition to match config order
+    current_fields = invoke("modelFieldNames", modelName=model_name)
+
+    for field_name in expected_fields:
+        if field_name not in current_fields:
+            invoke("modelFieldAdd", modelName=model_name, fieldName=field_name)
+
+    for field_name in current_fields:
+        if field_name not in expected_fields:
+            invoke("modelFieldRemove", modelName=model_name, fieldName=field_name)
+
+    for i, field_name in enumerate(expected_fields):
+        invoke(
+            "modelFieldReposition",
+            modelName=model_name,
+            fieldName=field_name,
+            index=i,
+        )
 
     # Update styling
     invoke("updateModelStyling", model={"name": model_name, "css": css})
 
-    # Update templates - match expected templates with current template names
+    # Update card templates by position.
+    # Rename mismatched names, add genuinely new templates (e.g. Card 2 for reversed).
     current_templates = invoke("modelTemplates", modelName=model_name)
-    current_template_names = list(current_templates.keys())
+    current_names = list(current_templates.keys())
 
-    # Build templates dict using actual Anki template names
+    # Rename templates first so updateModelTemplates uses the correct names
+    for i, expected in enumerate(expected_templates):
+        if i < len(current_names) and current_names[i] != expected["Name"]:
+            invoke(
+                "modelTemplateRename",
+                modelName=model_name,
+                oldTemplateName=current_names[i],
+                newTemplateName=expected["Name"],
+            )
+            current_names[i] = expected["Name"]
+
     templates_dict = {}
     for i, expected in enumerate(expected_templates):
-        if i < len(current_template_names):
-            template_name = current_template_names[i]
-            templates_dict[template_name] = {
+        if i < len(current_names):
+            templates_dict[current_names[i]] = {
                 "Front": expected["Front"],
                 "Back": expected["Back"],
             }
+        else:
+            invoke(
+                "modelTemplateAdd",
+                modelName=model_name,
+                template={
+                    "Name": expected["Name"],
+                    "Front": expected["Front"],
+                    "Back": expected["Back"],
+                },
+            )
 
-    invoke(
-        "updateModelTemplates",
-        model={"name": model_name, "templates": templates_dict},
-    )
+    if templates_dict:
+        invoke(
+            "updateModelTemplates",
+            model={"name": model_name, "templates": templates_dict},
+        )
+
     logger.info(f"Updated note type '{model_name}' in Anki")
 
 
@@ -130,3 +179,8 @@ def ensure_note_types() -> None:
             _create_model(model_name, is_cloze=("cloze" in model_name.lower()))
         elif not _is_model_up_to_date(model_name):
             _update_model(model_name)
+
+
+if __name__ == "__main__":
+    ensure_note_types()
+    print(_is_model_up_to_date("AnkiOpsQA"))
