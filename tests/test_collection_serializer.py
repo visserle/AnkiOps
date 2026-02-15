@@ -2,17 +2,15 @@
 
 import hashlib
 import json
-import tempfile
+import os
 import zipfile
-from pathlib import Path
 
-import pytest
 from ankiops.collection_serializer import (
     compute_file_hash,
     compute_zipfile_hash,
+    deserialize_collection_from_json,
     extract_media_references,
     serialize_collection_to_json,
-    deserialize_collection_from_json,
     update_media_references,
 )
 
@@ -139,8 +137,6 @@ class TestDeserializeMediaConflicts:
 
         serialized_data = {
             "collection": {
-                "profile": "test",
-                "auto_commit": True,
                 "serialized_at": "2024-01-01T00:00:00Z",
             },
             "decks": [
@@ -172,8 +168,15 @@ class TestDeserializeMediaConflicts:
         """Test normal deserialization with no conflicts."""
         serialized_file = self.create_test_serialized(tmp_path, b"image data")
         collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
 
-        deserialize_collection_from_json(serialized_file, collection_dir)
+        # Change to collection directory and deserialize
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file)
+        finally:
+            os.chdir(original_cwd)
 
         # Verify media file was extracted
         media_file = collection_dir / "media" / "AnkiOpsMedia" / "test.png"
@@ -189,6 +192,7 @@ class TestDeserializeMediaConflicts:
         """Test deserialization skips identical media files."""
         serialized_file = self.create_test_serialized(tmp_path, b"image data")
         collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
 
         # Create existing media file with same content
         media_dir = collection_dir / "media" / "AnkiOpsMedia"
@@ -197,7 +201,12 @@ class TestDeserializeMediaConflicts:
         existing_file.write_bytes(b"image data")
 
         # Deserialize
-        deserialize_collection_from_json(serialized_file, collection_dir)
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file)
+        finally:
+            os.chdir(original_cwd)
 
         # Verify file still has original content (not overwritten)
         assert existing_file.read_bytes() == b"image data"
@@ -211,6 +220,7 @@ class TestDeserializeMediaConflicts:
         """Test deserialization renames conflicting media files."""
         serialized_file = self.create_test_serialized(tmp_path, b"new image data")
         collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
 
         # Create existing media file with different content
         media_dir = collection_dir / "media" / "AnkiOpsMedia"
@@ -219,7 +229,12 @@ class TestDeserializeMediaConflicts:
         existing_file.write_bytes(b"old image data")
 
         # Deserialize
-        deserialize_collection_from_json(serialized_file, collection_dir)
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file)
+        finally:
+            os.chdir(original_cwd)
 
         # Verify original file unchanged
         assert existing_file.read_bytes() == b"old image data"
@@ -239,6 +254,7 @@ class TestDeserializeMediaConflicts:
         """Test deserialization handles multiple renamed files."""
         serialized_file = self.create_test_serialized(tmp_path, b"newest data")
         collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
 
         # Create existing media files
         media_dir = collection_dir / "media" / "AnkiOpsMedia"
@@ -247,7 +263,12 @@ class TestDeserializeMediaConflicts:
         (media_dir / "test_1.png").write_bytes(b"first rename")
 
         # Deserialize
-        deserialize_collection_from_json(serialized_file, collection_dir)
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file)
+        finally:
+            os.chdir(original_cwd)
 
         # Verify files unchanged
         assert (media_dir / "test.png").read_bytes() == b"original data"
