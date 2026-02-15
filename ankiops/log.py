@@ -1,6 +1,7 @@
 """Logging configuration for the root logger (Python >= 3.10)."""
 
 import logging
+import os
 import platform
 import sys
 from pathlib import Path
@@ -22,6 +23,35 @@ def format_changes(**counts: int) -> str:
         label = k[:-1] if v == 1 and k.endswith("s") else k
         parts.append(f"{v} {label}")
     return ", ".join(parts) if parts else "no changes"
+
+
+def clickable_path(file_path: Path | str, display_name: str | None = None) -> str:
+    """Create a clickable terminal hyperlink for a file path.
+
+    Uses OSC 8 escape sequences to create clickable links in modern terminals
+    (VSCode, iTerm2, Terminal.app, Windows Terminal, GNOME Terminal, etc.).
+
+    Args:
+        file_path: Path object or string to make clickable
+        display_name: Optional display text (defaults to filename only)
+
+    Returns:
+        String with OSC 8 escape codes for terminal hyperlinks
+
+    Example:
+        >>> logger.info(f"Created {clickable_path(tutorial_path)}")
+        >>> logger.warning(f"Found issue in {clickable_path(path, 'config.yaml')}")
+    """
+    # Respect NO_COLOR environment variable
+    if os.environ.get("NO_COLOR"):
+        return display_name or Path(file_path).name
+
+    path = Path(file_path)
+    absolute_path = path.resolve()
+    text = display_name if display_name is not None else path.name
+
+    # OSC 8 format: \033]8;;file://ABSOLUTE_PATH\033\\TEXT\033]8;;\033\\
+    return f"\033]8;;file://{absolute_path}\033\\{text}\033]8;;\033\\"
 
 
 def configure_logging(
@@ -182,7 +212,6 @@ def main():
     configure_logging(
         stream_level=logging.DEBUG,
         file_level=10,
-        file_path="debug.log",
     )
     logging.debug("This is a debug message.")
     logging.info("This is an info message.")

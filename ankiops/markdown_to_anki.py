@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ankiops.anki_client import AnkiState, invoke
-from ankiops.log import format_changes
+from ankiops.log import clickable_path, format_changes
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.markdown_helpers import (
     FileState,
@@ -130,7 +130,8 @@ def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> No
         logger.warning(f"\n  Deck IDs ({len(deck_ids)}):")
         for inv_id in deck_ids[:5]:
             if is_collection:
-                logger.warning(f"    - {inv_id.id_value} in {inv_id.file_path.name}")
+                clickable = clickable_path(inv_id.file_path)
+                logger.warning(f"    - {inv_id.id_value} in {clickable}")
             else:
                 logger.warning(f"    - {inv_id.id_value}")
         if len(deck_ids) > 5:
@@ -139,7 +140,10 @@ def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> No
     if note_ids:
         logger.warning(f"\n  Note IDs ({len(note_ids)}):")
         for inv_id in note_ids[:5]:
-            logger.warning(f"    - {inv_id.id_value} ({inv_id.context})")
+            # Replace filename in context with clickable link
+            clickable = clickable_path(inv_id.file_path)
+            context = inv_id.context.replace(inv_id.file_path.name, clickable)
+            logger.warning(f"    - {inv_id.id_value} ({context})")
         if len(note_ids) > 5:
             logger.warning(f"    ... and {len(note_ids) - 5} more")
 
@@ -252,7 +256,9 @@ def _sync_file(
             continue
 
         try:
-            html_fields = convert_fields_to_html(note.fields, converter)
+            html_fields = convert_fields_to_html(
+                note.fields, converter, note_type=note.note_type
+            )
         except Exception as e:
             result.errors.append(
                 f"Note {note.note_id or 'new'} ({note_identifier(note)}): {e}"
@@ -559,7 +565,7 @@ def import_collection(
             errors=len(file_result.errors),
         )
         if changes != "no changes":
-            logger.info(f"  {fs.file_path.name}: {changes}")
+            logger.info(f"  {file_result.deck_name}: {changes}")
         for error in file_result.errors:
             logger.error(f"  {error}")
 

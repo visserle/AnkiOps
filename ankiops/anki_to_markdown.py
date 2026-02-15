@@ -15,7 +15,7 @@ from pathlib import Path
 from ankiops.anki_client import AnkiState
 from ankiops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES
 from ankiops.html_converter import HTMLToMarkdown
-from ankiops.log import format_changes
+from ankiops.log import clickable_path, format_changes
 from ankiops.markdown_helpers import (
     extract_deck_id,
     extract_note_blocks,
@@ -302,7 +302,7 @@ def export_collection(
             "The following markdown files contain new notes without note IDs:"
         )
         for file_path in files_with_untracked:
-            logger.warning(f"  - {file_path.name}")
+            logger.warning(f"  - {clickable_path(file_path)}")
         logger.warning(
             "\nThese notes have not been imported to Anki yet and will be LOST "
             "if you continue with the export."
@@ -327,7 +327,7 @@ def export_collection(
         expected_name = sanitize_filename(anki.id_to_deck_name[deck_id]) + ".md"
         if fs.file_path.name != expected_name:
             new_path = fs.file_path.parent / expected_name
-            logger.info(f"Renamed {fs.file_path.name} -> {expected_name}")
+            logger.info(f"Renamed {clickable_path(fs.file_path)} -> {clickable_path(new_path)}")
             fs.file_path.rename(new_path)
             # Update references to the new path
             del files_by_path[fs.file_path]
@@ -403,7 +403,7 @@ def export_collection(
             deleted=result.deleted,
         )
         if changes != "no changes":
-            logger.info(f"  {deck_name}: {changes}")
+            logger.info(f"  {clickable_path(result.file_path)}: {changes}")
 
     # Detect cross-deck moves
     moved_ids = all_created_ids & all_deleted_ids
@@ -422,7 +422,7 @@ def export_collection(
         # Delete files whose deck_id doesn't exist in Anki
         for deck_id, fs in files_by_deck_id.items():
             if deck_id not in anki_deck_ids:
-                logger.info(f"Deleted orphaned deck file {fs.file_path.name}")
+                logger.info(f"Deleted orphaned deck file {clickable_path(fs.file_path)}")
                 fs.file_path.unlink()
                 deleted_deck_files += 1
 

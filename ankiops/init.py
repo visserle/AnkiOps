@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from ankiops.config import MARKER_FILE, get_collection_dir
+from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ def create_tutorial(collection_dir: Path) -> Path:
         # Python 3.9+ style
         ref = resources.files("ankiops.data").joinpath("AnkiOps Tutorial.md")
         tutorial_dst.write_text(ref.read_text(encoding="utf-8"), encoding="utf-8")
-        logger.info(f"Tutorial file created: {tutorial_dst}")
+        logger.info(f"Tutorial file created: {clickable_path(tutorial_dst)}")
     except Exception as e:
         logger.warning(f"Could not create tutorial file: {e}")
 
