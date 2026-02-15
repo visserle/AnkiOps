@@ -9,9 +9,9 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 ## Features
 
 - Simple CLI interface: after initialization, only two commands are needed for daily use
-- Fully round-trip, bi-directional sync that handles note creations, deletions, movements across decks, and conflicts
+- Fully round-trip, bi-directional sync that handles note creation, deletion, movements across decks, and conflicts
 - Markdown rendering with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Support for Basic (Q&A), Cloze, Single & Multiple Choice note types
+- Support for all standard note types plus Single & Multiple Choice cards
 - Embed images via VS Code where they are directly copied into your Anki media folder (automatically set up)
 - Built-in Git integration with autocommit for tracking all changes
 - High-performance processing: handles thousands of cards across hundreds of decks in seconds
@@ -19,7 +19,7 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
 > [!NOTE]
-> AnkiOps only syncs the `AnkiOpsQA`, `AnkiOpsCloze`, and `AnkiOpsChoice` note types.
+> AnkiOps only syncs `AnkiOpsQA`, `AnkiOpsReversed`, `AnkiOpsCloze`, `AnkiOpsInput`, and `AnkiOpsChoice` note types.
 
 
 ## Getting Started
@@ -94,17 +94,17 @@ We recommend using VS Code. It has excellent AI integration, a great [add-on](ht
 
 ### How can I share my AnkiOps collection?
 
-Use `ankiops serialize --no-ids` to export your local AnkiOps collection to a clean JSON file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops deserialize <file>`, which creates a new local AnkiOps directory on their machine and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
+Use `ankiops serialize --no-ids` to export your local AnkiOps collection to a clean JSON file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops deserialize <file>`, which creates a new local AnkiOps directory on their machine, and imports media to their Anki folder with smart conflict resolution. Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
 
 ### How can I migrate my existing notes into AnkiOps?
 
-While migration is doable, it can be tricky. The process requires:
+For standard note types, migration is straightforward:
 
-1. **Converting note types**: Your existing notes must be converted to AnkiOps note types (`AnkiOpsQA` or `AnkiOpsCloze`). This must be done manually in Anki or by adapting the AnkiOps code.
-2. **Exporting to Markdown**: Once converted, use `ankiops am` to export your notes from Anki to Markdown.
-3. **Formatting adjustments**: In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard.
+1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
+2. Export your notes from Anki to Markdown using `ankiops am`.
+3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
 
-If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code to your specific needs.
+If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be simple for most cases: define your note type in the `config.py`, and add your card's templates to `ankiops/card_templates`.
 
 ### How can I develop AnkiOps locally?
 
