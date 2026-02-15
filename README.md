@@ -21,7 +21,6 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 > [!NOTE]
 > AnkiOps only syncs `AnkiOpsQA`, `AnkiOpsReversed`, `AnkiOpsCloze`, `AnkiOpsInput`, and `AnkiOpsChoice` note types.
 
-
 ## Getting Started
 
 
@@ -79,6 +78,16 @@ A: 1,3
 
 And so on…
 ```
+
+Each note type is identified by its field prefixes. `E:` (Extra) and `M:` (More) are optional fields shared across all note types.
+
+| Note Type | Fields |
+|---|---|
+| **AnkiOpsQA** | `Q:`, `A:` |
+| **AnkiOpsReversed** | `F:`, `B:` |
+| **AnkiOpsCloze** | `T:` |
+| **AnkiOpsInput** | `Q:`, `I:` |
+| **AnkiOpsChoice** | `Q:`, `C1:`,–`C7:` `A:` |
 
 ### Which characters or symbols cannot be used?
 
