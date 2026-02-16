@@ -7,7 +7,7 @@ sent back to Anki is complete (including cleared optional fields).
 
 import pytest
 
-from ankiops.config import NOTE_TYPES
+from ankiops.config import NOTE_CONFIG
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import AnkiNote, Note
@@ -28,7 +28,7 @@ def _anki_note_raw(fields: dict[str, str], note_type: str = "AnkiOpsQA") -> dict
 def _complete_fields(note_type: str, html_fields: dict[str, str]) -> dict[str, str]:
     """Replicate the complete-fields logic from _sync_file."""
     all_field_names = [
-        name for name, _ in NOTE_TYPES.get(note_type, [])
+        name for name, _ in NOTE_CONFIG.get(note_type, [])
     ]
     complete = {name: "" for name in all_field_names}
     complete.update(html_fields)

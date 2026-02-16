@@ -79,10 +79,10 @@ def run_am(args):
         deleted_decks = summary.deleted_deck_files
         deleted_notes = summary.deleted_orphan_notes
 
-    updated = sum(r.updated for r in results)
-    created = sum(r.created for r in results)
-    deleted = sum(r.deleted for r in results) + deleted_notes
-    total = sum(r.total_notes for r in results)
+    updated = sum(r.updated_count for r in results)
+    created = sum(r.created_count for r in results)
+    deleted = sum(r.deleted_count for r in results) + deleted_notes
+    total = sum(r.note_count for r in results)
 
     changes = format_changes(
         updated=updated,
@@ -151,12 +151,12 @@ def run_ma(args):
             else:
                 logger.debug("Skipped untracked note deletion.")
 
-    updated = sum(r.updated for r in results)
-    created = sum(r.created for r in results)
-    deleted = sum(r.deleted for r in results) + deleted_notes
-    moved = sum(r.moved for r in results)
+    updated = sum(r.updated_count for r in results)
+    created = sum(r.created_count for r in results)
+    deleted = sum(r.deleted_count for r in results) + deleted_notes
+    moved = sum(r.moved_count for r in results)
     errors = sum(len(r.errors) for r in results)
-    total = sum(r.total_notes for r in results)
+    total = sum(r.note_count for r in results)
 
     changes = format_changes(
         updated=updated,

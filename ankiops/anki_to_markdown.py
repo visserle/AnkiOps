@@ -36,7 +36,7 @@ def _format_blocks(
     block_by_id: dict[str, tuple[int, str]] = {}
 
     for nid in note_ids:
-        anki_note = anki.notes.get(nid)
+        anki_note = anki.notes_by_id.get(nid)
         if not anki_note:
             continue
         if anki_note.note_type not in SUPPORTED_NOTE_TYPES:
@@ -62,28 +62,27 @@ def _sync_deck(
     Returns (result, new_content). new_content is None if the deck
     is empty (no notes to export).
     """
-    note_ids = anki.deck_note_ids.get(deck_name, set())
+    note_ids = anki.note_ids_by_deck_name.get(deck_name, set())
     block_by_id = _format_blocks(note_ids, anki, converter)
-
     if not block_by_id:
         return SyncResult(
             deck_name=deck_name,
             file_path=None,
-            total_notes=0,
-            updated=0,
-            created=0,
-            deleted=0,
-            moved=0,
-            skipped=0,
+            note_count=0,
+            updated_count=0,
+            created_count=0,
+            deleted_count=0,
+            moved_count=0,
+            skipped_count=0,
         ), None
 
     deck_id_line = f"<!-- deck_id: {deck_id} -->\n"
 
-    updated = 0
-    created = 0
-    deleted = 0
-    skipped = 0
-    moved = 0
+    updated_count = 0
+    created_count = 0
+    deleted_count = 0
+    skipped_count = 0
+    moved_count = 0
 
     if existing_file is not None:
         existing_blocks = existing_file.existing_blocks
@@ -96,11 +95,11 @@ def _sync_deck(
                 _, block = block_by_id[block_id]
                 ordered_blocks.append(block)
                 if existing_blocks[block_id] == block:
-                    skipped += 1
+                    skipped_count += 1
                 else:
-                    updated += 1
+                    updated_count += 1
             else:
-                deleted += 1
+                deleted_count += 1
 
         # Append genuinely new notes, sorted by creation date
         new_ids = new_block_ids - set(existing_blocks)
@@ -110,7 +109,7 @@ def _sync_deck(
         )
         for _, _, block in new_entries:
             ordered_blocks.append(block)
-            created += 1
+            created_count += 1
 
         markdown_blocks = ordered_blocks
     else:
@@ -124,12 +123,12 @@ def _sync_deck(
     result = SyncResult(
         deck_name=deck_name,
         file_path=None,  # Set by caller after writing
-        total_notes=len(markdown_blocks),
-        updated=updated,
-        created=created,
-        deleted=deleted,
-        moved=moved,
-        skipped=skipped,
+        note_count=len(markdown_blocks),
+        updated_count=updated_count,
+        created_count=created_count,
+        deleted_count=deleted_count,
+        moved_count=moved_count,
+        skipped_count=skipped_count,
     )
     return result, new_content
 
@@ -149,7 +148,7 @@ def export_deck(
     converter = HTMLToMarkdown()
 
     if deck_id is None:
-        deck_id = anki.deck_names_and_ids.get(deck_name)
+        deck_id = anki.deck_ids_by_name.get(deck_name)
     if deck_id is None:
         raise ValueError(f"Deck '{deck_name}' not found in Anki")
 
@@ -207,9 +206,10 @@ def export_collection(
     output_path = Path(output_dir)
 
     # Phase 1: Fetch all Anki state
+    # Phase 1: Fetch all Anki state
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
-    all_note_ids = set(anki.notes.keys())
+    all_note_ids = set(anki.notes_by_id.keys())
 
     # Phase 2: Read all existing markdown files
     files_by_deck_id: dict[int, FileState] = {}
@@ -255,9 +255,9 @@ def export_collection(
     # Phase 3: Rename files for decks renamed in Anki
     renamed_files = 0
     for deck_id, fs in list(files_by_deck_id.items()):
-        if deck_id not in anki.id_to_deck_name:
+        if deck_id not in anki.deck_names_by_id:
             continue
-        expected_name = sanitize_filename(anki.id_to_deck_name[deck_id]) + ".md"
+        expected_name = sanitize_filename(anki.deck_names_by_id[deck_id]) + ".md"
         if fs.file_path.name != expected_name:
             new_path = fs.file_path.parent / expected_name
             logger.info(
@@ -279,15 +279,15 @@ def export_collection(
     # Phase 4: Determine relevant decks
     # A deck is relevant if it has AnkiOps notes OR has an existing file
     relevant_decks: set[str] = set()
-    for deck_name in anki.deck_note_ids:
+    for deck_name in anki.note_ids_by_deck_name:
         relevant_decks.add(deck_name)
     for deck_id, fs in files_by_deck_id.items():
-        if deck_id in anki.id_to_deck_name:
-            relevant_decks.add(anki.id_to_deck_name[deck_id])
+        if deck_id in anki.deck_names_by_id:
+            relevant_decks.add(anki.deck_names_by_id[deck_id])
 
     # Log deck count (skip empty default deck)
-    total_decks = len(anki.deck_names_and_ids)
-    if total_decks > 1 and not anki.deck_note_ids.get("default"):
+    total_decks = len(anki.deck_ids_by_name)
+    if total_decks > 1 and not anki.note_ids_by_deck_name.get("default"):
         total_decks -= 1
     logger.debug(
         f"Found {total_decks} decks, {len(relevant_decks)} with supported note types"
@@ -298,11 +298,11 @@ def export_collection(
     all_created_ids: set[str] = set()
     all_deleted_ids: set[str] = set()
 
-    for deck_name in sorted(anki.deck_names_and_ids):
+    for deck_name in sorted(anki.deck_ids_by_name):
         if deck_name not in relevant_decks:
             continue
 
-        deck_id = anki.deck_names_and_ids[deck_name]
+        deck_id = anki.deck_ids_by_name[deck_name]
         existing_file = files_by_deck_id.get(deck_id)
 
         logger.debug(f"Processing {deck_name} (id: {deck_id})...")
@@ -333,9 +333,9 @@ def export_collection(
                 all_deleted_ids.update(deleted_ids)
 
         changes = format_changes(
-            updated=result.updated,
-            created=result.created,
-            deleted=result.deleted,
+            updated=result.updated_count,
+            created=result.created_count,
+            deleted=result.deleted_count,
         )
         if changes != "no changes":
             logger.info(f"  {clickable_path(result.file_path)}: {changes}")
@@ -352,7 +352,7 @@ def export_collection(
     deleted_orphan_notes = 0
 
     if not keep_orphans:
-        anki_deck_ids = set(anki.deck_names_and_ids.values())
+        anki_deck_ids = set(anki.deck_ids_by_name.values())
 
         # Delete files whose deck_id doesn't exist in Anki
         for deck_id, fs in files_by_deck_id.items():

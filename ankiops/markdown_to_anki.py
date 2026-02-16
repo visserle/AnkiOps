@@ -147,27 +147,27 @@ def _sync_file(
     deck_id_to_write: int | None = None
     needs_create_deck = False
 
-    if fs.deck_id and fs.deck_id in anki.id_to_deck_name:
-        deck_name = anki.id_to_deck_name[fs.deck_id]
+    if fs.deck_id and fs.deck_id in anki.deck_names_by_id:
+        deck_name = anki.deck_names_by_id[fs.deck_id]
         logger.debug(f"Resolved deck by ID {fs.deck_id}: {deck_name}")
     else:
         deck_name = fs.file_path.stem.replace("__", "::")
 
-        if deck_name not in anki.deck_names_and_ids:
+        if deck_name not in anki.deck_ids_by_name:
             needs_create_deck = True
         elif not fs.deck_id:
-            deck_id_to_write = anki.deck_names_and_ids[deck_name]
+            deck_id_to_write = anki.deck_ids_by_name[deck_name]
             logger.debug(f"Wrote deck_id {deck_id_to_write} to {fs.file_path.name}")
 
     result = SyncResult(
         deck_name=deck_name,
         file_path=fs.file_path,
-        total_notes=len(fs.parsed_notes),
-        updated=0,
-        created=0,
-        deleted=0,
-        moved=0,
-        skipped=0,
+        note_count=len(fs.parsed_notes),
+        updated_count=0,
+        created_count=0,
+        deleted_count=0,
+        moved_count=0,
+        skipped_count=0,
     )
 
     # ---- Phase 1: Classify + convert ----
@@ -193,7 +193,7 @@ def _sync_file(
 
         if note.note_id:
             if only_add_new:
-                result.skipped += 1
+                result.skipped_count += 1
             else:
                 existing.append((note, html_fields))
         else:
@@ -210,7 +210,7 @@ def _sync_file(
 
     # -- Safety check: note type mismatches --
     for note, _ in existing:
-        anki_note = anki.notes.get(note.note_id)  # type: ignore[arg-type]
+        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
         if anki_note and anki_note.note_type != note.note_type:
             raise ValueError(
                 f"Note type mismatch for note {note.note_id} "
@@ -225,11 +225,11 @@ def _sync_file(
     # -- changeDeck --
     cards_to_move: list[int] = []
     for note, _ in existing:
-        anki_note = anki.notes.get(note.note_id)  # type: ignore[arg-type]
+        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
         if not anki_note:
             continue
         for cid in anki_note.card_ids:
-            card = anki.cards.get(cid)
+            card = anki.cards_by_id.get(cid)
             if card and card.get("deckName") != deck_name:
                 cards_to_move.append(cid)
 
@@ -244,7 +244,7 @@ def _sync_file(
     update_notes: list[Note] = []
 
     for note, html_fields in existing:
-        anki_note = anki.notes.get(note.note_id)  # type: ignore[arg-type]
+        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
         if not anki_note or not anki_note.fields:
             logger.debug(
                 f"Note {note.note_id} ({note.identifier}) "
@@ -254,7 +254,7 @@ def _sync_file(
             continue
 
         if note.html_fields_match(html_fields, anki_note):
-            result.skipped += 1
+            result.skipped_count += 1
             continue
 
         actions.append(
@@ -270,18 +270,18 @@ def _sync_file(
 
     # -- deleteNotes --
     md_note_ids = {n.note_id for n in fs.parsed_notes if n.note_id is not None}
-    anki_deck_note_ids = anki.deck_note_ids.get(deck_name, set()).copy()
+    anki_deck_note_ids = anki.note_ids_by_deck_name.get(deck_name, set()).copy()
     orphaned = anki_deck_note_ids - md_note_ids
     if global_note_ids:
         orphaned -= global_note_ids
 
     if orphaned:
         for nid in orphaned:
-            anki_note = anki.notes.get(nid)
+            anki_note = anki.notes_by_id.get(nid)
             model = anki_note.note_type if anki_note else "unknown"
             cids = [
                 cid
-                for cid, c in anki.cards.items()
+                for cid, c in anki.cards_by_id.items()
                 if c["note"] == nid and c["deckName"] == deck_name
             ]
             cid_str = ", ".join(str(c) for c in cids)
@@ -325,8 +325,8 @@ def _sync_file(
             for tag, res in zip(tags, multi_results):
                 if tag == "create_deck":
                     new_deck_id = res
-                    anki.deck_names_and_ids[deck_name] = new_deck_id
-                    anki.id_to_deck_name[new_deck_id] = deck_name
+                    anki.deck_ids_by_name[deck_name] = new_deck_id
+                    anki.deck_names_by_id[new_deck_id] = deck_name
                     deck_id_to_write = new_deck_id
                     logger.info(
                         f"Created new deck '{deck_name}' (id: {new_deck_id})"
@@ -338,7 +338,7 @@ def _sync_file(
                     else:
                         moved_notes: set[int] = set()
                         for cid in cards_to_move:
-                            card = anki.cards.get(cid)
+                            card = anki.cards_by_id.get(cid)
                             if card:
                                 nid = card["note"]
                                 if nid not in moved_notes:
@@ -347,13 +347,13 @@ def _sync_file(
                                         f"Moved note {nid} from "
                                         f"'{card['deckName']}' to '{deck_name}'"
                                     )
-                        result.moved += len(moved_notes)
+                        result.moved_count += len(moved_notes)
 
                 elif tag == "update":
                     note = update_notes[update_idx]
                     update_idx += 1
                     if res is None:
-                        result.updated += 1
+                        result.updated_count += 1
                     else:
                         result.errors.append(
                             f"Note {note.note_id} ({note.identifier}): {res}"
@@ -363,14 +363,14 @@ def _sync_file(
                     if res is not None:
                         result.errors.append(f"Failed to delete orphaned notes: {res}")
                     else:
-                        result.deleted += len(orphaned)
+                        result.deleted_count += len(orphaned)
 
                 elif tag == "create":
                     note = create_notes[create_idx]
                     create_idx += 1
                     if res and isinstance(res, int):
                         id_assignments.append((note, res))
-                        result.created += 1
+                        result.created_count += 1
                     else:
                         result.errors.append(
                             f"Note new ({note.identifier}): {res}"
@@ -413,8 +413,8 @@ def import_file(
     # Check for invalid IDs and prompt user
     invalid_ids = FileState.validate_ids(
         [fs],
-        valid_deck_ids=set(anki.id_to_deck_name.keys()),
-        valid_note_ids=set(anki.notes.keys()),
+        valid_deck_ids=set(anki.deck_names_by_id.keys()),
+        valid_note_ids=set(anki.notes_by_id.keys()),
     )
     _prompt_invalid_ids(invalid_ids, is_collection=False)
 
@@ -497,8 +497,8 @@ def import_collection(
     # Phase 4: Validate IDs and prompt if needed
     invalid_ids = FileState.validate_ids(
         file_states,
-        valid_deck_ids=set(anki.id_to_deck_name.keys()),
-        valid_note_ids=set(anki.notes.keys()),
+        valid_deck_ids=set(anki.deck_names_by_id.keys()),
+        valid_note_ids=set(anki.notes_by_id.keys()),
     )
     _prompt_invalid_ids(invalid_ids, is_collection=True)
 
@@ -519,10 +519,10 @@ def import_collection(
         pending_writes.append(pending)
 
         changes = format_changes(
-            updated=file_result.updated,
-            created=file_result.created,
-            deleted=file_result.deleted,
-            moved=file_result.moved,
+            updated=file_result.updated_count,
+            created=file_result.created_count,
+            deleted=file_result.deleted_count,
+            moved=file_result.moved_count,
             errors=len(file_result.errors),
         )
         if changes != "no changes":
@@ -535,8 +535,8 @@ def import_collection(
 
     # Phase 7: Detect untracked decks
     untracked_decks: list[UntrackedDeck] = []
-    for deck_name, note_ids in anki.deck_note_ids.items():
-        deck_id = anki.deck_names_and_ids.get(deck_name)
+    for deck_name, note_ids in anki.note_ids_by_deck_name.items():
+        deck_id = anki.deck_ids_by_name.get(deck_name)
         if deck_id is None or deck_id in md_deck_ids:
             continue
         untracked_decks.append(UntrackedDeck(deck_name, deck_id, list(note_ids)))

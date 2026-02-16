@@ -442,31 +442,31 @@ class AnkiState:
       4. notesInfo  (details for discovered note IDs)
     """
 
-    deck_names_and_ids: dict[str, int]
-    id_to_deck_name: dict[int, str]
-    notes: dict[int, AnkiNote]  # note_id -> typed AnkiNote
-    cards: dict[int, dict]  # card_id -> raw AnkiConnect card dict
-    deck_note_ids: dict[str, set[int]]  # deck_name -> {note_id, ...}
+    deck_ids_by_name: dict[str, int]
+    deck_names_by_id: dict[int, str]
+    notes_by_id: dict[int, AnkiNote]  # note_id -> typed AnkiNote
+    cards_by_id: dict[int, dict]  # card_id -> raw AnkiConnect card dict
+    note_ids_by_deck_name: dict[str, set[int]]  # deck_name -> {note_id, ...}
 
     @staticmethod
     def fetch() -> AnkiState:
-        deck_names_and_ids = invoke("deckNamesAndIds")
-        id_to_deck_name = {v: k for k, v in deck_names_and_ids.items()}
+        deck_ids_by_name = invoke("deckNamesAndIds")
+        deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
 
         query = " OR ".join(f"note:{nt}" for nt in SUPPORTED_NOTE_TYPES)
         all_card_ids = invoke("findCards", query=query)
 
-        cards: dict[int, dict] = {}
-        deck_note_ids: dict[str, set[int]] = {}
+        cards_by_id: dict[int, dict] = {}
+        note_ids_by_deck_name: dict[str, set[int]] = {}
         all_note_ids: set[int] = set()
 
         if all_card_ids:
             for card in invoke("cardsInfo", cards=all_card_ids):
-                cards[card["cardId"]] = card
-                deck_note_ids.setdefault(card["deckName"], set()).add(card["note"])
+                cards_by_id[card["cardId"]] = card
+                note_ids_by_deck_name.setdefault(card["deckName"], set()).add(card["note"])
                 all_note_ids.add(card["note"])
 
-        notes: dict[int, AnkiNote] = {}
+        notes_by_id: dict[int, AnkiNote] = {}
         if all_note_ids:
             for note in invoke("notesInfo", notes=list(all_note_ids)):
                 if not note:
@@ -479,14 +479,14 @@ class AnkiState:
                         f"AnkiOps will never modify notes with non-AnkiOps templates."
                     )
                 anki_note = AnkiNote.from_raw(note)
-                notes[anki_note.note_id] = anki_note
+                notes_by_id[anki_note.note_id] = anki_note
 
         return AnkiState(
-            deck_names_and_ids=deck_names_and_ids,
-            id_to_deck_name=id_to_deck_name,
-            notes=notes,
-            cards=cards,
-            deck_note_ids=deck_note_ids,
+            deck_ids_by_name=deck_ids_by_name,
+            deck_names_by_id=deck_names_by_id,
+            notes_by_id=notes_by_id,
+            cards_by_id=cards_by_id,
+            note_ids_by_deck_name=note_ids_by_deck_name,
         )
 
 
@@ -546,12 +546,12 @@ class SyncResult:
 
     deck_name: str
     file_path: Path | None
-    total_notes: int
-    updated: int
-    created: int
-    deleted: int
-    moved: int
-    skipped: int
+    note_count: int
+    updated_count: int
+    created_count: int
+    deleted_count: int
+    moved_count: int
+    skipped_count: int
     errors: list[str] = field(default_factory=list)
     renamed_from: str | None = None
 
