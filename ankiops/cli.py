@@ -185,13 +185,11 @@ def run_serialize(args):
     logger.debug(f"Serializing collection from: {collection_dir}")
     logger.debug(f"Output file: {output_file}")
 
-    include_ids = not args.no_ids
-    include_media = args.include_media
     serialize_collection_to_json(
         collection_dir,
         output_file,
-        include_ids=include_ids,
-        include_media=include_media,
+        no_ids=args.no_ids,
+        include_media=args.include_media,
     )
 
 
@@ -203,7 +201,9 @@ def run_deserialize(args):
         logger.error(f"Serialized file not found: {serialized_file}")
         raise SystemExit(1)
 
-    deserialize_collection_from_json(serialized_file, overwrite=args.overwrite)
+    deserialize_collection_from_json(
+        serialized_file, overwrite=args.overwrite, no_ids=args.no_ids
+    )
 
 
 def main():
@@ -318,6 +318,11 @@ def main():
         "--overwrite",
         action="store_true",
         help="Overwrite existing markdown files (media uses smart conflict resolution)",
+    )
+    deserialize_parser.add_argument(
+        "--no-ids",
+        action="store_true",
+        help="Skip writing deck_id and note_id comments (useful for templates/sharing)",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 

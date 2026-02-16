@@ -24,11 +24,6 @@ FIELD_FONT_SIZES: dict[str, int] = {
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helpers (pure data, no API calls)
-# ---------------------------------------------------------------------------
-
-
 def _action(action: str, **params) -> dict:
     """Build an AnkiConnect action dict for use in a multi call."""
     return {"action": action, "params": params}

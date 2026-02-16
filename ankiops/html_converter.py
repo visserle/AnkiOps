@@ -125,7 +125,6 @@ class HTMLToMarkdown:
         extract_metadata=False,
     )
 
-    _VISITOR = _AnkiVisitor()
 
     def convert(self, html: str) -> str:
         """Convert HTML to Markdown."""
@@ -140,7 +139,7 @@ class HTMLToMarkdown:
         # Protect literal characters before conversion
         html = _protect_literal_chars(html)
 
-        md = convert_with_visitor(html, self._OPTIONS, visitor=self._VISITOR)
+        md = convert_with_visitor(html, self._OPTIONS, visitor=_AnkiVisitor())
 
         # Restore as escaped characters
         md = _restore_escaped_chars(md)

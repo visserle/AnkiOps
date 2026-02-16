@@ -141,8 +141,8 @@ class TestDeserializeMediaConflicts:
             },
             "decks": [
                 {
-                    "name": "Test Deck",
                     "deck_id": "1234567890",
+                    "name": "Test Deck",
                     "notes": [
                         {
                             "note_id": "1111111111",
@@ -283,3 +283,31 @@ class TestDeserializeMediaConflicts:
         deck_file = collection_dir / "Test Deck.md"
         content = deck_file.read_text()
         assert "![](media/test_2.png)" in content
+
+    def test_deserialize_with_ignore_ids(self, tmp_path):
+        """Test deserialization with ignore_ids skips writing ID comments."""
+        serialized_file = self.create_test_serialized(tmp_path, b"image data")
+        collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
+
+        # Deserialize with no_ids=True
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file, no_ids=True)
+        finally:
+            os.chdir(original_cwd)
+
+        # Verify markdown file was created
+        deck_file = collection_dir / "Test Deck.md"
+        assert deck_file.exists()
+        
+        # Verify NO ID comments appear in the markdown
+        content = deck_file.read_text()
+        assert "<!-- deck_id:" not in content
+        assert "<!-- note_id:" not in content
+        
+        # Verify note content is still present
+        assert "What is this?" in content
+        assert "An image" in content
+

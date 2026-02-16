@@ -126,7 +126,7 @@ def extract_media_references(text: str) -> set[str]:
 def serialize_collection_to_json(
     collection_dir: Path,
     output_file: Path,
-    include_ids: bool = True,
+    no_ids: bool = False,
     include_media: bool = False,
 ) -> dict:
     """Serialize entire collection to JSON format.
@@ -134,7 +134,7 @@ def serialize_collection_to_json(
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
-        include_ids: If False, exclude note_id and deck_id from serialized output
+        no_ids: If True, exclude note_id and deck_id from serialized output
         include_media: If True, create ZIP with JSON and media files
 
     Returns:
@@ -177,14 +177,12 @@ def serialize_collection_to_json(
         # Split into note blocks
         note_blocks_raw = remaining_content.split("\n\n---\n\n")
 
-        deck_data = {
-            "name": md_file.stem.replace("__", "::"),  # Restore :: from __
-            "notes": [],
-        }
-
-        # Only include deck_id if requested
-        if include_ids:
+        # Build deck data with deck_id first (matching markdown convention)
+        deck_data = {}
+        if not no_ids:
             deck_data["deck_id"] = str(deck_id) if deck_id else None
+        deck_data["name"] = md_file.stem.replace("__", "::")  # Restore :: from __
+        deck_data["notes"] = []
 
         line_number = 1  # Track for error reporting
         for block_text in note_blocks_raw:
@@ -195,14 +193,13 @@ def serialize_collection_to_json(
             try:
                 parsed = Note.from_block(block_text)
 
-                # Convert to JSON-friendly format (note_type inferred from fields)
-                note_data = {"fields": parsed.fields}
-
-                # Only include note_id if requested
-                if include_ids:
+                # Convert to JSON-friendly format with note_id first (matching markdown)
+                note_data = {}
+                if not no_ids:
                     note_data["note_id"] = (
                         str(parsed.note_id) if parsed.note_id else None
                     )
+                note_data["fields"] = parsed.fields
 
                 # Extract media references from all fields
                 if include_media:
@@ -291,7 +288,9 @@ def serialize_collection_to_json(
     return serialized_data
 
 
-def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -> None:
+def deserialize_collection_from_json(
+    json_file: Path, overwrite: bool = False, no_ids: bool = False
+) -> None:
     """Deserialize collection from JSON or ZIP format.
 
     In development mode (pyproject.toml with name="ankiops" in cwd),
@@ -303,6 +302,7 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
     Args:
         json_file: Path to JSON or ZIP file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
+        no_ids: If True, skip writing deck_id and note_id comments to markdown
     """
     total_media = 0
     # Use collection directory (respects development mode)
@@ -424,8 +424,8 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
         # Build markdown content
         lines = []
 
-        # Add deck_id if present
-        if deck_id:
+        # Add deck_id if present and not ignoring IDs
+        if deck_id and not no_ids:
             lines.append(f"<!-- deck_id: {deck_id} -->")
 
         # Process each note
@@ -442,8 +442,8 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
                 )
                 continue
 
-            # Add note_id if present
-            if note_id:
+            # Add note_id if present and not ignoring IDs
+            if note_id and not no_ids:
                 lines.append(f"<!-- note_id: {note_id} -->")
 
             # Get field mappings for this note type
