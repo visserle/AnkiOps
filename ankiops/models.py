@@ -19,12 +19,6 @@ from ankiops.config import (
     SUPPORTED_NOTE_TYPES,
 )
 
-_CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
-_NOTE_ID_PATTERN = re.compile(r"<!--\s*note_id:\s*(\d+)\s*-->")
-_DECK_ID_PATTERN = re.compile(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?")
-_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
-
-
 # prefix -> field name mapping for all note types, e.g. "Q:" -> "Question"
 PREFIX_TO_FIELD: dict[str, str] = {}
 for _cfg in NOTE_TYPES.values():
@@ -32,13 +26,13 @@ for _cfg in NOTE_TYPES.values():
         PREFIX_TO_FIELD[_prefix] = _field_name
 FIELD_TO_PREFIX = {v: k for k, v in PREFIX_TO_FIELD.items()}
 
+_CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
+_NOTE_ID_PATTERN = re.compile(r"<!--\s*note_id:\s*(\d+)\s*-->")
+_DECK_ID_PATTERN = re.compile(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?")
+_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
+
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# InvalidID
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -49,11 +43,6 @@ class InvalidID:
     id_type: str  # "deck_id" or "note_id"
     file_path: Path
     context: str  # additional context (e.g., note identifier)
-
-
-# ---------------------------------------------------------------------------
-# FileState
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -172,10 +161,28 @@ class FileState:
 
         return invalid_ids
 
+    def validate_no_duplicate_first_lines(
+        self,
+        id_assignments: list[tuple[Note, int]],
+    ) -> None:
+        """Raise if new notes share a first line (would break text-based ID insertion)."""
+        first_lines: dict[str, list[str]] = {}
+        for note, _ in id_assignments:
+            if note.note_id is not None:
+                continue
+            first_line = note.first_line
+            first_lines.setdefault(first_line, []).append(note.identifier)
 
-# ---------------------------------------------------------------------------
-# Note
-# ---------------------------------------------------------------------------
+        duplicates = {line: ids for line, ids in first_lines.items() if len(ids) > 1}
+        if duplicates:
+            msg = f"ERROR: Duplicate first lines detected in {self.file_path.name}:\n"
+            for first_line, ids in duplicates.items():
+                msg += f"  '{first_line[:60]}...' in notes: {', '.join(ids)}\n"
+            msg += (
+                "Cannot safely assign IDs. "
+                "Please ensure each note has a unique first line."
+            )
+            raise ValueError(msg)
 
 
 @dataclass
@@ -189,8 +196,6 @@ class Note:
     note_id: int | None
     note_type: str
     fields: dict[str, str]  # {field_name: markdown_content}
-
-    # -- constructor --------------------------------------------------------
 
     @staticmethod
     def infer_note_type(fields: dict[str, str]) -> str:
@@ -297,8 +302,6 @@ class Note:
             fields=fields,
         )
 
-    # -- properties ---------------------------------------------------------
-
     @property
     def first_line(self) -> str:
         """First content line of the note block (prefix + first line of content).
@@ -321,8 +324,6 @@ class Note:
         if self.note_id:
             return f"note_id: {self.note_id}"
         return f"'{self.first_line[:60]}...'"
-
-    # -- validation ---------------------------------------------------------
 
     def validate(self) -> list[str]:
         """Validate mandatory fields and note-type-specific rules.
@@ -379,8 +380,6 @@ class Note:
                 ]
         return []
 
-    # -- conversion ---------------------------------------------------------
-
     def to_html(self, converter) -> dict[str, str]:
         """Convert all field values from markdown to HTML.
 
@@ -406,8 +405,6 @@ class Note:
 
         return html
 
-    # -- comparison ---------------------------------------------------------
-
     def html_fields_match(
         self, html_fields: dict[str, str], anki_note: AnkiNote
     ) -> bool:
@@ -421,11 +418,6 @@ class Note:
             True if no update is needed.
         """
         return all(anki_note.fields.get(k) == v for k, v in html_fields.items())
-
-
-# ---------------------------------------------------------------------------
-# AnkiState
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -485,11 +477,6 @@ class AnkiState:
             cards=cards,
             deck_note_ids=deck_note_ids,
         )
-
-
-# ---------------------------------------------------------------------------
-# AnkiNote
-# ---------------------------------------------------------------------------
 
 
 @dataclass
