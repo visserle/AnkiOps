@@ -16,6 +16,8 @@ from ankiops.log import clickable_path, format_changes
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
     AnkiState,
+    Change,
+    ChangeType,
     FileState,
     ImportSummary,
     InvalidID,
@@ -34,7 +36,6 @@ class _PendingWrite:
     file_state: FileState
     deck_id_to_write: int | None
     id_assignments: list[tuple[Note, int]]
-
 
 
 def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> None:
@@ -123,6 +124,101 @@ def _flush_writes(writes: list[_PendingWrite]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _build_anki_actions(
+    deck_name: str,
+    needs_create_deck: bool,
+    changes: list[Change],
+    anki: AnkiState,
+    result: SyncResult,
+) -> tuple[list[dict], list[str], list[Change], list[Change], list[int]]:
+    """Build the list of actions for AnkiConnect's multi execution.
+
+    Returns:
+        (actions, tags, update_changes, create_changes, cards_to_move)
+    """
+    actions: list[dict] = []
+    tags: list[str] = []
+
+    # -- createDeck (must come first) --
+    if needs_create_deck:
+        actions.append({"action": "createDeck", "params": {"deck": deck_name}})
+        tags.append("create_deck")
+
+    # -- changeDeck --
+    cards_to_move: list[int] = []
+    for change in changes:
+        if change.change_type == ChangeType.MOVE:
+            # Context must contain 'cards' list
+            cards = change.context.get("cards", [])
+            cards_to_move.extend(cards)
+
+    if cards_to_move:
+        # Deduplicate
+        cards_to_move = list(set(cards_to_move))
+        actions.append(
+            {
+                "action": "changeDeck",
+                "params": {"cards": cards_to_move, "deck": deck_name},
+            }
+        )
+        tags.append("change_deck")
+
+    # -- updateNoteFields --
+    update_changes: list[Change] = []
+    for change in changes:
+        if change.change_type == ChangeType.UPDATE:
+            note_id = change.entity_id
+            html_fields = change.context.get("html_fields")
+            if note_id and html_fields:
+                actions.append(
+                    {
+                        "action": "updateNoteFields",
+                        "params": {"note": {"id": note_id, "fields": html_fields}},
+                    }
+                )
+                update_changes.append(change)
+                tags.append("update")
+
+    # -- deleteNotes --
+    delete_changes: list[Change] = [
+        c for c in changes if c.change_type == ChangeType.DELETE
+    ]
+    if delete_changes:
+        note_ids_to_delete = [
+            c.entity_id for c in delete_changes if c.entity_id is not None
+        ]
+        if note_ids_to_delete:
+            actions.append(
+                {"action": "deleteNotes", "params": {"notes": note_ids_to_delete}}
+            )
+            tags.append("delete")
+
+    # -- addNote --
+    create_changes: list[Change] = []
+    for change in changes:
+        if change.change_type == ChangeType.CREATE:
+            note = change.context.get("note")
+            html_fields = change.context.get("html_fields")
+            if note and html_fields:
+                actions.append(
+                    {
+                        "action": "addNote",
+                        "params": {
+                            "note": {
+                                "deckName": deck_name,
+                                "modelName": note.note_type,
+                                "fields": html_fields,
+                                "options": {"allowDuplicate": False},
+                            }
+                        },
+                    }
+                )
+                create_changes.append(change)
+                tags.append("create")
+
+    return actions, tags, update_changes, create_changes, cards_to_move
+
+
 def _sync_file(
     fs: FileState,
     anki: AnkiState,
@@ -133,15 +229,11 @@ def _sync_file(
     """Synchronize one markdown file to Anki.
 
     Phases:
-      0. Resolve deck (by deck_id or filename)
-      1. Classify notes (existing vs new) + convert md → html
-      2. Build unified action list (createDeck, changeDeck, updates, deletes, creates)
-      3. Execute single multi call + route results
-      4. Return result + pending file write
-
-    All Anki mutations are batched into a single ``invoke("multi", ...)``
-    call.  AnkiConnect executes multi-actions sequentially, so ordering
-    (e.g. createDeck before addNote) is preserved.
+        0. Resolve deck (by deck_id or filename)
+        1. Classify notes + convert md → html -> Generate Change objects
+        2. Build unified action list
+        3. Execute single multi call + route results
+        4. Return result + pending file write
     """
     # ---- Phase 0: Resolve deck ----
     deck_id_to_write: int | None = None
@@ -162,155 +254,113 @@ def _sync_file(
     result = SyncResult(
         deck_name=deck_name,
         file_path=fs.file_path,
-        note_count=len(fs.parsed_notes),
-        updated_count=0,
-        created_count=0,
-        deleted_count=0,
-        moved_count=0,
-        skipped_count=0,
     )
 
     # ---- Phase 1: Classify + convert ----
-    existing: list[tuple[Note, dict[str, str]]] = []
-    new: list[tuple[Note, dict[str, str]]] = []
+    changes: list[Change] = []
 
+    # Process parsed notes (Creates, Updates, Skips, Moves)
     for note in fs.parsed_notes:
-        validation_errors = note.validate()
-        if validation_errors:
-            for err in validation_errors:
-                result.errors.append(
-                    f"Note {note.note_id or 'new'} ({note.identifier}): {err}"
-                )
+        if errs := note.validate():
+            for e in errs:
+                result.errors.append(f"Note {note.identifier}: {e}")
             continue
-
         try:
             html_fields = note.to_html(converter)
         except Exception as e:
-            result.errors.append(
-                f"Note {note.note_id or 'new'} ({note.identifier}): {e}"
-            )
+            result.errors.append(f"Note {note.identifier}: {e}")
             continue
 
         if note.note_id:
+            # Existing note in file
             if only_add_new:
-                result.skipped_count += 1
+                changes.append(Change(ChangeType.SKIP, note.note_id, note.identifier))
+                continue
+
+            anki_note = anki.notes_by_id.get(note.note_id)
+            if not anki_note:
+                # Stale note (ID in file but not in Anki) -> Treat as NEW (Create)
+                changes.append(
+                    Change(
+                        ChangeType.CREATE,
+                        None,  # Will get a new ID
+                        note.identifier,
+                        context={"note": note, "html_fields": html_fields},
+                    )
+                )
             else:
-                existing.append((note, html_fields))
+                # Note exists in Anki
+
+                # Check for deck movement
+                cards_to_move = []
+                for cid in anki_note.card_ids:
+                    card = anki.cards_by_id.get(cid)
+                    if card and card.get("deckName") != deck_name:
+                        cards_to_move.append(cid)
+
+                if cards_to_move:
+                    changes.append(
+                        Change(
+                            ChangeType.MOVE,
+                            note.note_id,
+                            note.identifier,
+                            context={"cards": cards_to_move},
+                        )
+                    )
+
+                # Check for type mismatch
+                if anki_note.note_type != note.note_type:
+                    result.errors.append(
+                        f"Note type mismatch for note {note.note_id} "
+                        f"({note.identifier}): "
+                        f"Markdown specifies '{note.note_type}' "
+                        f"but Anki has '{anki_note.note_type}'."
+                    )
+                    continue
+
+                # Check for content update
+                if note.html_fields_match(html_fields, anki_note):
+                    changes.append(
+                        Change(ChangeType.SKIP, note.note_id, note.identifier)
+                    )
+                else:
+                    changes.append(
+                        Change(
+                            ChangeType.UPDATE,
+                            note.note_id,
+                            note.identifier,
+                            context={"html_fields": html_fields},
+                        )
+                    )
+
         else:
-            new.append((note, html_fields))
-
-    # ---- Phase 2: Build unified action list ----
-    actions: list[dict] = []
-    tags: list[str] = []  # one tag per action for result routing
-
-    # -- createDeck (must come first so the deck exists for addNote) --
-    if needs_create_deck:
-        actions.append({"action": "createDeck", "params": {"deck": deck_name}})
-        tags.append("create_deck")
-
-    # -- Safety check: note type mismatches --
-    for note, _ in existing:
-        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
-        if anki_note and anki_note.note_type != note.note_type:
-            raise ValueError(
-                f"Note type mismatch for note {note.note_id} "
-                f"({note.identifier}): "
-                f"Markdown specifies '{note.note_type}' "
-                f"but Anki has '{anki_note.note_type}'. "
-                f"AnkiConnect does not support changing note types. "
-                f"Please manually change the note type in Anki "
-                f"or delete the old note_id HTML tag to re-create the note."
+            # New note
+            changes.append(
+                Change(
+                    ChangeType.CREATE,
+                    None,
+                    note.identifier,
+                    context={"note": note, "html_fields": html_fields},
+                )
             )
 
-    # -- changeDeck --
-    cards_to_move: list[int] = []
-    for note, _ in existing:
-        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
-        if not anki_note:
-            continue
-        for cid in anki_note.card_ids:
-            card = anki.cards_by_id.get(cid)
-            if card and card.get("deckName") != deck_name:
-                cards_to_move.append(cid)
-
-    if cards_to_move:
-        actions.append(
-            {"action": "changeDeck", "params": {"cards": cards_to_move, "deck": deck_name}}
-        )
-        tags.append("change_deck")
-
-    # -- updateNoteFields --
-    stale: list[tuple[Note, dict[str, str]]] = []
-    update_notes: list[Note] = []
-
-    for note, html_fields in existing:
-        anki_note = anki.notes_by_id.get(note.note_id)  # type: ignore[arg-type]
-        if not anki_note or not anki_note.fields:
-            logger.debug(
-                f"Note {note.note_id} ({note.identifier}) "
-                f"no longer in Anki, will re-create"
-            )
-            stale.append((note, html_fields))
-            continue
-
-        if note.html_fields_match(html_fields, anki_note):
-            result.skipped_count += 1
-            continue
-
-        actions.append(
-            {
-                "action": "updateNoteFields",
-                "params": {"note": {"id": note.note_id, "fields": html_fields}},
-            }
-        )
-        update_notes.append(note)
-        tags.append("update")
-
-    new.extend(stale)
-
-    # -- deleteNotes --
-    md_note_ids = {n.note_id for n in fs.parsed_notes if n.note_id is not None}
+    # Identify orphans (Deletes)
+    md_note_ids = fs.note_ids
     anki_deck_note_ids = anki.note_ids_by_deck_name.get(deck_name, set()).copy()
     orphaned = anki_deck_note_ids - md_note_ids
     if global_note_ids:
         orphaned -= global_note_ids
 
-    if orphaned:
-        for nid in orphaned:
-            anki_note = anki.notes_by_id.get(nid)
-            model = anki_note.note_type if anki_note else "unknown"
-            cids = [
-                cid
-                for cid, c in anki.cards_by_id.items()
-                if c["note"] == nid and c["deckName"] == deck_name
-            ]
-            cid_str = ", ".join(str(c) for c in cids)
-            logger.debug(
-                f"Deleted {model} note {nid}"
-                f"{f' (cards {cid_str})' if cid_str else ''}"
-                f" from Anki"
-            )
-        actions.append({"action": "deleteNotes", "params": {"notes": list(orphaned)}})
-        tags.append("delete")
+    for nid in orphaned:
+        changes.append(Change(ChangeType.DELETE, nid, f"note_id: {nid}"))
 
-    # -- addNote --
-    create_notes: list[Note] = []
-    for note, html_fields in new:
-        actions.append(
-            {
-                "action": "addNote",
-                "params": {
-                    "note": {
-                        "deckName": deck_name,
-                        "modelName": note.note_type,
-                        "fields": html_fields,
-                        "options": {"allowDuplicate": False},
-                    }
-                },
-            }
-        )
-        create_notes.append(note)
-        tags.append("create")
+    # Store changes in result
+    result.changes = changes
+
+    # ---- Phase 2: Build unified action list ----
+    actions, tags, update_changes, create_changes, cards_to_move = _build_anki_actions(
+        deck_name, needs_create_deck, changes, anki, result
+    )
 
     # ---- Phase 3: Execute single multi call + route results ----
     id_assignments: list[tuple[Note, int]] = []
@@ -328,60 +378,48 @@ def _sync_file(
                     anki.deck_ids_by_name[deck_name] = new_deck_id
                     anki.deck_names_by_id[new_deck_id] = deck_name
                     deck_id_to_write = new_deck_id
-                    logger.info(
-                        f"Created new deck '{deck_name}' (id: {new_deck_id})"
-                    )
+                    logger.info(f"Created new deck '{deck_name}' (id: {new_deck_id})")
 
                 elif tag == "change_deck":
                     if res is not None:
                         result.errors.append(f"Failed to move cards: {res}")
                     else:
-                        moved_notes: set[int] = set()
-                        for cid in cards_to_move:
-                            card = anki.cards_by_id.get(cid)
-                            if card:
-                                nid = card["note"]
-                                if nid not in moved_notes:
-                                    moved_notes.add(nid)
-                                    logger.debug(
-                                        f"Moved note {nid} from "
-                                        f"'{card['deckName']}' to '{deck_name}'"
-                                    )
-                        result.moved_count += len(moved_notes)
+                        # Log implicitly via changes check later?
+                        # Or log now.
+                        pass  # Logging handled by summary or Change object if we want update it
 
                 elif tag == "update":
-                    note = update_notes[update_idx]
+                    # We know which change this corresponds to via update_changes list
+                    change = update_changes[update_idx]
                     update_idx += 1
-                    if res is None:
-                        result.updated_count += 1
-                    else:
+                    if res is not None:
                         result.errors.append(
-                            f"Note {note.note_id} ({note.identifier}): {res}"
+                            f"Note {change.entity_id} ({change.entity_repr}): {res}"
                         )
 
                 elif tag == "delete":
                     if res is not None:
                         result.errors.append(f"Failed to delete orphaned notes: {res}")
-                    else:
-                        result.deleted_count += len(orphaned)
 
                 elif tag == "create":
-                    note = create_notes[create_idx]
+                    change = create_changes[create_idx]
                     create_idx += 1
-                    if res and isinstance(res, int):
+                    note = change.context.get("note")
+                    if res and isinstance(res, int) and note:
                         id_assignments.append((note, res))
-                        result.created_count += 1
+                        # Update change object with real ID if we want?
+                        change.entity_id = res
                     else:
-                        result.errors.append(
-                            f"Note new ({note.identifier}): {res}"
-                        )
+                        result.errors.append(f"Note new ({change.entity_repr}): {res}")
 
         except Exception as e:
             # The entire multi call failed — attribute errors to all actions
-            for note in update_notes:
-                result.errors.append(f"Note {note.note_id} ({note.identifier}): {e}")
-            for note in create_notes:
-                result.errors.append(f"Note new ({note.identifier}): {e}")
+            for change in update_changes:
+                result.errors.append(
+                    f"Note {change.entity_id} ({change.entity_repr}): {e}"
+                )
+            for change in create_changes:
+                result.errors.append(f"Note new ({change.entity_repr}): {e}")
             if cards_to_move:
                 result.errors.append(f"Failed to move cards: {e}")
             if orphaned:

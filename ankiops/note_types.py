@@ -329,9 +329,7 @@ def ensure_note_types() -> None:
             read_actions.append(_action("modelFieldNames", modelName=model_name))
             read_actions.append(_action("modelStyling", modelName=model_name))
             read_actions.append(_action("modelTemplates", modelName=model_name))
-            read_actions.append(
-                _action("modelFieldDescriptions", modelName=model_name)
-            )
+            read_actions.append(_action("modelFieldDescriptions", modelName=model_name))
             read_actions.append(_action("modelFieldFonts", modelName=model_name))
 
         read_results = invoke("multi", actions=read_actions)

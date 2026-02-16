@@ -127,6 +127,3 @@ def require_collection_dir(active_profile: str) -> Path:
         raise SystemExit(1)
 
     return collection_dir
-
-
-

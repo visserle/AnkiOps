@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
+from typing import Any
 
 from ankiops.anki_client import invoke
 from ankiops.config import (
@@ -110,6 +112,16 @@ class FileState:
     def has_untracked(self) -> bool:
         """True if the file contains notes without a note_id."""
         return any(n.note_id is None for n in self.parsed_notes)
+
+    @property
+    def existing_notes(self) -> list[Note]:
+        """Notes that already have an ID (exist in Anki)."""
+        return [n for n in self.parsed_notes if n.note_id is not None]
+
+    @property
+    def new_notes(self) -> list[Note]:
+        """Notes that do not have an ID (newly created)."""
+        return [n for n in self.parsed_notes if n.note_id is None]
 
     @property
     def existing_blocks(self) -> dict[str, str]:
@@ -346,7 +358,7 @@ class Note:
                 choice_fields.append(field_name)
                 if self.fields.get(field_name):
                     choice_count += 1
-                continue # Skip individual Choice field check in mandatory loop
+                continue  # Skip individual Choice field check in mandatory loop
 
             if not self.fields.get(field_name):
                 errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
@@ -463,7 +475,9 @@ class AnkiState:
         if all_card_ids:
             for card in invoke("cardsInfo", cards=all_card_ids):
                 cards_by_id[card["cardId"]] = card
-                note_ids_by_deck_name.setdefault(card["deckName"], set()).add(card["note"])
+                note_ids_by_deck_name.setdefault(card["deckName"], set()).add(
+                    card["note"]
+                )
                 all_note_ids.add(card["note"])
 
         notes_by_id: dict[int, AnkiNote] = {}
@@ -537,6 +551,23 @@ class AnkiNote:
         return "\n".join(lines)
 
 
+class ChangeType(Enum):
+    CREATE = auto()
+    UPDATE = auto()
+    DELETE = auto()
+    MOVE = auto()
+    SKIP = auto()
+    CONFLICT = auto()
+
+
+@dataclass
+class Change:
+    change_type: ChangeType
+    entity_id: int | None
+    entity_repr: str
+    context: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class SyncResult:
     """Result of syncing a single file or deck.
@@ -546,14 +577,38 @@ class SyncResult:
 
     deck_name: str
     file_path: Path | None
-    note_count: int
-    updated_count: int
-    created_count: int
-    deleted_count: int
-    moved_count: int
-    skipped_count: int
+    changes: list[Change] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
-    renamed_from: str | None = None
+
+    @property
+    def note_count(self) -> int:
+        """Total valid notes processed (excluding deletes/conflicts)."""
+        return sum(
+            1
+            for c in self.changes
+            if c.change_type
+            in (ChangeType.CREATE, ChangeType.UPDATE, ChangeType.MOVE, ChangeType.SKIP)
+        )
+
+    @property
+    def updated_count(self) -> int:
+        return sum(1 for c in self.changes if c.change_type == ChangeType.UPDATE)
+
+    @property
+    def created_count(self) -> int:
+        return sum(1 for c in self.changes if c.change_type == ChangeType.CREATE)
+
+    @property
+    def deleted_count(self) -> int:
+        return sum(1 for c in self.changes if c.change_type == ChangeType.DELETE)
+
+    @property
+    def moved_count(self) -> int:
+        return sum(1 for c in self.changes if c.change_type == ChangeType.MOVE)
+
+    @property
+    def skipped_count(self) -> int:
+        return sum(1 for c in self.changes if c.change_type == ChangeType.SKIP)
 
 
 @dataclass

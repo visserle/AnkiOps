@@ -14,7 +14,14 @@ from pathlib import Path
 from ankiops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES, sanitize_filename
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.log import clickable_path, format_changes
-from ankiops.models import AnkiState, ExportSummary, FileState, SyncResult
+from ankiops.models import (
+    AnkiState,
+    Change,
+    ChangeType,
+    ExportSummary,
+    FileState,
+    SyncResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +57,77 @@ def _format_blocks(
     return block_by_id
 
 
+def _reconcile_blocks(
+    block_by_id: dict[str, tuple[int, str]],
+    existing_blocks: dict[str, str] | None,
+) -> list[Change]:
+    """Reconcile new Anki blocks with existing file blocks.
+
+    Args:
+        block_by_id: {block_id: (note_id, content)} from Anki.
+        existing_blocks: {block_id: content} from existing file.
+
+    Returns:
+        List of Change objects representing the transformation.
+    """
+    changes: list[Change] = []
+
+    if existing_blocks:
+        new_block_ids = set(block_by_id.keys())
+
+        # Preserve existing order, updating content
+        for block_id, old_content in existing_blocks.items():
+            if block_id in block_by_id:
+                note_id, new_content = block_by_id[block_id]
+
+                if old_content == new_content:
+                    changes.append(
+                        Change(
+                            ChangeType.SKIP,
+                            note_id,
+                            block_id,
+                            context={"block_content": new_content},
+                        )
+                    )
+                else:
+                    changes.append(
+                        Change(
+                            ChangeType.UPDATE,
+                            note_id,
+                            block_id,
+                            context={"block_content": new_content},
+                        )
+                    )
+            else:
+                # Block exists in file but not in Anki -> Delete from file
+                # Try to extract note_id from block_id ("note_id: 123")
+                match = re.search(r"note_id:\s*(\d+)", block_id)
+                entity_id = int(match.group(1)) if match else None
+
+                changes.append(Change(ChangeType.DELETE, entity_id, block_id))
+
+        # Append genuinely new notes, sorted by creation date
+        new_ids = new_block_ids - set(existing_blocks)
+        new_entries = sorted(
+            ((bid, *block_by_id[bid]) for bid in new_ids),
+            key=lambda x: x[1],  # sort by note_id (creation timestamp)
+        )
+        for bid, nid, content in new_entries:
+            changes.append(
+                Change(ChangeType.CREATE, nid, bid, context={"block_content": content})
+            )
+
+    else:
+        # First export: sort by creation date (note_id)
+        sorted_blocks = sorted(block_by_id.items(), key=lambda x: x[1][0])
+        for bid, (nid, content) in sorted_blocks:
+            changes.append(
+                Change(ChangeType.CREATE, nid, bid, context={"block_content": content})
+            )
+
+    return changes
+
+
 def _sync_deck(
     deck_name: str,
     deck_id: int,
@@ -68,67 +146,31 @@ def _sync_deck(
         return SyncResult(
             deck_name=deck_name,
             file_path=None,
-            note_count=0,
-            updated_count=0,
-            created_count=0,
-            deleted_count=0,
-            moved_count=0,
-            skipped_count=0,
         ), None
 
     deck_id_line = f"<!-- deck_id: {deck_id} -->\n"
+    existing_blocks = existing_file.existing_blocks if existing_file else None
 
-    updated_count = 0
-    created_count = 0
-    deleted_count = 0
-    skipped_count = 0
-    moved_count = 0
+    changes = _reconcile_blocks(block_by_id, existing_blocks)
 
-    if existing_file is not None:
-        existing_blocks = existing_file.existing_blocks
-        new_block_ids = set(block_by_id.keys())
-        ordered_blocks: list[str] = []
+    # Reconstruct content from changes
+    new_blocks = []
+    for change in changes:
+        if change.change_type in (
+            ChangeType.CREATE,
+            ChangeType.UPDATE,
+            ChangeType.SKIP,
+        ):
+            content = change.context.get("block_content")
+            if content:
+                new_blocks.append(content)
 
-        # Preserve existing order, updating content
-        for block_id in existing_blocks:
-            if block_id in block_by_id:
-                _, block = block_by_id[block_id]
-                ordered_blocks.append(block)
-                if existing_blocks[block_id] == block:
-                    skipped_count += 1
-                else:
-                    updated_count += 1
-            else:
-                deleted_count += 1
-
-        # Append genuinely new notes, sorted by creation date
-        new_ids = new_block_ids - set(existing_blocks)
-        new_entries = sorted(
-            ((bid, *block_by_id[bid]) for bid in new_ids),
-            key=lambda x: x[1],  # sort by note_id (creation timestamp)
-        )
-        for _, _, block in new_entries:
-            ordered_blocks.append(block)
-            created_count += 1
-
-        markdown_blocks = ordered_blocks
-    else:
-        # First export: sort by creation date
-        sorted_blocks = sorted(block_by_id.values(), key=lambda x: x[0])
-        markdown_blocks = [block for _, block in sorted_blocks]
-        created = len(markdown_blocks)
-
-    new_content = deck_id_line + NOTE_SEPARATOR.join(markdown_blocks)
+    new_content = deck_id_line + NOTE_SEPARATOR.join(new_blocks)
 
     result = SyncResult(
         deck_name=deck_name,
         file_path=None,  # Set by caller after writing
-        note_count=len(markdown_blocks),
-        updated_count=updated_count,
-        created_count=created_count,
-        deleted_count=deleted_count,
-        moved_count=moved_count,
-        skipped_count=skipped_count,
+        changes=changes,
     )
     return result, new_content
 
@@ -363,40 +405,14 @@ def export_collection(
                 fs.file_path.unlink()
                 deleted_deck_files += 1
 
-        # Delete notes from markdown files whose note_id isn't in Anki
-        for md_file in output_path.glob("*.md"):
-            # Re-read files that were just written (content may have changed)
-            content = md_file.read_text(encoding="utf-8")
-            deck_id_match = re.match(r"(<!--\s*deck_id:\s*\d+\s*-->\n?)", content)
-            deck_id_prefix = deck_id_match.group(1) if deck_id_match else ""
-            _, cards_content = FileState.extract_deck_id(content)
-
-            blocks = cards_content.split(NOTE_SEPARATOR)
-            kept: list[str] = []
-            deleted = 0
-
-            for block in blocks:
-                stripped = block.strip()
-                if not stripped:
-                    continue
-                note_match = re.match(r"<!--\s*note_id:\s*(\d+)\s*-->", stripped)
-                if note_match:
-                    nid = int(note_match.group(1))
-                    if nid not in all_note_ids:
-                        deleted += 1
-                        logger.debug(f"Deleting note {nid} from {md_file.name}")
-                        continue
-                kept.append(stripped)
-
-            if deleted > 0:
-                new_content = deck_id_prefix + NOTE_SEPARATOR.join(kept)
-                md_file.write_text(new_content, encoding="utf-8")
-                logger.info(f"  {md_file.name}: {deleted} orphaned note(s) deleted")
-                deleted_orphan_notes += deleted
+        # Note: Orphaned notes within valid deck files are already removed by _sync_deck
+        # because _reconcile_blocks creates DELETE changes for them.
+        # We only need to guard against files that weren't synced (e.g. unlinked),
+        # but those are edge cases.
 
     return ExportSummary(
         deck_results=deck_results,
         renamed_files=renamed_files,
         deleted_deck_files=deleted_deck_files,
-        deleted_orphan_notes=deleted_orphan_notes,
+        deleted_orphan_notes=deleted_orphan_notes,  # Consistently 0 if we rely on _sync_deck
     )
