@@ -1,6 +1,6 @@
 # AnkiOps
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://badge.fury.io/py/ankiops.svg)](https://badge.fury.io/py/ankiops) 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 
 **Anki decks ↔ Markdown files, in perfect sync**
 
