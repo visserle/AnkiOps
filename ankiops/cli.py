@@ -98,10 +98,11 @@ def run_ma(args):
     """Markdown -> Anki: import markdown files into Anki."""
     connect_or_exit()
     active_profile = invoke("getActiveProfile")
-    ensure_note_types()
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+
+    ensure_note_types()
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "import")
