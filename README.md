@@ -11,10 +11,10 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Simple CLI interface: after initialization, only two commands are needed for daily use
 - Fully round-trip, bi-directional sync that handles note creation, deletion, movements across decks, and conflicts
 - Markdown rendering with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Support for all standard note types plus Single & Multiple Choice cards
+- Support for all standard note types, plus Single & Multiple Choice
 - Embed images via VS Code where they are directly copied into your Anki media folder (automatically set up)
 - Built-in Git integration with autocommit for tracking all changes
-- High-performance processing: handles thousands of cards across hundreds of decks in seconds
+- High-performance processing: handles thousands of cards across hundreds of decks in mere seconds
 - Thoroughly tested, bi-directional conversion between Markdown and Anki-compatible HTML
 - Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
@@ -91,7 +91,7 @@ Each note type is identified by its field prefixes. `E:` (Extra) and `M:` (More,
 | **AnkiOpsReversed** | `F:`, `B:` |
 | **AnkiOpsCloze** | `T:` |
 | **AnkiOpsInput** | `Q:`, `I:` |
-| **AnkiOpsChoice** | `Q:`, `C1:`,–`C8:` `A:` |
+| **AnkiOpsChoice** | `Q:`, `C1:``C8:`, `A:` |
 
 ### Which characters or symbols cannot be used?
 
@@ -119,7 +119,7 @@ For standard note types, migration is straightforward:
 2. Export your notes from Anki to Markdown using `ankiops am`.
 3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
 
-If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type in the `config.py` with a unique field name for automatic note type detection, and add your card's templates to `ankiops/card_templates`.
+If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type in the `config.py` with a unique field name for automatic note type detection, and add your card's templates to `ankiops/card_templates`. 
 
 ### How can I develop AnkiOps locally?
 
