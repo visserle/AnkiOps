@@ -8,24 +8,23 @@ Architecture:
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki_client import invoke
 from ankiops.log import clickable_path, format_changes
 from ankiops.markdown_converter import MarkdownToHTML
-from ankiops.models import AnkiState, FileState, InvalidID, Note
+from ankiops.models import (
+    AnkiState,
+    FileState,
+    ImportSummary,
+    InvalidID,
+    Note,
+    SyncResult,
+    UntrackedDeck,
+)
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class UntrackedDeck:
-    """An Anki deck with AnkiOps notes but no matching markdown file."""
-
-    deck_name: str
-    deck_id: int
-    note_ids: list[int]
 
 
 @dataclass
@@ -35,29 +34,6 @@ class _PendingWrite:
     file_state: FileState
     deck_id_to_write: int | None
     id_assignments: list[tuple[Note, int]]
-
-
-@dataclass
-class FileImportResult:
-    """Result of importing a single file."""
-
-    file_path: Path
-    deck_name: str
-    total_notes: int
-    updated: int
-    created: int
-    deleted: int
-    moved: int
-    skipped: int
-    errors: list[str] = field(default_factory=list)
-
-
-@dataclass
-class ImportSummary:
-    """Aggregate result of a full collection import."""
-
-    file_results: list[FileImportResult]
-    untracked_decks: list[UntrackedDeck]
 
 
 
@@ -153,7 +129,7 @@ def _sync_file(
     converter: MarkdownToHTML,
     only_add_new: bool = False,
     global_note_ids: set[int] | None = None,
-) -> tuple[FileImportResult, _PendingWrite]:
+) -> tuple[SyncResult, _PendingWrite]:
     """Synchronize one markdown file to Anki.
 
     Phases:
@@ -183,9 +159,9 @@ def _sync_file(
             deck_id_to_write = anki.deck_names_and_ids[deck_name]
             logger.debug(f"Wrote deck_id {deck_id_to_write} to {fs.file_path.name}")
 
-    result = FileImportResult(
-        file_path=fs.file_path,
+    result = SyncResult(
         deck_name=deck_name,
+        file_path=fs.file_path,
         total_notes=len(fs.parsed_notes),
         updated=0,
         created=0,
@@ -387,7 +363,7 @@ def _sync_file(
 def import_file(
     file_path: Path,
     only_add_new: bool = False,
-) -> FileImportResult:
+) -> SyncResult:
     """Import a single markdown file into Anki."""
     fs = FileState.from_file(file_path)
     anki = AnkiState.fetch()
@@ -486,7 +462,7 @@ def import_collection(
     _prompt_invalid_ids(invalid_ids, is_collection=True)
 
     # Phase 5: Sync each file
-    results: list[FileImportResult] = []
+    results: list[SyncResult] = []
     pending_writes: list[_PendingWrite] = []
 
     for fs in file_states:

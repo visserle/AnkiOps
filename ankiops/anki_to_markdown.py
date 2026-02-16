@@ -9,45 +9,14 @@ Architecture:
 
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES, sanitize_filename
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.log import clickable_path, format_changes
-from ankiops.models import AnkiState, FileState
+from ankiops.models import AnkiState, ExportSummary, FileState, SyncResult
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class DeckExportResult:
-    """Result of exporting a single deck."""
-
-    deck_name: str
-    file_path: Path | None
-    total_notes: int
-    updated: int
-    created: int
-    deleted: int
-    moved: int
-    skipped: int
-    renamed_from: str | None = None
-
-
-@dataclass
-class ExportSummary:
-    """Aggregate result of a full collection export."""
-
-    deck_results: list[DeckExportResult]
-    renamed_files: int
-    deleted_deck_files: int
-    deleted_orphan_notes: int
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +56,7 @@ def _sync_deck(
     anki: AnkiState,
     converter: HTMLToMarkdown,
     existing_file: FileState | None,
-) -> tuple[DeckExportResult, str | None]:
+) -> tuple[SyncResult, str | None]:
     """Synchronize one Anki deck to markdown content.
 
     Returns (result, new_content). new_content is None if the deck
@@ -97,7 +66,7 @@ def _sync_deck(
     block_by_id = _format_blocks(note_ids, anki, converter)
 
     if not block_by_id:
-        return DeckExportResult(
+        return SyncResult(
             deck_name=deck_name,
             file_path=None,
             total_notes=0,
@@ -152,7 +121,7 @@ def _sync_deck(
 
     new_content = deck_id_line + NOTE_SEPARATOR.join(markdown_blocks)
 
-    result = DeckExportResult(
+    result = SyncResult(
         deck_name=deck_name,
         file_path=None,  # Set by caller after writing
         total_notes=len(markdown_blocks),
@@ -174,7 +143,7 @@ def export_deck(
     deck_name: str,
     output_dir: str = ".",
     deck_id: int | None = None,
-) -> DeckExportResult:
+) -> SyncResult:
     """Export a single Anki deck to a Markdown file."""
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
@@ -325,7 +294,7 @@ def export_collection(
     )
 
     # Phase 5: Sync each relevant deck
-    deck_results: list[DeckExportResult] = []
+    deck_results: list[SyncResult] = []
     all_created_ids: set[str] = set()
     all_deleted_ids: set[str] = set()
 

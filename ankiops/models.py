@@ -1,15 +1,15 @@
 """Core data models for AnkiOps.
 
 Provides typed data classes for both the markdown side (Note, FileState)
-and the Anki side (AnkiNote, AnkiState), enabling clean comparison
-between the two.
+and the Anki side (AnkiNote, AnkiState), plus sync result types
+(SyncResult, ImportSummary, ExportSummary) shared by import/export paths.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ankiops.anki_client import invoke
@@ -524,3 +524,49 @@ class AnkiNote:
                     lines.append(f"{prefix} {md}")
 
         return "\n".join(lines)
+
+
+@dataclass
+class SyncResult:
+    """Result of syncing a single file or deck.
+
+    Used by both import (markdown → Anki) and export (Anki → markdown) paths.
+    """
+
+    deck_name: str
+    file_path: Path | None
+    total_notes: int
+    updated: int
+    created: int
+    deleted: int
+    moved: int
+    skipped: int
+    errors: list[str] = field(default_factory=list)
+    renamed_from: str | None = None
+
+
+@dataclass
+class UntrackedDeck:
+    """An Anki deck with AnkiOps notes but no matching markdown file."""
+
+    deck_name: str
+    deck_id: int
+    note_ids: list[int]
+
+
+@dataclass
+class ImportSummary:
+    """Aggregate result of a full collection import."""
+
+    file_results: list[SyncResult]
+    untracked_decks: list[UntrackedDeck]
+
+
+@dataclass
+class ExportSummary:
+    """Aggregate result of a full collection export."""
+
+    deck_results: list[SyncResult]
+    renamed_files: int
+    deleted_deck_files: int
+    deleted_orphan_notes: int
