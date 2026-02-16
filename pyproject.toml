@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.4.0"
+version = "0.4.1"
 description = "Anki decks ↔ Markdown files, in perfect sync"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,7 @@ Repository = "https://github.com/visserle/AnkiOps"
 Issues = "https://github.com/visserle/AnkiOps/issues"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0.0", "ruff>=0.1.0"]
+dev = ["hypothesis>=6.0.0", "pytest>=7.0.0", "ruff>=0.1.0"]
 
 [project.scripts]
 ankiops = "ankiops:main"
