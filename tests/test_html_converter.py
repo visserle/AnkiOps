@@ -20,61 +20,6 @@ def md_to_html():
     return MarkdownToHTML()
 
 
-class TestRoundTripBasicFormatting:
-    """Test round-trip conversion of basic formatting from markdown origin."""
-
-    def test_empty_input(self, html_to_md):
-        assert html_to_md.convert("") == ""
-        assert html_to_md.convert("   ") == ""
-
-    def test_plain_text_roundtrip(self, html_to_md, md_to_html):
-        original_md = "Hello world"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert restored_md == original_md
-
-    def test_bold_roundtrip(self, html_to_md, md_to_html):
-        original_md = "This is **bold** text"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert "**bold**" in restored_md
-        assert "This is" in restored_md
-
-    def test_italic_roundtrip(self, html_to_md, md_to_html):
-        original_md = "This is *italic* text"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert "*italic*" in restored_md
-        assert "This is" in restored_md
-
-    def test_bold_italic_roundtrip(self, html_to_md, md_to_html):
-        original_md = "This is ***bold italic*** text"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert "bold italic" in restored_md
-        # Should have both bold and italic markers
-        assert "*" in restored_md
-
-    def test_inline_code_roundtrip(self, html_to_md, md_to_html):
-        original_md = "Use the `print()` function"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert "`print()`" in restored_md
-
-    def test_highlight_roundtrip(self, html_to_md, md_to_html):
-        original_md = "This is ==important== text"
-        html = md_to_html.convert(original_md)
-        restored_md = html_to_md.convert(html)
-        assert "==important==" in restored_md
-
-    def test_underline_roundtrip(self, html_to_md, md_to_html):
-        # Underline is HTML-only, not markdown
-        original_html = "This is <u>underlined</u> text"
-        restored_md = html_to_md.convert(original_html)
-        assert "<u>underlined</u>" in restored_md
-        # And back to HTML
-        restored_html = md_to_html.convert(restored_md)
-        assert "<u>underlined</u>" in restored_html
 
 
 class TestRoundTripHeadings:

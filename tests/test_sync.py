@@ -105,6 +105,53 @@ def test_reconcile_blocks_with_updates_and_deletes():
     assert changes[2].entity_repr == "note_id: 3"
     assert changes[2].entity_id == 3  # Now parsed from block_id
 
-    # Change 4: Create note 4
     assert changes[3].change_type == ChangeType.CREATE
     assert changes[3].entity_id == 4
+
+
+def test_reconcile_blocks_stale_note_recreation():
+    """If a note is in the file but not in Anki, it should be deleted (orphan).
+    
+    BUT, if the note in Anki has a different ID (e.g. was re-imported), 
+    we rely on the fact that _reconcile_blocks is fed {block_id: (nid, content)}.
+    
+    If the block ID in the file is 'note_id: 100' but Anki doesn't have 100,
+    it maps to DELETE.
+    If Anki has a new note 101 that matches the content, it maps to CREATE 101.
+    """
+    existing = {
+        "note_id: 100": "Content A",
+    }
+    # Anki has note 101 with same content (simulated re-import)
+    block_by_id = {
+        "note_id: 101": (101, "Content A"),
+    }
+    
+    changes = _reconcile_blocks(block_by_id, existing_blocks=existing)
+    
+    # Implementation detail: It detects DELETE 100 and CREATE 101
+    assert len(changes) == 2
+    
+    ch_del = next(c for c in changes if c.change_type == ChangeType.DELETE)
+    assert ch_del.entity_id == 100
+    
+    ch_create = next(c for c in changes if c.change_type == ChangeType.CREATE)
+    assert ch_create.entity_id == 101
+    assert ch_create.context["block_content"] == "Content A"
+
+
+def test_reconcile_blocks_content_update_preserves_id():
+    """An update to content should generate an UPDATE change with the same ID."""
+    existing = {
+        "note_id: 1": "Old Content",
+    }
+    block_by_id = {
+        "note_id: 1": (1, "New Content"),
+    }
+    
+    changes = _reconcile_blocks(block_by_id, existing_blocks=existing)
+    
+    assert len(changes) == 1
+    assert changes[0].change_type == ChangeType.UPDATE
+    assert changes[0].entity_id == 1
+    assert changes[0].context["block_content"] == "New Content"

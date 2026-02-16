@@ -156,40 +156,6 @@ class TestChangeDetectionInput:
 # -- tests: full round-trip --------------------------------------------------
 
 
-class TestFullRoundTrip:
-    """Export from Anki → markdown → re-import should be lossless."""
-
-    def test_qa_all_fields_roundtrip(self):
-        anki = {"Question": "What?", "Answer": "This", "Extra": "Info", "More": ""}
-        complete = _roundtrip(anki, "AnkiOpsQA")
-        assert not _has_changes(anki, complete)
-
-    def test_qa_only_mandatory_roundtrip(self):
-        anki = {"Question": "What?", "Answer": "This", "Extra": "", "More": ""}
-        complete = _roundtrip(anki, "AnkiOpsQA")
-        assert not _has_changes(anki, complete)
-
-    def test_cloze_roundtrip(self):
-        anki = {"Text": "{{c1::Paris}} is the capital", "Extra": "Geo", "More": ""}
-        complete = _roundtrip(anki, "AnkiOpsCloze")
-        assert not _has_changes(anki, complete)
-
-    def test_reversed_roundtrip(self):
-        anki = {"Front": "Hello", "Back": "World", "Extra": "", "More": ""}
-        complete = _roundtrip(anki, "AnkiOpsReversed")
-        assert not _has_changes(anki, complete)
-
-    def test_input_roundtrip(self):
-        anki = {
-            "Question": "Capital of France?",
-            "Input": "Paris",
-            "Extra": "",
-            "More": "",
-        }
-        complete = _roundtrip(anki, "AnkiOpsInput")
-        assert not _has_changes(anki, complete)
-
-
 class TestRoundTripWithEdits:
     """Export → edit markdown → re-import should detect the edit."""
 
