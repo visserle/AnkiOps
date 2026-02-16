@@ -5,7 +5,7 @@ from typing import Any
 
 import requests
 
-from ankiops.config import ANKI_CONNECT_URL
+ANKI_CONNECT_URL = "http://localhost:8765"
 
 logger = logging.getLogger(__name__)
 

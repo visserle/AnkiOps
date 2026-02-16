@@ -11,7 +11,7 @@ from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
-from ankiops.config import get_auto_commit, get_collection_dir, require_collection_dir
+from ankiops.config import get_collection_dir, require_collection_dir
 from ankiops.git import git_snapshot
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.log import configure_logging, format_changes
@@ -41,8 +41,7 @@ def run_init(args):
     profile = invoke("getActiveProfile")
     media_dir = invoke("getMediaDirPath")
 
-    auto_commit = not args.no_auto_commit
-    collection_dir = initialize_collection(profile, media_dir, auto_commit)
+    collection_dir = initialize_collection(profile, media_dir)
 
     if args.tutorial:
         create_tutorial(collection_dir)
@@ -60,7 +59,7 @@ def run_am(args):
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
 
-    if get_auto_commit(collection_dir) and not args.no_auto_commit:
+    if not args.no_auto_commit:
         git_snapshot(collection_dir, "export")
 
     if args.deck:
@@ -104,7 +103,7 @@ def run_ma(args):
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
 
-    if get_auto_commit(collection_dir) and not args.no_auto_commit:
+    if not args.no_auto_commit:
         git_snapshot(collection_dir, "import")
 
     deleted_notes = 0
@@ -232,11 +231,7 @@ def main():
         "init",
         help="Initialize current directory as an AnkiOps collection",
     )
-    init_parser.add_argument(
-        "--no-auto-commit",
-        action="store_true",
-        help="Disable automatic git commits before sync operations",
-    )
+
     init_parser.add_argument(
         "--tutorial",
         action="store_true",

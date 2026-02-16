@@ -13,16 +13,13 @@ from ankiops.log import clickable_path
 logger = logging.getLogger(__name__)
 
 
-def _setup_marker(
-    collection_dir: Path, profile: str, media_dir: str, auto_commit: bool = True
-):
+def _setup_marker(collection_dir: Path, profile: str, media_dir: str):
     """Write the .ankiops marker file with the active profile name and media path."""
     marker = collection_dir / MARKER_FILE
     config = configparser.ConfigParser()
     config["ankiops"] = {
         "profile": profile,
         "media_dir": media_dir,
-        "auto_commit": str(auto_commit).lower(),
     }
     with open(marker, "w") as f:
         f.write("# AnkiOps collection \u2014 do not delete this file.\n\n")
@@ -138,9 +135,7 @@ def _setup_git(collection_dir: Path):
     logger.info(f"Initialized git repository in {collection_dir}")
 
 
-def initialize_collection(
-    profile: str, media_dir: str, auto_commit: bool = True
-) -> Path:
+def initialize_collection(profile: str, media_dir: str) -> Path:
     """Initialize the current directory as an AnkiOps collection.
 
     Creates the collection directory (if needed), writes the marker file,
@@ -150,12 +145,11 @@ def initialize_collection(
     collection_dir = get_collection_dir()
     collection_dir.mkdir(parents=True, exist_ok=True)
 
-    _setup_marker(collection_dir, profile, media_dir, auto_commit)
+    _setup_marker(collection_dir, profile, media_dir)
     _setup_media_symlink(collection_dir, media_dir)
     (collection_dir / "media" / "AnkiOpsMedia").mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
-    if auto_commit:
-        _setup_git(collection_dir)
+    _setup_git(collection_dir)
 
     return collection_dir
 

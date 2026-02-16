@@ -6,11 +6,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-ANKI_CONNECT_URL = "http://localhost:8765"
-
 MARKER_FILE = ".ankiops"
 
-AUTO_COMMIT_DEFAULT = True
+
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -154,10 +152,4 @@ def require_collection_dir(active_profile: str) -> Path:
     return collection_dir
 
 
-def get_auto_commit(collection_dir: Path) -> bool:
-    """Return whether auto-commit is enabled for this collection."""
-    marker = collection_dir / MARKER_FILE
-    if not marker.exists():
-        return AUTO_COMMIT_DEFAULT
-    config = _read_marker(marker)
-    return config.getboolean("ankiops", "auto_commit", fallback=AUTO_COMMIT_DEFAULT)
+
