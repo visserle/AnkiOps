@@ -203,6 +203,53 @@ class TestRoundTripCodeBlocks:
         restored_html = md_to_html.convert(md)
         assert "&lt;div&gt;" in restored_html or "<div>" in restored_html
 
+    def test_empty_code_block_stripped(self, md_to_html, html_to_md):
+        """Empty code blocks should be stripped during conversion."""
+        original_html = "<pre><code></code></pre>"
+        md = html_to_md.convert(original_html)
+        # Should be empty string (stripped)
+        assert md.strip() == ""
+        restored_html = md_to_html.convert(md)
+        # Should remain empty (no empty pre/code tags)
+        assert "<pre>" not in restored_html
+
+    def test_whitespace_only_code_block_stripped(self, md_to_html, html_to_md):
+        """Whitespace-only code blocks should be stripped."""
+        original_html = "<pre><code>   \n   </code></pre>"
+        md = html_to_md.convert(original_html)
+        assert md.strip() == ""
+        restored_html = md_to_html.convert(md)
+        assert "<pre>" not in restored_html
+
+    def test_trailing_whitespace_stripped_in_code_block(self, md_to_html, html_to_md):
+        """Trailing whitespace in code blocks should be stripped to prevent oscillation."""
+        # Code block with trailing spaces/newlines
+        original_html = "<pre><code>print('hello')   \n\n</code></pre>"
+        md = html_to_md.convert(original_html)
+        # Markdown should have the code block
+        assert "```" in md
+        assert "print('hello')" in md
+
+        restored_html = md_to_html.convert(md)
+        # The restored HTML should have the code, but trailing whitespace might be normalized
+        assert "print('hello')" in restored_html
+        
+        # Verify stability on second roundtrip
+        md2 = html_to_md.convert(restored_html)
+        assert md == md2
+
+    def test_multiple_code_blocks(self, md_to_html, html_to_md):
+        """Multiple code blocks separated by text."""
+        original_html = "<pre><code>code1</code></pre><br>Text<br><pre><code>code2</code></pre>"
+        md = html_to_md.convert(original_html)
+        assert "code1" in md
+        assert "code2" in md
+        
+        restored_html = md_to_html.convert(md)
+        assert restored_html.count("<pre>") == 2
+        assert "code1" in restored_html
+        assert "code2" in restored_html
+
 
 class TestRoundTripTables:
     """Test round-trip conversion of tables."""

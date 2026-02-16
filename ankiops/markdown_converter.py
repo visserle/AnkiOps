@@ -105,6 +105,9 @@ class AnkiRenderer(mistune.HTMLRenderer):
 
     def block_code(self, code, info=None):
         code = code.rstrip("\n")
+        if not code.strip():
+            return ""
+
         if info:
             lang = info.strip().split(None, 1)[0]
             try:

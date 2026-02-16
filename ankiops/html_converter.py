@@ -151,6 +151,15 @@ class HTMLToMarkdown:
             .replace("\u2260", "=/=")
         )
 
+        def _normalize_code_blocks(match):
+            content = match.group(1)
+            if not content.strip():
+                return ""
+            return "```" + content.rstrip() + "\n```"
+
+        # Normalize code blocks: remove empty ones, strictly rstrip content of others
+        md = re.sub(r"(?s)```(.*?)```", _normalize_code_blocks, md)
+
         # Collapse excessive newlines
         md = re.sub(r"\n{3,}", "\n\n", md)
 
