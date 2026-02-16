@@ -12,7 +12,10 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ankiops.markdown_converter import MarkdownToHTML
 
 from ankiops.anki_client import invoke
 from ankiops.config import (
@@ -97,13 +100,14 @@ class FileState:
         blocks = remaining.split(NOTE_SEPARATOR)
         parsed_notes = []
         for block in blocks:
-            # Skip empty blocks or blocks with only whitespace/dashes (trailing separators)
+            # Skip empty or dashes-only blocks
+            # (whitespace/trailing separators)
             if not block.strip() or set(block.strip()) <= {"-"}:
                 continue
 
             note = Note.from_block(block)
             parsed_notes.append(note)
-        
+
         return FileState(
             file_path=file_path,
             raw_content=raw_content,
@@ -187,7 +191,10 @@ class FileState:
         self,
         id_assignments: list[tuple[Note, int]],
     ) -> None:
-        """Raise if new notes share a first line (would break text-based ID insertion)."""
+        """Raise if new notes share a first line.
+
+        Would break text-based ID insertion.
+        """
         first_lines: dict[str, list[str]] = {}
         for note, _ in id_assignments:
             if note.note_id is not None:
@@ -321,8 +328,9 @@ class Note:
             fields[current_field] = "\n".join(current_content).strip()
 
         if not fields:
-            # We reached here with a non-empty block (guaranteed by from_file filtering)
-            # but found no fields. This means the block has content but no field prefixes.
+            # We reached here with a non-empty block
+            # (guaranteed by from_file filtering) but found
+            # no fields — block has content but no prefixes.
             raise ValueError(
                 f"Found content but no valid field prefixes (e.g. 'Q: ', 'A: ') "
                 f"in block starting with: '{block.strip()[:50]}...'"
@@ -353,7 +361,7 @@ class Note:
     @property
     def identifier(self) -> str:
         """Stable identifier for error messages."""
-        if self.note_id:
+        if self.note_id is not None:
             return f"note_id: {self.note_id}"
         return f"'{self.first_line[:60]}...'"
 
@@ -421,7 +429,7 @@ class Note:
                 ]
         return []
 
-    def to_html(self, converter) -> dict[str, str]:
+    def to_html(self, converter: "MarkdownToHTML") -> dict[str, str]:
         """Convert all field values from markdown to HTML.
 
         The returned dict contains an entry for every field defined by

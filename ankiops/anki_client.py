@@ -9,18 +9,24 @@ ANKI_CONNECT_URL = "http://localhost:8765"
 
 logger = logging.getLogger(__name__)
 
+_session = requests.Session()
+
+
+class AnkiConnectError(Exception):
+    """Raised when AnkiConnect returns an error response."""
+
 
 def invoke(action: str, **params) -> Any:
     """Send a request to AnkiConnect and return the result.
 
-    Raises an Exception when AnkiConnect returns an error.
+    Raises AnkiConnectError when AnkiConnect returns an error.
     """
-    response = requests.post(
+    response = _session.post(
         ANKI_CONNECT_URL,
         json={"action": action, "version": 6, "params": params},
         timeout=10,
     )
     result = response.json()
     if result.get("error"):
-        raise Exception(f"AnkiConnect error: {result['error']}")
+        raise AnkiConnectError(result["error"])
     return result["result"]

@@ -238,10 +238,8 @@ def export_collection(
     output_path = Path(output_dir)
 
     # Phase 1: Fetch all Anki state
-    # Phase 1: Fetch all Anki state
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
-    all_note_ids = set(anki.notes_by_id.keys())
 
     # Phase 2: Read all existing markdown files
     files_by_deck_id: dict[int, FileState] = {}
@@ -404,5 +402,5 @@ def export_collection(
         deck_results=deck_results,
         renamed_files=renamed_files,
         deleted_deck_files=deleted_deck_files,
-        deleted_orphan_notes=deleted_orphan_notes,  # Consistently 0 if we rely on _sync_deck
+        deleted_orphan_notes=deleted_orphan_notes,
     )

@@ -106,7 +106,10 @@ def _read_marker(marker: Path) -> configparser.ConfigParser:
 
 
 def require_collection_dir(active_profile: str) -> Path:
-    """Return the collection directory, or exit if not initialized or profile mismatches."""
+    """Return the collection directory, or exit if not initialized.
+
+    Also exits if the active profile doesn't match.
+    """
     collection_dir = get_collection_dir()
     marker = collection_dir / MARKER_FILE
     if not marker.exists():

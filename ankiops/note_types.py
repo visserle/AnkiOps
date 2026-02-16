@@ -9,7 +9,7 @@ Architecture:
 import logging
 from importlib import resources
 
-from ankiops.anki_client import invoke
+from ankiops.anki_client import AnkiConnectError, invoke
 from ankiops.config import NOTE_CONFIG
 
 # Editor-side field properties (set via AnkiConnect, not card templates)
@@ -341,26 +341,33 @@ def ensure_note_types() -> None:
 
     # ---- Phase 3: Diff + build action dicts ----
     write_actions: list[dict] = []
+    created_models: list[str] = []
+    updated_models: list[str] = []
 
     for model_name in models_to_create:
         write_actions.extend(
             _create_model_actions(model_name, is_cloze="cloze" in model_name.lower())
         )
-        logger.info(f"Created note type '{model_name}' in Anki")
+        created_models.append(model_name)
 
     for model_name in models_to_check:
         if not _is_model_up_to_date(model_name, model_states[model_name]):
             write_actions.extend(
                 _update_model_actions(model_name, model_states[model_name])
             )
-            logger.info(f"Updated note type '{model_name}' in Anki")
+            updated_models.append(model_name)
 
     # ---- Phase 4: Batch-write all changes ----
     if write_actions:
         results = invoke("multi", actions=write_actions)
         errors = [r for r in results if r is not None and isinstance(r, str)]
         if errors:
-            raise Exception(f"Note type sync errors: {errors}")
+            raise AnkiConnectError(f"Note type sync errors: {errors}")
+
+        for model_name in created_models:
+            logger.info(f"Created note type '{model_name}' in Anki")
+        for model_name in updated_models:
+            logger.info(f"Updated note type '{model_name}' in Anki")
 
 
 if __name__ == "__main__":

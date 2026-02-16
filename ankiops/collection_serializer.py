@@ -1,5 +1,6 @@
 """Serialize and deserialize AnkiOps collections to/from JSON format."""
 
+import configparser
 import hashlib
 import json
 import logging
@@ -145,14 +146,9 @@ def serialize_collection_to_json(
         raise ValueError(f"Not a AnkiOps collection: {collection_dir}")
 
     # Parse .ankiops config file to get media_dir
-    config_content = marker_path.read_text()
-    media_dir_path = None
-
-    for line in config_content.split("\n"):
-        line = line.strip()
-        if line.startswith("media_dir ="):
-            media_dir_path = line.split("=", 1)[1].strip()
-            break
+    config = configparser.ConfigParser()
+    config.read(marker_path)
+    media_dir_path = config.get("ankiops", "media_dir", fallback=None)
 
     # Build JSON structure
     serialized_data = {
@@ -383,7 +379,8 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
                                     # Track rename for updating references
                                     media_rename_map[filename] = new_filename
                                     logger.info(
-                                        f"Renaming {filename} → {new_filename} (conflict)"
+                                        f"Renaming {filename} → "
+                            f"{new_filename} (conflict)"
                                     )
                                     renamed_count += 1
                                     break
@@ -453,7 +450,8 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
             note_config = NOTE_CONFIG.get(note_type)
             if not note_config:
                 logger.warning(
-                    f"Unknown note type '{note_type}' in deck '{deck_name}', skipping note"
+                    f"Unknown note type '{note_type}' "
+                    f"in deck '{deck_name}', skipping note"
                 )
                 continue
 
@@ -479,11 +477,12 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
         # Write file
         content = "\n".join(lines)
         if overwrite or not output_path.exists():
-            output_path.write_text(content)
+            output_path.write_text(content, encoding="utf-8")
             logger.info(f"  Created {clickable_path(output_path)} ({len(notes)} notes)")
         else:
             logger.debug(
-                f"Skipped {clickable_path(output_path)} (already exists, use --overwrite to replace)"
+                f"Skipped {clickable_path(output_path)} "
+                "(already exists, use --overwrite to replace)"
             )
 
         total_decks += 1

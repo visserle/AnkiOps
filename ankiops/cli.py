@@ -176,14 +176,6 @@ def run_ma(args):
 def run_serialize(args):
     """Serialize collection to JSON format."""
     collection_dir = get_collection_dir()
-    marker_path = collection_dir / ".ankiops"
-
-    if not marker_path.exists():
-        logger.error(
-            f"Not an AnkiOps collection ({collection_dir}). "
-            "Run 'ankiops init' first or navigate to a collection directory."
-        )
-        raise SystemExit(1)
 
     if args.output:
         output_file = Path(args.output)
@@ -300,7 +292,10 @@ def main():
     serialize_parser.add_argument(
         "--no-ids",
         action="store_true",
-        help="Exclude note_id and deck_id from serialized output (useful for sharing/templates)",
+        help=(
+            "Exclude note_id and deck_id from serialized output "
+            "(useful for sharing/templates)"
+        ),
     )
     serialize_parser.add_argument(
         "--include-media",
@@ -341,7 +336,7 @@ def main():
         print()
         print("Available commands:")
         print(
-            "  init              Initialize current directory as a AnkiOps collection"
+            "  init              Initialize current directory as an AnkiOps collection"
         )
         print("  anki-to-markdown  Export Anki decks to Markdown files (alias: am)")
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")

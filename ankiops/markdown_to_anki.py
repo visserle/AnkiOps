@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from ankiops.anki_client import invoke
+from ankiops.anki_client import AnkiConnectError, invoke
 from ankiops.log import clickable_path, format_changes
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
@@ -379,9 +379,9 @@ def _sync_file(
                     if res is not None:
                         result.errors.append(f"Failed to move cards: {res}")
                     else:
-                        # Log implicitly via changes check later?
-                        # Or log now.
-                        pass  # Logging handled by summary or Change object if we want update it
+                        logger.debug(
+                            f"Moved cards to '{deck_name}'"
+                        )
 
                 elif tag == "update":
                     # We know which change this corresponds to via update_changes list
@@ -407,7 +407,7 @@ def _sync_file(
                     else:
                         result.errors.append(f"Note new ({change.entity_repr}): {res}")
 
-        except Exception as e:
+        except AnkiConnectError as e:
             # The entire multi call failed — attribute errors to all actions
             for change in update_changes:
                 result.errors.append(
