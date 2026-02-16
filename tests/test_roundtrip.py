@@ -167,6 +167,35 @@ class TestRoundTripWithEdits:
     def html_to_md(self):
         return HTMLToMarkdown()
 
+    def test_character_conversions(self, md_to_html, html_to_md):
+        """Verify arrow and not-equal conversions."""
+        test_cases = [
+            ("a --> b", "a \u2192 b"),
+            ("a ==> b", "a \u21d2 b"),
+            ("a =/= b", "a \u2260 b"),
+        ]
+
+        for md_in, expected_html in test_cases:
+            # Markdown -> HTML
+            html_out = md_to_html.convert(md_in)
+            assert expected_html in html_out
+
+            # HTML -> Markdown
+            md_out = html_to_md.convert(html_out)
+            assert md_out == md_in
+
+    def test_character_conversions_complex_roundtrip(self, md_to_html, html_to_md):
+        """Verify complex string conversions."""
+        md_in = "If a --> b and b ==> c, then a =/= c is maybe false."
+        html_out = md_to_html.convert(md_in)
+
+        assert "\u2192" in html_out
+        assert "\u21d2" in html_out
+        assert "\u2260" in html_out
+
+        md_back = html_to_md.convert(html_out)
+        assert md_back == md_in
+
     def test_remove_extra_field_from_exported_markdown(self, html_to_md, md_to_html):
         """The exact bug scenario: export note with Extra, remove it, re-import."""
         anki_fields = {

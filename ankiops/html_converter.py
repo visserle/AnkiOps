@@ -146,7 +146,11 @@ class HTMLToMarkdown:
         md = _restore_escaped_chars(md)
 
         # Arrow replacements (convert Unicode arrows back to ASCII)
-        md = md.replace("\u2192", "-->").replace("\u21d2", "==>")
+        md = (
+            md.replace("\u2192", "-->")
+            .replace("\u21d2", "==>")
+            .replace("\u2260", "=/=")
+        )
 
         # Collapse excessive newlines
         md = re.sub(r"\n{3,}", "\n\n", md)

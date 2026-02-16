@@ -143,7 +143,11 @@ class MarkdownToHTML:
 
         # Arrow replacements: Replace before parsing to avoid conflicts
         # with markdown syntax (== is used for highlighting)
-        markdown = markdown.replace("==>", "\u21d2").replace("-->", "\u2192")
+        markdown = (
+            markdown.replace("==>", "\u21d2")
+            .replace("-->", "\u2192")
+            .replace("=/=", "\u2260")
+        )
 
         # Convert $$ and $ delimiters to \[...\] and \(...\) format
         # Anki only supports backslash delimiters, not dollar signs
