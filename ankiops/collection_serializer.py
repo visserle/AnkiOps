@@ -9,7 +9,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import MARKER_FILE, NOTE_TYPES, get_collection_dir
+from ankiops.config import MARKER_FILE, NOTE_CONFIG, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
 
@@ -450,7 +450,7 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
                 lines.append(f"<!-- note_id: {note_id} -->")
 
             # Get field mappings for this note type
-            note_config = NOTE_TYPES.get(note_type)
+            note_config = NOTE_CONFIG.get(note_type)
             if not note_config:
                 logger.warning(
                     f"Unknown note type '{note_type}' in deck '{deck_name}', skipping note"
@@ -458,7 +458,7 @@ def deserialize_collection_from_json(json_file: Path, overwrite: bool = False) -
                 continue
 
             # Format fields according to note type configuration
-            for field_name, prefix, mandatory in note_config["field_mappings"]:
+            for field_name, prefix in note_config:
                 field_content = fields.get(field_name)
                 if field_content:
                     # Update media references if files were renamed

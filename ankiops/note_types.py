@@ -10,7 +10,7 @@ import logging
 from importlib import resources
 
 from ankiops.anki_client import invoke
-from ankiops.config import NOTE_TYPES
+from ankiops.config import NOTE_CONFIG
 
 # Editor-side field properties (set via AnkiConnect, not card templates)
 FIELD_DESCRIPTIONS: dict[str, str] = {
@@ -132,8 +132,8 @@ def _field_property_actions(
 
 def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
     """Return action dicts to create a note type from scratch."""
-    cfg = NOTE_TYPES[model_name]
-    fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
+    note_config = NOTE_CONFIG[model_name]
+    fields = [field_name for field_name, _ in note_config]
 
     css = _load_template("Styling.css")
     card_templates = _get_card_templates(model_name)
@@ -160,8 +160,8 @@ def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
         model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
                      'descriptions', 'fonts'.
     """
-    cfg = NOTE_TYPES[model_name]
-    expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
+    note_config = NOTE_CONFIG[model_name]
+    expected_fields = [field_name for field_name, _ in note_config]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
 
@@ -216,8 +216,8 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
         model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
                      'descriptions', 'fonts'.
     """
-    cfg = NOTE_TYPES[model_name]
-    expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
+    note_config = NOTE_CONFIG[model_name]
+    expected_fields = [field_name for field_name, _ in note_config]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
 
@@ -317,8 +317,8 @@ def ensure_note_types() -> None:
       4. Batch-write all creates/updates (1 multi call)
     """
     existing = set(invoke("modelNames"))
-    models_to_check = [m for m in NOTE_TYPES if m in existing]
-    models_to_create = [m for m in NOTE_TYPES if m not in existing]
+    models_to_check = [m for m in NOTE_CONFIG if m in existing]
+    models_to_create = [m for m in NOTE_CONFIG if m not in existing]
 
     # ---- Phase 2: Batch-read all model state ----
     model_states: dict[str, dict] = {}

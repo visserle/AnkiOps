@@ -8,65 +8,42 @@ logger = logging.getLogger(__name__)
 
 MARKER_FILE = ".ankiops"
 
-
-
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
-COMMON_FIELDS = [
-    ("Extra", "E:", False),
-    ("More", "M:", False),
-    ("Source", "S:", False),
-    ("AI Notes", "AI:", False),
-]
-
-# Each note type has a list of field mappings, where each mapping is a tuple of:
-# (field_name, prefix, required)
-NOTE_TYPES = {
-    "AnkiOpsQA": {
-        "field_mappings": [
-            ("Question", "Q:", True),
-            ("Answer", "A:", True),
-            *COMMON_FIELDS,
-        ],
-    },
-    "AnkiOpsReversed": {
-        "field_mappings": [
-            ("Front", "F:", True),
-            ("Back", "B:", True),
-            *COMMON_FIELDS,
-        ],
-    },
-    "AnkiOpsCloze": {
-        "field_mappings": [
-            ("Text", "T:", True),
-            *COMMON_FIELDS,
-        ],
-    },
-    "AnkiOpsInput": {
-        "field_mappings": [
-            ("Question", "Q:", True),
-            ("Input", "I:", True),
-            *COMMON_FIELDS,
-        ],
-    },
-    "AnkiOpsChoice": {
-        "field_mappings": [
-            ("Question", "Q:", True),
-            ("Choice 1", "C1:", True),
-            ("Choice 2", "C2:", False),
-            ("Choice 3", "C3:", False),
-            ("Choice 4", "C4:", False),
-            ("Choice 5", "C5:", False),
-            ("Choice 6", "C6:", False),
-            ("Choice 7", "C7:", False),
-            ("Choice 8", "C8:", False),
-            ("Answer", "A:", True),
-            *COMMON_FIELDS,
-        ],
-    },
+# Each note type maps to a list of (field_name, prefix) tuples.
+MANDATORY_FIELDS = {
+    "AnkiOpsQA": [
+        ("Question", "Q:"),
+        ("Answer", "A:"),
+    ],
+    "AnkiOpsReversed": [
+        ("Front", "F:"),
+        ("Back", "B:"),
+    ],
+    "AnkiOpsCloze": [
+        ("Text", "T:"),
+    ],
+    "AnkiOpsInput": [
+        ("Question", "Q:"),
+        ("Input", "I:"),
+    ],
+    "AnkiOpsChoice": [
+        ("Question", "Q:"),
+        *[(f"Choice {i}", f"C{i}:") for i in range(1, 9)],
+        ("Answer", "A:"),
+    ],
 }
 
-SUPPORTED_NOTE_TYPES = list(NOTE_TYPES.keys())
+COMMON_FIELDS = [
+    ("Extra", "E:"),
+    ("More", "M:"),
+    ("Source", "S:"),
+    ("AI Notes", "AI:"),
+]
+
+NOTE_CONFIG = {k: v + COMMON_FIELDS for k, v in MANDATORY_FIELDS.items()}
+
+SUPPORTED_NOTE_TYPES = list(NOTE_CONFIG.keys())
 
 
 def sanitize_filename(deck_name: str) -> str:

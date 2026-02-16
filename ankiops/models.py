@@ -14,15 +14,17 @@ from pathlib import Path
 
 from ankiops.anki_client import invoke
 from ankiops.config import (
+    MANDATORY_FIELDS,
+    NOTE_CONFIG,
     NOTE_SEPARATOR,
-    NOTE_TYPES,
     SUPPORTED_NOTE_TYPES,
 )
 
 # prefix -> field name mapping for all note types, e.g. "Q:" -> "Question"
+# Dynamically built from NOTE_CONFIG to avoid duplication
 PREFIX_TO_FIELD: dict[str, str] = {}
-for _cfg in NOTE_TYPES.values():
-    for _field_name, _prefix, _ in _cfg["field_mappings"]:
+for _field_mappings in NOTE_CONFIG.values():
+    for _field_name, _prefix in _field_mappings:
         PREFIX_TO_FIELD[_prefix] = _field_name
 FIELD_TO_PREFIX = {v: k for k, v in PREFIX_TO_FIELD.items()}
 
@@ -199,30 +201,32 @@ class Note:
 
     @staticmethod
     def infer_note_type(fields: dict[str, str]) -> str:
-        """Infer note type from parsed fields based on required fields.
+        """Infer note type from parsed fields.
 
-        Checks all note types except AnkiOpsQA first (which is more specific),
-        then falls back to AnkiOpsQA as the generic catch-all.
+        Checks all note types from most specific to least specific,
+        with AnkiOpsQA as the generic catch-all.
         """
-        # Check all note types except AnkiOpsQA first
-        for note_type, config in NOTE_TYPES.items():
-            if note_type == "AnkiOpsQA":
+        items = []
+        for note_type, mandatory_fields in MANDATORY_FIELDS.items():
+            if note_type == "AnkiOpsChoice":
                 continue
+            elif note_type == "AnkiOpsQA":
+                identifying = {"Question", "Answer"}
+            else:
+                identifying = {f[0] for f in mandatory_fields}
+            items.append((note_type, identifying))
 
-            required_fields = {
-                field_name
-                for field_name, _, is_required in config["field_mappings"]
-                if is_required
-            }
+        # Sort by number of identifying fields (descending), then name
+        # But ensure AnkiOpsQA is always last
+        items.sort(key=lambda x: (x[0] == "AnkiOpsQA", -len(x[1]), x[0]))
 
-            if required_fields.issubset(fields.keys()):
+        # Special case: Choice notes are inferred by Question + ANY Choice field
+        if "Question" in fields and any(k.startswith("Choice ") for k in fields):
+            return "AnkiOpsChoice"
+
+        for note_type, identifying in items:
+            if identifying.issubset(fields.keys()):
                 return note_type
-
-        # Fall back to AnkiOpsQA when both Question and Answer fields are present.
-        # Validation of required fields happens later in validate().
-        qa_fields = {"Question", "Answer"}
-        if qa_fields.issubset(fields.keys()):
-            return "AnkiOpsQA"
 
         raise ValueError(
             "Cannot determine note type from fields: " + ", ".join(fields.keys())
@@ -331,13 +335,20 @@ class Note:
         Returns a list of error messages (empty if valid).
         """
         errors: list[str] = []
-        note_config = NOTE_TYPES.get(self.note_type)
-        if not note_config:
+        if self.note_type not in NOTE_CONFIG:
             errors.append(f"Unknown note type '{self.note_type}'")
             return errors
 
-        for field_name, prefix, mandatory in note_config["field_mappings"]:
-            if mandatory and not self.fields.get(field_name):
+        choice_count = 0
+        choice_fields = []
+        for field_name, prefix in MANDATORY_FIELDS.get(self.note_type, []):
+            if "Choice" in field_name:
+                choice_fields.append(field_name)
+                if self.fields.get(field_name):
+                    choice_count += 1
+                continue # Skip individual Choice field check in mandatory loop
+
+            if not self.fields.get(field_name):
                 errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
 
         if self.note_type == "AnkiOpsCloze":
@@ -349,11 +360,13 @@ class Note:
                 )
 
         if self.note_type == "AnkiOpsChoice":
-            errors.extend(self._validate_choice_answers())
+            if choice_count < 2:
+                errors.append("AnkiOpsChoice note must have at least 2 choices")
+            errors.extend(self._validate_choice_answers(choice_fields))
 
         return errors
 
-    def _validate_choice_answers(self) -> list[str]:
+    def _validate_choice_answers(self, choice_fields: list[str]) -> list[str]:
         """Validate AnkiOpsChoice answer format and range."""
         answer = self.fields.get("Answer", "")
         if not answer:
@@ -369,7 +382,7 @@ class Note:
             ]
 
         max_choice = max(
-            (i for i in range(1, 9) if self.fields.get(f"Choice {i}")),
+            (int(f.split()[-1]) for f in choice_fields if self.fields.get(f)),
             default=0,
         )
         for n in answer_ints:
@@ -398,9 +411,7 @@ class Note:
             name: converter.convert(content) for name, content in self.fields.items()
         }
 
-        for field_name, _, _ in NOTE_TYPES.get(self.note_type, {}).get(
-            "field_mappings", []
-        ):
+        for field_name, _ in NOTE_CONFIG.get(self.note_type, []):
             html.setdefault(field_name, "")
 
         return html
@@ -513,14 +524,14 @@ class AnkiNote:
         Returns:
             Markdown block string starting with ``<!-- note_id: ... -->``.
         """
-        field_mappings = NOTE_TYPES[self.note_type]["field_mappings"]
+        note_config = NOTE_CONFIG[self.note_type]
         lines = [f"<!-- note_id: {self.note_id} -->"]
 
-        for field_name, prefix, mandatory in field_mappings:
+        for field_name, prefix in note_config:
             value = self.fields.get(field_name, "")
             if value:
                 md = converter.convert(value)
-                if md or mandatory:
+                if md:
                     lines.append(f"{prefix} {md}")
 
         return "\n".join(lines)

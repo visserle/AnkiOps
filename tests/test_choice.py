@@ -92,14 +92,22 @@ class TestValidateChoiceNote:
         assert any("Question" in e for e in errors)
 
     def test_missing_mandatory_choice(self):
-        block = "Q: Question?\nA: 1"
         parsed_note = Note(
             note_id=1,
             note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Answer": "1"},
         )
         errors = parsed_note.validate()
-        assert any("Choice 1" in e or "C1:" in e for e in errors)
+        assert any("at least 2 choices" in e for e in errors)
+
+    def test_only_one_choice(self):
+        parsed_note = Note(
+            note_id=1,
+            note_type="AnkiOpsChoice",
+            fields={"Question": "Q?", "Choice 1": "A", "Answer": "1"},
+        )
+        errors = parsed_note.validate()
+        assert any("at least 2 choices" in e for e in errors)
 
     def test_missing_mandatory_answer(self):
         block = "Q: Question?\nC1: Choice 1\nC2: Choice 2"

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ankiops.config import NOTE_SEPARATOR, NOTE_TYPES
+from ankiops.config import NOTE_SEPARATOR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import AnkiNote, FileState, Note
@@ -162,14 +162,6 @@ class TestExtractNoteBlocks:
 class TestValidateNote:
     """Test Note.validate() for mandatory fields and unknown prefixes."""
 
-    def _mandatory_fields(self, note_type: str) -> list[tuple[str, str]]:
-        """Return (field_name, prefix) pairs for mandatory fields of a note type."""
-        return [
-            (name, prefix)
-            for name, prefix, mandatory in NOTE_TYPES[note_type]["field_mappings"]
-            if mandatory
-        ]
-
     def test_valid_qa_card(self):
         block = "<!-- note_id: 1 -->\nQ: Question\nA: Answer"
         parsed_note = Note.from_block(block)
@@ -193,8 +185,7 @@ class TestValidateNote:
             fields={"Extra": "Only extra"},
         )
         errors = parsed_note.validate()
-        for field_name, prefix in self._mandatory_fields("AnkiOpsCloze"):
-            assert any(field_name in e and prefix in e for e in errors)
+        assert any("Text" in e and "T:" in e for e in errors)
 
     def test_no_unique_prefix_raises(self):
         block = "<!-- note_id: 1 -->\nE: Only extra"
