@@ -135,13 +135,17 @@ def _sync_file(
     Phases:
       0. Resolve deck (by deck_id or filename)
       1. Classify notes (existing vs new) + convert md → html
-      2. Update existing notes + move cards between decks
-      3. Delete orphaned notes
-      4. Create new notes (including stale re-creations)
-      5. Return result + pending file write
+      2. Build unified action list (createDeck, changeDeck, updates, deletes, creates)
+      3. Execute single multi call + route results
+      4. Return result + pending file write
+
+    All Anki mutations are batched into a single ``invoke("multi", ...)``
+    call.  AnkiConnect executes multi-actions sequentially, so ordering
+    (e.g. createDeck before addNote) is preserved.
     """
     # ---- Phase 0: Resolve deck ----
     deck_id_to_write: int | None = None
+    needs_create_deck = False
 
     if fs.deck_id and fs.deck_id in anki.id_to_deck_name:
         deck_name = anki.id_to_deck_name[fs.deck_id]
@@ -150,11 +154,7 @@ def _sync_file(
         deck_name = fs.file_path.stem.replace("__", "::")
 
         if deck_name not in anki.deck_names_and_ids:
-            new_deck_id = invoke("createDeck", deck=deck_name)
-            anki.deck_names_and_ids[deck_name] = new_deck_id
-            anki.id_to_deck_name[new_deck_id] = deck_name
-            deck_id_to_write = new_deck_id
-            logger.info(f"Created new deck '{deck_name}' (id: {new_deck_id})")
+            needs_create_deck = True
         elif not fs.deck_id:
             deck_id_to_write = anki.deck_names_and_ids[deck_name]
             logger.debug(f"Wrote deck_id {deck_id_to_write} to {fs.file_path.name}")
@@ -199,9 +199,16 @@ def _sync_file(
         else:
             new.append((note, html_fields))
 
-    # ---- Phase 2: Update existing + move cards ----
+    # ---- Phase 2: Build unified action list ----
+    actions: list[dict] = []
+    tags: list[str] = []  # one tag per action for result routing
 
-    # Safety check: note type mismatches
+    # -- createDeck (must come first so the deck exists for addNote) --
+    if needs_create_deck:
+        actions.append({"action": "createDeck", "params": {"deck": deck_name}})
+        tags.append("create_deck")
+
+    # -- Safety check: note type mismatches --
     for note, _ in existing:
         anki_note = anki.notes.get(note.note_id)  # type: ignore[arg-type]
         if anki_note and anki_note.note_type != note.note_type:
@@ -215,7 +222,7 @@ def _sync_file(
                 f"or delete the old note_id HTML tag to re-create the note."
             )
 
-    # Move cards that are in the wrong deck
+    # -- changeDeck --
     cards_to_move: list[int] = []
     for note, _ in existing:
         anki_note = anki.notes.get(note.note_id)  # type: ignore[arg-type]
@@ -227,27 +234,13 @@ def _sync_file(
                 cards_to_move.append(cid)
 
     if cards_to_move:
-        try:
-            invoke("changeDeck", cards=cards_to_move, deck=deck_name)
-            moved_notes: set[int] = set()
-            for cid in cards_to_move:
-                card = anki.cards.get(cid)
-                if card:
-                    nid = card["note"]
-                    if nid not in moved_notes:
-                        moved_notes.add(nid)
-                        logger.debug(
-                            f"Moved note {nid} from "
-                            f"'{card['deckName']}' to '{deck_name}'"
-                        )
-            result.moved += len(moved_notes)
-        except Exception as e:
-            for note, _ in existing:
-                result.errors.append(f"Note {note.note_id}: failed to move deck: {e}")
+        actions.append(
+            {"action": "changeDeck", "params": {"cards": cards_to_move, "deck": deck_name}}
+        )
+        tags.append("change_deck")
 
-    # Build update batch
+    # -- updateNoteFields --
     stale: list[tuple[Note, dict[str, str]]] = []
-    updates: list[dict] = []
     update_notes: list[Note] = []
 
     for note, html_fields in existing:
@@ -264,32 +257,18 @@ def _sync_file(
             result.skipped += 1
             continue
 
-        updates.append(
+        actions.append(
             {
                 "action": "updateNoteFields",
                 "params": {"note": {"id": note.note_id, "fields": html_fields}},
             }
         )
         update_notes.append(note)
-
-    if updates:
-        try:
-            multi_results = invoke("multi", actions=updates)
-            for i, res in enumerate(multi_results):
-                if res is None:
-                    result.updated += 1
-                else:
-                    result.errors.append(
-                        f"Note {update_notes[i].note_id} "
-                        f"({update_notes[i].identifier}): {res}"
-                    )
-        except Exception as e:
-            for note in update_notes:
-                result.errors.append(f"Note {note.note_id} ({note.identifier}): {e}")
+        tags.append("update")
 
     new.extend(stale)
 
-    # ---- Phase 3: Delete orphaned notes ----
+    # -- deleteNotes --
     md_note_ids = {n.note_id for n in fs.parsed_notes if n.note_id is not None}
     anki_deck_note_ids = anki.deck_note_ids.get(deck_name, set()).copy()
     orphaned = anki_deck_note_ids - md_note_ids
@@ -311,14 +290,13 @@ def _sync_file(
                 f"{f' (cards {cid_str})' if cid_str else ''}"
                 f" from Anki"
             )
-        invoke("deleteNotes", notes=list(orphaned))
-        result.deleted += len(orphaned)
+        actions.append({"action": "deleteNotes", "params": {"notes": list(orphaned)}})
+        tags.append("delete")
 
-    # ---- Phase 4: Create new notes ----
-    id_assignments: list[tuple[Note, int]] = []
-
-    if new:
-        create_actions = [
+    # -- addNote --
+    create_notes: list[Note] = []
+    for note, html_fields in new:
+        actions.append(
             {
                 "action": "addNote",
                 "params": {
@@ -330,23 +308,86 @@ def _sync_file(
                     }
                 },
             }
-            for note, html_fields in new
-        ]
+        )
+        create_notes.append(note)
+        tags.append("create")
 
+    # ---- Phase 3: Execute single multi call + route results ----
+    id_assignments: list[tuple[Note, int]] = []
+
+    if actions:
+        logger.debug(f"Sending {len(actions)} batched actions for '{deck_name}'")
         try:
-            create_results = invoke("multi", actions=create_actions)
-            for i, note_id in enumerate(create_results):
-                note, _ = new[i]
-                if note_id and isinstance(note_id, int):
-                    id_assignments.append((note, note_id))
-                    result.created += 1
-                else:
-                    result.errors.append(f"Note new ({note.identifier}): {note_id}")
-        except Exception as e:
-            for note, _ in new:
-                result.errors.append(f"Note new ({note.identifier}): {e}")
+            multi_results = invoke("multi", actions=actions)
 
-    # ---- Phase 5: Return result + pending write ----
+            update_idx = 0
+            create_idx = 0
+            for tag, res in zip(tags, multi_results):
+                if tag == "create_deck":
+                    new_deck_id = res
+                    anki.deck_names_and_ids[deck_name] = new_deck_id
+                    anki.id_to_deck_name[new_deck_id] = deck_name
+                    deck_id_to_write = new_deck_id
+                    logger.info(
+                        f"Created new deck '{deck_name}' (id: {new_deck_id})"
+                    )
+
+                elif tag == "change_deck":
+                    if res is not None:
+                        result.errors.append(f"Failed to move cards: {res}")
+                    else:
+                        moved_notes: set[int] = set()
+                        for cid in cards_to_move:
+                            card = anki.cards.get(cid)
+                            if card:
+                                nid = card["note"]
+                                if nid not in moved_notes:
+                                    moved_notes.add(nid)
+                                    logger.debug(
+                                        f"Moved note {nid} from "
+                                        f"'{card['deckName']}' to '{deck_name}'"
+                                    )
+                        result.moved += len(moved_notes)
+
+                elif tag == "update":
+                    note = update_notes[update_idx]
+                    update_idx += 1
+                    if res is None:
+                        result.updated += 1
+                    else:
+                        result.errors.append(
+                            f"Note {note.note_id} ({note.identifier}): {res}"
+                        )
+
+                elif tag == "delete":
+                    if res is not None:
+                        result.errors.append(f"Failed to delete orphaned notes: {res}")
+                    else:
+                        result.deleted += len(orphaned)
+
+                elif tag == "create":
+                    note = create_notes[create_idx]
+                    create_idx += 1
+                    if res and isinstance(res, int):
+                        id_assignments.append((note, res))
+                        result.created += 1
+                    else:
+                        result.errors.append(
+                            f"Note new ({note.identifier}): {res}"
+                        )
+
+        except Exception as e:
+            # The entire multi call failed — attribute errors to all actions
+            for note in update_notes:
+                result.errors.append(f"Note {note.note_id} ({note.identifier}): {e}")
+            for note in create_notes:
+                result.errors.append(f"Note new ({note.identifier}): {e}")
+            if cards_to_move:
+                result.errors.append(f"Failed to move cards: {e}")
+            if orphaned:
+                result.errors.append(f"Failed to delete orphaned notes: {e}")
+
+    # ---- Phase 4: Return result + pending write ----
     pending = _PendingWrite(
         file_state=fs,
         deck_id_to_write=deck_id_to_write,

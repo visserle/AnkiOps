@@ -18,7 +18,7 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
 }
 FIELD_FONT_SIZES: dict[str, int] = {
     "Source": 14,
-    "AI Notes": 14, 
+    "AI Notes": 14,
 }
 
 logger = logging.getLogger(__name__)
@@ -70,27 +70,63 @@ def _get_card_templates(model_name: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _field_property_actions(model_name: str) -> list[dict]:
-    """Return action dicts for editor-side field properties (descriptions, font sizes)."""
-    actions: list[dict] = []
+def _field_property_actions(
+    model_name: str, model_state: dict | None = None
+) -> list[dict]:
+    """Return action dicts for editor-side field properties (descriptions, font sizes).
+
+    When model_state is provided (update path), only emits actions for values
+    that differ from the current Anki state.  When None (create path), emits
+    all actions unconditionally.
+    """
+    # Create path: emit all actions unconditionally
+    if model_state is None:
+        actions: list[dict] = []
+        for field_name, description in FIELD_DESCRIPTIONS.items():
+            actions.append(
+                _action(
+                    "modelFieldSetDescription",
+                    modelName=model_name,
+                    fieldName=field_name,
+                    description=description,
+                )
+            )
+        for field_name, size in FIELD_FONT_SIZES.items():
+            actions.append(
+                _action(
+                    "modelFieldSetFontSize",
+                    modelName=model_name,
+                    fieldName=field_name,
+                    fontSize=size,
+                )
+            )
+        return actions
+
+    # Update path: only emit actions for values that differ
+    actions = []
+    current_descriptions = model_state["descriptions"]
+    current_fonts = model_state["fonts"]
+
     for field_name, description in FIELD_DESCRIPTIONS.items():
-        actions.append(
-            _action(
-                "modelFieldSetDescription",
-                modelName=model_name,
-                fieldName=field_name,
-                description=description,
+        if current_descriptions.get(field_name) != description:
+            actions.append(
+                _action(
+                    "modelFieldSetDescription",
+                    modelName=model_name,
+                    fieldName=field_name,
+                    description=description,
+                )
             )
-        )
     for field_name, size in FIELD_FONT_SIZES.items():
-        actions.append(
-            _action(
-                "modelFieldSetFontSize",
-                modelName=model_name,
-                fieldName=field_name,
-                fontSize=size,
+        if current_fonts.get(field_name, {}).get("size") != size:
+            actions.append(
+                _action(
+                    "modelFieldSetFontSize",
+                    modelName=model_name,
+                    fieldName=field_name,
+                    fontSize=size,
+                )
             )
-        )
     return actions
 
 
@@ -117,11 +153,12 @@ def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
 
 
 def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
-    """Check if a model's fields, templates, and styling match our config.
+    """Check if a model's fields, templates, styling, and field properties match.
 
     Args:
         model_name: The note type name.
-        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates'.
+        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
+                     'descriptions', 'fonts'.
     """
     cfg = NOTE_TYPES[model_name]
     expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
@@ -156,6 +193,18 @@ def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
         if current.get("Back", "").strip() != expected["Back"].strip():
             return False
 
+    # Compare field descriptions
+    current_descriptions = model_state["descriptions"]
+    for field_name, description in FIELD_DESCRIPTIONS.items():
+        if current_descriptions.get(field_name) != description:
+            return False
+
+    # Compare field font sizes
+    current_fonts = model_state["fonts"]
+    for field_name, size in FIELD_FONT_SIZES.items():
+        if current_fonts.get(field_name, {}).get("size") != size:
+            return False
+
     return True
 
 
@@ -164,7 +213,8 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
 
     Args:
         model_name: The note type name.
-        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates'.
+        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
+                     'descriptions', 'fonts'.
     """
     cfg = NOTE_TYPES[model_name]
     expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
@@ -248,7 +298,7 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
             )
         )
 
-    actions.extend(_field_property_actions(model_name))
+    actions.extend(_field_property_actions(model_name, model_state))
     return actions
 
 
@@ -279,15 +329,26 @@ def ensure_note_types() -> None:
             read_actions.append(_action("modelFieldNames", modelName=model_name))
             read_actions.append(_action("modelStyling", modelName=model_name))
             read_actions.append(_action("modelTemplates", modelName=model_name))
+            read_actions.append(
+                _action("modelFieldDescriptions", modelName=model_name)
+            )
+            read_actions.append(_action("modelFieldFonts", modelName=model_name))
 
         read_results = invoke("multi", actions=read_actions)
 
         for i, model_name in enumerate(models_to_check):
-            base = i * 3
+            base = i * 5
+            # modelFieldDescriptions returns a list (positional), zip with field names
+            field_names = read_results[base]
+            raw_descriptions = read_results[base + 3]
+            descriptions = dict(zip(field_names, raw_descriptions))
+
             model_states[model_name] = {
-                "fields": read_results[base],
+                "fields": field_names,
                 "styling": read_results[base + 1],
                 "templates": read_results[base + 2],
+                "descriptions": descriptions,
+                "fonts": read_results[base + 4],
             }
 
     # ---- Phase 3: Diff + build action dicts ----
