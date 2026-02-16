@@ -1,4 +1,10 @@
-"""Ensure all AnkiOps note types exist in Anki and are up to date with our templates."""
+"""Ensure all AnkiOps note types exist in Anki and are up to date with our templates.
+
+Architecture:
+  Read phase  – one multi call fetches all model state from Anki
+  Diff phase  – compare local config/templates against Anki state
+  Write phase – one multi call applies all creates/updates
+"""
 
 import logging
 from importlib import resources
@@ -12,10 +18,20 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
 }
 FIELD_FONT_SIZES: dict[str, int] = {
     "Source": 14,
-    "AI Notes": 14,
+    "AI Notes": 14, 
 }
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Helpers (pure data, no API calls)
+# ---------------------------------------------------------------------------
+
+
+def _action(action: str, **params) -> dict:
+    """Build an AnkiConnect action dict for use in a multi call."""
+    return {"action": action, "params": params}
 
 
 def _load_template(filename: str) -> str:
@@ -49,55 +65,72 @@ def _get_card_templates(model_name: str) -> list[dict[str, str]]:
     return templates
 
 
-def _set_field_properties(model_name: str) -> None:
-    """Set editor-side field properties (descriptions, font sizes)."""
+# ---------------------------------------------------------------------------
+# Action-dict builders (return lists of action dicts, never call invoke)
+# ---------------------------------------------------------------------------
+
+
+def _field_property_actions(model_name: str) -> list[dict]:
+    """Return action dicts for editor-side field properties (descriptions, font sizes)."""
+    actions: list[dict] = []
     for field_name, description in FIELD_DESCRIPTIONS.items():
-        invoke(
-            "modelFieldSetDescription",
-            modelName=model_name,
-            fieldName=field_name,
-            description=description,
+        actions.append(
+            _action(
+                "modelFieldSetDescription",
+                modelName=model_name,
+                fieldName=field_name,
+                description=description,
+            )
         )
     for field_name, size in FIELD_FONT_SIZES.items():
-        invoke(
-            "modelFieldSetFontSize",
-            modelName=model_name,
-            fieldName=field_name,
-            fontSize=size,
+        actions.append(
+            _action(
+                "modelFieldSetFontSize",
+                modelName=model_name,
+                fieldName=field_name,
+                fontSize=size,
+            )
         )
+    return actions
 
 
-def _create_model(model_name: str, is_cloze: bool) -> None:
-    """Create a note type in Anki from the template files."""
+def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
+    """Return action dicts to create a note type from scratch."""
     cfg = NOTE_TYPES[model_name]
     fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
 
     css = _load_template("Styling.css")
     card_templates = _get_card_templates(model_name)
 
-    invoke(
-        "createModel",
-        modelName=model_name,
-        inOrderFields=fields,
-        css=css,
-        isCloze=is_cloze,
-        cardTemplates=card_templates,
-    )
-    _set_field_properties(model_name)
-    logger.info(f"Created note type '{model_name}' in Anki")
+    actions: list[dict] = [
+        _action(
+            "createModel",
+            modelName=model_name,
+            inOrderFields=fields,
+            css=css,
+            isCloze=is_cloze,
+            cardTemplates=card_templates,
+        )
+    ]
+    actions.extend(_field_property_actions(model_name))
+    return actions
 
 
-def _is_model_up_to_date(model_name: str) -> bool:
-    """Check if a model's fields, templates, and styling match our config."""
+def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
+    """Check if a model's fields, templates, and styling match our config.
+
+    Args:
+        model_name: The note type name.
+        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates'.
+    """
     cfg = NOTE_TYPES[model_name]
     expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
 
-    # Get current model info from Anki
-    current_fields = invoke("modelFieldNames", modelName=model_name)
-    current_styling = invoke("modelStyling", modelName=model_name)
-    current_templates = invoke("modelTemplates", modelName=model_name)
+    current_fields = model_state["fields"]
+    current_styling = model_state["styling"]
+    current_templates = model_state["templates"]
 
     # Compare fields
     if current_fields != expected_fields:
@@ -126,48 +159,64 @@ def _is_model_up_to_date(model_name: str) -> bool:
     return True
 
 
-def _update_model(model_name: str) -> None:
-    """Update an existing note type's fields, card templates, and styling."""
+def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
+    """Return action dicts to update an existing note type.
+
+    Args:
+        model_name: The note type name.
+        model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates'.
+    """
     cfg = NOTE_TYPES[model_name]
     expected_fields = [field_name for field_name, _, _ in cfg["field_mappings"]]
     css = _load_template("Styling.css")
     expected_templates = _get_card_templates(model_name)
 
-    # Update fields — add missing, remove stale, reposition to match config order
-    current_fields = invoke("modelFieldNames", modelName=model_name)
+    actions: list[dict] = []
+    current_fields = model_state["fields"]
 
+    # Update fields — add missing, remove stale, reposition to match config order
     for field_name in expected_fields:
         if field_name not in current_fields:
-            invoke("modelFieldAdd", modelName=model_name, fieldName=field_name)
+            actions.append(
+                _action("modelFieldAdd", modelName=model_name, fieldName=field_name)
+            )
 
     for field_name in current_fields:
         if field_name not in expected_fields:
-            invoke("modelFieldRemove", modelName=model_name, fieldName=field_name)
+            actions.append(
+                _action("modelFieldRemove", modelName=model_name, fieldName=field_name)
+            )
 
     for i, field_name in enumerate(expected_fields):
-        invoke(
-            "modelFieldReposition",
-            modelName=model_name,
-            fieldName=field_name,
-            index=i,
+        actions.append(
+            _action(
+                "modelFieldReposition",
+                modelName=model_name,
+                fieldName=field_name,
+                index=i,
+            )
         )
 
     # Update styling
-    invoke("updateModelStyling", model={"name": model_name, "css": css})
+    actions.append(
+        _action("updateModelStyling", model={"name": model_name, "css": css})
+    )
 
     # Update card templates by position.
     # Rename mismatched names, add genuinely new templates (e.g. Card 2 for reversed).
-    current_templates = invoke("modelTemplates", modelName=model_name)
+    current_templates = model_state["templates"]
     current_names = list(current_templates.keys())
 
     # Rename templates first so updateModelTemplates uses the correct names
     for i, expected in enumerate(expected_templates):
         if i < len(current_names) and current_names[i] != expected["Name"]:
-            invoke(
-                "modelTemplateRename",
-                modelName=model_name,
-                oldTemplateName=current_names[i],
-                newTemplateName=expected["Name"],
+            actions.append(
+                _action(
+                    "modelTemplateRename",
+                    modelName=model_name,
+                    oldTemplateName=current_names[i],
+                    newTemplateName=expected["Name"],
+                )
             )
             current_names[i] = expected["Name"]
 
@@ -179,37 +228,91 @@ def _update_model(model_name: str) -> None:
                 "Back": expected["Back"],
             }
         else:
-            invoke(
-                "modelTemplateAdd",
-                modelName=model_name,
-                template={
-                    "Name": expected["Name"],
-                    "Front": expected["Front"],
-                    "Back": expected["Back"],
-                },
+            actions.append(
+                _action(
+                    "modelTemplateAdd",
+                    modelName=model_name,
+                    template={
+                        "Name": expected["Name"],
+                        "Front": expected["Front"],
+                        "Back": expected["Back"],
+                    },
+                )
             )
 
     if templates_dict:
-        invoke(
-            "updateModelTemplates",
-            model={"name": model_name, "templates": templates_dict},
+        actions.append(
+            _action(
+                "updateModelTemplates",
+                model={"name": model_name, "templates": templates_dict},
+            )
         )
 
-    _set_field_properties(model_name)
-    logger.info(f"Updated note type '{model_name}' in Anki")
+    actions.extend(_field_property_actions(model_name))
+    return actions
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 
 def ensure_note_types() -> None:
-    """Ensure all required note types exist in Anki and are up to date."""
-    existing = set(invoke("modelNames"))
+    """Ensure all required note types exist in Anki and are up to date.
 
-    for model_name in NOTE_TYPES.keys():
-        if model_name not in existing:
-            _create_model(model_name, is_cloze=("cloze" in model_name.lower()))
-        elif not _is_model_up_to_date(model_name):
-            _update_model(model_name)
+    Phases:
+      1. Fetch existing model names (1 call)
+      2. Batch-read state for all existing models (1 multi call)
+      3. Diff local config vs Anki state, build action dicts
+      4. Batch-write all creates/updates (1 multi call)
+    """
+    existing = set(invoke("modelNames"))
+    models_to_check = [m for m in NOTE_TYPES if m in existing]
+    models_to_create = [m for m in NOTE_TYPES if m not in existing]
+
+    # ---- Phase 2: Batch-read all model state ----
+    model_states: dict[str, dict] = {}
+
+    if models_to_check:
+        read_actions: list[dict] = []
+        for model_name in models_to_check:
+            read_actions.append(_action("modelFieldNames", modelName=model_name))
+            read_actions.append(_action("modelStyling", modelName=model_name))
+            read_actions.append(_action("modelTemplates", modelName=model_name))
+
+        read_results = invoke("multi", actions=read_actions)
+
+        for i, model_name in enumerate(models_to_check):
+            base = i * 3
+            model_states[model_name] = {
+                "fields": read_results[base],
+                "styling": read_results[base + 1],
+                "templates": read_results[base + 2],
+            }
+
+    # ---- Phase 3: Diff + build action dicts ----
+    write_actions: list[dict] = []
+
+    for model_name in models_to_create:
+        write_actions.extend(
+            _create_model_actions(model_name, is_cloze="cloze" in model_name.lower())
+        )
+        logger.info(f"Created note type '{model_name}' in Anki")
+
+    for model_name in models_to_check:
+        if not _is_model_up_to_date(model_name, model_states[model_name]):
+            write_actions.extend(
+                _update_model_actions(model_name, model_states[model_name])
+            )
+            logger.info(f"Updated note type '{model_name}' in Anki")
+
+    # ---- Phase 4: Batch-write all changes ----
+    if write_actions:
+        results = invoke("multi", actions=write_actions)
+        errors = [r for r in results if r is not None and isinstance(r, str)]
+        if errors:
+            raise Exception(f"Note type sync errors: {errors}")
 
 
 if __name__ == "__main__":
     ensure_note_types()
-    print(_is_model_up_to_date("AnkiOpsQA"))
