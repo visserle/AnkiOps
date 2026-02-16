@@ -18,20 +18,8 @@ if TYPE_CHECKING:
     from ankiops.markdown_converter import MarkdownToHTML
 
 from ankiops.anki_client import invoke
-from ankiops.config import (
-    MANDATORY_FIELDS,
-    NOTE_CONFIG,
-    NOTE_SEPARATOR,
-    SUPPORTED_NOTE_TYPES,
-)
-
-# prefix -> field name mapping for all note types, e.g. "Q:" -> "Question"
-# Dynamically built from NOTE_CONFIG to avoid duplication
-PREFIX_TO_FIELD: dict[str, str] = {}
-for _field_mappings in NOTE_CONFIG.values():
-    for _field_name, _prefix in _field_mappings:
-        PREFIX_TO_FIELD[_prefix] = _field_name
-FIELD_TO_PREFIX = {v: k for k, v in PREFIX_TO_FIELD.items()}
+from ankiops.config import NOTE_SEPARATOR
+from ankiops.note_type_config import registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 _NOTE_ID_PATTERN = re.compile(r"<!--\s*note_id:\s*(\d+)\s*-->")
@@ -234,22 +222,31 @@ class Note:
         with AnkiOpsQA as the generic catch-all.
         """
         items = []
-        for note_type, mandatory_fields in MANDATORY_FIELDS.items():
-            if note_type == "AnkiOpsChoice":
+        identifying_map = registry.identifying_fields
+        for note_type, identifying_fields_list in identifying_map.items():
+            config = registry.get(note_type)
+            if config.has_choices:
                 continue
             elif note_type == "AnkiOpsQA":
                 identifying = {"Question", "Answer"}
             else:
-                identifying = {f[0] for f in mandatory_fields}
+                identifying = {f[0] for f in identifying_fields_list}
             items.append((note_type, identifying))
 
         # Sort by number of identifying fields (descending), then name
-        # But ensure AnkiOpsQA is always last
-        items.sort(key=lambda x: (x[0] == "AnkiOpsQA", -len(x[1]), x[0]))
+        # We want the most specific type (most identifying fields) to be checked first.
+        items.sort(key=lambda x: (-len(x[1]), x[0]))
 
         # Special case: Choice notes are inferred by Question + ANY Choice field
+        # We assume any type with 'has_choices' trait behaves this way
         if "Question" in fields and any(k.startswith("Choice ") for k in fields):
-            return "AnkiOpsChoice"
+            for name in registry.supported_note_types:
+                try:
+                    if registry.get(name).has_choices:
+                        return name
+                except KeyError:
+                    continue
+            return "AnkiOpsChoice"  # Fallback if no specific choice type found
 
         for note_type, identifying in items:
             if identifying.issubset(fields.keys()):
@@ -294,7 +291,7 @@ class Note:
 
             # Try to match a field prefix
             matched_field = None
-            for prefix, field_name in PREFIX_TO_FIELD.items():
+            for prefix, field_name in registry.prefix_to_field.items():
                 if line.startswith(prefix + " ") or line == prefix:
                     # Duplicate field check
                     if field_name in seen:
@@ -350,7 +347,7 @@ class Note:
         for duplicate detection.  Reconstructed from parsed fields.
         """
         for field_name, content in self.fields.items():
-            prefix = FIELD_TO_PREFIX.get(field_name, "")
+            prefix = registry.field_to_prefix.get(field_name, "")
             first_content = content.split("\n")[0] if content else ""
             if prefix and first_content:
                 return f"{prefix} {first_content}"
@@ -371,13 +368,18 @@ class Note:
         Returns a list of error messages (empty if valid).
         """
         errors: list[str] = []
-        if self.note_type not in NOTE_CONFIG:
+        try:
+            config = registry.get(self.note_type)
+        except KeyError:
             errors.append(f"Unknown note type '{self.note_type}'")
             return errors
 
         choice_count = 0
         choice_fields = []
-        for field_name, prefix in MANDATORY_FIELDS.get(self.note_type, []):
+        
+        # Use registry.identifying_fields here to get just the core fields
+        identifying = registry.identifying_fields.get(self.note_type, [])
+        for field_name, prefix in identifying:
             if "Choice" in field_name:
                 choice_fields.append(field_name)
                 if self.fields.get(field_name):
@@ -387,17 +389,17 @@ class Note:
             if not self.fields.get(field_name):
                 errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
 
-        if self.note_type == "AnkiOpsCloze":
+        if config.is_cloze:
             text = self.fields.get("Text", "")
             if text and not _CLOZE_PATTERN.search(text):
                 errors.append(
-                    "AnkiOpsCloze note must contain cloze syntax "
+                    f"{self.note_type} note must contain cloze syntax "
                     "(e.g. {{c1::answer}}) in the T: field"
                 )
 
-        if self.note_type == "AnkiOpsChoice":
+        if config.has_choices:
             if choice_count < 2:
-                errors.append("AnkiOpsChoice note must have at least 2 choices")
+                errors.append(f"{self.note_type} note must have at least 2 choices")
             errors.extend(self._validate_choice_answers(choice_fields))
 
         return errors
@@ -447,7 +449,7 @@ class Note:
             name: converter.convert(content) for name, content in self.fields.items()
         }
 
-        for field_name, _ in NOTE_CONFIG.get(self.note_type, []):
+        for field_name, _ in registry.note_config.get(self.note_type, []):
             html.setdefault(field_name, "")
 
         return html
@@ -489,7 +491,7 @@ class AnkiState:
         deck_ids_by_name = invoke("deckNamesAndIds")
         deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
 
-        query = " OR ".join(f"note:{nt}" for nt in SUPPORTED_NOTE_TYPES)
+        query = " OR ".join(f"note:{nt}" for nt in registry.supported_note_types)
         all_card_ids = invoke("findCards", query=query)
 
         cards_by_id: dict[int, dict] = {}
@@ -510,7 +512,7 @@ class AnkiState:
                 if not note:
                     continue
                 model = note.get("modelName")
-                if model and model not in SUPPORTED_NOTE_TYPES:
+                if model and model not in registry.supported_note_types:
                     raise ValueError(
                         f"Safety check failed: Note {note['noteId']} has template "
                         f"'{model}' but expected a AnkiOps template. "
@@ -562,7 +564,7 @@ class AnkiNote:
         Returns:
             Markdown block string starting with ``<!-- note_id: ... -->``.
         """
-        note_config = NOTE_CONFIG[self.note_type]
+        note_config = registry.note_config[self.note_type]
         lines = [f"<!-- note_id: {self.note_id} -->"]
 
         for field_name, prefix in note_config:

@@ -7,43 +7,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MARKER_FILE = ".ankiops"
+CARD_TEMPLATES_DIR_NAME = ".card_templates"
+CUSTOM_CONFIG_FILENAME = "note_types.yaml"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
-
-# Each note type maps to a list of (field_name, prefix) tuples.
-MANDATORY_FIELDS = {
-    "AnkiOpsQA": [
-        ("Question", "Q:"),
-        ("Answer", "A:"),
-    ],
-    "AnkiOpsReversed": [
-        ("Front", "F:"),
-        ("Back", "B:"),
-    ],
-    "AnkiOpsCloze": [
-        ("Text", "T:"),
-    ],
-    "AnkiOpsInput": [
-        ("Question", "Q:"),
-        ("Input", "I:"),
-    ],
-    "AnkiOpsChoice": [
-        ("Question", "Q:"),
-        *[(f"Choice {i}", f"C{i}:") for i in range(1, 9)],
-        ("Answer", "A:"),
-    ],
-}
-
-COMMON_FIELDS = [
-    ("Extra", "E:"),
-    ("More", "M:"),
-    ("Source", "S:"),
-    ("AI Notes", "AI:"),
-]
-
-NOTE_CONFIG = {k: v + COMMON_FIELDS for k, v in MANDATORY_FIELDS.items()}
-
-SUPPORTED_NOTE_TYPES = list(NOTE_CONFIG.keys())
 
 
 def sanitize_filename(deck_name: str) -> str:

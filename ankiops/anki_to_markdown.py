@@ -11,7 +11,8 @@ import logging
 import re
 from pathlib import Path
 
-from ankiops.config import NOTE_SEPARATOR, SUPPORTED_NOTE_TYPES, sanitize_filename
+from ankiops.config import NOTE_SEPARATOR, sanitize_filename
+from ankiops.note_type_config import registry
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.log import clickable_path, format_changes
 from ankiops.models import (
@@ -41,7 +42,7 @@ def _format_blocks(
         anki_note = anki.notes_by_id.get(nid)
         if not anki_note:
             continue
-        if anki_note.note_type not in SUPPORTED_NOTE_TYPES:
+        if anki_note.note_type not in registry.supported_note_types:
             continue
         block = anki_note.to_markdown(converter)
         match = re.match(r"<!--\s*(note_id:\s*\d+)\s*-->", block)

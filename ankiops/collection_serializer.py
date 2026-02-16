@@ -10,9 +10,10 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import MARKER_FILE, NOTE_CONFIG, get_collection_dir
+from ankiops.config import MARKER_FILE, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
+from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +448,8 @@ def deserialize_collection_from_json(
                 lines.append(f"<!-- note_id: {note_id} -->")
 
             # Get field mappings for this note type
-            note_config = NOTE_CONFIG.get(note_type)
+            # Use registry.note_config to get legacy list of (field_name, prefix)
+            note_config = registry.note_config.get(note_type)
             if not note_config:
                 logger.warning(
                     f"Unknown note type '{note_type}' "

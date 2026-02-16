@@ -8,9 +8,10 @@ Architecture:
 
 import logging
 from importlib import resources
+from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError, invoke
-from ankiops.config import NOTE_CONFIG
+from ankiops.note_type_config import NoteTypeConfig, registry
 
 # Editor-side field properties (set via AnkiConnect, not card templates)
 FIELD_DESCRIPTIONS: dict[str, str] = {
@@ -29,8 +30,17 @@ def _action(action: str, **params) -> dict:
     return {"action": action, "params": params}
 
 
-def _load_template(filename: str) -> str:
-    """Read a card template file from the card_templates directory."""
+def _load_template(filename: str, templates_dir: Path | None = None) -> str:
+    """Read a card template file.
+
+    If templates_dir is provided, looks there first.
+    otherwise falls back to package resources.
+    """
+    if templates_dir:
+        custom_path = templates_dir / filename
+        if custom_path.exists():
+            return custom_path.read_text(encoding="utf-8")
+
     return (
         resources.files("ankiops.card_templates")
         .joinpath(filename)
@@ -38,23 +48,26 @@ def _load_template(filename: str) -> str:
     )
 
 
-def _get_card_templates(model_name: str) -> list[dict[str, str]]:
-    """Get card templates for a model.
+def _get_card_templates(config: NoteTypeConfig) -> list[dict[str, str]]:
+    """Get card templates for a model configuration.
 
     Returns a list of card template dicts with Name, Front, and Back keys.
-    Most models have one card, but AnkiOpsReversed has two (forward and reverse).
     """
-    front = _load_template(f"{model_name}Front.template.anki")
-    back = _load_template(f"{model_name}Back.template.anki")
+    model_name = config.name
+    # Built-in or custom templates_dir
+    tdir = config.templates_dir
+
+    front = _load_template(f"{model_name}Front.template.anki", tdir)
+    back = _load_template(f"{model_name}Back.template.anki", tdir)
 
     templates = [{"Name": "Card 1", "Front": front, "Back": back}]
-    if model_name == "AnkiOpsCloze":
+    if config.is_cloze:
         templates[0]["Name"] = "Cloze"
 
-    # AnkiOpsReversed has a second card for the reverse direction
-    if model_name == "AnkiOpsReversed":
-        front2 = _load_template(f"{model_name}Front2.template.anki")
-        back2 = _load_template(f"{model_name}Back2.template.anki")
+    # Reversed models have a second card for the reverse direction
+    if config.is_reversed:
+        front2 = _load_template(f"{model_name}Front2.template.anki", tdir)
+        back2 = _load_template(f"{model_name}Back2.template.anki", tdir)
         templates.append({"Name": "Card 2", "Front": front2, "Back": back2})
 
     return templates
@@ -122,11 +135,15 @@ def _field_property_actions(
 
 def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
     """Return action dicts to create a note type from scratch."""
-    note_config = NOTE_CONFIG[model_name]
+    note_config = registry.note_config[model_name]
     fields = [field_name for field_name, _ in note_config]
 
-    css = _load_template("Styling.css")
-    card_templates = _get_card_templates(model_name)
+    if registry.custom_css_path and registry.custom_css_path.exists():
+        css = registry.custom_css_path.read_text(encoding="utf-8")
+    else:
+        css = _load_template("Styling.css")
+        
+    card_templates = _get_card_templates(registry.get(model_name))
 
     actions: list[dict] = [
         _action(
@@ -150,10 +167,17 @@ def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
         model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
                      'descriptions', 'fonts'.
     """
-    note_config = NOTE_CONFIG[model_name]
+    model_config = registry.get(model_name)
+    note_config = registry.note_config[model_name]
     expected_fields = [field_name for field_name, _ in note_config]
-    css = _load_template("Styling.css")
-    expected_templates = _get_card_templates(model_name)
+    
+    # Check if we have custom CSS overrides
+    if registry.custom_css_path and registry.custom_css_path.exists():
+        css = registry.custom_css_path.read_text(encoding="utf-8")
+    else:
+        css = _load_template("Styling.css")
+        
+    expected_templates = _get_card_templates(model_config)
 
     current_fields = model_state["fields"]
     current_styling = model_state["styling"]
@@ -206,10 +230,16 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
         model_state: Pre-fetched dict with keys 'fields', 'styling', 'templates',
                      'descriptions', 'fonts'.
     """
-    note_config = NOTE_CONFIG[model_name]
+    model_config = registry.get(model_name)
+    note_config = registry.note_config[model_name]
     expected_fields = [field_name for field_name, _ in note_config]
-    css = _load_template("Styling.css")
-    expected_templates = _get_card_templates(model_name)
+
+    if registry.custom_css_path and registry.custom_css_path.exists():
+        css = registry.custom_css_path.read_text(encoding="utf-8")
+    else:
+        css = _load_template("Styling.css")
+
+    expected_templates = _get_card_templates(model_config)
 
     actions: list[dict] = []
     current_fields = model_state["fields"]
@@ -302,8 +332,12 @@ def ensure_note_types() -> None:
       4. Batch-write all creates/updates (1 multi call)
     """
     existing = set(invoke("modelNames"))
-    models_to_check = [m for m in NOTE_CONFIG if m in existing]
-    models_to_create = [m for m in NOTE_CONFIG if m not in existing]
+    
+    # We check all supported note types (built-in + custom)
+    required_types = registry.supported_note_types
+    
+    models_to_check = [m for m in required_types if m in existing]
+    models_to_create = [m for m in required_types if m not in existing]
 
     # ---- Phase 2: Batch-read all model state ----
     model_states: dict[str, dict] = {}

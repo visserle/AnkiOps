@@ -11,7 +11,12 @@ from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
-from ankiops.config import MARKER_FILE, get_collection_dir, require_collection_dir
+from ankiops.config import (
+    CARD_TEMPLATES_DIR_NAME,
+    MARKER_FILE,
+    get_collection_dir,
+    require_collection_dir,
+)
 from ankiops.git import git_snapshot
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.log import configure_logging, format_changes
@@ -19,6 +24,7 @@ from ankiops.markdown_to_anki import (
     import_collection,
     import_file,
 )
+from ankiops.note_type_config import registry
 from ankiops.note_types import ensure_note_types
 
 logger = logging.getLogger(__name__)
@@ -58,6 +64,9 @@ def run_am(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+
+    # Load custom note types so export can identity them
+    registry.load_custom(collection_dir / CARD_TEMPLATES_DIR_NAME)
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "export")
@@ -183,6 +192,9 @@ def run_serialize(args):
             f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
         )
         raise SystemExit(1)
+
+    # Load custom note types to infer correct types during serialization
+    registry.load_custom(collection_dir / CARD_TEMPLATES_DIR_NAME)
 
     if args.output:
         output_file = Path(args.output)
