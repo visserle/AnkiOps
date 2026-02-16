@@ -65,11 +65,6 @@ def _get_card_templates(model_name: str) -> list[dict[str, str]]:
     return templates
 
 
-# ---------------------------------------------------------------------------
-# Action-dict builders (return lists of action dicts, never call invoke)
-# ---------------------------------------------------------------------------
-
-
 def _field_property_actions(
     model_name: str, model_state: dict | None = None
 ) -> list[dict]:
@@ -300,11 +295,6 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
 
     actions.extend(_field_property_actions(model_name, model_state))
     return actions
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def ensure_note_types() -> None:

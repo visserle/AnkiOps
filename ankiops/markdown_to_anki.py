@@ -119,11 +119,6 @@ def _flush_writes(writes: list[_PendingWrite]) -> None:
         w.file_state.file_path.write_text(content, encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Sync engine
-# ---------------------------------------------------------------------------
-
-
 def _build_anki_actions(
     deck_name: str,
     needs_create_deck: bool,
@@ -432,11 +427,6 @@ def _sync_file(
         id_assignments=id_assignments,
     )
     return result, pending
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def import_file(

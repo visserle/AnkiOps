@@ -20,8 +20,6 @@ def md_to_html():
     return MarkdownToHTML()
 
 
-
-
 class TestRoundTripHeadings:
     """Test round-trip conversion of headings."""
 

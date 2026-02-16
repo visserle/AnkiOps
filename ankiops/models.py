@@ -95,7 +95,15 @@ class FileState:
         raw_content = file_path.read_text(encoding="utf-8")
         deck_id, remaining = FileState.extract_deck_id(raw_content)
         blocks = remaining.split(NOTE_SEPARATOR)
-        parsed_notes = [Note.from_block(block) for block in blocks if block.strip()]
+        parsed_notes = []
+        for block in blocks:
+            # Skip empty blocks or blocks with only whitespace/dashes (trailing separators)
+            if not block.strip() or set(block.strip()) <= {"-"}:
+                continue
+
+            note = Note.from_block(block)
+            parsed_notes.append(note)
+        
         return FileState(
             file_path=file_path,
             raw_content=raw_content,
@@ -311,6 +319,14 @@ class Note:
 
         if current_field:
             fields[current_field] = "\n".join(current_content).strip()
+
+        if not fields:
+            # We reached here with a non-empty block (guaranteed by from_file filtering)
+            # but found no fields. This means the block has content but no field prefixes.
+            raise ValueError(
+                f"Found content but no valid field prefixes (e.g. 'Q: ', 'A: ') "
+                f"in block starting with: '{block.strip()[:50]}...'"
+            )
 
         return Note(
             note_id=note_id,

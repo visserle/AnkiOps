@@ -26,11 +26,6 @@ from ankiops.models import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Sync engine
-# ---------------------------------------------------------------------------
-
-
 def _format_blocks(
     note_ids: set[int],
     anki: AnkiState,
@@ -173,11 +168,6 @@ def _sync_deck(
         changes=changes,
     )
     return result, new_content
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 
 def export_deck(
