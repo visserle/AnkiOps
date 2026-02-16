@@ -19,11 +19,6 @@ from ankiops.models import AnkiState, FileState, InvalidID, Note
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class UntrackedDeck:
     """An Anki deck with AnkiOps notes but no matching markdown file."""
@@ -37,8 +32,7 @@ class UntrackedDeck:
 class _PendingWrite:
     """Deferred file modification, applied after all Anki mutations."""
 
-    file_path: Path
-    raw_content: str
+    file_state: FileState
     deck_id_to_write: int | None
     id_assignments: list[tuple[Note, int]]
 
@@ -65,33 +59,6 @@ class ImportSummary:
     file_results: list[FileImportResult]
     untracked_decks: list[UntrackedDeck]
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _validate_no_duplicate_first_lines(
-    file_path: Path,
-    id_assignments: list[tuple[Note, int]],
-) -> None:
-    """Raise if new notes share a first line (would break text-based ID insertion)."""
-    first_lines: dict[str, list[str]] = {}
-    for note, _ in id_assignments:
-        if note.note_id is not None:
-            continue
-        first_line = note.first_line
-        first_lines.setdefault(first_line, []).append(note.identifier)
-
-    duplicates = {line: ids for line, ids in first_lines.items() if len(ids) > 1}
-    if duplicates:
-        msg = f"ERROR: Duplicate first lines detected in {file_path.name}:\n"
-        for first_line, ids in duplicates.items():
-            msg += f"  '{first_line[:60]}...' in notes: {', '.join(ids)}\n"
-        msg += (
-            "Cannot safely assign IDs. Please ensure each note has a unique first line."
-        )
-        raise ValueError(msg)
 
 
 def _prompt_invalid_ids(invalid_ids: list[InvalidID], is_collection: bool) -> None:
@@ -151,7 +118,7 @@ def _flush_writes(writes: list[_PendingWrite]) -> None:
         if w.deck_id_to_write is None and not w.id_assignments:
             continue
 
-        content = w.raw_content
+        content = w.file_state.raw_content
 
         # 1. Insert or replace deck_id
         if w.deck_id_to_write is not None:
@@ -160,7 +127,7 @@ def _flush_writes(writes: list[_PendingWrite]) -> None:
 
         # 2. Insert note_ids for new / stale notes
         if w.id_assignments:
-            _validate_no_duplicate_first_lines(w.file_path, w.id_assignments)
+            w.file_state.validate_no_duplicate_first_lines(w.id_assignments)
 
             for note, id_value in w.id_assignments:
                 new_id_comment = f"<!-- note_id: {id_value} -->"
@@ -172,7 +139,7 @@ def _flush_writes(writes: list[_PendingWrite]) -> None:
                         note.first_line, new_id_comment + "\n" + note.first_line, 1
                     )
 
-        w.file_path.write_text(content, encoding="utf-8")
+        w.file_state.file_path.write_text(content, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -405,8 +372,7 @@ def _sync_file(
 
     # ---- Phase 5: Return result + pending write ----
     pending = _PendingWrite(
-        file_path=fs.file_path,
-        raw_content=fs.raw_content,
+        file_state=fs,
         deck_id_to_write=deck_id_to_write,
         id_assignments=id_assignments,
     )

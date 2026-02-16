@@ -12,6 +12,7 @@ FIELD_DESCRIPTIONS: dict[str, str] = {
 }
 FIELD_FONT_SIZES: dict[str, int] = {
     "Source": 14,
+    "AI Notes": 14,
 }
 
 logger = logging.getLogger(__name__)
