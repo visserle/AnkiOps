@@ -96,7 +96,7 @@ def create_tutorial(collection_dir: Path) -> Path:
 
     try:
         # Python 3.9+ style
-        ref = resources.files("ankiops.data").joinpath("AnkiOps Tutorial.md")
+        ref = resources.files("ankiops.tutorial").joinpath("AnkiOps Tutorial.md")
         tutorial_dst.write_text(ref.read_text(encoding="utf-8"), encoding="utf-8")
         logger.info(f"Tutorial file created: {clickable_path(tutorial_dst)}")
     except Exception as e:
