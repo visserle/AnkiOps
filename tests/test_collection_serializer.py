@@ -5,7 +5,6 @@ import os
 
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
-    extract_media_references,
     serialize_collection_to_json,
 )
 
@@ -13,38 +12,7 @@ from ankiops.collection_serializer import (
 
 
 
-class TestMediaReferences:
-    """Test media reference extraction and updating."""
 
-    def test_extract_markdown_images(self):
-        """Test extracting markdown image references."""
-        text = "Some text ![alt](image.png) more text ![](another.jpg)"
-        refs = extract_media_references(text)
-        assert "image.png" in refs
-        assert "another.jpg" in refs
-
-    def test_extract_media_prefix(self):
-        """Test extracting references with media/ prefix."""
-        text = "![](media/image.png) and [sound:media/audio.mp3]"
-        refs = extract_media_references(text)
-        # Should strip media/ prefix
-        assert "image.png" in refs
-        assert "audio.mp3" in refs
-        assert "media/image.png" not in refs
-
-    def test_extract_sound_tags(self):
-        """Test extracting Anki sound tags."""
-        text = "Text with [sound:audio.mp3] and [sound:music.ogg]"
-        refs = extract_media_references(text)
-        assert "audio.mp3" in refs
-        assert "music.ogg" in refs
-
-    def test_extract_html_img(self):
-        """Test extracting HTML img tags."""
-        text = '<img src="image.png"> and <img src="photo.jpg">'
-        refs = extract_media_references(text)
-        assert "image.png" in refs
-        assert "photo.jpg" in refs
 
 
 

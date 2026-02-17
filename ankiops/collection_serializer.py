@@ -2,7 +2,7 @@
 
 import json
 import logging
-import re
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,51 +12,6 @@ from ankiops.models import FileState, Note
 from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
-
-# Regex patterns for media file references
-MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?"
-ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
-HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
-
-
-
-
-def _normalize_media_path(path: str) -> str:
-    """Normalize media path by stripping angle brackets and media/ prefix.
-
-    Args:
-        path: Raw path string from markdown/HTML
-
-    Returns:
-        Normalized path without angle brackets or media/ prefix
-    """
-    path = path.strip("<>")
-    if path.startswith(f"{LOCAL_MEDIA_DIR}/"):
-        path = path[len(LOCAL_MEDIA_DIR) + 1 :]
-    return path
-
-
-def extract_media_references(text: str) -> set[str]:
-    """Extract media file references from markdown text.
-
-    Finds:
-    - Markdown images: ![alt](filename.png)
-    - Anki sound: [sound:audio.mp3]
-    - HTML img tags: <img src="file.jpg">
-
-    Returns:
-        Set of normalized media file paths (without media/ prefix)
-    """
-    media_files = set()
-
-    # Extract from all three pattern types
-    for pattern in [MARKDOWN_IMAGE_PATTERN, ANKI_SOUND_PATTERN, HTML_IMG_PATTERN]:
-        for match in re.finditer(pattern, text):
-            path = _normalize_media_path(match.group(1))
-            if path:  # Only add if path is not empty
-                media_files.add(path)
-
-    return media_files
 
 
 def serialize_collection_to_json(
@@ -281,8 +236,7 @@ def deserialize_collection_from_json(
         total_notes += len(notes)
 
     logger.info(
-        f"Deserialized {total_decks} deck(s), {total_notes} note(s)"
-        f" to {root_dir}"
+        f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {root_dir}"
     )
 
     # Check if .ankiops marker file exists

@@ -4,13 +4,14 @@ import hashlib
 from pathlib import Path
 
 from ankiops.sync_media import (
+    LOCAL_MEDIA_DIR,
     _calculate_hash,
     _get_hashed_filename,
     apply_hashing,
+    extract_media_references,
     sync_from_anki,
     sync_to_anki,
     update_markdown_media_references,
-    LOCAL_MEDIA_DIR,
 )
 
 
@@ -21,11 +22,15 @@ def create_image(path: Path, content: bytes = b"fake image content"):
 
 
 def test_calculate_hash(tmp_path):
-    """Test SHA256 hash calculation."""
+    """Test BLAKE2b hash calculation."""
     f = tmp_path / "test.png"
     create_image(f, b"test content")
-    
-    expected_hash = hashlib.sha256(b"test content").hexdigest()[:8]
+
+    # Calculate expected hash using same algo as implementation
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"test content")
+    expected_hash = digest.hexdigest()
+
     assert _calculate_hash(f) == expected_hash
 
 
@@ -49,9 +54,7 @@ def test_update_markdown_media_references(tmp_path):
     collection_dir = tmp_path
     md_file = collection_dir / "test.md"
     md_file.write_text(
-        "![img](media/old.png)\n"
-        "<img src=\"media/old.png\">\n"
-        "[sound:media/audio.mp3]"
+        '![img](media/old.png)\n<img src="media/old.png">\n[sound:media/audio.mp3]'
     )
 
     rename_map = {
@@ -76,7 +79,7 @@ def test_apply_hashing(tmp_path):
     # Create files
     img1 = media_dir / "image1.png"
     create_image(img1, b"content1")
-    
+
     # Check that subfolders are IGNORED
     (media_dir / "sub").mkdir()
     img2 = media_dir / "sub" / "image2.png"
@@ -89,17 +92,25 @@ def test_apply_hashing(tmp_path):
     apply_hashing(collection_dir)
 
     # Calculate expected hashes
-    h1 = hashlib.sha256(b"content1").hexdigest()[:8]
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"content1")
+    h1 = digest.hexdigest()
 
     # Verify renames
     new_img1 = media_dir / f"image1_{h1}.png"
 
     assert not img1.exists()
     assert new_img1.exists()
-    
+
     # Verify subfolder file was NOT touched (ignored)
     assert img2.exists()
-    assert not (media_dir / "sub" / f"image2_{hashlib.sha256(b'content2').hexdigest()[:8]}.png").exists()
+
+    # Calculate hash for second file for negative check
+    digest2 = hashlib.blake2b(digest_size=4)
+    digest2.update(b"content2")
+    h2 = digest2.hexdigest()
+
+    assert not (media_dir / "sub" / f"image2_{h2}.png").exists()
 
     # Verify markdown update
     content = md_file.read_text()
@@ -113,9 +124,13 @@ def test_apply_hashing_idempotent(tmp_path):
     media_dir.mkdir()
 
     content = b"content"
-    h = hashlib.sha256(content).hexdigest()[:8]
+
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(content)
+    h = digest.hexdigest()
+
     fname = f"image_{h}.png"
-    
+
     img = media_dir / fname
     create_image(img, content)
 
@@ -131,7 +146,7 @@ def test_sync_to_anki(tmp_path):
     """Test syncing files to Anki directory."""
     collection_dir = tmp_path / "collection"
     anki_media = tmp_path / "anki_media"
-    
+
     collection_dir.mkdir()
     anki_media.mkdir()
     (collection_dir / LOCAL_MEDIA_DIR).mkdir()
@@ -139,14 +154,17 @@ def test_sync_to_anki(tmp_path):
     # Setup local file
     img = collection_dir / LOCAL_MEDIA_DIR / "test.png"
     create_image(img, b"data")
-    
+
     # Run sync
     sync_to_anki(collection_dir, anki_media)
-    
+
     # Expect file to be hashed and copied
-    h = hashlib.sha256(b"data").hexdigest()[:8]
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"data")
+    h = digest.hexdigest()
+
     expected_name = f"test_{h}.png"
-    
+
     assert (anki_media / expected_name).exists()
     assert (anki_media / expected_name).read_bytes() == b"data"
 
@@ -155,7 +173,7 @@ def test_sync_from_anki(tmp_path):
     """Test syncing referenced files from Anki."""
     collection_dir = tmp_path / "collection"
     anki_media = tmp_path / "anki_media"
-    
+
     collection_dir.mkdir()
     anki_media.mkdir()
 
@@ -171,3 +189,37 @@ def test_sync_from_anki(tmp_path):
     assert (media_dir / "remote.png").exists()
     assert (media_dir / "remote.png").read_bytes() == b"remote data"
     assert not (media_dir / "missing.png").exists()
+
+
+def test_extract_markdown_images():
+    """Test extracting markdown image references."""
+    text = "Some text ![alt](image.png) more text ![](another.jpg)"
+    refs = extract_media_references(text)
+    assert "image.png" in refs
+    assert "another.jpg" in refs
+
+
+def test_extract_media_prefix():
+    """Test extracting references with media/ prefix."""
+    text = "![](media/image.png) and [sound:media/audio.mp3]"
+    refs = extract_media_references(text)
+    # Should strip media/ prefix
+    assert "image.png" in refs
+    assert "audio.mp3" in refs
+    assert "media/image.png" not in refs
+
+
+def test_extract_sound_tags():
+    """Test extracting Anki sound tags."""
+    text = "Text with [sound:audio.mp3] and [sound:music.ogg]"
+    refs = extract_media_references(text)
+    assert "audio.mp3" in refs
+    assert "music.ogg" in refs
+
+
+def test_extract_html_img():
+    """Test extracting HTML img tags."""
+    text = '<img src="image.png"> and <img src="photo.jpg">'
+    refs = extract_media_references(text)
+    assert "image.png" in refs
+    assert "photo.jpg" in refs

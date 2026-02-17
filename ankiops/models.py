@@ -224,36 +224,27 @@ class Note:
         """
         # Exclude common fields (Extra, More, etc.) from logic
         # as they do not distinguish note types.
-        from ankiops.note_type_config import NoteTypeRegistry
-        
-        common_names = NoteTypeRegistry._COMMON_NAMES
+        common_names = registry._COMMON_NAMES
         note_fields = {k for k in fields.keys() if k not in common_names}
         candidates = []
 
         for name in registry.supported_note_types:
             config = registry.get(name)
-            # Identifying fields == all fields now (excluding common ones potentially,
-            # but note_type_config.indentifying_fields returns self.fields which includes all specific fields)
-            # actually identifying_fields property returns self.fields.
-            # config.identifying_field_names returns names.
-            # We want to check against all specific fields of the type.
             type_fields = set(config.identifying_field_names)
-            
-        # Check 1: Note fields must be a subset of the Type's fields
+
+            # Check 1: Note fields must be a subset of the Type's fields
             if note_fields.issubset(type_fields):
                 candidates.append((name, len(type_fields)))
 
         if not note_fields:
-             raise ValueError(
-                "Cannot determine note type: only common fields found"
-            )
+            raise ValueError("Cannot determine note type: only common fields found")
 
         if not candidates:
-             raise ValueError(
+            raise ValueError(
                 "Cannot determine note type from fields: " + ", ".join(fields.keys())
             )
 
-        # Sort by size (ascending). 
+        # Sort by size (ascending).
         # {Q, A} fits QA (size 2) and Choice (size 10). QA comes first.
         # {Q, A, C1} fits Choice (size 10). QA rejects it. Choice comes first.
         candidates.sort(key=lambda x: x[1])
@@ -379,31 +370,20 @@ class Note:
 
         choice_count = 0
         choice_fields = []
-        
+
         # Check if this is a Choice-like note type
         # We detect this by checking if it has choice-like fields in its definition
         has_choices = any("Choice" in f.name for f in config.fields)
 
         identifying = registry.identifying_fields.get(self.note_type, [])
-        # identifying in registry is now a dict: name -> list of (name, prefix) tuples
-        # wait, registry.identifying_fields property in note_type_config.py returns list[Field] on CONFIG object
-        # but registry.identifying_fields in models.py usage seems to be accessing registry.identifying_fields PROPERTY of REGISTRY
-        # In note_type_config.py:
-        # @property
-        # def identifying_fields(self) -> dict[str, list[tuple[str, str]]]:
-        # matching what we see in `infer_note_type` loop in current models.py
-        
-        # NOTE: logic in validate usage of `identifying` was:
-        # identifying = registry.identifying_fields.get(self.note_type, [])
-        # for field_name, prefix in identifying:
-        
+
         for field_name, prefix in identifying:
             if "Choice" in field_name:
                 choice_fields.append(field_name)
                 if self.fields.get(field_name):
                     choice_count += 1
                 continue  # Skip individual Choice field check in mandatory loop
-            
+
             # Non-Choice fields (Question, Answer, etc.) are mandatory if defined in the type
             if not self.fields.get(field_name):
                 errors.append(f"Missing mandatory field '{field_name}' ({prefix})")

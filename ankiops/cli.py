@@ -9,7 +9,6 @@ from ankiops.anki_to_markdown import (
 )
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
-    extract_media_references,
     serialize_collection_to_json,
 )
 from ankiops.config import (
@@ -27,7 +26,11 @@ from ankiops.markdown_to_anki import (
 )
 from ankiops.note_type_config import registry
 from ankiops.note_types import ensure_note_types
-from ankiops.sync_media import sync_from_anki, sync_to_anki
+from ankiops.sync_media import (
+    extract_media_references,
+    sync_from_anki,
+    sync_to_anki,
+)
 
 logger = logging.getLogger(__name__)
 
