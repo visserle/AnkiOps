@@ -2,7 +2,6 @@
 
 import json
 import logging
-
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +23,7 @@ def serialize_collection_to_json(
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
-        no_ids: If True, exclude note_id and deck_id from serialized output
+        no_ids: If True, exclude note_key and deck_key from serialized output
 
     Returns:
         Dictionary containing the serialized data
@@ -53,8 +52,8 @@ def serialize_collection_to_json(
         logger.debug(f"Processing {md_file.name}...")
         content = md_file.read_text()
 
-        # Extract deck_id and remaining content
-        deck_id, remaining_content = FileState.extract_deck_id(content)
+        # Extract deck_key and remaining content
+        deck_key, remaining_content = FileState.extract_deck_key(content)
 
         # Split into note blocks
         note_blocks_raw = remaining_content.split("\n\n---\n\n")
@@ -62,7 +61,8 @@ def serialize_collection_to_json(
         # Build deck data with deck_id first (matching markdown convention)
         deck_data = {}
         if not no_ids:
-            deck_data["deck_id"] = str(deck_id) if deck_id else None
+            deck_data["deck_key"] = deck_key
+
         deck_data["name"] = md_file.stem.replace("__", "::")  # Restore :: from __
         deck_data["notes"] = []
 
@@ -75,12 +75,10 @@ def serialize_collection_to_json(
             try:
                 parsed = Note.from_block(block_text)
 
-                # Convert to JSON-friendly format with note_id first (matching markdown)
+                # Convert to JSON-friendly format with note_key first (matching markdown)
                 note_data = {}
                 if not no_ids:
-                    note_data["note_id"] = (
-                        str(parsed.note_id) if parsed.note_id else None
-                    )
+                    note_data["note_key"] = parsed.note_key
                 note_data["fields"] = parsed.fields
 
                 deck_data["notes"].append(note_data)
@@ -132,7 +130,7 @@ def deserialize_collection_from_json(
     Args:
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
-        no_ids: If True, skip writing deck_id and note_id comments to markdown
+        no_ids: If True, skip writing deck_key and note_key comments to markdown
     """
     # Use collection directory (respects development mode)
     root_dir = get_collection_dir()
@@ -159,7 +157,8 @@ def deserialize_collection_from_json(
 
     for deck in data["decks"]:
         deck_name = deck["name"]
-        deck_id = deck.get("deck_id")
+        deck_key = deck.get("deck_key")
+
         notes = deck["notes"]
 
         # Sanitize filename (replace :: with __)
@@ -169,13 +168,13 @@ def deserialize_collection_from_json(
         # Build markdown content
         lines = []
 
-        # Add deck_id if present and not ignoring IDs
-        if deck_id and not no_ids:
-            lines.append(f"<!-- deck_id: {deck_id} -->")
+        # Add deck_key if present and not ignoring IDs
+        if deck_key and not no_ids:
+            lines.append(f"<!-- deck_key: {deck_key} -->")
 
         # Process each note
         for note in notes:
-            note_id = note.get("note_id")
+            note_key = note.get("note_key")
             fields = note["fields"]
 
             # Infer note type from fields
@@ -187,9 +186,9 @@ def deserialize_collection_from_json(
                 )
                 continue
 
-            # Add note_id if present and not ignoring IDs
-            if note_id and not no_ids:
-                lines.append(f"<!-- note_id: {note_id} -->")
+            # Add note_key if present and not ignoring IDs
+            if note_key and not no_ids:
+                lines.append(f"<!-- note_key: {note_key} -->")
 
             # Get field mappings for this note type
             # Use registry.note_config to get legacy list of (field_name, prefix)

@@ -12,8 +12,8 @@ import re
 from pathlib import Path
 
 from ankiops.config import NOTE_SEPARATOR, sanitize_filename
-from ankiops.note_type_config import registry
 from ankiops.html_converter import HTMLToMarkdown
+from ankiops.key_map import KeyMap
 from ankiops.log import clickable_path, format_changes
 from ankiops.models import (
     AnkiState,
@@ -23,6 +23,7 @@ from ankiops.models import (
     FileState,
     SyncResult,
 )
+from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,11 @@ def _format_blocks(
     note_ids: set[int],
     anki: AnkiState,
     converter: HTMLToMarkdown,
+    key_map: KeyMap,
 ) -> dict[str, tuple[int, str]]:
     """Format Anki notes into markdown blocks.
 
-    Returns {block_id_key: (note_id, formatted_block)}.
+    Returns {block_key: (note_id, formatted_block)}.
     """
     block_by_id: dict[str, tuple[int, str]] = {}
 
@@ -44,8 +46,15 @@ def _format_blocks(
             continue
         if anki_note.note_type not in registry.supported_note_types:
             continue
-        block = anki_note.to_markdown(converter)
-        match = re.match(r"<!--\s*(note_id:\s*\d+)\s*-->", block)
+
+        # Look up or generate Key for this note
+        note_key = key_map.get_note_key(nid)
+        if not note_key:
+            note_key = KeyMap.generate_key()
+            key_map.set_note(note_key, nid)
+
+        block = anki_note.to_markdown(converter, note_key=note_key)
+        match = re.match(r"<!--\s*(note_key:\s*[a-zA-Z0-9-]+)\s*-->", block)
         if match:
             key = re.sub(r"\s+", " ", match.group(1))
             block_by_id[key] = (nid, block)
@@ -60,8 +69,8 @@ def _reconcile_blocks(
     """Reconcile new Anki blocks with existing file blocks.
 
     Args:
-        block_by_id: {block_id: (note_id, content)} from Anki.
-        existing_blocks: {block_id: content} from existing file.
+        block_by_id: {block_key: (note_id, content)} from Anki.
+        existing_blocks: {block_key: content} from existing file.
 
     Returns:
         List of Change objects representing the transformation.
@@ -96,11 +105,7 @@ def _reconcile_blocks(
                     )
             else:
                 # Block exists in file but not in Anki -> Delete from file
-                # Try to extract note_id from block_id ("note_id: 123")
-                match = re.search(r"note_id:\s*(\d+)", block_id)
-                entity_id = int(match.group(1)) if match else None
-
-                changes.append(Change(ChangeType.DELETE, entity_id, block_id))
+                changes.append(Change(ChangeType.DELETE, None, block_id))
 
         # Append genuinely new notes, sorted by creation date
         new_ids = new_block_ids - set(existing_blocks)
@@ -129,6 +134,7 @@ def _sync_deck(
     deck_id: int,
     anki: AnkiState,
     converter: HTMLToMarkdown,
+    key_map: KeyMap,
     existing_file: FileState | None,
 ) -> tuple[SyncResult, str | None]:
     """Synchronize one Anki deck to markdown content.
@@ -137,14 +143,26 @@ def _sync_deck(
     is empty (no notes to export).
     """
     note_ids = anki.note_ids_by_deck_name.get(deck_name, set())
-    block_by_id = _format_blocks(note_ids, anki, converter)
+    block_by_id = _format_blocks(note_ids, anki, converter, key_map)
     if not block_by_id:
         return SyncResult(
             deck_name=deck_name,
             file_path=None,
         ), None
 
-    deck_id_line = f"<!-- deck_id: {deck_id} -->\n"
+    # Resolve Deck Key
+    deck_key = key_map.get_deck_key(deck_id)
+    if not deck_key:
+        # Check if existing file has a Key we should adopt
+        if existing_file and existing_file.deck_key:
+            deck_key = existing_file.deck_key
+            key_map.set_deck(deck_key, deck_id)
+        else:
+            deck_key = KeyMap.generate_key()
+            key_map.set_deck(deck_key, deck_id)
+
+    deck_id_line = f"<!-- deck_key: {deck_key} -->\n"
+
     existing_blocks = existing_file.existing_blocks if existing_file else None
 
     changes = _reconcile_blocks(block_by_id, existing_blocks)
@@ -188,11 +206,11 @@ def export_deck(
     output_path = Path(output_dir) / (sanitize_filename(deck_name) + ".md")
     existing_file = FileState.from_file(output_path) if output_path.exists() else None
 
+    key_map = KeyMap.load(Path(output_dir))
+
     # Check for untracked notes before overwriting
     if existing_file and existing_file.has_untracked:
-        logger.warning(
-            f"The file {output_path.name} contains new notes without note IDs."
-        )
+        logger.warning(f"The file {output_path.name} contains new notes without Keys.")
         logger.warning(
             "\nThese notes have not been imported to Anki yet and will be LOST "
             "if you continue with the export."
@@ -209,7 +227,9 @@ def export_deck(
             logger.info("Export cancelled. Import your new notes first.")
             raise SystemExit(0)
 
-    result, new_content = _sync_deck(deck_name, deck_id, anki, converter, existing_file)
+    result, new_content = _sync_deck(
+        deck_name, deck_id, anki, converter, key_map, existing_file
+    )
 
     if new_content is not None:
         old_content = existing_file.raw_content if existing_file else None
@@ -217,6 +237,7 @@ def export_deck(
             output_path.write_text(new_content, encoding="utf-8")
         result.file_path = output_path
 
+    key_map.save(Path(output_dir))
     return result
 
 
@@ -232,7 +253,7 @@ def export_collection(
       3. Rename files for decks renamed in Anki
       4. Sync each relevant deck
       5. Delete orphaned deck files (deck_id not in Anki)
-      6. Delete orphaned notes (note_id not in Anki)
+      6. Delete orphaned notes (note_key not in Anki)
 
     Returns an ExportSummary with all results.
     """
@@ -241,6 +262,7 @@ def export_collection(
     # Phase 1: Fetch all Anki state
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
+    key_map = KeyMap.load(output_path)
 
     # Phase 2: Read all existing markdown files
     files_by_deck_id: dict[int, FileState] = {}
@@ -250,21 +272,26 @@ def export_collection(
     for md_file in output_path.glob("*.md"):
         fs = FileState.from_file(md_file)
         files_by_path[md_file] = fs
-        if fs.deck_id is not None:
-            files_by_deck_id[fs.deck_id] = fs
+        if fs.deck_key:
+            # We need to resolve deck_id from deck_key via KeyMap
+            # But the KeyMap might not be loaded yet or we need to look it up.
+            # Actually, we can just use the mapped deck_id if available.
+            resolved_deck_id = key_map.get_deck_id(fs.deck_key)
+            if resolved_deck_id:
+                files_by_deck_id[resolved_deck_id] = fs
+            else:
+                unlinked_files.append(fs)
         else:
             unlinked_files.append(fs)
 
-    # Check for untracked notes (notes without IDs) before overwriting
+    # Check for untracked notes (notes without Keys) before overwriting
     files_with_untracked: list[Path] = []
     for md_file, fs in files_by_path.items():
         if fs.has_untracked:
             files_with_untracked.append(md_file)
 
     if files_with_untracked:
-        logger.warning(
-            "The following markdown files contain new notes without note IDs:"
-        )
+        logger.warning("The following markdown files contain new notes without Keys:")
         for file_path in files_with_untracked:
             logger.warning(f"  - {clickable_path(file_path)}")
         logger.warning(
@@ -300,9 +327,10 @@ def export_collection(
             fs = FileState(
                 file_path=new_path,
                 raw_content=fs.raw_content,
-                deck_id=fs.deck_id,
+                deck_key=fs.deck_key,
                 parsed_notes=fs.parsed_notes,
             )
+
             files_by_deck_id[deck_id] = fs
             files_by_path[new_path] = fs
             renamed_files += 1
@@ -338,7 +366,7 @@ def export_collection(
 
         logger.debug(f"Processing {deck_name} (id: {deck_id})...")
         result, new_content = _sync_deck(
-            deck_name, deck_id, anki, converter, existing_file
+            deck_name, deck_id, anki, converter, key_map, existing_file
         )
 
         if new_content is not None:
@@ -349,10 +377,10 @@ def export_collection(
             result.file_path = file_path
             deck_results.append(result)
 
-            # Track created/deleted IDs for move detection
+            # Track created/deleted Keys for move detection
             new_block_ids = set()
             for line in new_content.split("\n"):
-                m = re.match(r"<!--\s*(note_id:\s*\d+)\s*-->", line)
+                m = re.match(r"<!--\s*(note_key:\s*[a-zA-Z0-9-]+)\s*-->", line)
                 if m:
                     new_block_ids.add(re.sub(r"\s+", " ", m.group(1)))
 
@@ -394,10 +422,7 @@ def export_collection(
                 fs.file_path.unlink()
                 deleted_deck_files += 1
 
-        # Note: Orphaned notes within valid deck files are already removed by _sync_deck
-        # because _reconcile_blocks creates DELETE changes for them.
-        # We only need to guard against files that weren't synced (e.g. unlinked),
-        # but those are edge cases.
+    key_map.save(output_path)
 
     return ExportSummary(
         deck_results=deck_results,

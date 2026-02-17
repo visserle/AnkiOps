@@ -10,6 +10,7 @@ MARKER_FILE = ".ankiops"
 CARD_TEMPLATES_DIR_NAME = ".custom_card_templates"
 CUSTOM_CONFIG_FILENAME = "note_types.yaml"
 LOCAL_MEDIA_DIR = "media"
+KEY_MAP_DB = "key_map.db"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 

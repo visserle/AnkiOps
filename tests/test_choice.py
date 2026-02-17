@@ -1,7 +1,5 @@
 """Tests for AnkiOpsChoice note type parsing and validation."""
 
-import pytest
-
 from ankiops.models import Note
 
 
@@ -10,7 +8,7 @@ class TestParseChoiceBlock:
 
     def test_choice_with_note_id(self):
         block = (
-            "<!-- note_id: 789 -->\n"
+            "<!-- note_key: key-789 -->\n"
             "Q: What is the capital of France?\n"
             "C1: Paris\n"
             "C2: London\n"
@@ -18,7 +16,7 @@ class TestParseChoiceBlock:
             "A: 1"
         )
         parsed_note = Note.from_block(block)
-        assert parsed_note.note_id == 789
+        assert parsed_note.note_key == "key-789"
         assert parsed_note.note_type == "AnkiOpsChoice"
         assert parsed_note.fields["Question"] == "What is the capital of France?"
         assert parsed_note.fields["Choice 1"] == "Paris"
@@ -29,12 +27,12 @@ class TestParseChoiceBlock:
     def test_choice_without_id_detected_from_prefix(self):
         block = "Q: Test\nC1: Choice 1\nC2: Choice 2\nA: 1"
         parsed_note = Note.from_block(block)
-        assert parsed_note.note_id is None
+        assert parsed_note.note_key is None
         assert parsed_note.note_type == "AnkiOpsChoice"
 
     def test_choice_with_all_fields(self):
         block = (
-            "<!-- note_id: 100 -->\n"
+            "<!-- note_key: key-100 -->\n"
             "Q: Question?\n"
             "C1: A\nC2: B\nC3: C\nC4: D\nC5: E\nC6: F\nC7: G\n"
             "A: 1\n"
@@ -84,7 +82,7 @@ class TestValidateChoiceNote:
     def test_missing_mandatory_question(self):
         block = "C1: Choice 1\nC2: Choice 2\nA: 1"
         parsed_note = Note(
-            note_id=1,
+            note_key="key-1",
             note_type="AnkiOpsChoice",
             fields={"Choice 1": "A", "Choice 2": "B", "Answer": "1"},
         )
@@ -93,7 +91,7 @@ class TestValidateChoiceNote:
 
     def test_missing_mandatory_choice(self):
         parsed_note = Note(
-            note_id=1,
+            note_key="key-1",
             note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Answer": "1"},
         )
@@ -102,7 +100,7 @@ class TestValidateChoiceNote:
 
     def test_only_one_choice(self):
         parsed_note = Note(
-            note_id=1,
+            note_key="key-1",
             note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Choice 1": "A", "Answer": "1"},
         )
@@ -112,7 +110,7 @@ class TestValidateChoiceNote:
     def test_missing_mandatory_answer(self):
         block = "Q: Question?\nC1: Choice 1\nC2: Choice 2"
         parsed_note = Note(
-            note_id=1,
+            note_key="key-1",
             note_type="AnkiOpsChoice",
             fields={"Question": "Q?", "Choice 1": "A", "Choice 2": "B"},
         )

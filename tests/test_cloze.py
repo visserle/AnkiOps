@@ -13,12 +13,12 @@ class TestParseClozBlock:
 
     def test_cloze_with_note_id(self):
         block = (
-            "<!-- note_id: 789 -->\n"
+            "<!-- note_key: key-789 -->\n"
             "T: The capital of {{c1::France}} is {{c2::Paris}}\n"
             "E: Geography fact"
         )
         parsed_note = Note.from_block(block)
-        assert parsed_note.note_id == 789
+        assert parsed_note.note_key == "key-789"
         assert parsed_note.note_type == "AnkiOpsCloze"
         assert len(parsed_note.fields) == 2
         assert (
@@ -30,13 +30,13 @@ class TestParseClozBlock:
     def test_cloze_without_id_detected_from_prefix(self):
         block = "T: This is a {{c1::cloze}} test\nE: Extra"
         parsed_note = Note.from_block(block)
-        assert parsed_note.note_id is None
+        assert parsed_note.note_key is None
         assert parsed_note.note_type == "AnkiOpsCloze"
         assert parsed_note.fields["Text"] == "This is a {{c1::cloze}} test"
 
     def test_cloze_with_hint(self):
         block = (
-            "<!-- note_id: 100 -->\n"
+            "<!-- note_key: key-100 -->\n"
             "T: The {{c1::mitochondria::organelle}} is the powerhouse of the cell"
         )
         parsed_note = Note.from_block(block)
@@ -45,7 +45,7 @@ class TestParseClozBlock:
 
     def test_cloze_multiline_text(self):
         block = (
-            "<!-- note_id: 200 -->\n"
+            "<!-- note_key: key-200 -->\n"
             "T: First line with {{c1::cloze}}\n"
             "Second line continues\n"
             "E: Some extra info"
@@ -58,7 +58,7 @@ class TestParseClozBlock:
         )
 
     def test_cloze_all_fields(self):
-        block = "<!-- note_id: 300 -->\nT: {{c1::Answer}}\nE: Extra\nM: More info"
+        block = "<!-- note_key: key-300 -->\nT: {{c1::Answer}}\nE: Extra\nM: More info"
         parsed_note = Note.from_block(block)
         assert parsed_note.fields["Text"] == "{{c1::Answer}}"
         assert parsed_note.fields["Extra"] == "Extra"
@@ -69,9 +69,9 @@ class TestParseQABlock:
     """Verify AnkiOpsQA parsing."""
 
     def test_qa_with_note_id(self):
-        block = "<!-- note_id: 123 -->\nQ: What?\nA: This"
+        block = "<!-- note_key: key-123 -->\nQ: What?\nA: This"
         parsed_note = Note.from_block(block)
-        assert parsed_note.note_id == 123
+        assert parsed_note.note_key == "key-123"
         assert parsed_note.note_type == "AnkiOpsQA"
         assert parsed_note.fields["Question"] == "What?"
         assert parsed_note.fields["Answer"] == "This"
@@ -80,7 +80,7 @@ class TestParseQABlock:
         block = "Q: New question\nA: New answer"
         parsed_note = Note.from_block(block)
         assert parsed_note.note_type == "AnkiOpsQA"
-        assert parsed_note.note_id is None
+        assert parsed_note.note_key is None
 
 
 class TestFormatNote:
@@ -103,8 +103,8 @@ class TestFormatNote:
                 "cards": [],
             }
         )
-        result = anki_note.to_markdown(converter)
-        assert "<!-- note_id: 789 -->" in result
+        result = anki_note.to_markdown(converter, note_key="key-789")
+        assert "<!-- note_key: key-789 -->" in result
         assert "T: The {{c1::answer}} is here" in result
         assert "E: Extra info" in result
         assert "M:" not in result  # empty optional field omitted
@@ -123,8 +123,8 @@ class TestFormatNote:
                 "cards": [],
             }
         )
-        result = anki_note.to_markdown(converter)
-        assert "<!-- note_id: 123 -->" in result
+        result = anki_note.to_markdown(converter, note_key="key-123")
+        assert "<!-- note_key: key-123 -->" in result
         assert "Q: What?" in result
         assert "A: This" in result
 
@@ -134,46 +134,46 @@ class TestExtractNoteBlocks:
 
     def test_mixed_qa_and_cloze(self):
         content = (
-            "<!-- note_id: 10 -->\n"
+            "<!-- note_key: key-10 -->\n"
             "Q: Question\n"
             "A: Answer\n"
             f"{NOTE_SEPARATOR}"
-            "<!-- note_id: 20 -->\n"
+            "<!-- note_key: key-20 -->\n"
             "T: {{c1::Cloze}}"
         )
         blocks = FileState.extract_note_blocks(content)
-        assert "note_id: 10" in blocks
-        assert "note_id: 20" in blocks
+        assert "note_key: key-10" in blocks
+        assert "note_key: key-20" in blocks
         assert len(blocks) == 2
 
     def test_only_cloze_blocks(self):
         content = (
-            "<!-- note_id: 100 -->\n"
+            "<!-- note_key: key-100 -->\n"
             "T: {{c1::First}}\n"
             f"{NOTE_SEPARATOR}"
-            "<!-- note_id: 200 -->\n"
+            "<!-- note_key: key-200 -->\n"
             "T: {{c1::Second}}"
         )
         blocks = FileState.extract_note_blocks(content)
-        assert "note_id: 100" in blocks
-        assert "note_id: 200" in blocks
+        assert "note_key: key-100" in blocks
+        assert "note_key: key-200" in blocks
 
 
 class TestValidateNote:
     """Test Note.validate() for mandatory fields and unknown prefixes."""
 
     def test_valid_qa_card(self):
-        block = "<!-- note_id: 1 -->\nQ: Question\nA: Answer"
+        block = "<!-- note_key: key-1 -->\nQ: Question\nA: Answer"
         parsed_note = Note.from_block(block)
         assert parsed_note.validate() == []
 
     def test_valid_cloze_card(self):
-        block = "<!-- note_id: 1 -->\nT: {{c1::text}}"
+        block = "<!-- note_key: key-1 -->\nT: {{c1::text}}"
         parsed_note = Note.from_block(block)
         assert parsed_note.validate() == []
 
     def test_missing_mandatory_qa_fields(self):
-        block = "<!-- note_id: 1 -->\nQ: Question only"
+        block = "<!-- note_key: key-1 -->\nQ: Question only"
         # Parsing should succeed (inference works with subsets)
         parsed_note = Note.from_block(block)
         assert parsed_note.note_type == "AnkiOpsQA"
@@ -184,7 +184,7 @@ class TestValidateNote:
     def test_missing_mandatory_cloze_field(self):
         # Construct directly since T: without cloze syntax would fail validation
         parsed_note = Note(
-            note_id=1,
+            note_key="key-1",
             note_type="AnkiOpsCloze",
             fields={"Extra": "Only extra"},
         )
@@ -192,7 +192,7 @@ class TestValidateNote:
         assert any("Text" in e and "T:" in e for e in errors)
 
     def test_no_unique_prefix_raises(self):
-        block = "<!-- note_id: 1 -->\nE: Only extra"
+        block = "<!-- note_key: key-1 -->\nE: Only extra"
         with pytest.raises(ValueError, match="Cannot determine note type"):
             Note.from_block(block)
 
@@ -208,7 +208,9 @@ class TestValidateNote:
         assert parsed_note.validate() == []
 
     def test_continuation_lines_not_flagged(self):
-        block = "<!-- note_id: 1 -->\nQ: Question\nA: Answer starts\nmore answer text"
+        block = (
+            "<!-- note_key: key-1 -->\nQ: Question\nA: Answer starts\nmore answer text"
+        )
         parsed_note = Note.from_block(block)
         assert parsed_note.validate() == []
 

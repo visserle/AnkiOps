@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class Field:
     """Definition of a field in a note type."""
+
     name: str
-    prefix: str
+    prefix: str | None
 
 
 # Common fields available to all note types
@@ -25,6 +26,7 @@ COMMON_FIELDS = [
     Field("More", "M:"),
     Field("Source", "S:"),
     Field("AI Notes", "AI:"),
+    Field("AnkiOps ID", None),  # Internal ID for safe syncing
 ]
 
 # Identifying fields for built-in note types
@@ -75,7 +77,7 @@ class NoteTypeConfig:
     @property
     def identifying_prefixes(self) -> set[str]:
         """Return prefixes of identifying fields."""
-        return {f.prefix for f in self.fields}
+        return {f.prefix for f in self.fields if f.prefix is not None}
 
     def get_field_by_prefix(self, prefix: str) -> Field | None:
         """Get field definition by its prefix."""
@@ -87,11 +89,13 @@ class NoteTypeConfig:
 
 class NoteTypeRegistry:
     """Registry for all supported note types (built-in and custom)."""
-    
+
     # Pre-computed sets for validation
     _COMMON_NAMES: ClassVar[set[str]] = {f.name for f in COMMON_FIELDS}
-    _COMMON_PREFIXES: ClassVar[set[str]] = {f.prefix for f in COMMON_FIELDS}
-    
+    _COMMON_PREFIXES: ClassVar[set[str]] = {
+        f.prefix for f in COMMON_FIELDS if f.prefix is not None
+    }
+
     # Built-in identifying fields are also reserved to prevent ambiguity
     _BUILTIN_NAMES: ClassVar[set[str]] = set()
     _BUILTIN_PREFIXES: ClassVar[set[str]] = set()
@@ -107,7 +111,9 @@ class NoteTypeRegistry:
         builtin_configs = [
             NoteTypeConfig("AnkiOpsQA", IDENTIFYING_FIELDS["AnkiOpsQA"]),
             NoteTypeConfig("AnkiOpsReversed", IDENTIFYING_FIELDS["AnkiOpsReversed"]),
-            NoteTypeConfig("AnkiOpsCloze", IDENTIFYING_FIELDS["AnkiOpsCloze"], is_cloze=True),
+            NoteTypeConfig(
+                "AnkiOpsCloze", IDENTIFYING_FIELDS["AnkiOpsCloze"], is_cloze=True
+            ),
             NoteTypeConfig("AnkiOpsInput", IDENTIFYING_FIELDS["AnkiOpsInput"]),
             NoteTypeConfig("AnkiOpsChoice", IDENTIFYING_FIELDS["AnkiOpsChoice"]),
         ]
@@ -116,7 +122,8 @@ class NoteTypeRegistry:
         for config in builtin_configs:
             for field in config.fields:
                 self._BUILTIN_NAMES.add(field.name)
-                self._BUILTIN_PREFIXES.add(field.prefix)
+                if field.prefix is not None:
+                    self._BUILTIN_PREFIXES.add(field.prefix)
 
         # Register them
         for config in builtin_configs:
@@ -138,33 +145,39 @@ class NoteTypeRegistry:
         """Ensure fields do not accidentally start with reserved prefixes/names."""
         # 1. Determine reserved sets
         if config.custom:
-             # Custom types: Cannot match Common OR Built-in fields
-            reserved_prefixes = NoteTypeRegistry._COMMON_PREFIXES | NoteTypeRegistry._BUILTIN_PREFIXES
-            reserved_names = NoteTypeRegistry._COMMON_NAMES | NoteTypeRegistry._BUILTIN_NAMES
+            # Custom types: Cannot match Common OR Built-in fields
+            reserved_prefixes = (
+                NoteTypeRegistry._COMMON_PREFIXES | NoteTypeRegistry._BUILTIN_PREFIXES
+            )
+            reserved_names = (
+                NoteTypeRegistry._COMMON_NAMES | NoteTypeRegistry._BUILTIN_NAMES
+            )
             error_msg = "reserved built-in/common"
         else:
-             # Built-in types: Cannot match Common fields
+            # Built-in types: Cannot match Common fields
             reserved_prefixes = NoteTypeRegistry._COMMON_PREFIXES
             reserved_names = NoteTypeRegistry._COMMON_NAMES
             error_msg = "reserved common"
 
         # 2. Check each field
         for field in config.fields:
-            if field.prefix in reserved_prefixes:
+            if field.prefix is not None and field.prefix in reserved_prefixes:
                 raise ValueError(
-                    f"Note type '{config.name}' uses {error_msg} prefix '{field.prefix}'"
+                    f"Note type '{config.name}' uses {error_msg} "
+                    f"prefix '{field.prefix}'"
                 )
             if field.name in reserved_names:
                 raise ValueError(
-                    f"Note type '{config.name}' uses {error_msg} field name '{field.name}'"
+                    f"Note type '{config.name}' uses {error_msg} "
+                    f"field name '{field.name}'"
                 )
 
     def _validate_global_consistency(self, config: NoteTypeConfig) -> None:
         """Ensure a prefix always maps to the same field name globally."""
         global_map = self.prefix_to_field
-        
+
         for field in config.fields:
-            if field.prefix in global_map:
+            if field.prefix is not None and field.prefix in global_map:
                 existing_name = global_map[field.prefix]
                 if existing_name != field.name:
                     raise ValueError(
@@ -176,15 +189,16 @@ class NoteTypeRegistry:
     def _validate_distinctness(self, config: NoteTypeConfig) -> None:
         """Ensure the set of identifying fields is unique to avoid ambiguity."""
         new_prefixes = config.identifying_prefixes
-        
+
         for existing_name, existing_config in self._configs.items():
             if existing_name == config.name:
                 continue
-                
+
             if new_prefixes == existing_config.identifying_prefixes:
-                 raise ValueError(
+                raise ValueError(
                     f"Note type '{config.name}' has identical identifying fields "
-                    f"to '{existing_name}' ({new_prefixes}), which makes inference ambiguous."
+                    f"to '{existing_name}' ({new_prefixes}), "
+                    "which makes inference ambiguous."
                 )
 
     def get(self, name: str) -> NoteTypeConfig:
@@ -211,11 +225,8 @@ class NoteTypeRegistry:
 
         for name, info in data.items():
             try:
-                fields = [
-                    Field(f["name"], f["prefix"])
-                    for f in info.get("fields", [])
-                ]
-                
+                fields = [Field(f["name"], f["prefix"]) for f in info.get("fields", [])]
+
                 self.register(
                     NoteTypeConfig(
                         name=name,
@@ -245,11 +256,13 @@ class NoteTypeRegistry:
         """Global mapping of prefix -> field name for all registered types."""
         mapping = {}
         for field in COMMON_FIELDS:
-            mapping[field.prefix] = field.name
-            
+            if field.prefix is not None:
+                mapping[field.prefix] = field.name
+
         for config in self._configs.values():
             for field in config.fields:
-                mapping[field.prefix] = field.name
+                if field.prefix is not None:
+                    mapping[field.prefix] = field.name
         return mapping
 
     @property
@@ -258,9 +271,9 @@ class NoteTypeRegistry:
         return {v: k for k, v in self.prefix_to_field.items()}
 
     @property
-    def note_config(self) -> dict[str, list[tuple[str, str]]]:
+    def note_config(self) -> dict[str, list[tuple[str, str | None]]]:
         """Legacy-style dictionary of note type -> all fields (including common).
-        
+
         Returns:
             Dict mapping note type name to list of (field_name, prefix) tuples.
         """
@@ -272,15 +285,15 @@ class NoteTypeRegistry:
         return result
 
     @property
-    def identifying_fields(self) -> dict[str, list[tuple[str, str]]]:
+    def identifying_fields(self) -> dict[str, list[tuple[str, str | None]]]:
         """Legacy-style dictionary of note type -> identifying fields.
-        
+
         Returns:
             Dict mapping note type name to list of (field_name, prefix) tuples.
         """
         result = {}
         for name, config in self._configs.items():
-             result[name] = [(f.name, f.prefix) for f in config.fields]
+            result[name] = [(f.name, f.prefix) for f in config.fields]
         return result
 
 

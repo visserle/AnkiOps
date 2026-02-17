@@ -7,10 +7,10 @@ sent back to Anki is complete (including cleared optional fields).
 
 import pytest
 
-from ankiops.note_type_config import registry
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import AnkiNote, Note
+from ankiops.note_type_config import registry
 
 # -- helpers -----------------------------------------------------------------
 
@@ -54,7 +54,7 @@ def _roundtrip(anki_fields: dict[str, str], note_type: str) -> dict[str, str]:
 
     raw = _anki_note_raw(anki_fields, note_type)
     anki_note = AnkiNote.from_raw(raw)
-    md_text = anki_note.to_markdown(html_to_md)
+    md_text = anki_note.to_markdown(html_to_md, note_key="key-1")
     parsed = Note.from_block(md_text)
     html_fields = parsed.to_html(md_to_html)
     return _complete_fields(note_type, html_fields)
@@ -208,11 +208,11 @@ class TestRoundTripWithEdits:
         anki_note = AnkiNote.from_raw(raw)
 
         # Export
-        md_text = anki_note.to_markdown(html_to_md)
+        md_text = anki_note.to_markdown(html_to_md, note_key="key-1")
         assert "E: Info" in md_text
 
         # User removes the E: line
-        lines = [l for l in md_text.splitlines() if not l.startswith("E:")]
+        lines = [line for line in md_text.splitlines() if not line.startswith("E:")]
         edited_md = "\n".join(lines)
         assert "E:" not in edited_md
 
@@ -232,7 +232,7 @@ class TestRoundTripWithEdits:
         raw = _anki_note_raw(anki_fields)
         anki_note = AnkiNote.from_raw(raw)
 
-        md_text = anki_note.to_markdown(html_to_md)
+        md_text = anki_note.to_markdown(html_to_md, note_key="key-1")
         assert "E:" not in md_text
 
         # User adds an Extra line
@@ -249,7 +249,7 @@ class TestRoundTripWithEdits:
         raw = _anki_note_raw(anki_fields)
         anki_note = AnkiNote.from_raw(raw)
 
-        md_text = anki_note.to_markdown(html_to_md)
+        md_text = anki_note.to_markdown(html_to_md, note_key="key-1")
         edited_md = md_text.replace("A: This", "A: That")
 
         parsed = Note.from_block(edited_md)
