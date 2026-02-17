@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import LOCAL_MEDIA_DIR, MARKER_FILE, get_collection_dir
+from ankiops.config import MARKER_FILE, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
 from ankiops.note_type_config import registry
@@ -34,9 +34,6 @@ def serialize_collection_to_json(
     if not marker_path.exists():
         raise ValueError(f"Not a AnkiOps collection: {collection_dir}")
 
-    # Use local project media directory
-    media_dir_path = collection_dir / LOCAL_MEDIA_DIR
-
     # Build JSON structure
     serialized_data = {
         "collection": {
@@ -45,8 +42,6 @@ def serialize_collection_to_json(
         "decks": [],
     }
 
-    # Track all media files referenced in notes
-    all_media_files = set()
     # Track errors during serialization
     errors = []
 
