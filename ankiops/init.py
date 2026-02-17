@@ -7,7 +7,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from ankiops.config import MARKER_FILE, get_collection_dir
+from ankiops.config import LOCAL_MEDIA_DIR, MARKER_FILE, get_collection_dir
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
@@ -26,74 +26,7 @@ def _setup_marker(collection_dir: Path, profile: str, media_dir: str):
         config.write(f)
 
 
-def _is_junction(path: Path) -> bool:
-    """Check if a path is a Windows directory junction."""
-    if platform.system() != "Windows":
-        return False
-    try:
-        import ctypes
 
-        FILE_ATTRIBUTE_REPARSE_POINT = 0x400
-        attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
-        return attrs != -1 and bool(attrs & FILE_ATTRIBUTE_REPARSE_POINT)
-    except Exception:
-        return False
-
-
-def _create_junction(link: Path, target: Path) -> bool:
-    """Create a Windows directory junction. Returns True on success."""
-    try:
-        subprocess.run(
-            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-            capture_output=True,
-            check=True,
-        )
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-
-
-def _setup_media_symlink(collection_dir: Path, media_dir: str):
-    """Create a 'media' symlink/junction in the collection dir pointing to Anki media.
-
-    On macOS/Linux, creates a symbolic link.
-    On Windows, tries a symlink first (requires Developer Mode or admin privileges),
-    then falls back to a directory junction.
-    """
-    link = collection_dir / "media"
-    target = Path(media_dir)
-    is_windows = platform.system() == "Windows"
-
-    # Check if link already exists and is correct
-    if link.is_symlink() or _is_junction(link):
-        try:
-            if link.resolve() == target.resolve():
-                return  # already correct
-        except OSError:
-            pass
-        link.unlink()
-    elif link.exists():
-        link.unlink()
-
-    # Try symlink first (works on Unix, and Windows with Developer Mode)
-    try:
-        link.symlink_to(target, target_is_directory=True)
-        return
-    except OSError:
-        if not is_windows:
-            raise  # On Unix, symlinks should work
-
-    # Windows fallback: try directory junction
-    if _create_junction(link, target):
-        return
-
-    # Neither worked — warn the user
-    logger.warning(
-        f"Could not create media link at {link}. "
-        "On Windows, enable Developer Mode or run as administrator to create symlinks. "
-        "Without this link, pasting images into the VS Code markdown editor will not "
-        "save them directly to the Anki media folder."
-    )
 
 
 def _setup_vscode_settings(collection_dir: Path):
@@ -109,7 +42,9 @@ def _setup_vscode_settings(collection_dir: Path):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    settings["markdown.copyFiles.destination"] = {"**/*.md": "media/AnkiOpsMedia/"}
+    settings["markdown.copyFiles.destination"] = {
+        "**/*.md": f"{LOCAL_MEDIA_DIR}/"
+    }
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 
@@ -146,8 +81,7 @@ def initialize_collection(profile: str, media_dir: str) -> Path:
     collection_dir.mkdir(parents=True, exist_ok=True)
 
     _setup_marker(collection_dir, profile, media_dir)
-    _setup_media_symlink(collection_dir, media_dir)
-    (collection_dir / "media" / "AnkiOpsMedia").mkdir(exist_ok=True)
+    (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
     _setup_git(collection_dir)
 

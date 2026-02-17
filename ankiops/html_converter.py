@@ -5,6 +5,8 @@ import re
 from bs4 import BeautifulSoup
 from html_to_markdown import ConversionOptions, convert_with_visitor
 
+from ankiops.config import LOCAL_MEDIA_DIR
+
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
     "*": "\u200dMDESCASTERISK\u200d",
@@ -94,7 +96,10 @@ class _AnkiVisitor:
         width_attr = (
             f"{{width={int(float(width_match.group(1)))}}}" if width_match else ""
         )
-        return {"type": "custom", "output": f"![{alt}](<media/{src}>){width_attr}"}
+        return {
+            "type": "custom",
+            "output": f"![{alt}](<{LOCAL_MEDIA_DIR}/{src}>){width_attr}",
+        }
 
     def visit_underline(self, node, text):
         content = text.strip()

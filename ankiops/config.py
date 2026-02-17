@@ -7,8 +7,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MARKER_FILE = ".ankiops"
-CARD_TEMPLATES_DIR_NAME = ".card_templates"
+CARD_TEMPLATES_DIR_NAME = ".custom_card_templates"
 CUSTOM_CONFIG_FILENAME = "note_types.yaml"
+LOCAL_MEDIA_DIR = "media"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 

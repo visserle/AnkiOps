@@ -218,43 +218,46 @@ class Note:
     def infer_note_type(fields: dict[str, str]) -> str:
         """Infer note type from parsed fields.
 
-        Checks all note types from most specific to least specific,
-        with AnkiOpsQA as the generic catch-all.
+        Finds the note type that contains all fields present in the note.
+        If multiple types match (e.g. QA matches {Q, A}, Choice matches {Q, A, C1}),
+        prefers the "tightest" fit (smallest number of defined fields).
         """
-        items = []
-        identifying_map = registry.identifying_fields
-        for note_type, identifying_fields_list in identifying_map.items():
-            config = registry.get(note_type)
-            if config.has_choices:
-                continue
-            elif note_type == "AnkiOpsQA":
-                identifying = {"Question", "Answer"}
-            else:
-                identifying = {f[0] for f in identifying_fields_list}
-            items.append((note_type, identifying))
+        # Exclude common fields (Extra, More, etc.) from logic
+        # as they do not distinguish note types.
+        from ankiops.note_type_config import NoteTypeRegistry
+        
+        common_names = NoteTypeRegistry._COMMON_NAMES
+        note_fields = {k for k in fields.keys() if k not in common_names}
+        candidates = []
 
-        # Sort by number of identifying fields (descending), then name
-        # We want the most specific type (most identifying fields) to be checked first.
-        items.sort(key=lambda x: (-len(x[1]), x[0]))
+        for name in registry.supported_note_types:
+            config = registry.get(name)
+            # Identifying fields == all fields now (excluding common ones potentially,
+            # but note_type_config.indentifying_fields returns self.fields which includes all specific fields)
+            # actually identifying_fields property returns self.fields.
+            # config.identifying_field_names returns names.
+            # We want to check against all specific fields of the type.
+            type_fields = set(config.identifying_field_names)
+            
+        # Check 1: Note fields must be a subset of the Type's fields
+            if note_fields.issubset(type_fields):
+                candidates.append((name, len(type_fields)))
 
-        # Special case: Choice notes are inferred by Question + ANY Choice field
-        # We assume any type with 'has_choices' trait behaves this way
-        if "Question" in fields and any(k.startswith("Choice ") for k in fields):
-            for name in registry.supported_note_types:
-                try:
-                    if registry.get(name).has_choices:
-                        return name
-                except KeyError:
-                    continue
-            return "AnkiOpsChoice"  # Fallback if no specific choice type found
+        if not note_fields:
+             raise ValueError(
+                "Cannot determine note type: only common fields found"
+            )
 
-        for note_type, identifying in items:
-            if identifying.issubset(fields.keys()):
-                return note_type
+        if not candidates:
+             raise ValueError(
+                "Cannot determine note type from fields: " + ", ".join(fields.keys())
+            )
 
-        raise ValueError(
-            "Cannot determine note type from fields: " + ", ".join(fields.keys())
-        )
+        # Sort by size (ascending). 
+        # {Q, A} fits QA (size 2) and Choice (size 10). QA comes first.
+        # {Q, A, C1} fits Choice (size 10). QA rejects it. Choice comes first.
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
 
     @staticmethod
     def from_block(block: str) -> Note:
@@ -377,15 +380,31 @@ class Note:
         choice_count = 0
         choice_fields = []
         
-        # Use registry.identifying_fields here to get just the core fields
+        # Check if this is a Choice-like note type
+        # We detect this by checking if it has choice-like fields in its definition
+        has_choices = any("Choice" in f.name for f in config.fields)
+
         identifying = registry.identifying_fields.get(self.note_type, [])
+        # identifying in registry is now a dict: name -> list of (name, prefix) tuples
+        # wait, registry.identifying_fields property in note_type_config.py returns list[Field] on CONFIG object
+        # but registry.identifying_fields in models.py usage seems to be accessing registry.identifying_fields PROPERTY of REGISTRY
+        # In note_type_config.py:
+        # @property
+        # def identifying_fields(self) -> dict[str, list[tuple[str, str]]]:
+        # matching what we see in `infer_note_type` loop in current models.py
+        
+        # NOTE: logic in validate usage of `identifying` was:
+        # identifying = registry.identifying_fields.get(self.note_type, [])
+        # for field_name, prefix in identifying:
+        
         for field_name, prefix in identifying:
             if "Choice" in field_name:
                 choice_fields.append(field_name)
                 if self.fields.get(field_name):
                     choice_count += 1
                 continue  # Skip individual Choice field check in mandatory loop
-
+            
+            # Non-Choice fields (Question, Answer, etc.) are mandatory if defined in the type
             if not self.fields.get(field_name):
                 errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
 
@@ -397,7 +416,7 @@ class Note:
                     "(e.g. {{c1::answer}}) in the T: field"
                 )
 
-        if config.has_choices:
+        if has_choices:
             if choice_count < 2:
                 errors.append(f"{self.note_type} note must have at least 2 choices")
             errors.extend(self._validate_choice_answers(choice_fields))

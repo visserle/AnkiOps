@@ -4,8 +4,16 @@ from pathlib import Path
 
 import pytest
 import yaml
+from unittest.mock import patch
 
-from ankiops.note_type_config import NoteTypeRegistry, NoteTypeConfig, Field
+from ankiops import models
+from ankiops.note_type_config import (
+    NoteTypeRegistry, 
+    NoteTypeConfig, 
+    Field, 
+    IDENTIFYING_FIELDS, 
+    COMMON_FIELDS
+)
 
 
 @pytest.fixture
@@ -61,14 +69,14 @@ def test_register_conflict_with_common(registry):
     """Ensure we cannot register a type that conflicts with common fields."""
     config = NoteTypeConfig(
         name="ConflictType",
-        fields=[Field("Extra", "E:")],  # "E:" is a common field prefix
+        fields=[COMMON_FIELDS[0]],  # "Extra" / "E:"
     )
     with pytest.raises(ValueError, match="uses reserved common prefix"):
         registry.register(config)
 
     config_name = NoteTypeConfig(
         name="ConflictName",
-        fields=[Field("Extra", "X:")],  # "Extra" is a reserved field name (even with different prefix)
+        fields=[Field(COMMON_FIELDS[0].name, "X:")],  # "Extra" name, different prefix
     )
     with pytest.raises(ValueError, match="uses reserved common field name"):
         registry.register(config_name)
@@ -78,7 +86,7 @@ def test_register_conflict_with_existing(registry):
     """Ensure we cannot register a type that has identical identifying fields to an existing one."""
     config = NoteTypeConfig(
         name="CopyCat",
-        fields=[Field("Question", "Q:"), Field("Answer", "A:")],  # Same as AnkiOpsQA
+        fields=IDENTIFYING_FIELDS["AnkiOpsQA"],
     )
     with pytest.raises(ValueError, match="makes inference ambiguous"):
         registry.register(config)
@@ -86,7 +94,7 @@ def test_register_conflict_with_existing(registry):
     # Subset should be allowed
     subset_config = NoteTypeConfig(
         name="SubsetType",
-        fields=[Field("Question", "Q:")],
+        fields=[IDENTIFYING_FIELDS["AnkiOpsQA"][0]], # Just Question
     )
     registry.register(subset_config)
     assert "SubsetType" in registry.supported_note_types
@@ -113,7 +121,7 @@ def test_load_custom_from_dir(registry):
         
         assert "MyCustomType" in registry.supported_note_types
         config = registry.get("MyCustomType")
-        assert config.is_reversed
+
         assert config.custom
         assert config.templates_dir == card_templates
         assert config.fields == [Field("Term", "TM:"), Field("Definition", "D:")]
@@ -271,7 +279,7 @@ def test_reserved_common_names(registry):
     """Ensure reserved common field names cannot be used."""
     config = NoteTypeConfig(
         name="BadName",
-        fields=[Field("Extra", "X:")], # Name collision with Common Field
+        fields=[Field(COMMON_FIELDS[0].name, "X:")], # Name collision with Common Field (Extra)
         custom=True,
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common field name"):
@@ -282,7 +290,7 @@ def test_reserved_common_prefixes(registry):
     """Ensure reserved common field prefixes cannot be used."""
     config = NoteTypeConfig(
         name="BadPrefix",
-        fields=[Field("Xfield", "E:")], # Prefix collision with Common Field (E:)
+        fields=[Field("Xfield", COMMON_FIELDS[0].prefix)], # Prefix collision with Common Field (E:)
         custom=True,
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
@@ -301,3 +309,65 @@ def test_reserved_builtin_prefixes_for_custom(registry):
     with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
         registry.register(config)
 
+# --- Inference Tests ---
+
+@pytest.fixture
+def mock_registry():
+    r = NoteTypeRegistry()
+    # Clear rules for clean slate testing of inference logic
+    r._configs = {}
+    return r
+
+def test_inference_qa_vs_choice(mock_registry):
+    """Verify {Q, A} matches QA (tighter) over Choice."""
+    qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
+    choice = NoteTypeConfig("Choice", IDENTIFYING_FIELDS["AnkiOpsChoice"])
+    mock_registry._configs = {"QA": qa, "Choice": choice}
+    
+    with patch("ankiops.models.registry", mock_registry):
+        # {Q, A} -> QA (size 2) vs Choice (size > 2) -> QA wins
+        qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
+        assert models.Note.infer_note_type(qa_fields) == "QA"
+        
+        # {Q, A, C1} -> Choice vs QA (rejection) -> Choice wins
+        # Construct fields: QA fields + Choice 1
+        choice_fields = qa_fields.copy()
+        choice_1 = next(f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 1")
+        choice_fields[choice_1.name] = "val"
+        assert models.Note.infer_note_type(choice_fields) == "Choice"
+
+def test_inference_choice_resilience(mock_registry):
+    """Verify Choice note is detected even if some choices are missing."""
+    choice = NoteTypeConfig("Choice", IDENTIFYING_FIELDS["AnkiOpsChoice"])
+    mock_registry._configs = {"Choice": choice}
+    
+    with patch("ankiops.models.registry", mock_registry):
+        # {Q, A, C2} -> Choice
+        qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
+        choice_2 = next(f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 2")
+        note_fields = qa_fields | {choice_2.name: "val"}
+        
+        assert models.Note.infer_note_type(note_fields) == "Choice"
+
+def test_inference_with_common_fields(mock_registry):
+    """Verify common fields don't interfere with inference."""
+    qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
+    mock_registry._configs = {"QA": qa}
+    
+    with patch("ankiops.models.registry", mock_registry):
+        # {Q, A, Extra} -> matches QA
+        qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
+        note_fields = qa_fields | {COMMON_FIELDS[0].name: "ex"} # Extra
+        assert models.Note.infer_note_type(note_fields) == "QA"
+
+def test_inference_unknown_field_fails(mock_registry):
+    """Verify that unknown fields cause inference failure."""
+    qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
+    mock_registry._configs = {"QA": qa}
+    
+    with patch("ankiops.models.registry", mock_registry):
+        # {Q, A, Random} -> Fails
+        qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
+        note_fields = qa_fields | {"Random": "r"}
+        with pytest.raises(ValueError, match="Cannot determine note type"):
+            models.Note.infer_note_type(note_fields)

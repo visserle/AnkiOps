@@ -59,14 +59,12 @@ class NoteTypeConfig:
     name: str
     fields: list[Field]
     is_cloze: bool = False
-    is_reversed: bool = False
-    has_choices: bool = False
     custom: bool = False
     templates_dir: Path | None = None
 
     @property
     def identifying_fields(self) -> list[Field]:
-        """Return identifying fields (excluding common fields)."""
+        """Return identifying fields."""
         return self.fields
 
     @property
@@ -108,10 +106,10 @@ class NoteTypeRegistry:
         # Config for built-ins
         builtin_configs = [
             NoteTypeConfig("AnkiOpsQA", IDENTIFYING_FIELDS["AnkiOpsQA"]),
-            NoteTypeConfig("AnkiOpsReversed", IDENTIFYING_FIELDS["AnkiOpsReversed"], is_reversed=True),
+            NoteTypeConfig("AnkiOpsReversed", IDENTIFYING_FIELDS["AnkiOpsReversed"]),
             NoteTypeConfig("AnkiOpsCloze", IDENTIFYING_FIELDS["AnkiOpsCloze"], is_cloze=True),
             NoteTypeConfig("AnkiOpsInput", IDENTIFYING_FIELDS["AnkiOpsInput"]),
-            NoteTypeConfig("AnkiOpsChoice", IDENTIFYING_FIELDS["AnkiOpsChoice"], has_choices=True),
+            NoteTypeConfig("AnkiOpsChoice", IDENTIFYING_FIELDS["AnkiOpsChoice"]),
         ]
 
         # Populate reserved sets from built-ins
@@ -153,9 +151,6 @@ class NoteTypeRegistry:
         # 2. Check each field
         for field in config.fields:
             if field.prefix in reserved_prefixes:
-                # Special case: allow if it's strictly the SAME field (same name & prefix)?
-                # Actually, common fields are implicitly added later, so the 'identifying'
-                # fields config shouldn't contain them at all.
                 raise ValueError(
                     f"Note type '{config.name}' uses {error_msg} prefix '{field.prefix}'"
                 )
@@ -226,8 +221,6 @@ class NoteTypeRegistry:
                         name=name,
                         fields=fields,
                         is_cloze=info.get("cloze", False),
-                        is_reversed=info.get("reversed", False),
-                        has_choices=info.get("choices", False),
                         custom=True,
                         templates_dir=card_templates_dir,
                     )

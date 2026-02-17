@@ -9,6 +9,7 @@ from ankiops.anki_to_markdown import (
 )
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
+    extract_media_references,
     serialize_collection_to_json,
 )
 from ankiops.config import (
@@ -26,6 +27,7 @@ from ankiops.markdown_to_anki import (
 )
 from ankiops.note_type_config import registry
 from ankiops.note_types import ensure_note_types
+from ankiops.sync_media import sync_from_anki, sync_to_anki
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,19 @@ def run_am(args):
     )
     logger.info(f"Export complete: {len(results)} files, {total} notes — {changes}")
 
+    # Sync referenced media from Anki to local
+    try:
+        media_dir = invoke("getMediaDirPath")
+        all_refs = set()
+        for md_file in collection_dir.glob("*.md"):
+            all_refs.update(extract_media_references(md_file.read_text()))
+        
+        if all_refs:
+            logger.info("Syncing referenced media from Anki...")
+            sync_from_anki(collection_dir, Path(media_dir), all_refs)
+    except Exception as e:
+        logger.warning(f"Media sync failed: {e}")
+
 
 def run_ma(args):
     """Markdown -> Anki: import markdown files into Anki."""
@@ -110,6 +125,14 @@ def run_ma(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+
+    # Sync local media to Anki (and rename if needed)
+    try:
+        media_dir = invoke("getMediaDirPath")
+        logger.info("Syncing local media to Anki...")
+        sync_to_anki(collection_dir, Path(media_dir))
+    except Exception as e:
+        logger.warning(f"Media sync failed: {e}")
 
     ensure_note_types()
 
@@ -208,7 +231,6 @@ def run_serialize(args):
         collection_dir,
         output_file,
         no_ids=args.no_ids,
-        include_media=args.include_media,
     )
 
 
@@ -301,7 +323,7 @@ def main():
     # Serialize parser
     serialize_parser = subparsers.add_parser(
         "serialize",
-        help="Export collection to portable JSON/ZIP (no Anki required)",
+        help="Export collection to portable JSON format",
     )
     serialize_parser.add_argument(
         "--output",
@@ -316,27 +338,22 @@ def main():
             "(useful for sharing/templates)"
         ),
     )
-    serialize_parser.add_argument(
-        "--include-media",
-        action="store_true",
-        help="Bundle media files into a ZIP archive (creates .zip instead of .json)",
-    )
     serialize_parser.set_defaults(handler=run_serialize)
 
     # Deserialize parser
     deserialize_parser = subparsers.add_parser(
         "deserialize",
-        help="Import markdown/media from JSON/ZIP (run 'init' after to set up)",
+        help="Import markdown from JSON (run 'init' after to set up)",
     )
     deserialize_parser.add_argument(
         "serialized_file",
         metavar="FILE",
-        help="Serialized file to import (.json or .zip)",
+        help="Serialized file to import (.json)",
     )
     deserialize_parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="Overwrite existing markdown files (media uses smart conflict resolution)",
+        help="Overwrite existing markdown files",
     )
     deserialize_parser.add_argument(
         "--no-ids",

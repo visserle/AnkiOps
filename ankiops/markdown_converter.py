@@ -10,6 +10,7 @@ from pygments import highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
+from ankiops.config import LOCAL_MEDIA_DIR
 
 _IMG_WIDTH_RE = re.compile(r'(<img src="[^"]*" alt="[^"]*")>\{width=(\d+)\}')
 # Rewrite [text](url_with_(parens)) to [text](<url>) so mistune doesn't
@@ -99,8 +100,8 @@ class AnkiRenderer(mistune.HTMLRenderer):
         return text
 
     def image(self, text, url, title=None):
-        if url.startswith("media/"):
-            url = url[6:]
+        if url.startswith(f"{LOCAL_MEDIA_DIR}/"):
+            url = url[len(LOCAL_MEDIA_DIR) + 1 :]
         return '<img src="' + url + '" alt="' + text + '">'
 
     def block_code(self, code, info=None):
