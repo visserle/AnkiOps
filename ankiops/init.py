@@ -26,9 +26,6 @@ def _setup_marker(collection_dir: Path, profile: str, media_dir: str):
         config.write(f)
 
 
-
-
-
 def _setup_vscode_settings(collection_dir: Path):
     """Create/update .vscode/settings.json with markdown paste destination."""
     vscode_dir = collection_dir / ".vscode"
@@ -42,9 +39,7 @@ def _setup_vscode_settings(collection_dir: Path):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    settings["markdown.copyFiles.destination"] = {
-        "**/*.md": f"{LOCAL_MEDIA_DIR}/"
-    }
+    settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 

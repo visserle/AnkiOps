@@ -342,8 +342,17 @@ class TestRoundTripEscapedCharacters:
         original_md = r"Path: C:\\Users\\Name"
         html = md_to_html.convert(original_md)
         restored_md = html_to_md.convert(html)
-        assert "C:" in restored_md
-        assert "Users" in restored_md
+        assert r"C:\\Users" in restored_md or r"C:\Users" in restored_md
+
+    def test_backslash_followed_by_punctuation_roundtrip(self, html_to_md, md_to_html):
+        """Regression test for backslash followed by punctuation (e.g. \\:)."""
+        original_md = r"\\: \\* \\."
+        html = md_to_html.convert(original_md)
+        restored_md = html_to_md.convert(html)
+        # Should preserve as literal backslash + char
+        assert r"\\:" in restored_md
+        assert r"\\*" in restored_md
+        assert r"\\." in restored_md
 
     def test_mixed_escaped_and_formatting_roundtrip(self, html_to_md, md_to_html):
         original_md = r"Therapeut\*in is **important**"

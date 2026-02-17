@@ -22,22 +22,12 @@ from ankiops.config import NOTE_SEPARATOR
 from ankiops.note_type_config import registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
-_NOTE_ID_PATTERN = re.compile(r"<!--\s*note_id:\s*(\d+)\s*-->")
-_DECK_ID_PATTERN = re.compile(r"<!--\s*deck_id:\s*(\d+)\s*-->\n?")
+_NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
+_DECK_KEY_PATTERN = re.compile(r"<!--\s*deck_key:\s*([a-zA-Z0-9-]+)\s*-->\n?")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class InvalidID:
-    """An ID from markdown that cannot be matched to an existing Anki entity."""
-
-    id_value: int
-    id_type: str  # "deck_id" or "note_id"
-    file_path: Path
-    context: str  # additional context (e.g., note identifier)
 
 
 @dataclass
@@ -49,15 +39,19 @@ class FileState:
 
     file_path: Path
     raw_content: str
-    deck_id: int | None
+    deck_key: str | None
     parsed_notes: list[Note]
 
     @staticmethod
-    def extract_deck_id(content: str) -> tuple[int | None, str]:
-        """Extract deck_id from the first line and return (deck_id, remaining)."""
-        match = _DECK_ID_PATTERN.match(content)
+    def extract_deck_key(content: str) -> tuple[str | None, str]:
+        """Extract deck_key from the first line.
+
+        Returns (deck_key, remaining_content).
+        """
+        match = _DECK_KEY_PATTERN.match(content)
         if match:
-            return int(match.group(1)), content[match.end() :]
+            return match.group(1), content[match.end() :]
+
         return None, content
 
     @staticmethod
@@ -65,26 +59,26 @@ class FileState:
         """Extract identified note blocks from content.
 
         Args:
-            cards_content: Content with deck_id already stripped
-                (the output of extract_deck_id).
+            cards_content: Content with deck_key already stripped.
 
-        Returns {"note_id: 123": block_content, ...}.
+        Returns {"note_key: a1b2c3d4...": block_content, ...}.
         """
+
         notes: dict[str, str] = {}
         for block in cards_content.split(NOTE_SEPARATOR):
             stripped = block.strip()
             if not stripped:
                 continue
-            match = _NOTE_ID_PATTERN.match(stripped)
+            match = _NOTE_KEY_PATTERN.match(stripped)
             if match:
-                notes[f"note_id: {match.group(1)}"] = stripped
+                notes[f"note_key: {match.group(1)}"] = stripped
         return notes
 
     @staticmethod
     def from_file(file_path: Path) -> FileState:
         """Read and parse a markdown file."""
         raw_content = file_path.read_text(encoding="utf-8")
-        deck_id, remaining = FileState.extract_deck_id(raw_content)
+        deck_key, remaining = FileState.extract_deck_key(raw_content)
         blocks = remaining.split(NOTE_SEPARATOR)
         parsed_notes = []
         for block in blocks:
@@ -99,93 +93,51 @@ class FileState:
         return FileState(
             file_path=file_path,
             raw_content=raw_content,
-            deck_id=deck_id,
+            deck_key=deck_key,
             parsed_notes=parsed_notes,
         )
 
     @property
-    def note_ids(self) -> set[int]:
-        """All note IDs present in this file."""
-        return {n.note_id for n in self.parsed_notes if n.note_id is not None}
+    def note_keys(self) -> set[str]:
+        """All note keys present in this file."""
+        return {n.note_key for n in self.parsed_notes if n.note_key is not None}
 
     @property
     def has_untracked(self) -> bool:
-        """True if the file contains notes without a note_id."""
-        return any(n.note_id is None for n in self.parsed_notes)
+        """True if the file contains notes without a note_key."""
+        return any(n.note_key is None for n in self.parsed_notes)
 
     @property
     def existing_notes(self) -> list[Note]:
-        """Notes that already have an ID (exist in Anki)."""
-        return [n for n in self.parsed_notes if n.note_id is not None]
+        """Notes that already have a note_key."""
+        return [n for n in self.parsed_notes if n.note_key is not None]
 
     @property
     def new_notes(self) -> list[Note]:
-        """Notes that do not have an ID (newly created)."""
-        return [n for n in self.parsed_notes if n.note_id is None]
+        """Notes that do not have a note_key (newly created)."""
+        return [n for n in self.parsed_notes if n.note_key is None]
 
     @property
     def existing_blocks(self) -> dict[str, str]:
-        """Identified note blocks keyed by ``"note_id: 123"``.
+        """Identified note blocks keyed by ``"note_key: a1b2..."``.
 
         Used by the export path for block-level text comparison.
         Derived from the file's raw content (not from individual notes).
         """
-        _, remaining = FileState.extract_deck_id(self.raw_content)
+        _, remaining = FileState.extract_deck_key(self.raw_content)
         return FileState.extract_note_blocks(remaining)
-
-    @staticmethod
-    def validate_ids(
-        file_states: list[FileState],
-        valid_deck_ids: set[int],
-        valid_note_ids: set[int],
-    ) -> list[InvalidID]:
-        """Check all deck and note IDs in markdown files against valid ID sets.
-
-        Args:
-            file_states: List of parsed file states
-            valid_deck_ids: Set of deck IDs that exist in Anki
-            valid_note_ids: Set of note IDs that exist in Anki
-
-        Returns:
-            List of IDs that exist in markdown but not in the valid sets
-        """
-        invalid_ids: list[InvalidID] = []
-
-        for fs in file_states:
-            if fs.deck_id is not None and fs.deck_id not in valid_deck_ids:
-                invalid_ids.append(
-                    InvalidID(
-                        id_value=fs.deck_id,
-                        id_type="deck_id",
-                        file_path=fs.file_path,
-                        context=f"deck_id in {fs.file_path.name}",
-                    )
-                )
-
-            for note in fs.parsed_notes:
-                if note.note_id is not None and note.note_id not in valid_note_ids:
-                    invalid_ids.append(
-                        InvalidID(
-                            id_value=note.note_id,
-                            id_type="note_id",
-                            file_path=fs.file_path,
-                            context=f"{note.identifier} in {fs.file_path.name}",
-                        )
-                    )
-
-        return invalid_ids
 
     def validate_no_duplicate_first_lines(
         self,
-        id_assignments: list[tuple[Note, int]],
+        key_assignments: list[tuple[Note, str]],
     ) -> None:
         """Raise if new notes share a first line.
 
-        Would break text-based ID insertion.
+        Would break text-based key insertion.
         """
         first_lines: dict[str, list[str]] = {}
-        for note, _ in id_assignments:
-            if note.note_id is not None:
+        for note, _ in key_assignments:
+            if note.note_key is not None:
                 continue
             first_line = note.first_line
             first_lines.setdefault(first_line, []).append(note.identifier)
@@ -196,7 +148,7 @@ class FileState:
             for first_line, ids in duplicates.items():
                 msg += f"  '{first_line[:60]}...' in notes: {', '.join(ids)}\n"
             msg += (
-                "Cannot safely assign IDs. "
+                "Cannot safely assign keys. "
                 "Please ensure each note has a unique first line."
             )
             raise ValueError(msg)
@@ -210,7 +162,7 @@ class Note:
     ``"AnkiOpsQA"``, ``"AnkiOpsCloze"``) drives behaviour via config lookup.
     """
 
-    note_id: int | None
+    note_key: str | None
     note_type: str
     fields: dict[str, str]  # {field_name: markdown_content}
 
@@ -254,7 +206,7 @@ class Note:
     def from_block(block: str) -> Note:
         """Parse a raw markdown block into a Note."""
         lines = block.strip().split("\n")
-        note_id: int | None = None
+        note_key: str | None = None
         fields: dict[str, str] = {}
         current_field: str | None = None
         current_content: list[str] = []
@@ -271,10 +223,10 @@ class Note:
                     current_content.append(line)
                 continue
 
-            # Note ID comment
-            id_match = _NOTE_ID_PATTERN.match(line)
-            if id_match:
-                note_id = int(id_match.group(1))
+            # Key comment
+            key_match = _NOTE_KEY_PATTERN.match(line)
+            if key_match:
+                note_key = key_match.group(1)
                 continue
 
             # Inside code blocks, don't detect field prefixes
@@ -289,7 +241,7 @@ class Note:
                 if line.startswith(prefix + " ") or line == prefix:
                     # Duplicate field check
                     if field_name in seen:
-                        ctx = f"in note_id: {note_id}" if note_id else "in this note"
+                        ctx = f"in note_key: {note_key}" if note_key else "in this note"
                         msg = (
                             f"Duplicate field '{prefix}' {ctx}. "
                             f"Did you forget to end the previous note with "
@@ -328,7 +280,7 @@ class Note:
             )
 
         return Note(
-            note_id=note_id,
+            note_key=note_key,
             note_type=Note.infer_note_type(fields),
             fields=fields,
         )
@@ -352,8 +304,8 @@ class Note:
     @property
     def identifier(self) -> str:
         """Stable identifier for error messages."""
-        if self.note_id is not None:
-            return f"note_id: {self.note_id}"
+        if self.note_key is not None:
+            return f"note_key: {self.note_key}"
         return f"'{self.first_line[:60]}...'"
 
     def validate(self) -> list[str]:
@@ -514,7 +466,7 @@ class AnkiState:
                 if model and model not in registry.supported_note_types:
                     raise ValueError(
                         f"Safety check failed: Note {note['noteId']} has template "
-                        f"'{model}' but expected a AnkiOps template. "
+                        f"'{model}' but expected a AnkiOps note type. "
                         f"AnkiOps will never modify notes with non-AnkiOps templates."
                     )
                 anki_note = AnkiNote.from_raw(note)
@@ -554,17 +506,18 @@ class AnkiNote:
             card_ids=raw_note.get("cards", []),
         )
 
-    def to_markdown(self, converter) -> str:
+    def to_markdown(self, converter, note_key: str) -> str:
         """Format this Anki note as a markdown block.
 
         Args:
             converter: HTMLToMarkdown converter instance
+            note_key: The key to write in the markdown header
 
         Returns:
-            Markdown block string starting with ``<!-- note_id: ... -->``.
+            Markdown block string starting with ``<!-- note_key: ... -->``.
         """
         note_config = registry.note_config[self.note_type]
-        lines = [f"<!-- note_id: {self.note_id} -->"]
+        lines = [f"<!-- note_key: {note_key} -->"]
 
         for field_name, prefix in note_config:
             value = self.fields.get(field_name, "")

@@ -10,6 +10,7 @@ from pygments import highlight
 from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
+
 from ankiops.config import LOCAL_MEDIA_DIR
 
 _IMG_WIDTH_RE = re.compile(r'(<img src="[^"]*" alt="[^"]*")>\{width=(\d+)\}')
@@ -152,13 +153,6 @@ class MarkdownToHTML:
             .replace("-->", "\u2192")
             .replace("=/=", "\u2260")
         )
-
-        # Convert $$ and $ delimiters to \[...\] and \(...\) format
-        # Anki only supports backslash delimiters, not dollar signs
-        # Block math: $$...$$ -> \[...\]
-        markdown = re.sub(r"\$\$(.*?)\$\$", r"\\[\1\\]", markdown, flags=re.DOTALL)
-        # Inline math: $...$ -> \(...\) (but not $$)
-        markdown = re.sub(r"(?<!\$)\$(?!\$)(.*?)(?<!\$)\$(?!\$)", r"\\(\1\\)", markdown)
 
         markdown = _LINK_WITH_PARENS_RE.sub(r"[\1](<\2>)", markdown)
         html: str = self._md(markdown)  # type: ignore[assignment]

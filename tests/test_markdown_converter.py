@@ -20,8 +20,6 @@ def html_to_md():
     return HTMLToMarkdown()
 
 
-
-
 class TestRoundTripHeadings:
     """Test round-trip conversion of headings."""
 
@@ -100,8 +98,8 @@ class TestRoundTripLists:
 
     def test_ordered_list_with_nested_unordered_roundtrip(self, md_to_html, html_to_md):
         original_html = (
-            "<ol><li>First item<ul><li>Nested bullet 1</li><li>Nested bullet 2</li></ul></li>"
-            "<li>Second item</li></ol>"
+            "<ol><li>First item<ul><li>Nested bullet 1</li><li>Nested bullet 2</li>"
+            "</ul></li><li>Second item</li></ol>"
         )
         md = html_to_md.convert(original_html)
         restored_html = md_to_html.convert(md)
@@ -222,7 +220,9 @@ class TestRoundTripCodeBlocks:
         assert "<pre>" not in restored_html
 
     def test_trailing_whitespace_stripped_in_code_block(self, md_to_html, html_to_md):
-        """Trailing whitespace in code blocks should be stripped to prevent oscillation."""
+        """Trailing whitespace in code blocks should be stripped to prevent
+        oscillation.
+        """
         # Code block with trailing spaces/newlines
         original_html = "<pre><code>print('hello')   \n\n</code></pre>"
         md = html_to_md.convert(original_html)
@@ -231,20 +231,23 @@ class TestRoundTripCodeBlocks:
         assert "print('hello')" in md
 
         restored_html = md_to_html.convert(md)
-        # The restored HTML should have the code, but trailing whitespace might be normalized
+        # The restored HTML should have the code, but trailing whitespace
+        # might be normalized
         assert "print('hello')" in restored_html
-        
+
         # Verify stability on second roundtrip
         md2 = html_to_md.convert(restored_html)
         assert md == md2
 
     def test_multiple_code_blocks(self, md_to_html, html_to_md):
         """Multiple code blocks separated by text."""
-        original_html = "<pre><code>code1</code></pre><br>Text<br><pre><code>code2</code></pre>"
+        original_html = (
+            "<pre><code>code1</code></pre><br>Text<br><pre><code>code2</code></pre>"
+        )
         md = html_to_md.convert(original_html)
         assert "code1" in md
         assert "code2" in md
-        
+
         restored_html = md_to_html.convert(md)
         assert restored_html.count("<pre>") == 2
         assert "code1" in restored_html
@@ -337,7 +340,9 @@ class TestRoundTripBlockquotes:
         )
 
     def test_separate_blockquotes_roundtrip(self, md_to_html, html_to_md):
-        """Test that two separate blockquotes separated by a blank line round-trip correctly."""
+        """Test that two separate blockquotes separated by a blank line
+        round-trip correctly.
+        """
         original_html = (
             "<blockquote>xxx</blockquote><br><br><blockquote>xxx</blockquote>"
         )
@@ -667,24 +672,22 @@ class TestRoundTripMathExpressions:
         assert "s_x" in restored_html
         assert "s_y" in restored_html
 
-    def test_dollar_delimiters_converted_to_backslash(self, md_to_html):
-        """$$ and $ delimiters should be converted to \\[...\\] and \\(...\\)."""
-        # Block math with $$ should be converted to \[...\]
+    def test_dollar_delimiters_preserved(self, md_to_html):
+        """$$ and $ delimiters should NOT be converted automatically."""
+        # Block math with $$ should remain as $$
         markdown_with_dollars = r"$$\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}$$"
         html = md_to_html.convert(markdown_with_dollars)
-        # Should use backslash delimiters, not dollar signs
-        assert r"\[" in html and r"\]" in html
-        assert "$$" not in html
+        # Should preserve dollar signs
+        assert "$$" in html
+        assert r"\[" not in html
         # Content should be preserved correctly
         assert r"\int_{-\infty}^{\infty}" in html
-        assert "e^{-x^2}" in html
-        assert r"\sqrt{\pi}" in html
 
-        # Inline math with $ should be converted to \(...\)
+        # Inline math with $ should remain as $
         markdown_inline = r"The value is $x_i^2$ here"
         html = md_to_html.convert(markdown_inline)
-        assert r"\(" in html and r"\)" in html
-        assert "x_i^2" in html
+        assert r"\(" not in html
+        assert "$x_i^2$" in html
 
 
 class TestSpecialCharacterConversion:

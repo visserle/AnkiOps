@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from ankiops.anki_client import AnkiConnectError
 from ankiops.anki_to_markdown import export_collection, export_deck
 from ankiops.markdown_to_anki import import_collection, import_file
 
@@ -86,7 +87,13 @@ class MockAnki:
 
         if action == "addNote":
             note_data = params["note"]
+            if "deckName" in note_data:
+                deck_name = note_data["deckName"]
+                if deck_name not in self.decks:
+                    raise AnkiConnectError(f"deck was not found: {deck_name}")
+
             new_id = self.next_note_id
+
             self.next_note_id += 1
 
             # Create cards (mock 1 card per note)
@@ -174,7 +181,9 @@ def run_ankiops(mock_anki):
         yield
 
 
-def test_export_fresh_collection(tmp_path, mock_anki, run_ankiops):
+def test_import_with_stale_deck_key_mapping(
+    tmp_path, mock_anki, run_ankiops, monkeypatch
+):
     """Test exporting a collection from Anki to an empty directory."""
     # Setup Anki state
     mock_anki.add_note("Deck A", "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
@@ -195,7 +204,8 @@ def test_export_fresh_collection(tmp_path, mock_anki, run_ankiops):
     content_a = file_a.read_text()
     assert "Q: Q1" in content_a
     assert "A: A1" in content_a
-    assert "<!-- deck_id:" in content_a
+    assert "<!-- note_key:" in content_a
+    assert "<!-- deck_key:" in content_a
 
     content_b = file_b.read_text()
     assert "Q: Q2" in content_b
@@ -205,7 +215,8 @@ def test_import_creates_new_notes(tmp_path, mock_anki, run_ankiops):
     """Test importing new notes from markdown to Anki."""
     # Setup markdown files
     deck_c = tmp_path / "Deck C.md"
-    deck_c.write_text("<!-- deck_id: 999 -->\nQ: New Question\nA: New Answer")
+    # We use a preset Key to simulate an existing deck file or forcing a Key
+    deck_c.write_text("<!-- deck_key: deck-key-999 -->\nQ: New Question\nA: New Answer")
 
     # Run import
     summary = import_collection(collection_dir=str(tmp_path))
@@ -219,12 +230,13 @@ def test_import_creates_new_notes(tmp_path, mock_anki, run_ankiops):
     new_note = list(mock_anki.notes.values())[0]
     assert new_note["fields"]["Question"]["value"] == "New Question"
 
-    # Check file was updated with ID
+    # Check file was updated with Key
     content = deck_c.read_text()
-    assert f"<!-- note_id: {new_note['noteId']} -->" in content
-    # Deck ID should be updated to the real one assigned by MockAnki
-    real_deck_id = mock_anki.decks["Deck C"]
-    assert f"<!-- deck_id: {real_deck_id} -->" in content
+    assert "<!-- note_key:" in content
+    # Note ID should NOT be in the file
+    assert "<!-- note_id:" not in content
+    # Deck Key should be present (Deck ID replaced by Key)
+    assert "<!-- deck_key:" in content
 
 
 def test_roundtrip_sync_update(tmp_path, mock_anki, run_ankiops):
@@ -274,7 +286,8 @@ def test_sync_move_cards(tmp_path, mock_anki, run_ankiops):
     source_file.write_text(deck_line)
 
     # Write target file
-    target_file.write_text(f"<!-- deck_id: {mock_anki.next_deck_id} -->\n" + note_block)
+    # We use a new Key or rely on filename matching
+    target_file.write_text("<!-- deck_key: deck-key-move-target -->\n" + note_block)
 
     # 4. Import
     import_collection(collection_dir=str(tmp_path))

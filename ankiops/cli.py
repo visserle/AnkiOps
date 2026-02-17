@@ -70,7 +70,7 @@ def run_am(args):
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
 
-    # Load custom note types so export can identity them
+    # Load custom note types so export can identify them
     registry.load_custom(collection_dir / CARD_TEMPLATES_DIR_NAME)
 
     if not args.no_auto_commit:
@@ -113,7 +113,7 @@ def run_am(args):
         all_refs = set()
         for md_file in collection_dir.glob("*.md"):
             all_refs.update(extract_media_references(md_file.read_text()))
-        
+
         if all_refs:
             logger.info("Syncing referenced media from Anki...")
             sync_from_anki(collection_dir, Path(media_dir), all_refs)
@@ -337,7 +337,7 @@ def main():
         "--no-ids",
         action="store_true",
         help=(
-            "Exclude note_id and deck_id from serialized output "
+            "Exclude note_key and deck_key from serialized output "
             "(useful for sharing/templates)"
         ),
     )
@@ -361,7 +361,7 @@ def main():
     deserialize_parser.add_argument(
         "--no-ids",
         action="store_true",
-        help="Skip writing deck_id and note_id comments (useful for templates/sharing)",
+        help="Skip writing deck_key and note_key comments (useful for templates/sharing)",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 

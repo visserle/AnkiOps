@@ -10,8 +10,10 @@ from ankiops.config import LOCAL_MEDIA_DIR
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
     "*": "\u200dMDESCASTERISK\u200d",
+    "\\": "\u200dMDESCBACKSLASH\u200d",
     # other characters are adequately escaped by html-to-markdown
 }
+
 
 # Tags where content is already protected (don't escape inside these)
 _PROTECTED_TAGS = {
@@ -42,13 +44,14 @@ def _protect_literal_chars(html: str) -> str:
         text = str(text_node)
 
         # Don't escape inside LaTeX math expressions
-        # Math delimiters: \(...\) or $...$ for inline, \[...\] or $$...$$ for block
-        if r"\(" in text or r"\[" in text or "$" in text:
+        # Math delimiters: \(...\) for inline, \[...\] for block, dollar signs not
+        # protected
+        if r"\(" in text or r"\[" in text:
             # Check if this looks like it contains math
-            # Pattern for inline math: \(...\) or $...$
-            # Pattern for block math: \[...\] or $$...$$
-            # Only match explicit math delimiters with backslashes or dollar signs
-            math_pattern = r"(\\\(.*?\\\)|\\\[.*?\\\]|\$\$.*?\$\$|\$(?!\$).*?(?<!\$)\$)"
+            # Pattern for inline math: \(...\)
+            # Pattern for block math: \[...\]
+            # Only match explicit math delimiters with backslashes
+            math_pattern = r"(\\\(.*?\\\)|\\\[.*?\\\])"
 
             # Split by math regions to preserve them
             parts = []
@@ -129,7 +132,6 @@ class HTMLToMarkdown:
         autolinks=False,
         extract_metadata=False,
     )
-
 
     def convert(self, html: str) -> str:
         """Convert HTML to Markdown."""

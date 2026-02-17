@@ -1,18 +1,17 @@
-
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
-from unittest.mock import patch
 
 from ankiops import models
 from ankiops.note_type_config import (
-    NoteTypeRegistry, 
-    NoteTypeConfig, 
-    Field, 
-    IDENTIFYING_FIELDS, 
-    COMMON_FIELDS
+    COMMON_FIELDS,
+    IDENTIFYING_FIELDS,
+    Field,
+    NoteTypeConfig,
+    NoteTypeRegistry,
 )
 
 
@@ -46,7 +45,7 @@ def test_register_custom_type(registry):
         custom=True,
     )
     registry.register(config)
-    
+
     assert "CustomType" in registry.supported_note_types
     retrieved = registry.get("CustomType")
     assert retrieved.custom
@@ -83,7 +82,9 @@ def test_register_conflict_with_common(registry):
 
 
 def test_register_conflict_with_existing(registry):
-    """Ensure we cannot register a type that has identical identifying fields to an existing one."""
+    """Ensure we cannot register a type that has identical identifying fields
+    to an existing one.
+    """
     config = NoteTypeConfig(
         name="CopyCat",
         fields=IDENTIFYING_FIELDS["AnkiOpsQA"],
@@ -94,7 +95,7 @@ def test_register_conflict_with_existing(registry):
     # Subset should be allowed
     subset_config = NoteTypeConfig(
         name="SubsetType",
-        fields=[IDENTIFYING_FIELDS["AnkiOpsQA"][0]], # Just Question
+        fields=[IDENTIFYING_FIELDS["AnkiOpsQA"][0]],  # Just Question
     )
     registry.register(subset_config)
     assert "SubsetType" in registry.supported_note_types
@@ -105,20 +106,20 @@ def test_load_custom_from_dir(registry):
     with tempfile.TemporaryDirectory() as tmpdir:
         card_templates = Path(tmpdir)
         yaml_path = card_templates / "note_types.yaml"
-        
+
         data = {
             "MyCustomType": {
                 "fields": [
                     {"name": "Term", "prefix": "TM:"},
-                    {"name": "Definition", "prefix": "D:"}
+                    {"name": "Definition", "prefix": "D:"},
                 ],
-                "reversed": True
+                "reversed": True,
             }
         }
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
-        
+
         registry.load_custom(card_templates)
-        
+
         assert "MyCustomType" in registry.supported_note_types
         config = registry.get("MyCustomType")
 
@@ -131,21 +132,21 @@ def test_load_custom_css(registry):
     """Test detecting custom CSS file."""
     with tempfile.TemporaryDirectory() as tmpdir:
         card_templates = Path(tmpdir)
-        (card_templates / "note_types.yaml").touch() # Empty config is fine
+        (card_templates / "note_types.yaml").touch()  # Empty config is fine
         (card_templates / "Styling.css").touch()
-        
+
         registry.load_custom(card_templates)
-        
+
         assert registry.custom_css_path == card_templates / "Styling.css"
 
 
 def test_prefix_to_field_mapping(registry):
     """Test the global prefix -> field mapping."""
     mapping = registry.prefix_to_field
-    
+
     # Common fields
     assert mapping["E:"] == "Extra"
-    
+
     # Built-in fields
     assert mapping["Q:"] == "Question"
     assert mapping["A:"] == "Answer"
@@ -167,12 +168,16 @@ def test_prefix_collision_different_field(registry):
         fields=[Field("FieldB", "X:")],
         custom=True,
     )
-    with pytest.raises(ValueError, match="matches existing prefix.*but maps to different field"):
+    with pytest.raises(
+        ValueError, match="matches existing prefix.*but maps to different field"
+    ):
         registry.register(config2)
 
 
 def test_prefix_sharing_custom_field(registry):
-    """Ensure two note types CAN share a prefix if it maps to the SAME *custom* field name."""
+    """Ensure two note types CAN share a prefix if it maps to the SAME *custom*
+    field name.
+    """
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("Description", "D:")],
@@ -187,7 +192,7 @@ def test_prefix_sharing_custom_field(registry):
     )
     # Should Pass for CUSTOM fields
     registry.register(config2)
-    
+
     assert registry.prefix_to_field["D:"] == "Description"
 
 
@@ -196,14 +201,14 @@ def test_strict_builtin_reservation(registry):
     # Attempt to use "Question" and "Q:" (Built-in)
     config = NoteTypeConfig(
         name="MyQA",
-        fields=[Field("Question", "Q:")], 
+        fields=[Field("Question", "Q:")],
         custom=True,
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common"):
         registry.register(config)
 
     # Attempt to use just the name "Question" with different prefix
-    # (Note: This is caught by rule 2 if prefix maps to something else, 
+    # (Note: This is caught by rule 2 if prefix maps to something else,
     # but if prefix is new, it's caught by rule 3 strict name check)
     config_name = NoteTypeConfig(
         name="MyQA_Name",
@@ -212,15 +217,18 @@ def test_strict_builtin_reservation(registry):
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common field name"):
         registry.register(config_name)
-    
+
     # Attempt to use just the prefix "Q:" with different name
-    # This might be caught by Rule 2 (Global Consistency) if "Q:" is already mapped to "Question"
+    # This might be caught by Rule 2 (Global Consistency) if "Q:" is already
+    # mapped to "Question"
     config_prefix = NoteTypeConfig(
         name="MyQA_Prefix",
         fields=[Field("MyQuestion", "Q:")],
         custom=True,
     )
-    with pytest.raises(ValueError, match="matches existing prefix|uses reserved built-in/common prefix"):
+    with pytest.raises(
+        ValueError, match="matches existing prefix|uses reserved built-in/common prefix"
+    ):
         registry.register(config_prefix)
 
 
@@ -232,13 +240,13 @@ def test_mandatory_set_collision(registry):
         custom=True,
     )
     registry.register(config1)
-    
+
     config2 = NoteTypeConfig(
         name="Type2",
         fields=[Field("Prop", "P:"), Field("Val", "V:")],
         custom=True,
     )
-    
+
     with pytest.raises(ValueError, match="identical identifying fields"):
         registry.register(config2)
 
@@ -252,7 +260,7 @@ def test_subset_inference(registry):
         custom=True,
     )
     registry.register(base_config)
-    
+
     # Create SupersetType {BaseQ, BaseA, Context}
     superset_config = NoteTypeConfig(
         name="SupersetType",
@@ -260,16 +268,17 @@ def test_subset_inference(registry):
         custom=True,
     )
     registry.register(superset_config)
-    
+
     # Test Inference using the local registry
-    from ankiops import models
     from unittest.mock import patch
-    
+
+    from ankiops import models
+
     with patch("ankiops.models.registry", registry):
         # Fields for Superset
         fields_super = {"BaseQ": "q", "BaseA": "a", "Context": "c"}
         assert models.Note.infer_note_type(fields_super) == "SupersetType"
-        
+
         # Fields for Base (subset)
         fields_base = {"BaseQ": "q", "BaseA": "a"}
         assert models.Note.infer_note_type(fields_base) == "BaseType"
@@ -279,7 +288,9 @@ def test_reserved_common_names(registry):
     """Ensure reserved common field names cannot be used."""
     config = NoteTypeConfig(
         name="BadName",
-        fields=[Field(COMMON_FIELDS[0].name, "X:")], # Name collision with Common Field (Extra)
+        fields=[
+            Field(COMMON_FIELDS[0].name, "X:")
+        ],  # Name collision with Common Field (Extra)
         custom=True,
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common field name"):
@@ -290,7 +301,9 @@ def test_reserved_common_prefixes(registry):
     """Ensure reserved common field prefixes cannot be used."""
     config = NoteTypeConfig(
         name="BadPrefix",
-        fields=[Field("Xfield", COMMON_FIELDS[0].prefix)], # Prefix collision with Common Field (E:)
+        fields=[
+            Field("Xfield", COMMON_FIELDS[0].prefix)
+        ],  # Prefix collision with Common Field (E:)
         custom=True,
     )
     with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
@@ -302,14 +315,17 @@ def test_reserved_builtin_prefixes_for_custom(registry):
     # AnkiOpsQA uses Q: and A:
     config = NoteTypeConfig(
         name="Hijack",
-        fields=[Field("MyField", "Q:")], # Q: is taken by Question
+        fields=[Field("MyField", "Q:")],  # Q: is taken by Question
         custom=True,
     )
-    # Rule 1 (Reservation) catches this before Rule 2 (Consistency) because Q: is reserved
+    # Rule 1 (Reservation) catches this before Rule 2 (Consistency) because
+    # Q: is reserved
     with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
         registry.register(config)
 
+
 # --- Inference Tests ---
+
 
 @pytest.fixture
 def mock_registry():
@@ -318,53 +334,61 @@ def mock_registry():
     r._configs = {}
     return r
 
+
 def test_inference_qa_vs_choice(mock_registry):
     """Verify {Q, A} matches QA (tighter) over Choice."""
     qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
     choice = NoteTypeConfig("Choice", IDENTIFYING_FIELDS["AnkiOpsChoice"])
     mock_registry._configs = {"QA": qa, "Choice": choice}
-    
+
     with patch("ankiops.models.registry", mock_registry):
         # {Q, A} -> QA (size 2) vs Choice (size > 2) -> QA wins
         qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
         assert models.Note.infer_note_type(qa_fields) == "QA"
-        
+
         # {Q, A, C1} -> Choice vs QA (rejection) -> Choice wins
         # Construct fields: QA fields + Choice 1
         choice_fields = qa_fields.copy()
-        choice_1 = next(f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 1")
+        choice_1 = next(
+            f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 1"
+        )
         choice_fields[choice_1.name] = "val"
         assert models.Note.infer_note_type(choice_fields) == "Choice"
+
 
 def test_inference_choice_resilience(mock_registry):
     """Verify Choice note is detected even if some choices are missing."""
     choice = NoteTypeConfig("Choice", IDENTIFYING_FIELDS["AnkiOpsChoice"])
     mock_registry._configs = {"Choice": choice}
-    
+
     with patch("ankiops.models.registry", mock_registry):
         # {Q, A, C2} -> Choice
         qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
-        choice_2 = next(f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 2")
+        choice_2 = next(
+            f for f in IDENTIFYING_FIELDS["AnkiOpsChoice"] if f.name == "Choice 2"
+        )
         note_fields = qa_fields | {choice_2.name: "val"}
-        
+
         assert models.Note.infer_note_type(note_fields) == "Choice"
+
 
 def test_inference_with_common_fields(mock_registry):
     """Verify common fields don't interfere with inference."""
     qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
     mock_registry._configs = {"QA": qa}
-    
+
     with patch("ankiops.models.registry", mock_registry):
         # {Q, A, Extra} -> matches QA
         qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
-        note_fields = qa_fields | {COMMON_FIELDS[0].name: "ex"} # Extra
+        note_fields = qa_fields | {COMMON_FIELDS[0].name: "ex"}  # Extra
         assert models.Note.infer_note_type(note_fields) == "QA"
+
 
 def test_inference_unknown_field_fails(mock_registry):
     """Verify that unknown fields cause inference failure."""
     qa = NoteTypeConfig("QA", IDENTIFYING_FIELDS["AnkiOpsQA"])
     mock_registry._configs = {"QA": qa}
-    
+
     with patch("ankiops.models.registry", mock_registry):
         # {Q, A, Random} -> Fails
         qa_fields = {f.name: "val" for f in IDENTIFYING_FIELDS["AnkiOpsQA"]}
