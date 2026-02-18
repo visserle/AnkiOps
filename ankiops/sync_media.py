@@ -13,6 +13,7 @@ import shutil
 from pathlib import Path
 
 from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,14 @@ def update_markdown_media_references(
         collection_dir: Root of standard markdown collection
         rename_map: Dict mapping {original_relative_path_str: new_relative_path_str}
                    Note: paths should use forward slashes for markdown compatibility.
+
+    Returns:
+        Number of markdown files updated.
     """
     if not rename_map:
-        return
+        return 0
+
+    updated_files = 0
 
     # Regex to find potential media links:
     # 1. Markdown image: ![alt](path) -> group 2
@@ -120,10 +126,10 @@ def update_markdown_media_references(
 
         if lookup_path in rename_map:
             new_path = rename_map[lookup_path]
-            
+
             # Always wrap the new path in angle brackets for consistency and robustness
             new_path = f"<{new_path}>"
-                
+
             # Replace the old path with new path in the full match string
             return full_match.replace(path, new_path)
 
@@ -138,19 +144,26 @@ def update_markdown_media_references(
 
         if new_content != content:
             md_file.write_text(new_content, encoding="utf-8")
-            logger.info(f"Updated media references in {md_file.name}")
+            logger.debug(f"Updated media references in {clickable_path(md_file)}")
+            updated_files += 1
+
+    return updated_files
 
 
 def apply_hashing(collection_dir: Path) -> None:
     """Rename local media files to include content hash and update markdown refs.
 
     Recursive scan of LOCAL_MEDIA_DIR.
+
+    Returns:
+        Number of media files hashed.
     """
     media_root = collection_dir / LOCAL_MEDIA_DIR
     if not media_root.exists():
-        return
+        return 0
 
     rename_map = {}  # old_rel_path -> new_rel_path
+    hashed_count = 0
 
     # Walk all files (non-recursive)
     for file_path in media_root.glob("*"):
@@ -173,18 +186,24 @@ def apply_hashing(collection_dir: Path) -> None:
                     # If content matches, we can delete the old unhashed file
                     if _calculate_hash(new_path) == content_hash:
                         file_path.unlink()
-                        logger.info(
-                            f"Replaced {file_path.name} with existing {new_name}"
+                        logger.debug(
+                            f"Replaced {clickable_path(file_path)} with existing "
+                            f"{clickable_path(new_path)}"
                         )
                     else:
                         logger.warning(
-                            f"Target {new_name} exists but content differs? "
-                            f"Skipping rename of {file_path.name}"
+                            f"Target {clickable_path(new_path)} exists but content "
+                            f"differs? Skipping rename of {clickable_path(file_path)}"
                         )
                         continue
                 else:
                     file_path.rename(new_path)
-                    logger.info(f"Hashed: {file_path.name} -> {new_name}")
+                    logger.debug(
+                        f"Hashed: {clickable_path(file_path)} -> "
+                        f"{clickable_path(new_path)}"
+                    )
+
+                hashed_count += 1
 
                 # Record relative paths for markdown update
                 old_rel = f"{LOCAL_MEDIA_DIR}/{file_path.name}"
@@ -195,10 +214,14 @@ def apply_hashing(collection_dir: Path) -> None:
                 rename_map[file_path.name] = new_rel
 
         except Exception as e:
-            logger.warning(f"Failed to hash media file {file_path}: {e}")
+            logger.warning(
+                f"Failed to hash media file {clickable_path(file_path)}: {e}"
+            )
 
     if rename_map:
         update_markdown_media_references(collection_dir, rename_map)
+
+    return hashed_count
 
 
 def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
@@ -206,25 +229,28 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
 
     1. Apply hashing (renames check).
     2. Copy all files to Anki's media directory.
+
+    Returns:
+        Dict with counts of synced, removed, and hashed files.
     """
+    counts = {"synced": 0, "removed": 0, "hashed": 0, "total": 0}
     target_root = Path(anki_media_dir).resolve()
     media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
 
     if media_root == target_root:
         logger.error(
-            "Local media directory is the same as Anki media directory. "
-            "Pass --debug for more info."
+            f"Local media directory ({media_root}) aliases Anki media directory."
         )
         raise ValueError(
             f"Local media directory ({media_root}) aliases Anki media directory. "
             "Syncing would rename all files in Anki. Aborting."
         )
 
-    apply_hashing(collection_dir)
+    counts["hashed"] = apply_hashing(collection_dir)
 
     media_root = collection_dir / LOCAL_MEDIA_DIR
     if not media_root.exists():
-        return
+        return counts
 
     target_root = Path(anki_media_dir)
 
@@ -236,7 +262,12 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
         )
 
     # 2. Iterate over local files to Sync or Delete
-    for file_path in media_root.glob("*"):
+    local_files = list(media_root.glob("*"))
+    counts["total"] = len(
+        [f for f in local_files if f.is_file() and not f.name.startswith(".")]
+    )
+
+    for file_path in local_files:
         if not file_path.is_file() or file_path.name.startswith("."):
             continue
 
@@ -247,7 +278,8 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
             target_path = target_root / filename
             if not target_path.exists():
                 shutil.copy2(file_path, target_path)
-                logger.debug(f"Synced to Anki: {filename}")
+                logger.debug(f"Synced {clickable_path(file_path)} to Anki")
+                counts["synced"] += 1
 
         # If NOT referenced: Check for cleanup
         if filename not in referenced_files:
@@ -258,20 +290,31 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
             # otherwise delete
             try:
                 file_path.unlink()
-                logger.info(f"Removed unreferenced media file: {filename}")
+                logger.debug(
+                    f"Removed unreferenced media file: {clickable_path(file_path)}"
+                )
+                counts["removed"] += 1
             except Exception as e:
-                logger.warning(f"Failed to remove unreferenced file {filename}: {e}")
+                logger.warning(
+                    f"Failed to remove unreferenced file {clickable_path(file_path)}: {e}"
+                )
+
+    return counts
 
 
 def sync_from_anki(
     collection_dir: Path,
     anki_media_dir: Path,
     referenced_files: set[str],
-) -> None:
+) -> dict[str, int]:
     """Sync referenced media from Anki to local media folder.
 
     Only copies files that are referenced in the markdown.
+
+    Returns:
+        Dict with summary counts.
     """
+    counts = {"synced": 0, "total": len(referenced_files)}
     media_root = collection_dir / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
     target_root = Path(anki_media_dir)
@@ -281,9 +324,14 @@ def sync_from_anki(
         target_path = media_root / filename
 
         if not source_path.exists():
-            logger.warning(f"Referenced media not found in Anki: {filename}")
+            logger.warning(
+                f"Referenced media not found in Anki: {clickable_path(source_path, filename)}"
+            )
             continue
 
         if not target_path.exists():
             shutil.copy2(source_path, target_path)
-            logger.info(f"Synced from Anki: {filename}")
+            logger.debug(f"Synced {clickable_path(source_path, filename)} from Anki")
+            counts["synced"] += 1
+
+    return counts

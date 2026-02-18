@@ -91,7 +91,10 @@ def test_update_markdown_media_references(tmp_path):
 
     content = md_file.read_text()
     assert "![img](<media/new.png>)" in content
-    assert '<img src="<media/new.png>">' in content or "<img src=\"<media/new.png>\">" in content
+    assert (
+        '<img src="<media/new.png>">' in content
+        or '<img src="<media/new.png>">' in content
+    )
     assert "[sound:<media/audio_hash.mp3>]" in content
 
 
@@ -219,7 +222,9 @@ def test_sync_to_anki(tmp_path):
     (collection_dir / "deck.md").write_text("![img](media/test.png)")
 
     # Run sync
-    sync_to_anki(collection_dir, anki_media)
+    summary = sync_to_anki(collection_dir, anki_media)
+    assert summary["synced"] == 1
+    assert summary["total"] == 1
 
     # Expect file to be hashed and copied
     digest = hashlib.blake2b(digest_size=4)
@@ -246,7 +251,9 @@ def test_sync_from_anki(tmp_path):
     # References
     refs = {"remote.png", "missing.png"}
 
-    sync_from_anki(collection_dir, anki_media, refs)
+    summary = sync_from_anki(collection_dir, anki_media, refs)
+    assert summary["synced"] == 1
+    assert summary["total"] == 2
 
     media_dir = collection_dir / LOCAL_MEDIA_DIR
     assert (media_dir / "remote.png").exists()
@@ -318,7 +325,10 @@ def test_sync_to_anki_with_cleanup(tmp_path):
     expected_referenced_name = f"referenced_{h}.png"
 
     # 4. Run sync
-    sync_to_anki(collection_dir, anki_media)
+    summary = sync_to_anki(collection_dir, anki_media)
+    assert summary["synced"] == 2
+    assert summary["removed"] == 1
+    assert summary["total"] == 3  # referenced, unreferenced, _static
 
     # 5. Assertions
 
@@ -351,7 +361,9 @@ def test_sync_to_anki_syncs_underscores(tmp_path):
     create_image(underscore_img, b"static data")
 
     # Run sync (no markdown references created)
-    sync_to_anki(collection_dir, anki_media)
+    summary = sync_to_anki(collection_dir, anki_media)
+    assert summary["synced"] == 1
+    assert summary["total"] == 1
 
     # Assert underscore file is copied to Anki
     assert (anki_media / "_static.png").exists()
@@ -435,7 +447,8 @@ def test_roundtrip_export_remote_media(tmp_path):
     md_file.write_text("![alt](remote.png)")
 
     # 3. Sync From Anki
-    sync_from_anki(collection_dir, anki_media, {"remote.png"})
+    summary = sync_from_anki(collection_dir, anki_media, {"remote.png"})
+    assert summary["synced"] == 1
 
     # Verify download
     local_img = collection_dir / LOCAL_MEDIA_DIR / "remote.png"

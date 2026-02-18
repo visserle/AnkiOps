@@ -16,8 +16,10 @@ def format_changes(**counts: int) -> str:
     'no changes'
     """
     parts = []
+    # 'total' is usually displayed separately (e.g. "X files - Y synced")
+    # so we skip it in the compact change summary.
     for k, v in counts.items():
-        if not v:
+        if not v or k == "total":
             continue
         # Singularize nouns (e.g. "1 errors" → "1 error")
         label = k[:-1] if v == 1 and k.endswith("s") else k

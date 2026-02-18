@@ -114,8 +114,15 @@ def run_am(args):
             all_refs.update(extract_media_references(md_file.read_text()))
 
         if all_refs:
-            logger.info("Syncing referenced media from Anki...")
-            sync_from_anki(collection_dir, Path(media_dir), all_refs)
+            logger.debug("Syncing referenced media from Anki...")
+            summary = sync_from_anki(collection_dir, Path(media_dir), all_refs)
+            changes_str = format_changes(**summary)
+            if changes_str != "no changes":
+                logger.info(
+                    f"Media sync complete: {summary['total']} files — {changes_str}"
+                )
+            else:
+                logger.debug("Media sync complete: no changes")
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
@@ -131,8 +138,14 @@ def run_ma(args):
     # Sync local media to Anki (and rename if needed)
     try:
         media_dir = invoke("getMediaDirPath")
-        logger.info("Syncing local media to Anki...")
-        sync_to_anki(collection_dir, Path(media_dir))
+        media_summary = sync_to_anki(collection_dir, Path(media_dir))
+        changes_str = format_changes(**media_summary)
+        if changes_str != "no changes":
+            logger.info(
+                f"Media sync complete: {media_summary['total']} files — {changes_str}"
+            )
+        else:
+            logger.debug("Media sync complete: no changes")
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
