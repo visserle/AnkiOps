@@ -400,7 +400,9 @@ class Note:
             name: converter.convert(content) for name, content in self.fields.items()
         }
 
-        for field_name, _ in registry.note_config.get(self.note_type, []):
+        for field_name, prefix in registry.note_config.get(self.note_type, []):
+            if prefix is None:  # key-only field, not present in markdown
+                continue
             html.setdefault(field_name, "")
 
         return html

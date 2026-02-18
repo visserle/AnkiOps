@@ -292,3 +292,26 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     assert current_val == note_key, (
         f"AnkiOps Key expected '{note_key}', got '{current_val}'"
     )
+
+
+def test_import_idempotency(tmp_path, mock_anki, run_ankiops):
+    """Test that importing twice with no changes results in zero updates on the second run."""
+    # 1. Setup: Create a markdown file and import it
+    deck_name = "IdempotencyDeck"
+    md_file = tmp_path / f"{deck_name}.md"
+    content = "Q: Question 1\nA: Answer 1"
+    md_file.write_text(content)
+
+    # 2. First import: should create the note
+    summary1 = import_collection(collection_dir=str(tmp_path))
+    assert len(summary1.file_results) == 1
+    assert summary1.file_results[0].created_count == 1
+    assert summary1.file_results[0].updated_count == 0
+
+    # 3. Second import: should NOT update anything
+    summary2 = import_collection(collection_dir=str(tmp_path))
+    assert len(summary2.file_results) == 1
+    assert summary2.file_results[0].created_count == 0
+    assert summary2.file_results[0].updated_count == 0, (
+        f"Expected 0 updates on second run, got {summary2.file_results[0].updated_count}"
+    )

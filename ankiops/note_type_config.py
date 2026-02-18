@@ -17,7 +17,7 @@ class Field:
     """Definition of a field in a note type."""
 
     name: str
-    prefix: str | None
+    prefix: str | None # None is used for the AnkiOps Key field
 
 
 # Common fields available to all note types
