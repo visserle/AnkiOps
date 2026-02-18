@@ -34,8 +34,7 @@ class KeyMap:
 
         try:
             conn = sqlite3.connect(db_path)
-            # Enable WAL mode for better concurrency compliance (though strictly we are likely single-process)
-            conn.execute("PRAGMA journal_mode=WAL")
+
 
             # Create schema
             with conn:
@@ -87,7 +86,8 @@ class KeyMap:
         """Look up Anki note_id by Key."""
         cursor = self._conn.execute("SELECT id FROM notes WHERE key = ?", (key_str,))
         row = cursor.fetchone()
-        return row[0] if row else None
+        res = row[0] if row else None
+        return res
 
     def get_key(self, note_id: int) -> Optional[str]:
         """Look up Key by Anki note_id (alias for get_note_key)."""

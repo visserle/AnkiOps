@@ -161,7 +161,7 @@ def _build_anki_actions(
                 # Inject the hidden ID field for safety
                 note_key = change.context.get("note_key")
                 if note_key:
-                    html_fields["AnkiOps ID"] = note_key
+                    html_fields["AnkiOps Key"] = note_key
 
                 actions.append(
                     {
@@ -280,15 +280,16 @@ def _sync_file(
         if parsed_note.note_key:
             # Note has a Key — look up the Anki note_id from mapping
             note_id = key_map.get_note_id(parsed_note.note_key)
+            found_ids = None
 
             # --- RECOVERY LOGIC START ---
             if note_id is None:
                 # Key exists in markdown but not in ID Map.
-                # Check if it exists in Anki via the "AnkiOps ID" field (crash recovery).
+                # Check if it exists in Anki via the "AnkiOps Key" field (crash recovery).
                 try:
                     # Query for the specific ID (exact match)
                     found_ids = invoke(
-                        "findNotes", query=f'"AnkiOps ID:{parsed_note.note_key}"'
+                        "findNotes", query=f'"AnkiOps Key:{parsed_note.note_key}"'
                     )
                     if found_ids:
                         note_id = found_ids[0]
@@ -376,7 +377,15 @@ def _sync_file(
                         f"but Anki has '{anki_note.note_type}'."
                     )
                     continue
-
+                
+                # --- FIX: Ensure AnkiOps Key is set ---
+                # Even if other content matches, we must ensure the Key field matches.
+                # If it's missing or wrong in Anki, we treat it as an update.
+                current_anki_key_val = anki_note.fields.get("AnkiOps Key", "")
+                if current_anki_key_val != parsed_note.note_key:
+                    html_fields["AnkiOps Key"] = parsed_note.note_key
+                    # Merge logic: if content is same but Key diff, we force update
+                
                 # Check for content update
                 if parsed_note.html_fields_match(html_fields, anki_note):
                     changes.append(

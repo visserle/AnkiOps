@@ -26,7 +26,7 @@ COMMON_FIELDS = [
     Field("More", "M:"),
     Field("Source", "S:"),
     Field("AI Notes", "AI:"),
-    Field("AnkiOps ID", None),  # Internal ID for safe syncing
+    Field("AnkiOps Key", None),  # Internal Key for safe syncing
 ]
 
 # Identifying fields for built-in note types
