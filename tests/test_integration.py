@@ -7,12 +7,6 @@ These tests simulate the entire application stack:
 4.  Verify end-to-end behavior (files created, Anki updated).
 """
 
-from typing import Any
-from unittest.mock import patch
-
-import pytest
-
-from ankiops.anki_client import AnkiConnectError
 from ankiops.anki_to_markdown import export_collection, export_deck
 from ankiops.markdown_to_anki import import_collection, import_file
 

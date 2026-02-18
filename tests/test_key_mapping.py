@@ -16,7 +16,6 @@ from ankiops.key_map import KeyMap
 from ankiops.markdown_to_anki import _build_anki_actions, _sync_file
 from ankiops.models import AnkiState, ChangeType, FileState, Note
 
-
 # -- Basic CRUD Tests --------------------------------------------------------
 
 

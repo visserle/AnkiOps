@@ -1,7 +1,7 @@
-
-import pytest
 import hashlib
 from pathlib import Path
+
+import pytest
 
 from ankiops.sync_media import (
     LOCAL_MEDIA_DIR,
@@ -25,19 +25,19 @@ def test_sync_to_anki_safety_aliased_dirs(tmp_path):
     """Test that sync_to_anki raises error if local media dir IS the anki media dir."""
     collection_dir = tmp_path / "collection"
     anki_media = tmp_path / "anki_media"
-    
+
     collection_dir.mkdir()
     anki_media.mkdir()
     (collection_dir / "media").symlink_to(anki_media)
-    
+
     # Create a file in Anki media
     original_file = anki_media / "pre_existing.png"
     create_image(original_file, b"content")
-    
+
     # Assert that safety check triggers
     with pytest.raises(ValueError, match="aliases Anki media directory"):
         sync_to_anki(collection_dir, anki_media)
-        
+
     # Verify file was NOT touched/renamed
     assert original_file.exists()
     digest = hashlib.blake2b(digest_size=4)
@@ -398,7 +398,7 @@ def test_roundtrip_export_remote_media(tmp_path):
 
     collection_dir.mkdir()
     anki_media.mkdir()
-    
+
     # 1. Setup Anki file
     remote_img = anki_media / "remote.png"
     create_image(remote_img, b"remote data")
@@ -434,4 +434,3 @@ def test_roundtrip_export_remote_media(tmp_path):
 
     # Anki has new file (it keeps old one too usually, but check new one exists)
     assert (anki_media / expected_name).exists()
-

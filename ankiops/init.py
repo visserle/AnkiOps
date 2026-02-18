@@ -13,7 +13,6 @@ from ankiops.log import clickable_path
 logger = logging.getLogger(__name__)
 
 
-
 def _setup_marker(collection_dir: Path, profile: str):
     """Write the .ankiops marker file with the active profile name."""
     marker = collection_dir / MARKER_FILE
