@@ -316,6 +316,27 @@ class TestFormatNote:
         assert "Q: What?" in result
         assert "A: This" in result
 
+    def test_format_qa_card_with_internal_key(self, converter):
+        """Regression test for bug where internal AnkiOps Key was printed as 'None key'."""
+        anki_note = AnkiNote.from_raw(
+            {
+                "noteId": 123,
+                "modelName": "AnkiOpsQA",
+                "fields": {
+                    "Question": {"value": "What?"},
+                    "Answer": {"value": "This"},
+                    "AnkiOps Key": {"value": "key-123"},
+                },
+                "cards": [],
+            }
+        )
+        result = anki_note.to_markdown(converter, note_key="key-123")
+        assert "<!-- note_key: key-123 -->" in result
+        assert "Q: What?" in result
+        assert "A: This" in result
+        assert "None key-123" not in result
+
+
 
 class TestExtractNoteBlocks:
     """Test extract_note_blocks with mixed content."""

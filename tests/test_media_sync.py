@@ -91,8 +91,31 @@ def test_update_markdown_media_references(tmp_path):
 
     content = md_file.read_text()
     assert "![img](media/new.png)" in content
-    assert '<img src="media/new.png">' in content
+    assert "<img src=\"media/new.png\">" in content
     assert "[sound:media/audio_hash.mp3]" in content
+
+
+def test_update_media_references_with_angle_brackets(tmp_path):
+    """Test updating markdown references that use angle brackets."""
+    collection_dir = tmp_path
+    md_file = collection_dir / "test_brackets.md"
+    md_file.write_text(
+        "![img](<media/old.png>)\n<img src='<media/old.png>'>\n[sound:<media/audio.mp3>]"
+    )
+
+    rename_map = {
+        "media/old.png": "media/new.png",
+        "media/audio.mp3": "media/audio_hash.mp3",
+    }
+
+    update_markdown_media_references(collection_dir, rename_map)
+
+    content = md_file.read_text()
+    assert "![img](<media/new.png>)" in content
+    # Angle brackets should be preserved (or added if logic dictates, but main goal is proper replacement)
+    # The fix ensures brackets are preserved if present in original match
+    assert "src='<media/new.png>'" in content
+    assert "[sound:<media/audio_hash.mp3>]" in content
 
 
 def test_apply_hashing(tmp_path):

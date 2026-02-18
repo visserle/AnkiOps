@@ -523,7 +523,7 @@ class AnkiNote:
             value = self.fields.get(field_name, "")
             if value:
                 md = converter.convert(value)
-                if md:
+                if md and prefix:
                     lines.append(f"{prefix} {md}")
 
         return "\n".join(lines)

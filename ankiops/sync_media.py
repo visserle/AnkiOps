@@ -115,10 +115,16 @@ def update_markdown_media_references(
         path = match.group(2) or match.group(3) or match.group(4)
 
         # Normalize path for lookup (handle windows backslashes if any)
-        lookup_path = path.replace("\\", "/")
+        # Also strip angle brackets if present (markdown can use <path>)
+        lookup_path = path.strip("<>").replace("\\", "/")
 
         if lookup_path in rename_map:
             new_path = rename_map[lookup_path]
+            
+            # If original path had brackets, preserve them
+            if path.startswith("<") and path.endswith(">"):
+                new_path = f"<{new_path}>"
+                
             # Replace the old path with new path in the full match string
             return full_match.replace(path, new_path)
 
