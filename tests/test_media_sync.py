@@ -305,8 +305,8 @@ def test_sync_to_anki_with_cleanup(tmp_path):
     assert not list(anki_media.glob("unreferenced*"))
     assert not list((collection_dir / LOCAL_MEDIA_DIR).glob("unreferenced*"))
 
-    # Underscore file: Should NOT be in Anki (unless ref'd) BUT should REMAIN in Local
-    assert not (anki_media / "_static.png").exists()
+    # Underscore file: Should be in Anki (synced) AND should REMAIN in Local
+    assert (anki_media / "_static.png").exists()
     assert (collection_dir / LOCAL_MEDIA_DIR / "_static.png").exists()
 
 
@@ -329,3 +329,109 @@ def test_sync_to_anki_syncs_underscores(tmp_path):
     # Assert underscore file is copied to Anki
     assert (anki_media / "_static.png").exists()
     assert (anki_media / "_static.png").read_bytes() == b"static data"
+
+
+def test_roundtrip_import_local_media(tmp_path):
+    """Test standardizing a local unhashed image reference during import.
+
+    Scenario:
+    1. Local has `media/image.png`.
+    2. Markdown has `![alt](image.png)` (no prefix).
+    3. Sync to Anki.
+    4. Expect:
+       - File hashed to `media/image_<hash>.png`
+       - Markdown updated to `![alt](media/image_<hash>.png)`
+       - File synced to Anki
+    """
+    collection_dir = tmp_path / "collection"
+    anki_media = tmp_path / "anki_media"
+
+    collection_dir.mkdir()
+    anki_media.mkdir()
+    (collection_dir / LOCAL_MEDIA_DIR).mkdir()
+
+    # 1. Setup local file
+    img_name = "image.png"
+    img_path = collection_dir / LOCAL_MEDIA_DIR / img_name
+    create_image(img_path, b"image data")
+
+    # 2. Setup markdown referencing it without prefix
+    md_file = collection_dir / "deck.md"
+    md_file.write_text(f"![alt]({img_name})")
+
+    # 3. Run sync
+    sync_to_anki(collection_dir, anki_media)
+
+    # 4. Verify
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"image data")
+    h = digest.hexdigest()
+    expected_name = f"image_{h}.png"
+
+    # Markdown updated
+    content = md_file.read_text()
+    assert f"media/{expected_name}" in content
+
+    # File exists locally (hashed)
+    assert (collection_dir / LOCAL_MEDIA_DIR / expected_name).exists()
+    assert not (collection_dir / LOCAL_MEDIA_DIR / img_name).exists()
+
+    # File exists in Anki
+    assert (anki_media / expected_name).exists()
+
+
+def test_roundtrip_export_remote_media(tmp_path):
+    """Test downloading and then standardizing a remote image reference.
+
+    Scenario:
+    1. Anki has `remote.png` (unhashed).
+    2. Markdown has `![alt](remote.png)` (simulating raw export from Anki).
+    3. Sync From Anki (download).
+    4. Sync To Anki (import/standardize).
+    5. Expect:
+       - File downloaded to local
+       - File hashed and markdown updated
+       - Hashed file returned to Anki
+    """
+    collection_dir = tmp_path / "collection"
+    anki_media = tmp_path / "anki_media"
+
+    collection_dir.mkdir()
+    anki_media.mkdir()
+    
+    # 1. Setup Anki file
+    remote_img = anki_media / "remote.png"
+    create_image(remote_img, b"remote data")
+
+    # 2. Setup markdown (raw reference)
+    md_file = collection_dir / "deck.md"
+    md_file.write_text("![alt](remote.png)")
+
+    # 3. Sync From Anki
+    sync_from_anki(collection_dir, anki_media, {"remote.png"})
+
+    # Verify download
+    local_img = collection_dir / LOCAL_MEDIA_DIR / "remote.png"
+    assert local_img.exists()
+    assert local_img.read_bytes() == b"remote data"
+
+    # 4. Sync To Anki
+    sync_to_anki(collection_dir, anki_media)
+
+    # 5. Verify standardization
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"remote data")
+    h = digest.hexdigest()
+    expected_name = f"remote_{h}.png"
+
+    # Markdown updated
+    content = md_file.read_text()
+    assert f"media/{expected_name}" in content
+
+    # Local file hashed
+    assert (collection_dir / LOCAL_MEDIA_DIR / expected_name).exists()
+    assert not local_img.exists()
+
+    # Anki has new file (it keeps old one too usually, but check new one exists)
+    assert (anki_media / expected_name).exists()
+

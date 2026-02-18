@@ -185,6 +185,9 @@ def apply_hashing(collection_dir: Path) -> None:
                 old_rel = f"{LOCAL_MEDIA_DIR}/{file_path.name}"
                 new_rel = f"{LOCAL_MEDIA_DIR}/{new_name}"
                 rename_map[old_rel] = new_rel
+                # Also map the bare filename itself to the new path (with media/ prefix)
+                # This handles cases where markdown refs don't utilize the prefix (e.g. ![alt](img.png))
+                rename_map[file_path.name] = new_rel
 
         except Exception as e:
             logger.warning(f"Failed to hash media file {file_path}: {e}")
