@@ -42,7 +42,7 @@ class MockAnki:
                 for cid, card in self.cards.items():
                     # Check if card matches ANY of the OR groups
                     card_matches_any_group = False
-                    
+
                     for group in or_groups:
                         # Inside a group, terms are AND-ed
                         # e.g. "note:Basic deck:Default" -> must match note type AND deck
@@ -64,14 +64,14 @@ class MockAnki:
                                 if card["deckName"] != deck_name:
                                     group_matches_all_terms = False
                                     break
-                            # Ignore unknown terms for now or fail? 
+                            # Ignore unknown terms for now or fail?
                             # Failing is safer for tests to catch unexpected queries.
                             # But for now let's assume valid queries.
-                        
+
                         if group_matches_all_terms:
                             card_matches_any_group = True
                             break
-                    
+
                     if card_matches_any_group:
                         found_cards.append(cid)
 

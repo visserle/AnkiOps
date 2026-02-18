@@ -35,7 +35,6 @@ class KeyMap:
         try:
             conn = sqlite3.connect(db_path)
 
-
             # Create schema
             with conn:
                 conn.execute("""

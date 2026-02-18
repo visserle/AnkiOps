@@ -17,12 +17,6 @@ from ankiops.anki_to_markdown import export_collection, export_deck
 from ankiops.markdown_to_anki import import_collection, import_file
 
 
-
-
-
-
-
-
 def test_import_with_stale_deck_key_mapping(
     tmp_path, mock_anki, run_ankiops, monkeypatch
 ):
@@ -246,7 +240,9 @@ def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):
     assert len(mock_anki.notes) == 1
     new_note = list(mock_anki.notes.values())[0]
 
-    assert "AnkiOps Key" in new_note["fields"], "AnkiOps Key field missing from new note"
+    assert "AnkiOps Key" in new_note["fields"], (
+        "AnkiOps Key field missing from new note"
+    )
     val = new_note["fields"]["AnkiOps Key"]["value"]
     assert val and len(val) > 0
 
@@ -258,10 +254,10 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
 
     # Create dummy existing note in mock
     field_data = {"Question": "OldQ", "Answer": "OldA", "AnkiOps Key": ""}
-    
+
     deck_id = mock_anki.invoke("createDeck", deck="ReproDeck")
     note_id = 999
-    
+
     # Manually properly structure the note in the mock
     mock_anki.notes[note_id] = {
         "noteId": note_id,
@@ -286,15 +282,19 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
 
     # Create File
     deck_file = tmp_path / "ReproDeck.md"
-    deck_file.write_text(f"<!-- deck_key: {deck_key} -->\n<!-- note_key: {note_key} -->\nQ: OldQ\nA: UpdatedA")
+    deck_file.write_text(
+        f"<!-- deck_key: {deck_key} -->\n<!-- note_key: {note_key} -->\nQ: OldQ\nA: UpdatedA"
+    )
 
     # Run Import
     import_collection(collection_dir=str(tmp_path))
-    
+
     # Verify Anki note was updated
     updated_note = mock_anki.notes[note_id]
     assert updated_note["fields"]["Answer"]["value"] == "UpdatedA"
-    
+
     # Verify AnkiOps Key was populated
     current_val = updated_note["fields"]["AnkiOps Key"]["value"]
-    assert current_val == note_key, f"AnkiOps Key expected '{note_key}', got '{current_val}'"
+    assert current_val == note_key, (
+        f"AnkiOps Key expected '{note_key}', got '{current_val}'"
+    )

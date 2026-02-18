@@ -377,7 +377,7 @@ def _sync_file(
                         f"but Anki has '{anki_note.note_type}'."
                     )
                     continue
-                
+
                 # --- FIX: Ensure AnkiOps Key is set ---
                 # Even if other content matches, we must ensure the Key field matches.
                 # If it's missing or wrong in Anki, we treat it as an update.
@@ -385,7 +385,7 @@ def _sync_file(
                 if current_anki_key_val != parsed_note.note_key:
                     html_fields["AnkiOps Key"] = parsed_note.note_key
                     # Merge logic: if content is same but Key diff, we force update
-                
+
                 # Check for content update
                 if parsed_note.html_fields_match(html_fields, anki_note):
                     changes.append(

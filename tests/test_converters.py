@@ -51,24 +51,24 @@ def md_to_html():
 )
 def test_markup_conversion(md_to_html, md, html):
     """Test standard markup conversion (MD -> HTML).
-    
-    Note: We don't always test HTML->MD roundtrip here because 
+
+    Note: We don't always test HTML->MD roundtrip here because
     HTML conversion might normalize things (e.g. <b> -> <strong>).
-    """    
+    """
     converted_html = md_to_html.convert(md)
     # Loose check for key tags due to newline/spacing variations
     # Normalize expected and actual by removing whitespace for comparison logic
     # or just check basic tag presence.
-    
+
     if "<blockquote>" in html:
         assert "<blockquote>" in converted_html
         assert "Quote" in converted_html
     else:
         # Check that the main tag is present
-        main_tag = html.split(">")[0][1:] # e.g. strong
+        main_tag = html.split(">")[0][1:]  # e.g. strong
         if " " in main_tag:
             main_tag = main_tag.split()[0]
-            
+
         assert f"<{main_tag}" in converted_html
 
 
@@ -103,7 +103,7 @@ def test_unordered_list(md_to_html, html_to_md):
     html = md_to_html.convert(md)
     assert "<ul>" in html
     assert "<li>Item 1</li>" in html
-    
+
     back_to_md = html_to_md.convert(html)
     assert "- Item 1" in back_to_md
     assert "- Item 2" in back_to_md
@@ -114,7 +114,7 @@ def test_ordered_list(md_to_html, html_to_md):
     html = md_to_html.convert(md)
     assert "<ol>" in html
     assert "<li>First</li>" in html
-    
+
     back_to_md = html_to_md.convert(html)
     assert "1. First" in back_to_md
     assert "2. Second" in back_to_md
@@ -125,26 +125,23 @@ def test_nested_list(md_to_html, html_to_md):
     html = md_to_html.convert(md)
     assert "<ul>" in html
     # Check for nesting structure
-    assert "Item 1" not in html # sanity
+    assert "Item 1" not in html  # sanity
 
     back_to_md = html_to_md.convert(html)
     assert "- Parent" in back_to_md
     assert "  - Child" in back_to_md
 
+
 # -- Tables -----------------------------------------------------------------
 
 
 def test_table_conversion(md_to_html, html_to_md):
-    md = (
-        "| Head1 | Head2 |\n"
-        "| --- | --- |\n"
-        "| Cell1 | Cell2 |"
-    )
+    md = "| Head1 | Head2 |\n| --- | --- |\n| Cell1 | Cell2 |"
     html = md_to_html.convert(md)
     assert "<table>" in html
     assert "<th>Head1</th>" in html
     assert "<td>Cell1</td>" in html
-    
+
     # Tables are often not perfectly round-tripped by simple libraries
     # converting standard markdown tables -> html -> markdown is complex.
     # AnkiOps implementation might simplify or rely on specific library behavior.
@@ -155,6 +152,7 @@ def test_table_conversion(md_to_html, html_to_md):
 
 
 # -- Math -------------------------------------------------------------------
+
 
 # PREVIOUSLY: We expected $ -> \\(
 # CURRENTLY: We expect $ -> $ (preserved) because automatic conversion caused issues.
@@ -190,15 +188,15 @@ def test_fenced_code_block(md_to_html, html_to_md):
     # <span class="...">print</span><span class="...">('hello')</span>
     # So searching for the full string might fail.
     # We check for parts or check for the container.
-    
-    assert '<div class="highlight">' in html or '<pre>' in html
+
+    assert '<div class="highlight">' in html or "<pre>" in html
     assert "python" in html or "language-python" in html
-    
-    # Markdownify (html_to_md) usually strips simpler html well, 
+
+    # Markdownify (html_to_md) usually strips simpler html well,
     # but complex pygments HTML might require a very robust converter.
     # We'll check if the TEXT is recovered.
     back_to_md = html_to_md.convert(html)
-    assert "print" in back_to_md 
+    assert "print" in back_to_md
     assert "'hello'" in back_to_md
 
 

@@ -16,7 +16,6 @@ from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import AnkiNote, ChangeType, FileState, Note
 from ankiops.note_type_config import registry
 
-
 # -- Fixtures ----------------------------------------------------------------
 
 
@@ -427,9 +426,7 @@ class TestAnkiNoteFromRaw:
     """Verify the AnkiNote field extraction."""
 
     def test_extracts_all_fields(self):
-        raw = _anki_note_raw(
-            {"Question": "Q", "Answer": "A", "Extra": "E", "More": ""}
-        )
+        raw = _anki_note_raw({"Question": "Q", "Answer": "A", "Extra": "E", "More": ""})
         anki_note = AnkiNote.from_raw(raw)
         assert anki_note.fields == {
             "Question": "Q",
