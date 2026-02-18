@@ -149,7 +149,11 @@ def apply_hashing(collection_dir: Path) -> None:
 
     # Walk all files (non-recursive)
     for file_path in media_root.glob("*"):
-        if not file_path.is_file() or file_path.name.startswith("."):
+        if (
+            not file_path.is_file()
+            or file_path.name.startswith(".")
+            or file_path.name.startswith("_")
+        ):
             continue
 
         try:
@@ -195,6 +199,19 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
     1. Apply hashing (renames check).
     2. Copy all files to Anki's media directory.
     """
+    target_root = Path(anki_media_dir).resolve()
+    media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
+
+    if media_root == target_root:
+        logger.error(
+            "Local media directory is the same as Anki media directory. "
+            "Pass --debug for more info."
+        )
+        raise ValueError(
+            f"Local media directory ({media_root}) aliases Anki media directory. "
+            "Syncing would rename all files in Anki. Aborting."
+        )
+
     apply_hashing(collection_dir)
 
     media_root = collection_dir / LOCAL_MEDIA_DIR
@@ -203,16 +220,39 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
 
     target_root = Path(anki_media_dir)
 
-    # Copy files
+    # 1. Identify all referenced media files
+    referenced_files = set()
+    for md_file in collection_dir.glob("*.md"):
+        referenced_files.update(
+            extract_media_references(md_file.read_text(encoding="utf-8"))
+        )
+
+    # 2. Iterate over local files to Sync or Delete
     for file_path in media_root.glob("*"):
         if not file_path.is_file() or file_path.name.startswith("."):
             continue
 
-        target_path = target_root / file_path.name
+        filename = file_path.name
 
-        if not target_path.exists():
-            shutil.copy2(file_path, target_path)
-            logger.debug(f"Synced to Anki: {file_path.name}")
+        # If referenced OR underscore file: Sync to Anki
+        if filename in referenced_files or filename.startswith("_"):
+            target_path = target_root / filename
+            if not target_path.exists():
+                shutil.copy2(file_path, target_path)
+                logger.debug(f"Synced to Anki: {filename}")
+
+        # If NOT referenced: Check for cleanup
+        if filename not in referenced_files:
+            # Keep special files starting with _ (Anki templates/static assets)
+            if filename.startswith("_"):
+                continue
+
+            # otherwise delete
+            try:
+                file_path.unlink()
+                logger.info(f"Removed unreferenced media file: {filename}")
+            except Exception as e:
+                logger.warning(f"Failed to remove unreferenced file {filename}: {e}")
 
 
 def sync_from_anki(

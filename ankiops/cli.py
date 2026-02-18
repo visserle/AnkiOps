@@ -50,9 +50,8 @@ def run_init(args):
     """Initialize the current directory as an AnkiOps collection."""
     connect_or_exit()
     profile = invoke("getActiveProfile")
-    media_dir = invoke("getMediaDirPath")
 
-    collection_dir = initialize_collection(profile, media_dir)
+    collection_dir = initialize_collection(profile)
 
     if args.tutorial:
         create_tutorial(collection_dir)

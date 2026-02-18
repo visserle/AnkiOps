@@ -1,5 +1,5 @@
-"""Tests for media synchronization logic."""
 
+import pytest
 import hashlib
 from pathlib import Path
 
@@ -19,6 +19,31 @@ def create_image(path: Path, content: bytes = b"fake image content"):
     """Helper to create a dummy image file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
+
+
+def test_sync_to_anki_safety_aliased_dirs(tmp_path):
+    """Test that sync_to_anki raises error if local media dir IS the anki media dir."""
+    collection_dir = tmp_path / "collection"
+    anki_media = tmp_path / "anki_media"
+    
+    collection_dir.mkdir()
+    anki_media.mkdir()
+    (collection_dir / "media").symlink_to(anki_media)
+    
+    # Create a file in Anki media
+    original_file = anki_media / "pre_existing.png"
+    create_image(original_file, b"content")
+    
+    # Assert that safety check triggers
+    with pytest.raises(ValueError, match="aliases Anki media directory"):
+        sync_to_anki(collection_dir, anki_media)
+        
+    # Verify file was NOT touched/renamed
+    assert original_file.exists()
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"content")
+    h = digest.hexdigest()
+    assert not (anki_media / f"pre_existing_{h}.png").exists()
 
 
 def test_calculate_hash(tmp_path):
@@ -89,6 +114,10 @@ def test_apply_hashing(tmp_path):
     md_file = collection_dir / "deck.md"
     md_file.write_text("![1](media/image1.png)")
 
+    # Create underscore file (should be ignored)
+    underscore = media_dir / "_ignore.png"
+    create_image(underscore, b"ignore")
+
     apply_hashing(collection_dir)
 
     # Calculate expected hashes
@@ -101,6 +130,10 @@ def test_apply_hashing(tmp_path):
 
     assert not img1.exists()
     assert new_img1.exists()
+
+    # Verify underscore file was NOT touched
+    assert underscore.exists()
+    assert not (media_dir / f"_ignore_{h1}.png").exists()
 
     # Verify subfolder file was NOT touched (ignored)
     assert img2.exists()
@@ -154,6 +187,9 @@ def test_sync_to_anki(tmp_path):
     # Setup local file
     img = collection_dir / LOCAL_MEDIA_DIR / "test.png"
     create_image(img, b"data")
+
+    # Create markdown referencing it
+    (collection_dir / "deck.md").write_text("![img](media/test.png)")
 
     # Run sync
     sync_to_anki(collection_dir, anki_media)
@@ -223,3 +259,73 @@ def test_extract_html_img():
     refs = extract_media_references(text)
     assert "image.png" in refs
     assert "photo.jpg" in refs
+
+
+def test_sync_to_anki_with_cleanup(tmp_path):
+    """Test that sync_to_anki syncs referenced files and cleans up unreferenced ones."""
+    collection_dir = tmp_path / "collection"
+    anki_media = tmp_path / "anki_media"
+
+    collection_dir.mkdir()
+    anki_media.mkdir()
+    (collection_dir / LOCAL_MEDIA_DIR).mkdir()
+
+    # 1. Setup local files
+    img1 = collection_dir / LOCAL_MEDIA_DIR / "referenced.png"
+    create_image(img1, b"referenced data")
+
+    img2 = collection_dir / LOCAL_MEDIA_DIR / "unreferenced.png"
+    create_image(img2, b"unreferenced data")
+
+    img3 = collection_dir / LOCAL_MEDIA_DIR / "_static.png"
+    create_image(img3, b"static data")
+
+    # 2. Setup markdown referencing only one image
+    md_file = collection_dir / "deck.md"
+    md_file.write_text("![img](media/referenced.png)")
+
+    # 3. Create expected names (hashing will happen inside sync_to_anki)
+    digest = hashlib.blake2b(digest_size=4)
+    digest.update(b"referenced data")
+    h = digest.hexdigest()
+    expected_referenced_name = f"referenced_{h}.png"
+
+    # 4. Run sync
+    sync_to_anki(collection_dir, anki_media)
+
+    # 5. Assertions
+
+    # Referenced file: Should be in Anki (hashed) AND Local (hashed)
+    assert (anki_media / expected_referenced_name).exists()
+    assert (collection_dir / LOCAL_MEDIA_DIR / expected_referenced_name).exists()
+
+    # Unreferenced file: Should NOT be in Anki AND should be DELETED from Local
+    # Note: Using glob because hashing might rename it if logic is broken;
+    # but correct logic means it's gone regardless of name.
+    assert not list(anki_media.glob("unreferenced*"))
+    assert not list((collection_dir / LOCAL_MEDIA_DIR).glob("unreferenced*"))
+
+    # Underscore file: Should NOT be in Anki (unless ref'd) BUT should REMAIN in Local
+    assert not (anki_media / "_static.png").exists()
+    assert (collection_dir / LOCAL_MEDIA_DIR / "_static.png").exists()
+
+
+def test_sync_to_anki_syncs_underscores(tmp_path):
+    """Test that underscore files are synced to Anki even if not referenced in markdown."""
+    collection_dir = tmp_path / "collection"
+    anki_media = tmp_path / "anki_media"
+
+    collection_dir.mkdir()
+    anki_media.mkdir()
+    (collection_dir / LOCAL_MEDIA_DIR).mkdir()
+
+    # Setup local underscore file
+    underscore_img = collection_dir / LOCAL_MEDIA_DIR / "_static.png"
+    create_image(underscore_img, b"static data")
+
+    # Run sync (no markdown references created)
+    sync_to_anki(collection_dir, anki_media)
+
+    # Assert underscore file is copied to Anki
+    assert (anki_media / "_static.png").exists()
+    assert (anki_media / "_static.png").read_bytes() == b"static data"
