@@ -2,14 +2,12 @@
 
 import json
 import os
-from pathlib import Path
 
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
 from ankiops.config import MARKER_FILE
-from ankiops.models import FileState, Note
 
 
 class TestDeserialization:
