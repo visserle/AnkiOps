@@ -98,3 +98,7 @@ node_modules/
 *.o
 *.a
 *.out
+
+# AI
+.gemini/
+.claude/
