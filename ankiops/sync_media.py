@@ -121,9 +121,8 @@ def update_markdown_media_references(
         if lookup_path in rename_map:
             new_path = rename_map[lookup_path]
             
-            # If original path had brackets, preserve them
-            if path.startswith("<") and path.endswith(">"):
-                new_path = f"<{new_path}>"
+            # Always wrap the new path in angle brackets for consistency and robustness
+            new_path = f"<{new_path}>"
                 
             # Replace the old path with new path in the full match string
             return full_match.replace(path, new_path)

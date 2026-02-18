@@ -111,9 +111,8 @@ class _AnkiVisitor:
         return {"type": "skip"}
 
     def visit_link(self, node, href, text, title):
-        if "(" in href or ")" in href:
-            return {"type": "custom", "output": f"[{text}](<{href}>)"}
-        return {"type": "continue"}
+        # Always use angle brackets for robustness
+        return {"type": "custom", "output": f"[{text}](<{href}>)"}
 
     def visit_element_end(self, node, text):
         if node["tag_name"] == "br":

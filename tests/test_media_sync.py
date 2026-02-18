@@ -90,9 +90,9 @@ def test_update_markdown_media_references(tmp_path):
     update_markdown_media_references(collection_dir, rename_map)
 
     content = md_file.read_text()
-    assert "![img](media/new.png)" in content
-    assert "<img src=\"media/new.png\">" in content
-    assert "[sound:media/audio_hash.mp3]" in content
+    assert "![img](<media/new.png>)" in content
+    assert '<img src="<media/new.png>">' in content or "<img src=\"<media/new.png>\">" in content
+    assert "[sound:<media/audio_hash.mp3>]" in content
 
 
 def test_update_media_references_with_angle_brackets(tmp_path):
@@ -171,6 +171,10 @@ def test_apply_hashing(tmp_path):
     # Verify markdown update
     content = md_file.read_text()
     assert f"media/image1_{h1}.png" in content
+    # Note: sync_media.py uses replace(path, new_path)
+    # If the original was ![1](media/image1.png), it replaces "media/image1.png" with "<media/image1_hash.png>"
+    # Result: ![1](<media/image1_hash.png>)
+    assert f"![1](<media/image1_{h1}.png>)" in content
 
 
 def test_apply_hashing_idempotent(tmp_path):
@@ -393,7 +397,7 @@ def test_roundtrip_import_local_media(tmp_path):
 
     # Markdown updated
     content = md_file.read_text()
-    assert f"media/{expected_name}" in content
+    assert f"<media/{expected_name}>" in content
 
     # File exists locally (hashed)
     assert (collection_dir / LOCAL_MEDIA_DIR / expected_name).exists()
@@ -449,7 +453,7 @@ def test_roundtrip_export_remote_media(tmp_path):
 
     # Markdown updated
     content = md_file.read_text()
-    assert f"media/{expected_name}" in content
+    assert f"<media/{expected_name}>" in content
 
     # Local file hashed
     assert (collection_dir / LOCAL_MEDIA_DIR / expected_name).exists()

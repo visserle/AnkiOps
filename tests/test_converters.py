@@ -83,7 +83,7 @@ def test_markup_conversion(md_to_html, md, html):
         ("<del>Strike</del>", "~~Strike~~"),
         ("<s>Strike</s>", "~~Strike~~"),
         # <strike> often arguably supported or not depending on library version, skipping to avoid flake
-        ('<a href="u">L</a>', "[L](u)"),
+        ('<a href="u">L</a>', "[L](<u>)"),
         ("<h1>H1</h1>", "# H1"),
         ("<h2>H2</h2>", "## H2"),
         ("<h3>H3</h3>", "### H3"),
@@ -236,3 +236,22 @@ def test_media_prefix_stripping(md_to_html):
     # Should result in src="img.png" NOT src="media/img.png"
     assert '<img src="img.png"' in html
     assert "media/img.png" not in html
+
+
+def test_html_to_markdown_enforces_brackets(html_to_md):
+    """Verify that HTMLToMarkdown always enforces angle brackets for links and images."""
+    # Test images
+    html_img = '<img src="test.jpg" alt="alt">'
+    md_img = html_to_md.convert(html_img)
+    assert "![alt](<media/test.jpg>)" in md_img
+
+    # Test links
+    html_link = '<a href="https://example.com">Link</a>'
+    md_link = html_to_md.convert(html_link)
+    assert "[Link](<https://example.com>)" in md_link
+
+    # Test links with parens
+    html_link_parens = '<a href="https://example.com/(test)">Link</a>'
+    md_link_parens = html_to_md.convert(html_link_parens)
+    assert "[Link](<https://example.com/(test)>)" in md_link_parens
+
