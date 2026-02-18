@@ -1,6 +1,8 @@
 Q: Welcome to AnkiOps!
 A: Anki decks ↔ Markdown files, in perfect sync
 E: Edit in your text editor, review in Anki.
+
+![](sync_arrows.png)
 M: Neat!
 
 ---
