@@ -223,8 +223,8 @@ def test_sync_to_anki(tmp_path):
 
     # Run sync
     summary = sync_to_anki(collection_dir, anki_media)
-    assert summary["synced"] == 1
-    assert summary["total"] == 1
+    assert summary.synced == 1
+    assert summary.total == 1
 
     # Expect file to be hashed and copied
     digest = hashlib.blake2b(digest_size=4)
@@ -252,8 +252,8 @@ def test_sync_from_anki(tmp_path):
     refs = {"remote.png", "missing.png"}
 
     summary = sync_from_anki(collection_dir, anki_media, refs)
-    assert summary["synced"] == 1
-    assert summary["total"] == 2
+    assert summary.synced == 1
+    assert summary.total == 2
 
     media_dir = collection_dir / LOCAL_MEDIA_DIR
     assert (media_dir / "remote.png").exists()
@@ -326,9 +326,9 @@ def test_sync_to_anki_with_cleanup(tmp_path):
 
     # 4. Run sync
     summary = sync_to_anki(collection_dir, anki_media)
-    assert summary["synced"] == 2
-    assert summary["removed"] == 1
-    assert summary["total"] == 3  # referenced, unreferenced, _static
+    assert summary.synced == 2
+    assert summary.removed == 1
+    assert summary.total == 2  # referenced (hashed) and _static
 
     # 5. Assertions
 
@@ -362,8 +362,8 @@ def test_sync_to_anki_syncs_underscores(tmp_path):
 
     # Run sync (no markdown references created)
     summary = sync_to_anki(collection_dir, anki_media)
-    assert summary["synced"] == 1
-    assert summary["total"] == 1
+    assert summary.synced == 1
+    assert summary.total == 1
 
     # Assert underscore file is copied to Anki
     assert (anki_media / "_static.png").exists()
@@ -448,7 +448,7 @@ def test_roundtrip_export_remote_media(tmp_path):
 
     # 3. Sync From Anki
     summary = sync_from_anki(collection_dir, anki_media, {"remote.png"})
-    assert summary["synced"] == 1
+    assert summary.synced == 1
 
     # Verify download
     local_img = collection_dir / LOCAL_MEDIA_DIR / "remote.png"

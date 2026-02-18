@@ -116,10 +116,10 @@ def run_am(args):
         if all_refs:
             logger.debug("Syncing referenced media from Anki...")
             summary = sync_from_anki(collection_dir, Path(media_dir), all_refs)
-            changes_str = format_changes(**summary)
+            changes_str = format_changes(**summary.to_dict())
             if changes_str != "no changes":
                 logger.info(
-                    f"Media sync complete: {summary['total']} files — {changes_str}"
+                    f"Media sync complete: {summary.total} files — {changes_str}"
                 )
             else:
                 logger.debug("Media sync complete: no changes")
@@ -139,10 +139,10 @@ def run_ma(args):
     try:
         media_dir = invoke("getMediaDirPath")
         media_summary = sync_to_anki(collection_dir, Path(media_dir))
-        changes_str = format_changes(**media_summary)
+        changes_str = format_changes(**media_summary.to_dict())
         if changes_str != "no changes":
             logger.info(
-                f"Media sync complete: {media_summary['total']} files — {changes_str}"
+                f"Media sync complete: {media_summary.total} files — {changes_str}"
             )
         else:
             logger.debug("Media sync complete: no changes")

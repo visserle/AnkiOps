@@ -10,6 +10,7 @@ import hashlib
 import logging
 import re
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.config import LOCAL_MEDIA_DIR
@@ -22,6 +23,25 @@ HASH_SUFFIX_PATTERN = re.compile(r"_([a-f0-9]{8})\.[^.]+$")
 ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
 MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?"
 HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
+
+
+@dataclass
+class MediaSyncSummary:
+    """Summary of media synchronization operations."""
+
+    synced: int = 0
+    removed: int = 0
+    hashed: int = 0
+    total: int = 0
+
+    def to_dict(self) -> dict[str, int]:
+        """Convert to dictionary for compatibility with format_changes."""
+        return {
+            "synced": self.synced,
+            "removed": self.removed,
+            "hashed": self.hashed,
+            "total": self.total,
+        }
 
 
 def _normalize_media_path(path: str) -> str:
@@ -150,10 +170,21 @@ def update_markdown_media_references(
     return updated_files
 
 
-def apply_hashing(collection_dir: Path) -> None:
+def apply_hashing(
+    collection_dir: Path,
+    referenced_files: set[str] | None = None,
+    summary: MediaSyncSummary | None = None,
+) -> int:
     """Rename local media files to include content hash and update markdown refs.
 
     Recursive scan of LOCAL_MEDIA_DIR.
+
+    Args:
+        collection_dir: Root of the collection
+        referenced_files: Optional set of filenames that are actually used.
+                         If provided, only files in this set (or starting with _)
+                         will be hashed.
+        summary: Optional MediaSyncSummary to update.
 
     Returns:
         Number of media files hashed.
@@ -172,6 +203,10 @@ def apply_hashing(collection_dir: Path) -> None:
             or file_path.name.startswith(".")
             or file_path.name.startswith("_")
         ):
+            continue
+
+        # If referenced_files provided, skip hashing unreferenced ones
+        if referenced_files is not None and file_path.name not in referenced_files:
             continue
 
         try:
@@ -221,19 +256,24 @@ def apply_hashing(collection_dir: Path) -> None:
     if rename_map:
         update_markdown_media_references(collection_dir, rename_map)
 
+    if summary:
+        summary.hashed += hashed_count
+
     return hashed_count
 
 
-def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
+def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> MediaSyncSummary:
     """Sync local media to Anki collection.media.
 
-    1. Apply hashing (renames check).
-    2. Copy all files to Anki's media directory.
+    1. Extract referenced files.
+    2. Apply hashing (only to referenced files).
+    3. Copy all files to Anki's media directory.
+    4. Remove unreferenced files from local.
 
     Returns:
-        Dict with counts of synced, removed, and hashed files.
+        MediaSyncSummary with counts of synced, removed, and hashed files.
     """
-    counts = {"synced": 0, "removed": 0, "hashed": 0, "total": 0}
+    summary = MediaSyncSummary()
     target_root = Path(anki_media_dir).resolve()
     media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
 
@@ -246,27 +286,31 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
             "Syncing would rename all files in Anki. Aborting."
         )
 
-    counts["hashed"] = apply_hashing(collection_dir)
-
-    media_root = collection_dir / LOCAL_MEDIA_DIR
-    if not media_root.exists():
-        return counts
-
-    target_root = Path(anki_media_dir)
-
-    # 1. Identify all referenced media files
+    # 1. Identify all referenced media files BEFORE hashing
     referenced_files = set()
     for md_file in collection_dir.glob("*.md"):
         referenced_files.update(
             extract_media_references(md_file.read_text(encoding="utf-8"))
         )
 
-    # 2. Iterate over local files to Sync or Delete
-    local_files = list(media_root.glob("*"))
-    counts["total"] = len(
-        [f for f in local_files if f.is_file() and not f.name.startswith(".")]
-    )
+    # 2. Apply hashing (only for referenced files)
+    apply_hashing(collection_dir, referenced_files=referenced_files, summary=summary)
 
+    # Refresh referenced files in case some were renamed by hashing
+    referenced_files = set()
+    for md_file in collection_dir.glob("*.md"):
+        referenced_files.update(
+            extract_media_references(md_file.read_text(encoding="utf-8"))
+        )
+
+    media_root = collection_dir / LOCAL_MEDIA_DIR
+    if not media_root.exists():
+        return summary
+
+    target_root = Path(anki_media_dir)
+    local_files = list(media_root.glob("*"))
+
+    # 3. Iterate over local files to Sync or Delete
     for file_path in local_files:
         if not file_path.is_file() or file_path.name.startswith("."):
             continue
@@ -279,7 +323,7 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
             if not target_path.exists():
                 shutil.copy2(file_path, target_path)
                 logger.debug(f"Synced {clickable_path(file_path)} to Anki")
-                counts["synced"] += 1
+                summary.synced += 1
 
         # If NOT referenced: Check for cleanup
         if filename not in referenced_files:
@@ -293,28 +337,33 @@ def sync_to_anki(collection_dir: Path, anki_media_dir: Path) -> None:
                 logger.debug(
                     f"Removed unreferenced media file: {clickable_path(file_path)}"
                 )
-                counts["removed"] += 1
+                summary.removed += 1
             except Exception as e:
                 logger.warning(
                     f"Failed to remove unreferenced file {clickable_path(file_path)}: {e}"
                 )
 
-    return counts
+    # Final total: files remaining in local media folder
+    summary.total = len(
+        [f for f in media_root.glob("*") if f.is_file() and not f.name.startswith(".")]
+    )
+
+    return summary
 
 
 def sync_from_anki(
     collection_dir: Path,
     anki_media_dir: Path,
     referenced_files: set[str],
-) -> dict[str, int]:
+) -> MediaSyncSummary:
     """Sync referenced media from Anki to local media folder.
 
     Only copies files that are referenced in the markdown.
 
     Returns:
-        Dict with summary counts.
+        MediaSyncSummary with counts.
     """
-    counts = {"synced": 0, "total": len(referenced_files)}
+    summary = MediaSyncSummary(total=len(referenced_files))
     media_root = collection_dir / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
     target_root = Path(anki_media_dir)
@@ -332,6 +381,6 @@ def sync_from_anki(
         if not target_path.exists():
             shutil.copy2(source_path, target_path)
             logger.debug(f"Synced {clickable_path(source_path, filename)} from Anki")
-            counts["synced"] += 1
+            summary.synced += 1
 
-    return counts
+    return summary
