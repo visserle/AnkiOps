@@ -54,7 +54,8 @@ class MockAnki:
                         for term in terms:
                             if term.startswith("note:"):
                                 model = term.split(":", 1)[1]
-                                # Note might not exist if deleted but card remains (shouldn't happen in valid state but good to be safe)
+                                # Note might not exist if deleted but card remains
+                                # (shouldn't happen in valid state but good to be safe)
                                 note = self.notes.get(card["note"])
                                 if not note or note["modelName"] != model:
                                     group_matches_all_terms = False

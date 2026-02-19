@@ -20,15 +20,6 @@ class Field:
     prefix: str | None  # None is used for the AnkiOps Key field
 
 
-# Common fields available to all note types
-COMMON_FIELDS = [
-    Field("Extra", "E:"),
-    Field("More", "M:"),
-    Field("Source", "S:"),
-    Field("AI Notes", "AI:"),
-    Field("AnkiOps Key", None),  # Internal Key for safe syncing
-]
-
 # Identifying fields for built-in note types
 IDENTIFYING_FIELDS = {
     "AnkiOpsQA": [
@@ -53,6 +44,15 @@ IDENTIFYING_FIELDS = {
     ],
 }
 
+# Common fields available to all note types
+COMMON_FIELDS = [
+    Field("Extra", "E:"),
+    Field("More", "M:"),
+    Field("Source", "S:"),
+    Field("AI Notes", "AI:"),
+    Field("AnkiOps Key", None),  # Internal Key for safe syncing
+]
+
 
 @dataclass
 class NoteTypeConfig:
@@ -63,16 +63,6 @@ class NoteTypeConfig:
     is_cloze: bool = False
     custom: bool = False
     templates_dir: Path | None = None
-
-    @property
-    def identifying_fields(self) -> list[Field]:
-        """Return identifying fields."""
-        return self.fields
-
-    @property
-    def identifying_field_names(self) -> list[str]:
-        """Return names of identifying fields."""
-        return [f.name for f in self.fields]
 
     @property
     def identifying_prefixes(self) -> set[str]:
@@ -270,31 +260,6 @@ class NoteTypeRegistry:
         """Global mapping of field name -> prefix."""
         return {v: k for k, v in self.prefix_to_field.items()}
 
-    @property
-    def note_config(self) -> dict[str, list[tuple[str, str | None]]]:
-        """Legacy-style dictionary of note type -> all fields (including common).
-
-        Returns:
-            Dict mapping note type name to list of (field_name, prefix) tuples.
-        """
-        result = {}
-        common_tuples = [(f.name, f.prefix) for f in COMMON_FIELDS]
-        for name, config in self._configs.items():
-            field_tuples = [(f.name, f.prefix) for f in config.fields]
-            result[name] = field_tuples + common_tuples
-        return result
-
-    @property
-    def identifying_fields(self) -> dict[str, list[tuple[str, str | None]]]:
-        """Legacy-style dictionary of note type -> identifying fields.
-
-        Returns:
-            Dict mapping note type name to list of (field_name, prefix) tuples.
-        """
-        result = {}
-        for name, config in self._configs.items():
-            result[name] = [(f.name, f.prefix) for f in config.fields]
-        return result
 
 
 # Global registry instance
