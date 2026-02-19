@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import ClassVar
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+# Load default CSS globally once
+BUILTIN_CSS = (
+    resources.files("ankiops.card_templates")
+    .joinpath("Styling.css")
+    .read_text(encoding="utf-8")
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,7 @@ class NoteTypeConfig:
     is_cloze: bool = False
     custom: bool = False
     templates_dir: Path | None = None
+    css: str = BUILTIN_CSS
 
     @property
     def identifying_prefixes(self) -> set[str]:
@@ -92,7 +102,6 @@ class NoteTypeRegistry:
 
     def __init__(self):
         self._configs: dict[str, NoteTypeConfig] = {}
-        self.custom_css_path: Path | None = None
         self._initialize_builtins()
 
     def _initialize_builtins(self):
@@ -112,7 +121,7 @@ class NoteTypeRegistry:
         for config in builtin_configs:
             for field in config.fields:
                 self._BUILTIN_NAMES.add(field.name)
-                if field.prefix is not None:
+                if field.prefix:
                     self._BUILTIN_PREFIXES.add(field.prefix)
 
         # Register them
@@ -151,7 +160,7 @@ class NoteTypeRegistry:
 
         # 2. Check each field
         for field in config.fields:
-            if field.prefix is not None and field.prefix in reserved_prefixes:
+            if field.prefix and field.prefix in reserved_prefixes:
                 raise ValueError(
                     f"Note type '{config.name}' uses {error_msg} "
                     f"prefix '{field.prefix}'"
@@ -167,7 +176,7 @@ class NoteTypeRegistry:
         global_map = self.prefix_to_field
 
         for field in config.fields:
-            if field.prefix is not None and field.prefix in global_map:
+            if field.prefix and field.prefix in global_map:
                 existing_name = global_map[field.prefix]
                 if existing_name != field.name:
                     raise ValueError(
@@ -217,6 +226,15 @@ class NoteTypeRegistry:
             try:
                 fields = [Field(f["name"], f["prefix"]) for f in info.get("fields", [])]
 
+                css_content = BUILTIN_CSS
+                if "css" in info:
+                    custom_css_file = card_templates_dir / info["css"]
+                    if not custom_css_file.exists():
+                        raise FileNotFoundError(
+                            f"CSS file not found: {custom_css_file}"
+                        )
+                    css_content = custom_css_file.read_text(encoding="utf-8")
+
                 self.register(
                     NoteTypeConfig(
                         name=name,
@@ -224,17 +242,12 @@ class NoteTypeRegistry:
                         is_cloze=info.get("cloze", False),
                         custom=True,
                         templates_dir=card_templates_dir,
+                        css=css_content,
                     )
                 )
                 logger.debug(f"Registered custom note type: {name}")
             except Exception as e:
                 logger.error(f"Failed to register custom type '{name}': {e}")
-
-        # Check for custom styling
-        css_path = card_templates_dir / "Styling.css"
-        if css_path.exists():
-            self.custom_css_path = css_path
-            logger.debug(f"Found custom styling at {css_path}")
 
     @property
     def supported_note_types(self) -> list[str]:
@@ -246,12 +259,12 @@ class NoteTypeRegistry:
         """Global mapping of prefix -> field name for all registered types."""
         mapping = {}
         for field in COMMON_FIELDS:
-            if field.prefix is not None:
+            if field.prefix:
                 mapping[field.prefix] = field.name
 
         for config in self._configs.values():
             for field in config.fields:
-                if field.prefix is not None:
+                if field.prefix:
                     mapping[field.prefix] = field.name
         return mapping
 

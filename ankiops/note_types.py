@@ -159,10 +159,7 @@ def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
     model_config = registry.get(model_name)
     fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
-    if registry.custom_css_path and registry.custom_css_path.exists():
-        css = registry.custom_css_path.read_text(encoding="utf-8")
-    else:
-        css = _load_template("Styling.css")
+    css = model_config.css
 
     card_templates = _get_card_templates(registry.get(model_name))
 
@@ -191,11 +188,7 @@ def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
     model_config = registry.get(model_name)
     expected_fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
-    # Check if we have custom CSS overrides
-    if registry.custom_css_path and registry.custom_css_path.exists():
-        css = registry.custom_css_path.read_text(encoding="utf-8")
-    else:
-        css = _load_template("Styling.css")
+    css = model_config.css
 
     expected_templates = _get_card_templates(model_config)
 
@@ -253,10 +246,7 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
     model_config = registry.get(model_name)
     expected_fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
-    if registry.custom_css_path and registry.custom_css_path.exists():
-        css = registry.custom_css_path.read_text(encoding="utf-8")
-    else:
-        css = _load_template("Styling.css")
+    css = model_config.css
 
     expected_templates = _get_card_templates(model_config)
 

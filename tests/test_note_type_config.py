@@ -114,9 +114,11 @@ def test_load_custom_from_dir(registry):
                     {"name": "Definition", "prefix": "D:"},
                 ],
                 "reversed": True,
+                "css": "MyCustom.css",
             }
         }
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
+        (card_templates / "MyCustom.css").write_text(".custom { color: red; }", encoding="utf-8")
 
         registry.load_custom(card_templates)
 
@@ -126,18 +128,26 @@ def test_load_custom_from_dir(registry):
         assert config.custom
         assert config.templates_dir == card_templates
         assert config.fields == [Field("Term", "TM:"), Field("Definition", "D:")]
+        assert config.css == ".custom { color: red; }"
 
 
-def test_load_custom_css(registry):
-    """Test detecting custom CSS file."""
+def test_load_custom_fallback_css(registry):
+    """Test that custom types fall back to built-in CSS if not specified."""
     with tempfile.TemporaryDirectory() as tmpdir:
         card_templates = Path(tmpdir)
-        (card_templates / "note_types.yaml").touch()  # Empty config is fine
-        (card_templates / "Styling.css").touch()
+        yaml_path = card_templates / "note_types.yaml"
+        data = {
+            "NoCSSType": {
+                "fields": [{"name": "XField", "prefix": "XF:"}]
+            }
+        }
+        yaml_path.write_text(yaml.dump(data), encoding="utf-8")
 
         registry.load_custom(card_templates)
 
-        assert registry.custom_css_path == card_templates / "Styling.css"
+        config = registry.get("NoCSSType")
+        builtin_css = registry.get("AnkiOpsQA").css
+        assert config.css == builtin_css
 
 
 def test_prefix_to_field_mapping(registry):
