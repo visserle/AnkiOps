@@ -11,7 +11,7 @@ from importlib import resources
 from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError, invoke
-from ankiops.note_type_config import NoteTypeConfig, registry
+from ankiops.note_type_config import COMMON_FIELDS, NoteTypeConfig, registry
 
 # Editor-side field properties (set via AnkiConnect, not card templates)
 FIELD_FONT_SIZES: dict[str, int] = {
@@ -156,8 +156,8 @@ def _field_property_actions(
 
 def _create_model_actions(model_name: str, is_cloze: bool) -> list[dict]:
     """Return action dicts to create a note type from scratch."""
-    note_config = registry.note_config[model_name]
-    fields = [field_name for field_name, _ in note_config]
+    model_config = registry.get(model_name)
+    fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
     if registry.custom_css_path and registry.custom_css_path.exists():
         css = registry.custom_css_path.read_text(encoding="utf-8")
@@ -189,8 +189,7 @@ def _is_model_up_to_date(model_name: str, model_state: dict) -> bool:
                      'descriptions', 'fonts'.
     """
     model_config = registry.get(model_name)
-    note_config = registry.note_config[model_name]
-    expected_fields = [field_name for field_name, _ in note_config]
+    expected_fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
     # Check if we have custom CSS overrides
     if registry.custom_css_path and registry.custom_css_path.exists():
@@ -252,8 +251,7 @@ def _update_model_actions(model_name: str, model_state: dict) -> list[dict]:
                      'descriptions', 'fonts'.
     """
     model_config = registry.get(model_name)
-    note_config = registry.note_config[model_name]
-    expected_fields = [field_name for field_name, _ in note_config]
+    expected_fields = [f.name for f in model_config.fields + COMMON_FIELDS]
 
     if registry.custom_css_path and registry.custom_css_path.exists():
         css = registry.custom_css_path.read_text(encoding="utf-8")

@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 from ankiops.anki_client import invoke
 from ankiops.config import NOTE_SEPARATOR
+from ankiops.note_type_config import COMMON_FIELDS, registry
 from ankiops.log import format_changes
-from ankiops.note_type_config import registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
@@ -183,7 +183,7 @@ class Note:
 
         for name in registry.supported_note_types:
             config = registry.get(name)
-            type_fields = set(config.identifying_field_names)
+            type_fields = {field.name for field in config.fields}
 
             # Check 1: Note fields must be a subset of the Type's fields
             if note_fields.issubset(type_fields):
@@ -328,18 +328,19 @@ class Note:
         # We detect this by checking if it has choice-like fields in its definition
         has_choices = any("Choice" in f.name for f in config.fields)
 
-        identifying = registry.identifying_fields.get(self.note_type, [])
+        config = registry.get(self.note_type)
+        identifying = config.fields
 
-        for field_name, prefix in identifying:
-            if "Choice" in field_name:
-                choice_fields.append(field_name)
-                if self.fields.get(field_name):
+        for field in identifying:
+            if "Choice" in field.name:
+                choice_fields.append(field.name)
+                if self.fields.get(field.name):
                     choice_count += 1
                 continue  # Skip individual Choice field check in mandatory loop
 
             # Non-Choice fields (Question, Answer, etc.) are mandatory if defined in the type
-            if not self.fields.get(field_name):
-                errors.append(f"Missing mandatory field '{field_name}' ({prefix})")
+            if not self.fields.get(field.name):
+                errors.append(f"Missing mandatory field '{field.name}' ({field.prefix})")
 
         if config.is_cloze:
             text = self.fields.get("Text", "")
@@ -401,10 +402,11 @@ class Note:
             name: converter.convert(content) for name, content in self.fields.items()
         }
 
-        for field_name, prefix in registry.note_config.get(self.note_type, []):
-            if prefix is None:  # key-only field, not present in markdown
+        config = registry.get(self.note_type)
+        for field in config.fields + COMMON_FIELDS:
+            if field.prefix is None:  # key-only field, not present in markdown
                 continue
-            html.setdefault(field_name, "")
+            html.setdefault(field.name, "")
 
         return html
 
@@ -519,15 +521,16 @@ class AnkiNote:
         Returns:
             Markdown block string starting with ``<!-- note_key: ... -->``.
         """
-        note_config = registry.note_config[self.note_type]
+        config = registry.get(self.note_type)
+        note_fields = config.fields + COMMON_FIELDS
         lines = [f"<!-- note_key: {note_key} -->"]
 
-        for field_name, prefix in note_config:
-            value = self.fields.get(field_name, "")
+        for field in note_fields:
+            value = self.fields.get(field.name, "")
             if value:
                 md = converter.convert(value)
-                if md and prefix:
-                    lines.append(f"{prefix} {md}")
+                if md and field.prefix:
+                    lines.append(f"{field.prefix} {md}")
 
         return "\n".join(lines)
 

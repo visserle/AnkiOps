@@ -8,7 +8,7 @@ from pathlib import Path
 from ankiops.config import MARKER_FILE, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
-from ankiops.note_type_config import registry
+from ankiops.note_type_config import COMMON_FIELDS, registry
 
 logger = logging.getLogger(__name__)
 
@@ -191,20 +191,14 @@ def deserialize_collection_from_json(
                 lines.append(f"<!-- note_key: {note_key} -->")
 
             # Get field mappings for this note type
-            # Use registry.note_config to get legacy list of (field_name, prefix)
-            note_config = registry.note_config.get(note_type)
-            if not note_config:
-                logger.warning(
-                    f"Unknown note type '{note_type}' "
-                    f"in deck '{deck_name}', skipping note"
-                )
-                continue
+            config = registry.get(note_type)
+            note_fields = config.fields + COMMON_FIELDS
 
             # Format fields according to note type configuration
-            for field_name, prefix in note_config:
-                field_content = fields.get(field_name)
+            for field in note_fields:
+                field_content = fields.get(field.name)
                 if field_content:
-                    lines.append(f"{prefix} {field_content}")
+                    lines.append(f"{field.prefix} {field_content}")
 
             # Add separator between notes
             lines.append("")
