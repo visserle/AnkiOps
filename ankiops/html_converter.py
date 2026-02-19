@@ -11,7 +11,8 @@ from ankiops.config import LOCAL_MEDIA_DIR
 _MD_SPECIAL_CHARS = {
     "*": "\u200dMDESCASTERISK\u200d",
     "\\": "\u200dMDESCBACKSLASH\u200d",
-    # other characters are adequately escaped by html-to-markdown
+    "+": "\u200dMDESPLUS\u200d",
+    "#": "\u200dMDESCHASH\u200d",
 }
 
 

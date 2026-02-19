@@ -254,3 +254,40 @@ def test_html_to_markdown_enforces_brackets(html_to_md):
     html_link_parens = '<a href="https://example.com/(test)">Link</a>'
     md_link_parens = html_to_md.convert(html_link_parens)
     assert "[Link](<https://example.com/(test)>)" in md_link_parens
+
+
+@pytest.mark.parametrize(
+    "anki_in,expected_html,expected_md",
+    [
+        # Structural: Typing these in Anki should "upgrade" to Markdown elements
+        ("> Quote", "<blockquote>\nQuote</blockquote>\n", "> Quote"),
+        ("- Item", "<ul>\n<li>Item</li>\n</ul>\n", "- Item"),
+        # Literal: Typing these in Anki should stay literal markers
+        ("+ Literal Plus", "+ Literal Plus", r"\+ Literal Plus"),
+        ("# Literal Hash", "# Literal Hash", r"\# Literal Hash"),
+        ("* Literal Asterisk", "* Literal Asterisk", r"\* Literal Asterisk"),
+        # Anki Specifics
+        ("{{c1::cloze}}", "{{c1::cloze}}", "{{c1::cloze}}"),
+    ],
+)
+def test_structural_vs_literal_roundtrips(
+    md_to_html, html_to_md, anki_in, expected_html, expected_md
+):
+    """Verify that some characters are structural (auto-upgrade) while others stay literal."""
+    # 1. Anki -> MD (Export)
+    md = html_to_md.convert(anki_in)
+    assert md == expected_md
+
+    # 2. MD -> HTML (Import)
+    html = md_to_html.convert(md)
+    # Check if the structural tag is there or content is same
+    if "<blockquote>" in expected_html:
+        assert "<blockquote>" in html
+    elif "<ul>" in expected_html:
+        assert "<ul>" in html
+    else:
+        assert html == expected_html
+
+    # 3. HTML -> MD (Roundtrip)
+    md_roundtrip = html_to_md.convert(html)
+    assert md_roundtrip == expected_md
