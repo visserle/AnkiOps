@@ -39,18 +39,19 @@ def clickable_path(file_path: Path | str, display_name: str | None = None) -> st
 
     Returns:
         String with OSC 8 escape codes for terminal hyperlinks
-
-    Example:
-        >>> logger.info(f"Created {clickable_path(tutorial_path)}")
-        >>> logger.warning(f"Found issue in {clickable_path(path, 'config.yaml')}")
     """
+    path = Path(file_path)
+    text = display_name if display_name is not None else path.name
+
     # Respect NO_COLOR environment variable
     if os.environ.get("NO_COLOR"):
-        return display_name or Path(file_path).name
+        return text
 
-    path = Path(file_path)
+    # Only create links for paths that actually exist (to avoid confusion/broken links)
+    if not path.exists():
+        return text
+
     absolute_path = path.resolve()
-    text = display_name if display_name is not None else path.name
 
     # OSC 8 format: \033]8;;file://ABSOLUTE_PATH\033\\TEXT\033]8;;\033\\
     return f"\033]8;;file://{absolute_path}\033\\{text}\033]8;;\033\\"

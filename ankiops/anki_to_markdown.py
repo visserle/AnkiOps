@@ -318,10 +318,10 @@ def export_collection(
         expected_name = sanitize_filename(anki.deck_names_by_id[deck_id]) + ".md"
         if fs.file_path.name != expected_name:
             new_path = fs.file_path.parent / expected_name
+            fs.file_path.rename(new_path)
             logger.info(
                 f"Renamed {clickable_path(fs.file_path)} -> {clickable_path(new_path)}"
             )
-            fs.file_path.rename(new_path)
             # Update references to the new path
             del files_by_path[fs.file_path]
             fs = FileState(
