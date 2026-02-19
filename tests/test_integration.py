@@ -175,7 +175,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     md_file.write_text(content)
 
     # 2. Import
-    result = import_file(md_file)
+    result = import_file(md_file, collection_dir=tmp_path)
     assert not result.errors
     assert result.summary.created == 5
 

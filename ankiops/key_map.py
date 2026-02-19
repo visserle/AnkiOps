@@ -31,7 +31,9 @@ class KeyMap:
     def load(collection_dir: Path) -> "KeyMap":
         """Load mapping from the collection's key_map.db (migrating from json if needed)."""
         db_path = collection_dir / KEY_MAP_DB
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        conn = None
         try:
             conn = sqlite3.connect(db_path)
 
@@ -53,8 +55,9 @@ class KeyMap:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(id)")
 
-        except sqlite3.DatabaseError:
-            conn.close()
+        except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            if conn:
+                conn.close()
             logger.error(
                 f"Database at {db_path} is corrupt. Backing up and creating new."
             )

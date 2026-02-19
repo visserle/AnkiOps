@@ -536,12 +536,14 @@ def _sync_file(
 def import_file(
     file_path: Path,
     only_add_new: bool = False,
+    collection_dir: Path | None = None,
 ) -> NoteSyncResult:
     """Import a single markdown file into Anki."""
     fs = FileState.from_file(file_path)
     anki = AnkiState.fetch()
     converter = MarkdownToHTML()
-    collection_dir = get_collection_dir()
+    if collection_dir is None:
+        collection_dir = get_collection_dir()
     key_map = KeyMap.load(collection_dir)
 
     result, pending = _sync_file(
