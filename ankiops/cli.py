@@ -19,10 +19,14 @@ from ankiops.config import (
 )
 from ankiops.git import git_snapshot
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.log import configure_logging, format_changes
+from ankiops.log import configure_logging
 from ankiops.markdown_to_anki import (
     import_collection,
     import_file,
+)
+from ankiops.models import (
+    CollectionExportResult,
+    CollectionImportResult,
 )
 from ankiops.note_type_config import registry
 from ankiops.note_types import ensure_note_types
@@ -78,33 +82,17 @@ def run_am(args):
     if args.deck:
         logger.debug(f"Processing deck: {args.deck}...")
         result = export_deck(args.deck, output_dir=str(collection_dir))
-        results = [result] if result.file_path else []
-        renamed_files = 0
-        deleted_decks = 0
-        deleted_notes = 0
+        note_summary = result.summary
+        files_count = 1 if result.file_path else 0
     else:
-        summary = export_collection(
+        export_summary: CollectionExportResult = export_collection(
             output_dir=str(collection_dir),
             keep_orphans=args.keep_orphans,
         )
-        results = summary.deck_results
-        renamed_files = summary.renamed_files
-        deleted_decks = summary.deleted_deck_files
-        deleted_notes = summary.deleted_orphan_notes
+        note_summary = export_summary.summary
+        files_count = len(export_summary.results)
 
-    updated = sum(r.updated_count for r in results)
-    created = sum(r.created_count for r in results)
-    deleted = sum(r.deleted_count for r in results) + deleted_notes
-    total = sum(r.note_count for r in results)
-
-    changes = format_changes(
-        updated=updated,
-        created=created,
-        deleted=deleted,
-        renamed=renamed_files,
-        orphaned=deleted_decks,
-    )
-    logger.info(f"Export complete: {len(results)} files, {total} notes — {changes}")
+    logger.info(f"Export complete: {files_count} files — {note_summary}")
 
     # Sync referenced media from Anki to local
     try:
@@ -115,11 +103,11 @@ def run_am(args):
 
         if all_refs:
             logger.debug("Syncing referenced media from Anki...")
-            summary = sync_from_anki(collection_dir, Path(media_dir), all_refs)
-            changes_str = format_changes(**summary.to_dict())
-            if changes_str != "no changes":
+            media_result = sync_from_anki(collection_dir, Path(media_dir), all_refs)
+            media_summary = media_result.summary
+            if media_summary.format() != "no changes":
                 logger.info(
-                    f"Media sync complete: {summary.total} files — {changes_str}"
+                    f"Media sync complete: {media_summary.total} files — {media_summary}"
                 )
             else:
                 logger.debug("Media sync complete: no changes")
@@ -138,11 +126,11 @@ def run_ma(args):
     # Sync local media to Anki (and rename if needed)
     try:
         media_dir = invoke("getMediaDirPath")
-        media_summary = sync_to_anki(collection_dir, Path(media_dir))
-        changes_str = format_changes(**media_summary.to_dict())
-        if changes_str != "no changes":
+        media_result = sync_to_anki(collection_dir, Path(media_dir))
+        media_summary = media_result.summary
+        if media_summary.format() != "no changes":
             logger.info(
-                f"Media sync complete: {media_summary.total} files — {changes_str}"
+                f"Media sync complete: {media_summary.total} files — {media_summary}"
             )
         else:
             logger.debug("Media sync complete: no changes")
@@ -158,63 +146,36 @@ def run_ma(args):
 
     if args.file:
         logger.debug(f"Processing {Path(args.file).name}...")
-        results = [
-            import_file(
-                Path(args.file),
-                only_add_new=args.only_add_new,
-            )
-        ]
-        summary = None
+        result = import_file(
+            Path(args.file),
+            only_add_new=args.only_add_new,
+        )
+        note_summary = result.summary
+        files_stat = 1
+        untracked = []
     else:
-        summary = import_collection(str(collection_dir), only_add_new=args.only_add_new)
-        results = summary.file_results
+        import_summary: CollectionImportResult = import_collection(
+            str(collection_dir), only_add_new=args.only_add_new
+        )
+        note_summary = import_summary.summary
+        files_stat = len(import_summary.results)
+        untracked = import_summary.untracked_decks
 
-        # Handle untracked decks (AnkiOps notes in Anki with no markdown file)
-        if summary.untracked_decks:
-            logger.warning(
-                "The following Anki decks with AnkiOps notes inside "
-                "have no matching markdown file:"
-            )
-            for ud in summary.untracked_decks:
-                logger.warning(
-                    f"  - '{ud.deck_name}' "
-                    f"(deck_id: {ud.deck_id}, {len(ud.note_ids)} managed notes)"
-                )
-            answer = (
-                input(
-                    "Delete these managed notes from Anki "
-                    "(only AnkiOps notes will be removed)? [y/N] "
-                )
-                .strip()
-                .lower()
-            )
-            if answer == "y":
-                for ud in summary.untracked_decks:
-                    invoke("deleteNotes", notes=ud.note_ids)
-                    deleted_notes += len(ud.note_ids)
-                    logger.info(
-                        f"Deleted {len(ud.note_ids)} managed notes from "
-                        f"'{ud.deck_name}'"
-                    )
-            else:
-                logger.debug("Skipped untracked note deletion.")
+    # Add back explicit deleted notes from CLI prompt
+    note_summary.deleted += deleted_notes
 
-    updated = sum(r.updated_count for r in results)
-    created = sum(r.created_count for r in results)
-    deleted = sum(r.deleted_count for r in results) + deleted_notes
-    moved = sum(r.moved_count for r in results)
-    errors = sum(len(r.errors) for r in results)
-    total = sum(r.note_count for r in results)
+    logger.info(f"Import complete: {files_stat} files — {note_summary}")
 
-    changes = format_changes(
-        updated=updated,
-        created=created,
-        deleted=deleted,
-        moved=moved,
-        errors=errors,
-    )
-    logger.info(f"Import complete: {len(results)} files, {total} notes — {changes}")
-    if errors:
+    if untracked:
+        logger.warning(
+            f"Found {len(untracked)} untracked Anki deck(s) with AnkiOps notes "
+            "that are not present in your local markdown collection."
+        )
+        for deck in untracked:
+            logger.warning(f"  - {deck.deck_name} ({len(deck.note_ids)} notes)")
+        logger.warning("Use 'ankiops export' to bring them into your collection.")
+
+    if note_summary.errors:
         logger.critical(
             "Review and resolve errors above, then re-run the import — "
             "or you risk losing notes with the next export."

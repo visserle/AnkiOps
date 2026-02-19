@@ -337,7 +337,6 @@ class TestFormatNote:
         assert "None key-123" not in result
 
 
-
 class TestExtractNoteBlocks:
     """Test extract_note_blocks with mixed content."""
 

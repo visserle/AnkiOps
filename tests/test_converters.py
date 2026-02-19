@@ -254,4 +254,3 @@ def test_html_to_markdown_enforces_brackets(html_to_md):
     html_link_parens = '<a href="https://example.com/(test)">Link</a>'
     md_link_parens = html_to_md.convert(html_link_parens)
     assert "[Link](<https://example.com/(test)>)" in md_link_parens
-

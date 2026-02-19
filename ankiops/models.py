@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 from ankiops.anki_client import invoke
 from ankiops.config import NOTE_SEPARATOR
+from ankiops.log import format_changes
 from ankiops.note_type_config import registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
@@ -538,18 +539,55 @@ class ChangeType(Enum):
     MOVE = auto()
     SKIP = auto()
     CONFLICT = auto()
+    HASH = auto()
+    SYNC = auto()
 
 
 @dataclass
 class Change:
     change_type: ChangeType
-    entity_id: int | None
+    entity_id: int | str | None
     entity_repr: str
     context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class SyncResult:
+class SyncSummary:
+    """Unified summary of synchronization operations."""
+
+    total: int = 0
+    created: int = 0
+    updated: int = 0
+    deleted: int = 0
+    moved: int = 0
+    skipped: int = 0
+    errors: int = 0
+    hashed: int = 0
+    synced: int = 0
+
+    def __add__(self, other: "SyncSummary") -> "SyncSummary":
+        if not isinstance(other, SyncSummary):
+            return NotImplemented
+        return SyncSummary(
+            **{f: getattr(self, f) + getattr(other, f) for f in self.__annotations__}
+        )
+
+    def __radd__(self, other: int) -> "SyncSummary":
+        return self if other == 0 else NotImplemented
+
+    def to_dict(self) -> dict[str, int]:
+        return {f: getattr(self, f) for f in self.__annotations__}
+
+    def format(self) -> str:
+        """Format non-zero change counts into a compact string."""
+        return format_changes(**self.to_dict())
+
+    def __str__(self) -> str:
+        return self.format()
+
+
+@dataclass
+class NoteSyncResult:
     """Result of syncing a single file or deck.
 
     Used by both import (markdown → Anki) and export (Anki → markdown) paths.
@@ -561,34 +599,94 @@ class SyncResult:
     errors: list[str] = field(default_factory=list)
 
     @property
-    def note_count(self) -> int:
-        """Total valid notes processed (excluding deletes/conflicts)."""
-        return sum(
-            1
-            for c in self.changes
-            if c.change_type
-            in (ChangeType.CREATE, ChangeType.UPDATE, ChangeType.MOVE, ChangeType.SKIP)
-        )
+    def summary(self) -> SyncSummary:
+        """Generate a distilled summary of changes in this result."""
+        sig = {
+            ct: i
+            for i, ct in enumerate(
+                [
+                    ChangeType.SKIP,
+                    ChangeType.HASH,
+                    ChangeType.SYNC,
+                    ChangeType.UPDATE,
+                    ChangeType.CREATE,
+                    ChangeType.MOVE,
+                    ChangeType.DELETE,
+                    ChangeType.CONFLICT,
+                ]
+            )
+        }
+        mapping = {
+            ChangeType.CREATE: "created",
+            ChangeType.UPDATE: "updated",
+            ChangeType.DELETE: "deleted",
+            ChangeType.MOVE: "moved",
+            ChangeType.SKIP: "skipped",
+        }
+
+        effective: dict[int | str, ChangeType] = {}
+        for c in self.changes:
+            eid = c.entity_id or c.entity_repr
+            if (prev := effective.get(eid)) is None or sig[c.change_type] > sig[prev]:
+                effective[eid] = c.change_type
+
+        res = {"total": 0, "errors": len(self.errors)}
+        for ct in effective.values():
+            if field := mapping.get(ct):
+                res[field] = res.get(field, 0) + 1
+            if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
+                res["total"] += 1
+        return SyncSummary(**res)
+
+
+@dataclass
+class MediaSyncResult:
+    """Result of a media sync operation."""
+
+    changes: list[Change] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
-    def updated_count(self) -> int:
-        return sum(1 for c in self.changes if c.change_type == ChangeType.UPDATE)
+    def summary(self) -> SyncSummary:
+        """Generate a distilled summary of media changes."""
+        sig = {
+            ct: i
+            for i, ct in enumerate(
+                [
+                    ChangeType.SKIP,
+                    ChangeType.HASH,
+                    ChangeType.SYNC,
+                    ChangeType.UPDATE,
+                    ChangeType.CREATE,
+                    ChangeType.MOVE,
+                    ChangeType.DELETE,
+                    ChangeType.CONFLICT,
+                ]
+            )
+        }
+        mapping = {
+            ChangeType.CREATE: "created",
+            ChangeType.UPDATE: "updated",
+            ChangeType.DELETE: "deleted",
+            ChangeType.MOVE: "moved",
+            ChangeType.SKIP: "skipped",
+            ChangeType.HASH: "hashed",
+            ChangeType.SYNC: "synced",
+        }
 
-    @property
-    def created_count(self) -> int:
-        return sum(1 for c in self.changes if c.change_type == ChangeType.CREATE)
+        effective: dict[str, ChangeType] = {}
+        for c in self.changes:
+            eid = c.entity_id or c.entity_repr
+            if (prev := effective.get(eid)) is None or sig[c.change_type] > sig[prev]:
+                effective[eid] = c.change_type
 
-    @property
-    def deleted_count(self) -> int:
-        return sum(1 for c in self.changes if c.change_type == ChangeType.DELETE)
-
-    @property
-    def moved_count(self) -> int:
-        return sum(1 for c in self.changes if c.change_type == ChangeType.MOVE)
-
-    @property
-    def skipped_count(self) -> int:
-        return sum(1 for c in self.changes if c.change_type == ChangeType.SKIP)
+        res = {"total": 0, "errors": len(self.errors)}
+        for ct in effective.values():
+            if field := mapping.get(ct):
+                res[field] = res.get(field, 0) + 1
+            if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
+                res["total"] += 1
+        return SyncSummary(**res)
 
 
 @dataclass
@@ -601,18 +699,42 @@ class UntrackedDeck:
 
 
 @dataclass
-class ImportSummary:
+class CollectionImportResult:
     """Aggregate result of a full collection import."""
 
-    file_results: list[SyncResult]
-    untracked_decks: list[UntrackedDeck]
+    results: list[NoteSyncResult] = field(default_factory=list)
+    untracked_decks: list[UntrackedDeck] = field(default_factory=list)
+
+    @property
+    def summary(self) -> SyncSummary:
+        """Aggregate summary of all results."""
+        return sum((r.summary for r in self.results), SyncSummary())
 
 
 @dataclass
-class ExportSummary:
+class CollectionExportResult:
     """Aggregate result of a full collection export."""
 
-    deck_results: list[SyncResult]
-    renamed_files: int
-    deleted_deck_files: int
-    deleted_orphan_notes: int
+    results: list[NoteSyncResult] = field(default_factory=list)
+    extra_changes: list[Change] = field(default_factory=list)
+
+    @property
+    def summary(self) -> SyncSummary:
+        """Aggregate summary of all results plus extra changes."""
+        base = sum((r.summary for r in self.results), SyncSummary())
+
+        # Add stats from extra changes
+        mapping = {
+            ChangeType.CREATE: "created",
+            ChangeType.UPDATE: "updated",
+            ChangeType.DELETE: "deleted",
+            ChangeType.MOVE: "moved",
+            ChangeType.SKIP: "skipped",
+            ChangeType.HASH: "hashed",
+            ChangeType.SYNC: "synced",
+        }
+        for c in self.extra_changes:
+            if field := mapping.get(c.change_type):
+                setattr(base, field, getattr(base, field) + 1)
+
+        return base

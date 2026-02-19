@@ -19,9 +19,9 @@ from ankiops.models import (
     AnkiState,
     Change,
     ChangeType,
-    ExportSummary,
+    CollectionExportResult,
     FileState,
-    SyncResult,
+    NoteSyncResult,
 )
 from ankiops.note_type_config import registry
 
@@ -136,7 +136,7 @@ def _sync_deck(
     converter: HTMLToMarkdown,
     key_map: KeyMap,
     existing_file: FileState | None,
-) -> tuple[SyncResult, str | None]:
+) -> tuple[NoteSyncResult, str | None]:
     """Synchronize one Anki deck to markdown content.
 
     Returns (result, new_content). new_content is None if the deck
@@ -145,7 +145,7 @@ def _sync_deck(
     note_ids = anki.note_ids_by_deck_name.get(deck_name, set())
     block_by_id = _format_blocks(note_ids, anki, converter, key_map)
     if not block_by_id:
-        return SyncResult(
+        return NoteSyncResult(
             deck_name=deck_name,
             file_path=None,
         ), None
@@ -181,7 +181,7 @@ def _sync_deck(
 
     new_content = deck_id_line + NOTE_SEPARATOR.join(new_blocks)
 
-    result = SyncResult(
+    result = NoteSyncResult(
         deck_name=deck_name,
         file_path=None,  # Set by caller after writing
         changes=changes,
@@ -193,7 +193,7 @@ def export_deck(
     deck_name: str,
     output_dir: str = ".",
     deck_id: int | None = None,
-) -> SyncResult:
+) -> NoteSyncResult:
     """Export a single Anki deck to a Markdown file."""
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
@@ -244,7 +244,7 @@ def export_deck(
 def export_collection(
     output_dir: str = ".",
     keep_orphans: bool = False,
-) -> ExportSummary:
+) -> CollectionExportResult:
     """Export all Anki decks to Markdown files in a single pass.
 
     Orchestrates the entire export:
@@ -353,7 +353,7 @@ def export_collection(
     )
 
     # Phase 5: Sync each relevant deck
-    deck_results: list[SyncResult] = []
+    deck_results: list[NoteSyncResult] = []
     all_created_ids: set[str] = set()
     all_deleted_ids: set[str] = set()
 
@@ -391,10 +391,11 @@ def export_collection(
                 all_created_ids.update(created_ids)
                 all_deleted_ids.update(deleted_ids)
 
+        summary = result.summary
         changes = format_changes(
-            updated=result.updated_count,
-            created=result.created_count,
-            deleted=result.deleted_count,
+            updated=summary.updated,
+            created=summary.created,
+            deleted=summary.deleted,
         )
         if changes != "no changes":
             logger.info(f"  {clickable_path(result.file_path)}: {changes}")
@@ -407,8 +408,7 @@ def export_collection(
         )
 
     # Phase 6: Delete orphaned deck files and notes
-    deleted_deck_files = 0
-    deleted_orphan_notes = 0
+    extra_changes: list[Change] = []
 
     if not keep_orphans:
         anki_deck_ids = set(anki.deck_ids_by_name.values())
@@ -420,13 +420,15 @@ def export_collection(
                     f"Deleted orphaned deck file {clickable_path(fs.file_path)}"
                 )
                 fs.file_path.unlink()
-                deleted_deck_files += 1
+                extra_changes.append(Change(ChangeType.DELETE, None, fs.file_path.name))
+
+    if renamed_files:
+        for _ in range(renamed_files):
+            extra_changes.append(Change(ChangeType.HASH, None, "renamed_file"))
 
     key_map.save(output_path)
 
-    return ExportSummary(
-        deck_results=deck_results,
-        renamed_files=renamed_files,
-        deleted_deck_files=deleted_deck_files,
-        deleted_orphan_notes=deleted_orphan_notes,
+    return CollectionExportResult(
+        results=deck_results,
+        extra_changes=extra_changes,
     )

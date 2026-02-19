@@ -15,16 +15,16 @@ from pathlib import Path
 from ankiops.anki_client import AnkiConnectError, invoke
 from ankiops.config import get_collection_dir
 from ankiops.key_map import KeyMap
-from ankiops.log import clickable_path, format_changes
+from ankiops.log import format_changes
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
     AnkiState,
     Change,
     ChangeType,
+    CollectionImportResult,
     FileState,
-    ImportSummary,
     Note,
-    SyncResult,
+    NoteSyncResult,
     UntrackedDeck,
 )
 
@@ -87,7 +87,7 @@ def _build_anki_actions(
     needs_create_deck: bool,
     changes: list[Change],
     anki: AnkiState,
-    result: SyncResult,
+    result: NoteSyncResult,
 ) -> tuple[list[dict], list[str], list[Change], list[Change], list[int]]:
     """Build the list of actions for AnkiConnect's multi execution.
 
@@ -189,7 +189,7 @@ def _sync_file(
     key_map: KeyMap,
     only_add_new: bool = False,
     global_keys: set[str] | None = None,
-) -> tuple[SyncResult, _PendingWrite]:
+) -> tuple[NoteSyncResult, _PendingWrite]:
     """Synchronize one markdown file to Anki.
 
     Phases:
@@ -257,7 +257,7 @@ def _sync_file(
         else:
             deck_key_to_write = KeyMap.generate_key()
 
-    result = SyncResult(
+    result = NoteSyncResult(
         deck_name=deck_name,
         file_path=fs.file_path,
     )
@@ -536,7 +536,7 @@ def _sync_file(
 def import_file(
     file_path: Path,
     only_add_new: bool = False,
-) -> SyncResult:
+) -> NoteSyncResult:
     """Import a single markdown file into Anki."""
     fs = FileState.from_file(file_path)
     anki = AnkiState.fetch()
@@ -556,7 +556,7 @@ def import_file(
 def import_collection(
     collection_dir: str,
     only_add_new: bool = False,
-) -> ImportSummary:
+) -> CollectionImportResult:
     """Import all markdown files in a directory back into Anki.
 
     Single pass:
@@ -624,7 +624,7 @@ def import_collection(
     key_map = KeyMap.load(collection_path)
 
     # Phase 5: Sync each file
-    results: list[SyncResult] = []
+    results: list[NoteSyncResult] = []
     pending_writes: list[_PendingWrite] = []
 
     for fs in file_states:
@@ -643,12 +643,13 @@ def import_collection(
         results.append(file_result)
         pending_writes.append(pending)
 
+        summary = file_result.summary
         changes = format_changes(
-            updated=file_result.updated_count,
-            created=file_result.created_count,
-            deleted=file_result.deleted_count,
-            moved=file_result.moved_count,
-            errors=len(file_result.errors),
+            updated=summary.updated,
+            created=summary.created,
+            deleted=summary.deleted,
+            moved=summary.moved,
+            errors=summary.errors,
         )
         if changes != "no changes":
             logger.info(f"  {file_result.deck_name}: {changes}")
@@ -667,7 +668,7 @@ def import_collection(
             continue
         untracked_decks.append(UntrackedDeck(deck_name, deck_id, list(note_ids)))
 
-    return ImportSummary(
-        file_results=results,
+    return CollectionImportResult(
+        results=results,
         untracked_decks=untracked_decks,
     )

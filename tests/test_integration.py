@@ -23,7 +23,7 @@ def test_import_with_stale_deck_key_mapping(
     summary = export_collection(output_dir=str(tmp_path))
 
     # Assertions
-    assert len(summary.deck_results) == 2
+    assert len(summary.results) == 2
 
     file_a = tmp_path / "Deck A.md"
     file_b = tmp_path / "Deck B.md"
@@ -177,7 +177,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     # 2. Import
     result = import_file(md_file)
     assert not result.errors
-    assert result.created_count == 5
+    assert result.summary.created == 5
 
     # 3. Verify MockAnki state
     notes = list(mock_anki.notes.values())
@@ -304,14 +304,14 @@ def test_import_idempotency(tmp_path, mock_anki, run_ankiops):
 
     # 2. First import: should create the note
     summary1 = import_collection(collection_dir=str(tmp_path))
-    assert len(summary1.file_results) == 1
-    assert summary1.file_results[0].created_count == 1
-    assert summary1.file_results[0].updated_count == 0
+    assert len(summary1.results) == 1
+    assert summary1.results[0].summary.created == 1
+    assert summary1.results[0].summary.updated == 0
 
     # 3. Second import: should NOT update anything
     summary2 = import_collection(collection_dir=str(tmp_path))
-    assert len(summary2.file_results) == 1
-    assert summary2.file_results[0].created_count == 0
-    assert summary2.file_results[0].updated_count == 0, (
-        f"Expected 0 updates on second run, got {summary2.file_results[0].updated_count}"
+    assert len(summary2.results) == 1
+    assert summary2.results[0].summary.created == 0
+    assert summary2.results[0].summary.updated == 0, (
+        f"Expected 0 updates on second run, got {summary2.results[0].summary.updated}"
     )
