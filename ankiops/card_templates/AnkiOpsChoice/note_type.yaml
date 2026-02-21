@@ -1,0 +1,35 @@
+name: AnkiOpsChoice
+fields:
+  - name: Question
+    prefix: "Q:"
+  - name: Choice 1
+    prefix: "C1:"
+  - name: Choice 2
+    prefix: "C2:"
+  - name: Choice 3
+    prefix: "C3:"
+  - name: Choice 4
+    prefix: "C4:"
+  - name: Choice 5
+    prefix: "C5:"
+  - name: Choice 6
+    prefix: "C6:"
+  - name: Choice 7
+    prefix: "C7:"
+  - name: Choice 8
+    prefix: "C8:"
+  - name: Answer
+    prefix: "A:"
+  - name: Extra
+    prefix: "E:"
+  - name: More
+    prefix: "M:"
+  - name: Source
+    prefix: "S:"
+  - name: AI Notes
+    prefix: "AI:"
+cloze: false
+templates:
+  - name: Card 1
+    front: Front.template.anki
+    back: Back.template.anki

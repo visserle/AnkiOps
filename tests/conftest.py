@@ -1,11 +1,13 @@
 """Shared fixtures for AnkiOps tests."""
 
+from importlib import resources
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from ankiops.anki_client import AnkiConnectError
+from ankiops.note_type_config import registry
 
 
 class MockAnki:
@@ -196,14 +198,13 @@ def mock_input():
         yield
 
 
-@pytest.fixture
-def run_ankiops(mock_anki):
-    """Fixture to run ankiops with mocked invoke."""
-    # We must patch where it's imported in all touched modules
-    with (
-        patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.models.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.markdown_to_anki.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.note_types.invoke", side_effect=mock_anki.invoke),
-    ):
-        yield
+@pytest.fixture(autouse=True)
+def populate_registry():
+    """Ensure the global registry is populated with standard types for tests."""
+
+    # Only populate if empty (to avoid redundant work)
+    if not registry.supported_note_types:
+        src_root = resources.files("ankiops.card_templates")
+        with resources.as_file(src_root) as src_path:
+            registry.load(src_path)
+    yield

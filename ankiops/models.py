@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 
 from ankiops.anki_client import invoke
 from ankiops.config import NOTE_SEPARATOR
-from ankiops.note_type_config import COMMON_FIELDS, registry
 from ankiops.log import format_changes
+from ankiops.note_type_config import COMMON_FIELD_MAP, registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
@@ -173,12 +173,22 @@ class Note:
 
         Finds the note type that contains all fields present in the note.
         If multiple types match (e.g. QA matches {Q, A}, Choice matches {Q, A, C1}),
-        prefers the "tightest" fit (smallest number of defined fields).
+        prefers the "tightest" fit (smallest number of identifying fields).
         """
-        # Exclude common fields (Extra, More, etc.) from logic
+        # Exclude internal mandatory fields (AnkiOps Key) from logic
         # as they do not distinguish note types.
-        common_names = registry._COMMON_NAMES
-        note_fields = {k for k in fields.keys() if k not in common_names}
+        reserved_names = registry._RESERVED_NAMES
+        note_fields = {k for k in fields.keys() if k not in reserved_names}
+
+        # We also filter out common fields for the purpose of ensuring
+        # at least one core field is present.
+        common_prefixes = set(COMMON_FIELD_MAP.values())
+        common_field_names = set(COMMON_FIELD_MAP.keys())
+
+        identifying_note_fields = note_fields - common_field_names
+        if not identifying_note_fields:
+            raise ValueError("Cannot determine note type: only common fields found")
+
         candidates = []
 
         for name in registry.supported_note_types:
@@ -187,10 +197,9 @@ class Note:
 
             # Check 1: Note fields must be a subset of the Type's fields
             if note_fields.issubset(type_fields):
-                candidates.append((name, len(type_fields)))
-
-        if not note_fields:
-            raise ValueError("Cannot determine note type: only common fields found")
+                # Specificity is based on identifying fields only
+                type_ident_prefixes = config.identifying_prefixes
+                candidates.append((name, len(type_ident_prefixes)))
 
         if not candidates:
             raise ValueError(
@@ -198,10 +207,18 @@ class Note:
             )
 
         # Sort by size (ascending).
-        # {Q, A} fits QA (size 2) and Choice (size 10). QA comes first.
-        # {Q, A, C1} fits Choice (size 10). QA rejects it. Choice comes first.
         candidates.sort(key=lambda x: x[1])
-        return candidates[0][0]
+
+        # Check for ambiguity among the best fits
+        best_size = candidates[0][1]
+        best_fits = [c[0] for c in candidates if c[1] == best_size]
+
+        if len(best_fits) > 1:
+            raise ValueError(
+                f"Ambiguous note type: matches multiple types with same specificity: {', '.join(best_fits)}"
+            )
+
+        return best_fits[0]
 
     @staticmethod
     def from_block(block: str) -> Note:
@@ -254,7 +271,7 @@ class Note:
 
                     seen.add(field_name)
                     if current_field:
-                        fields[current_field] = "\n".join(current_content).strip()
+                        fields[str(current_field)] = "\n".join(current_content).strip()
 
                     matched_field = field_name
                     current_content = (
@@ -269,7 +286,7 @@ class Note:
                 current_content.append(line)
 
         if current_field:
-            fields[current_field] = "\n".join(current_content).strip()
+            fields[str(current_field)] = "\n".join(current_content).strip()
 
         if not fields:
             # We reached here with a non-empty block
@@ -321,26 +338,30 @@ class Note:
             errors.append(f"Unknown note type '{self.note_type}'")
             return errors
 
-        choice_count = 0
+        choice_count: int = 0
         choice_fields = []
 
         # Check if this is a Choice-like note type
         # We detect this by checking if it has choice-like fields in its definition
         has_choices = any("Choice" in f.name for f in config.fields)
 
-        config = registry.get(self.note_type)
-        identifying = config.fields
-
-        for field in identifying:
+        for field in config.fields:
             if "Choice" in field.name:
                 choice_fields.append(field.name)
                 if self.fields.get(field.name):
                     choice_count += 1
                 continue  # Skip individual Choice field check in mandatory loop
 
-            # Non-Choice fields (Question, Answer, etc.) are mandatory if defined in the type
-            if not self.fields.get(field.name):
-                errors.append(f"Missing mandatory field '{field.name}' ({field.prefix})")
+            # Mandatory fields must be present if marked as identifying in config.
+            # internal fields (prefix is None) are implicitly optional in markdown.
+            if (
+                field.prefix is not None
+                and field.identifying
+                and not self.fields.get(field.name)
+            ):
+                errors.append(
+                    f"Missing mandatory field '{field.name}' ({field.prefix})"
+                )
 
         if config.is_cloze:
             text = self.fields.get("Text", "")
@@ -403,7 +424,7 @@ class Note:
         }
 
         config = registry.get(self.note_type)
-        for field in config.fields + COMMON_FIELDS:
+        for field in config.fields:
             if field.prefix is None:  # key-only field, not present in markdown
                 continue
             html.setdefault(field.name, "")
@@ -522,7 +543,7 @@ class AnkiNote:
             Markdown block string starting with ``<!-- note_key: ... -->``.
         """
         config = registry.get(self.note_type)
-        note_fields = config.fields + COMMON_FIELDS
+        note_fields = config.fields
         lines = [f"<!-- note_key: {note_key} -->"]
 
         for field in note_fields:

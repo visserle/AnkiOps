@@ -381,7 +381,7 @@ class TestValidateNote:
         assert parsed_note.validate() == []
 
     def test_missing_mandatory_qa_fields(self):
-        block = "<!-- note_key: key-1 -->\nQ: Question only"
+        block = "<!-- note_key: key-1 -->\nQ: Question only, no answer"
         # Parsing should succeed (inference works with subsets)
         parsed_note = Note.from_block(block)
         assert parsed_note.note_type == "AnkiOpsQA"

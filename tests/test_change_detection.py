@@ -14,7 +14,7 @@ from ankiops.anki_to_markdown import _reconcile_blocks
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import AnkiNote, ChangeType, FileState, Note
-from ankiops.note_type_config import COMMON_FIELDS, registry
+from ankiops.note_type_config import registry
 
 # -- Fixtures ----------------------------------------------------------------
 
@@ -182,7 +182,7 @@ def _anki_note_raw(fields: dict[str, str], note_type: str = "AnkiOpsQA") -> dict
 def _complete_fields(note_type: str, html_fields: dict[str, str]) -> dict[str, str]:
     """Replicate the complete-fields logic from _sync_file."""
     config = registry.get(note_type)
-    all_field_names = [f.name for f in config.fields + COMMON_FIELDS]
+    all_field_names = [f.name for f in config.fields]
     complete = {name: "" for name in all_field_names}
     complete.update(html_fields)
     return complete

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -10,15 +11,9 @@ from typing import ClassVar
 
 import yaml
 
+from ankiops.config import get_note_types_dir
+
 logger = logging.getLogger(__name__)
-
-
-# Load default CSS globally once
-BUILTIN_CSS = (
-    resources.files("ankiops.card_templates")
-    .joinpath("Styling.css")
-    .read_text(encoding="utf-8")
-)
 
 
 @dataclass(frozen=True)
@@ -27,40 +22,19 @@ class Field:
 
     name: str
     prefix: str | None  # None is used for the AnkiOps Key field
+    identifying: bool = True
 
 
-# Identifying fields for built-in note types
-IDENTIFYING_FIELDS = {
-    "AnkiOpsQA": [
-        Field("Question", "Q:"),
-        Field("Answer", "A:"),
-    ],
-    "AnkiOpsReversed": [
-        Field("Front", "F:"),
-        Field("Back", "B:"),
-    ],
-    "AnkiOpsCloze": [
-        Field("Text", "T:"),
-    ],
-    "AnkiOpsInput": [
-        Field("Question", "Q:"),
-        Field("Input", "I:"),
-    ],
-    "AnkiOpsChoice": [
-        Field("Question", "Q:"),
-        *[Field(f"Choice {i}", f"C{i}:") for i in range(1, 9)],
-        Field("Answer", "A:"),
-    ],
+# The mandatory field for all AnkiOps note types
+ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, identifying=False)
+
+# Common fields shared across many note types
+COMMON_FIELD_MAP = {
+    "Extra": "E:",
+    "More": "M:",
+    "Source": "S:",
+    "AI Notes": "AI:",
 }
-
-# Common fields available to all note types
-COMMON_FIELDS = [
-    Field("Extra", "E:"),
-    Field("More", "M:"),
-    Field("Source", "S:"),
-    Field("AI Notes", "AI:"),
-    Field("AnkiOps Key", None),  # Internal Key for safe syncing
-]
 
 
 @dataclass
@@ -70,14 +44,41 @@ class NoteTypeConfig:
     name: str
     fields: list[Field]
     is_cloze: bool = False
-    custom: bool = False
-    templates_dir: Path | None = None
-    css: str = BUILTIN_CSS
+    package_dir: Path | None = None  # Directory containing note_type.yaml and templates
+    card_templates: list[dict[str, str]] | None = (
+        None  # Explicit list of {Name, Front, Back}
+    )
+
+    @property
+    def css(self) -> str:
+        """Get CSS: Global root Styling.css + Local package Styling.css."""
+        css_parts = []
+        
+        # 1. Global root Styling.css
+        root_css = get_note_types_dir() / "Styling.css"
+        if root_css.exists():
+            css_parts.append(root_css.read_text(encoding="utf-8"))
+
+        pkg_dir = self.package_dir
+        if pkg_dir is not None:
+            # 2. Parent-level Styling.css (important for tests using tempdirs)
+            parent_css = pkg_dir.parent / "Styling.css"
+            if parent_css.exists() and parent_css != root_css:
+                css_parts.append(parent_css.read_text(encoding="utf-8"))
+
+            # 3. Local package Styling.css
+            local_css = pkg_dir / "Styling.css"
+            if local_css.exists():
+                css_parts.append(local_css.read_text(encoding="utf-8"))
+
+        return "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
 
     @property
     def identifying_prefixes(self) -> set[str]:
         """Return prefixes of identifying fields."""
-        return {f.prefix for f in self.fields if f.prefix is not None}
+        return {
+            str(f.prefix) for f in self.fields if f.prefix is not None and f.identifying
+        }
 
     def get_field_by_prefix(self, prefix: str) -> Field | None:
         """Get field definition by its prefix."""
@@ -90,43 +91,11 @@ class NoteTypeConfig:
 class NoteTypeRegistry:
     """Registry for all supported note types (built-in and custom)."""
 
-    # Pre-computed sets for validation
-    _COMMON_NAMES: ClassVar[set[str]] = {f.name for f in COMMON_FIELDS}
-    _COMMON_PREFIXES: ClassVar[set[str]] = {
-        f.prefix for f in COMMON_FIELDS if f.prefix is not None
-    }
-
-    # Built-in identifying fields are also reserved to prevent ambiguity
-    _BUILTIN_NAMES: ClassVar[set[str]] = set()
-    _BUILTIN_PREFIXES: ClassVar[set[str]] = set()
+    # Names that cannot be used by other fields
+    _RESERVED_NAMES: ClassVar[set[str]] = {ANKIOPS_KEY_FIELD.name}
 
     def __init__(self):
         self._configs: dict[str, NoteTypeConfig] = {}
-        self._initialize_builtins()
-
-    def _initialize_builtins(self):
-        """Register built-in note types."""
-        # Config for built-ins
-        builtin_configs = [
-            NoteTypeConfig("AnkiOpsQA", IDENTIFYING_FIELDS["AnkiOpsQA"]),
-            NoteTypeConfig("AnkiOpsReversed", IDENTIFYING_FIELDS["AnkiOpsReversed"]),
-            NoteTypeConfig(
-                "AnkiOpsCloze", IDENTIFYING_FIELDS["AnkiOpsCloze"], is_cloze=True
-            ),
-            NoteTypeConfig("AnkiOpsInput", IDENTIFYING_FIELDS["AnkiOpsInput"]),
-            NoteTypeConfig("AnkiOpsChoice", IDENTIFYING_FIELDS["AnkiOpsChoice"]),
-        ]
-
-        # Populate reserved sets from built-ins
-        for config in builtin_configs:
-            for field in config.fields:
-                self._BUILTIN_NAMES.add(field.name)
-                if field.prefix:
-                    self._BUILTIN_PREFIXES.add(field.prefix)
-
-        # Register them
-        for config in builtin_configs:
-            self.register(config)
 
     def register(self, config: NoteTypeConfig) -> None:
         """Register a new note type configuration with strict validation."""
@@ -142,33 +111,39 @@ class NoteTypeRegistry:
 
     def _validate_reservation(self, config: NoteTypeConfig) -> None:
         """Ensure fields do not accidentally start with reserved prefixes/names."""
-        # 1. Determine reserved sets
-        if config.custom:
-            # Custom types: Cannot match Common OR Built-in fields
-            reserved_prefixes = (
-                NoteTypeRegistry._COMMON_PREFIXES | NoteTypeRegistry._BUILTIN_PREFIXES
-            )
-            reserved_names = (
-                NoteTypeRegistry._COMMON_NAMES | NoteTypeRegistry._BUILTIN_NAMES
-            )
-            error_msg = "reserved built-in/common"
-        else:
-            # Built-in types: Cannot match Common fields
-            reserved_prefixes = NoteTypeRegistry._COMMON_PREFIXES
-            reserved_names = NoteTypeRegistry._COMMON_NAMES
-            error_msg = "reserved common"
+        is_builtin = config.name.startswith("AnkiOps")
 
-        # 2. Check each field
+        # 1. Names
         for field in config.fields:
-            if field.prefix and field.prefix in reserved_prefixes:
+            if field.name in self._RESERVED_NAMES:
+                # Built-ins must have the correct key field; custom types cannot use it at all
+                if is_builtin:
+                    if field.prefix != ANKIOPS_KEY_FIELD.prefix:
+                        raise ValueError(
+                            f"Built-in note type '{config.name}' has invalid "
+                            f"prefix for reserved field '{field.name}'"
+                        )
+                else:
+                    raise ValueError(
+                        f"Note type '{config.name}' uses reserved "
+                        f"field name '{field.name}'"
+                    )
+
+        # 2. Prefixes
+        reserved_prefixes = set(COMMON_FIELD_MAP.values())
+        # Add built-in prefixes from already registered built-ins
+        for c in self._configs.values():
+            if c.name.startswith("AnkiOps"):
+                reserved_prefixes.update(c.identifying_prefixes)
+
+        for field in config.fields:
+            if field.prefix is not None and field.prefix in reserved_prefixes:
+                if is_builtin:
+                    continue
+
                 raise ValueError(
-                    f"Note type '{config.name}' uses {error_msg} "
+                    f"Note type '{config.name}' uses reserved built-in/common "
                     f"prefix '{field.prefix}'"
-                )
-            if field.name in reserved_names:
-                raise ValueError(
-                    f"Note type '{config.name}' uses {error_msg} "
-                    f"field name '{field.name}'"
                 )
 
     def _validate_global_consistency(self, config: NoteTypeConfig) -> None:
@@ -176,7 +151,7 @@ class NoteTypeRegistry:
         global_map = self.prefix_to_field
 
         for field in config.fields:
-            if field.prefix and field.prefix in global_map:
+            if field.prefix is not None and field.prefix in global_map:
                 existing_name = global_map[field.prefix]
                 if existing_name != field.name:
                     raise ValueError(
@@ -206,48 +181,103 @@ class NoteTypeRegistry:
             raise KeyError(f"Unknown note type: {name}")
         return self._configs[name]
 
-    def load_custom(self, card_templates_dir: Path) -> None:
-        """Load custom note types from a directory."""
+    def eject_builtin_note_types(self, dst_dir: Path, force: bool = False) -> None:
+        """Eject all built-in note type definitions to the filesystem."""
+
+        src_root = resources.files("ankiops.card_templates")
+
+        # We use as_file to handle cases where the package is in a zip/egg
+        with resources.as_file(src_root) as src_path:
+            shutil.copytree(
+                src_path,
+                dst_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
+            )
+        logger.debug(f"Ejected built-in note type definitions to {dst_dir}")
+
+    def discover_builtins(self) -> None:
+        """Load built-in note types from the package resources."""
+        src_root = resources.files("ankiops.card_templates")
+        with resources.as_file(src_root) as src_path:
+            self.load(src_path)
+
+    def load(self, directory: Path | None = None) -> None:
+        """Scan a directory for Note Type definitions (folders with note_type.yaml)."""
+        card_templates_dir = directory or get_note_types_dir()
         if not card_templates_dir.exists():
             return
 
-        config_path = card_templates_dir / "note_types.yaml"
-        if not config_path.exists():
-            return
-
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.error(f"Failed to parse {config_path}: {e}")
-            return
-
-        for name, info in data.items():
-            try:
-                fields = [Field(f["name"], f["prefix"]) for f in info.get("fields", [])]
-
-                css_content = BUILTIN_CSS
-                if "css" in info:
-                    custom_css_file = card_templates_dir / info["css"]
-                    if not custom_css_file.exists():
-                        raise FileNotFoundError(
-                            f"CSS file not found: {custom_css_file}"
+        # 1. Look for note_types.yaml in the root (legacy/test support)
+        root_config = card_templates_dir / "note_types.yaml"
+        if root_config.exists():
+            data = yaml.safe_load(root_config.read_text(encoding="utf-8"))
+            for name, config_data in data.items():
+                fields = []
+                for f in config_data.get("fields", []):
+                    if isinstance(f, str):
+                        fields.append(Field(f, None))
+                    else:
+                        fields.append(
+                            Field(
+                                f["name"],
+                                f.get("prefix"),
+                                f.get("identifying", True),
+                            )
                         )
-                    css_content = custom_css_file.read_text(encoding="utf-8")
+
+                config = NoteTypeConfig(
+                    name=name,
+                    fields=fields,
+                    is_cloze=config_data.get("cloze", False),
+                    package_dir=card_templates_dir / name,
+                )
+                self.register(config)
+
+        # 2. Look for per-note-type folders
+
+        for subdir in card_templates_dir.iterdir():
+            if not subdir.is_dir():
+                continue
+
+            config_path = subdir / "note_type.yaml"
+            if not config_path.exists():
+                continue
+
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    info = yaml.safe_load(f) or {}
+
+                # Use name from YAML if present, fallback to folder name
+                name = info.get("name", subdir.name)
+
+                fields = []
+                for f in info.get("fields", []):
+                    # Hardcoded default for common optional fields if not specified
+                    is_common = f["name"] in COMMON_FIELD_MAP
+                    identifying = f.get("identifying", not is_common)
+                    fields.append(
+                        Field(f["name"], f["prefix"], identifying=identifying)
+                    )
+
+                # Ensure AnkiOps Key is at the end
+                if ANKIOPS_KEY_FIELD.name not in [f.name for f in fields]:
+                    fields.append(ANKIOPS_KEY_FIELD)
 
                 self.register(
                     NoteTypeConfig(
                         name=name,
                         fields=fields,
-                        is_cloze=info.get("cloze", False),
-                        custom=True,
-                        templates_dir=card_templates_dir,
-                        css=css_content,
+                        is_cloze=bool(info.get("cloze", False)),
+                        package_dir=subdir,
+                        card_templates=info.get("templates"),
                     )
                 )
-                logger.debug(f"Registered custom note type: {name}")
+                logger.debug(f"Registered note type definition: {name}")
             except Exception as e:
-                logger.error(f"Failed to register custom type '{name}': {e}")
+                logger.error(
+                    f"Failed to load note type definition '{subdir.name}': {e}"
+                )
 
     @property
     def supported_note_types(self) -> list[str]:
@@ -258,21 +288,16 @@ class NoteTypeRegistry:
     def prefix_to_field(self) -> dict[str, str]:
         """Global mapping of prefix -> field name for all registered types."""
         mapping = {}
-        for field in COMMON_FIELDS:
-            if field.prefix:
-                mapping[field.prefix] = field.name
-
         for config in self._configs.values():
             for field in config.fields:
-                if field.prefix:
-                    mapping[field.prefix] = field.name
+                if field.prefix is not None:
+                    mapping[str(field.prefix)] = field.name
         return mapping
 
     @property
     def field_to_prefix(self) -> dict[str, str]:
         """Global mapping of field name -> prefix."""
         return {v: k for k, v in self.prefix_to_field.items()}
-
 
 
 # Global registry instance

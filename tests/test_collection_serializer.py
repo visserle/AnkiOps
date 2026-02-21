@@ -129,6 +129,7 @@ class TestSerialization:
         assert len(deck["notes"]) == 1
         note = deck["notes"][0]
         assert note["note_key"] == "note-key-123"
+        assert note["note_type"] == "AnkiOpsQA"
         assert note["fields"]["Question"] == "Question"
 
     def test_deserialize_ignores_uuid(self, tmp_path):
@@ -171,3 +172,44 @@ class TestSerialization:
         # UUIDs should NOT be in the output as key comments
         assert "<!-- deck_key: legacy-deck-uuid -->" not in content
         assert "<!-- note_key: legacy-note-uuid -->" not in content
+
+
+    def test_deserialize_uses_note_type_from_json(self, tmp_path):
+        """Verify deserialization uses the note_type specified in JSON."""
+        serialized_file = tmp_path / "explicit_type.json"
+        
+        # JSON with an explicit note type that might be hard to infer
+        data = {
+            "collection": {"serialized_at": "2024-01-01"},
+            "decks": [
+                {
+                    "name": "Explicit Deck",
+                    "notes": [
+                        {
+                            "note_type": "AnkiOpsQA",
+                            "fields": {"Question": "Q", "Answer": "A"},
+                        }
+                    ],
+                }
+            ],
+        }
+        serialized_file.write_text(json.dumps(data))
+
+        collection_dir = tmp_path / "collection"
+        collection_dir.mkdir()
+        (collection_dir / MARKER_FILE).touch()
+
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(collection_dir)
+            deserialize_collection_from_json(serialized_file, overwrite=True)
+        finally:
+            os.chdir(original_cwd)
+
+        deck_file = collection_dir / "Explicit Deck.md"
+        assert deck_file.exists()
+        content = deck_file.read_text()
+        
+        # Verify it was formatted as QA (Q: and A: prefixes)
+        assert "Q: Q" in content
+        assert "A: A" in content

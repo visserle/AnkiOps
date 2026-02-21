@@ -195,6 +195,7 @@ def export_deck(
     deck_id: int | None = None,
 ) -> NoteSyncResult:
     """Export a single Anki deck to a Markdown file."""
+    registry.load()
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
 
@@ -260,6 +261,7 @@ def export_collection(
     output_path = Path(output_dir)
 
     # Phase 1: Fetch all Anki state
+    registry.load()
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
     key_map = KeyMap.load(output_path)

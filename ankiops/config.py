@@ -7,8 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MARKER_FILE = ".ankiops"
-CARD_TEMPLATES_DIR_NAME = ".custom_card_templates"
-CUSTOM_CONFIG_FILENAME = "note_types.yaml"
+NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 KEY_MAP_DB = "key_map.db"
 
@@ -65,6 +64,11 @@ def get_collection_dir() -> Path:
     if _is_development_mode():
         return Path.cwd() / "collection"
     return Path.cwd()
+
+
+def get_note_types_dir() -> Path:
+    """Get the standard note types directory path."""
+    return get_collection_dir() / NOTE_TYPES_DIR
 
 
 def _read_marker(marker: Path) -> configparser.ConfigParser:

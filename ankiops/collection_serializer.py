@@ -8,7 +8,7 @@ from pathlib import Path
 from ankiops.config import MARKER_FILE, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
-from ankiops.note_type_config import COMMON_FIELDS, registry
+from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ def serialize_collection_to_json(
                 note_data = {}
                 if not no_ids:
                     note_data["note_key"] = parsed.note_key
+                note_data["note_type"] = parsed.note_type
                 note_data["fields"] = parsed.fields
 
                 deck_data["notes"].append(note_data)
@@ -177,25 +178,24 @@ def deserialize_collection_from_json(
             note_key = note.get("note_key")
             fields = note["fields"]
 
-            # Infer note type from fields
-            try:
-                note_type = Note.infer_note_type(fields)
-            except ValueError as e:
-                logger.warning(
-                    f"Cannot infer note type in deck '{deck_name}': {e}, skipping note"
-                )
-                continue
+            # Get note type (prefer explicit from JSON, fallback to inference)
+            note_type = note.get("note_type")
+            if not note_type:
+                try:
+                    note_type = Note.infer_note_type(fields)
+                except ValueError as e:
+                    logger.warning(
+                        f"Cannot infer note type in deck '{deck_name}': {e}, skipping note"
+                    )
+                    continue
 
             # Add note_key if present and not ignoring IDs
             if note_key and not no_ids:
                 lines.append(f"<!-- note_key: {note_key} -->")
 
-            # Get field mappings for this note type
-            config = registry.get(note_type)
-            note_fields = config.fields + COMMON_FIELDS
-
             # Format fields according to note type configuration
-            for field in note_fields:
+            config = registry.get(note_type)
+            for field in config.fields:
                 field_content = fields.get(field.name)
                 if field_content:
                     lines.append(f"{field.prefix} {field_content}")

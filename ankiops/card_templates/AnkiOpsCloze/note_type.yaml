@@ -1,0 +1,17 @@
+name: AnkiOpsCloze
+fields:
+  - name: Text
+    prefix: "T:"
+  - name: Extra
+    prefix: "E:"
+  - name: More
+    prefix: "M:"
+  - name: Source
+    prefix: "S:"
+  - name: AI Notes
+    prefix: "AI:"
+cloze: true
+templates:
+  - name: Cloze
+    front: Front.template.anki
+    back: Back.template.anki

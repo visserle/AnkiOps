@@ -1,0 +1,22 @@
+name: AnkiOpsReversed
+fields:
+  - name: Front
+    prefix: "F:"
+  - name: Back
+    prefix: "B:"
+  - name: Extra
+    prefix: "E:"
+  - name: More
+    prefix: "M:"
+  - name: Source
+    prefix: "S:"
+  - name: AI Notes
+    prefix: "AI:"
+cloze: false
+templates:
+  - name: Card 1
+    front: Front.template.anki
+    back: Back.template.anki
+  - name: Card 2
+    front: Front2.template.anki
+    back: Back2.template.anki

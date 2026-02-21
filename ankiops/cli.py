@@ -12,7 +12,6 @@ from ankiops.collection_serializer import (
     serialize_collection_to_json,
 )
 from ankiops.config import (
-    CARD_TEMPLATES_DIR_NAME,
     MARKER_FILE,
     get_collection_dir,
     require_collection_dir,
@@ -28,7 +27,6 @@ from ankiops.models import (
     CollectionExportResult,
     CollectionImportResult,
 )
-from ankiops.note_type_config import registry
 from ankiops.note_types import ensure_note_types
 from ankiops.sync_media import (
     extract_media_references,
@@ -72,9 +70,6 @@ def run_am(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
-
-    # Load custom note types so export can identify them
-    registry.load_custom(collection_dir / CARD_TEMPLATES_DIR_NAME)
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "export")
@@ -192,9 +187,6 @@ def run_serialize(args):
         )
         raise SystemExit(1)
 
-    # Load custom note types to infer correct types during serialization
-    registry.load_custom(collection_dir / CARD_TEMPLATES_DIR_NAME)
-
     if args.output:
         output_file = Path(args.output)
     else:
@@ -240,7 +232,6 @@ def main():
         "init",
         help="Initialize current directory as an AnkiOps collection",
     )
-
     init_parser.add_argument(
         "--tutorial",
         action="store_true",
