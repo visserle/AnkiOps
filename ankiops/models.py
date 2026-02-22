@@ -190,7 +190,7 @@ class Note:
                 continue
 
             # Check 2: Identification requirements
-            type_ident_fields = {field.name for field in config.fields if field.is_identifying}
+            type_ident_fields = {field.name for field in config.fields if field.identifying}
 
             if config.is_choice:
                 # Choice types: base identifying (e.g. Q, A) must be present
@@ -358,7 +358,7 @@ class Note:
             # internal fields (prefix is None) are implicitly optional in markdown.
             if (
                 field.prefix is not None
-                and field.is_identifying
+                and field.identifying
                 and not self.fields.get(field.name)
             ):
                 errors.append(

@@ -10,15 +10,19 @@ templates:
 fields:
   - name: Front
     prefix: "F:"
-    is_identifying: true
+    identifying: true
   - name: Back
     prefix: "B:"
-    is_identifying: true
+    identifying: true
   - name: Extra
     prefix: "E:"
+    identifying: false
   - name: More
     prefix: "M:"
+    identifying: false
   - name: Source
     prefix: "S:"
+    identifying: false
   - name: AI Notes
     prefix: "AI:"
+    identifying: false

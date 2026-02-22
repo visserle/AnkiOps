@@ -22,11 +22,11 @@ class Field:
 
     name: str
     prefix: str | None  # None is used for the AnkiOps Key field
-    is_identifying: bool = False  # True if field is used to identify the note type
+    identifying: bool  # True if field is used to identify the note type
 
 
 # The mandatory field for all AnkiOps note types
-ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None)
+ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, identifying=False)
 
 @dataclass
 class NoteTypeConfig:
@@ -60,7 +60,7 @@ class NoteTypeConfig:
         return {
             str(field.prefix)
             for field in self.fields
-            if field.prefix is not None and field.is_identifying
+            if field.prefix is not None and field.identifying
         }
 
     def get_field_by_prefix(self, prefix: str) -> Field | None:
@@ -216,13 +216,13 @@ class NoteTypeRegistry:
                 fields = []
                 for field_def in config_data.get("fields", []):
                     if isinstance(field_def, str):
-                        fields.append(Field(field_def, None))
+                        fields.append(Field(field_def, None, identifying=False))
                     else:
                         fields.append(
                             Field(
                                 field_def["name"],
                                 field_def.get("prefix"),
-                                field_def.get("is_identifying", False),
+                                field_def["identifying"],
                             )
                         )
 
@@ -269,9 +269,8 @@ class NoteTypeRegistry:
 
                 fields = []
                 for field in info.get("fields", []):
-                    is_identifying = field.get("is_identifying", False)
                     fields.append(
-                        Field(field["name"], field["prefix"], is_identifying=is_identifying)
+                        Field(field["name"], field["prefix"], identifying=field["identifying"])
                     )
 
                 # Ensure AnkiOps Key is at the end
