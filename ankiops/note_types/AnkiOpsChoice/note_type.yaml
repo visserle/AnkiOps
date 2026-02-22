@@ -8,33 +8,39 @@ templates:
 fields:
   - name: Question
     prefix: "Q:"
+    is_identifying: true
   - name: Choice 1
     prefix: "C1:"
+    is_identifying: true
   - name: Choice 2
     prefix: "C2:"
+    is_identifying: true
   - name: Choice 3
     prefix: "C3:"
+    is_identifying: true
   - name: Choice 4
     prefix: "C4:"
+    is_identifying: true
   - name: Choice 5
     prefix: "C5:"
+    is_identifying: true
   - name: Choice 6
     prefix: "C6:"
+    is_identifying: true
   - name: Choice 7
     prefix: "C7:"
+    is_identifying: true
   - name: Choice 8
     prefix: "C8:"
+    is_identifying: true
   - name: Answer
     prefix: "A:"
+    is_identifying: true
   - name: Extra
     prefix: "E:"
-    is_identifying: false
   - name: More
     prefix: "M:"
-    is_identifying: false
   - name: Source
     prefix: "S:"
-    is_identifying: false
   - name: AI Notes
     prefix: "AI:"
-    is_identifying: false

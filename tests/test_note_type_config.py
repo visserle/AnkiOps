@@ -41,14 +41,20 @@ def test_register_custom_type(registry):
     """Test registering a new custom note type manually."""
     config = NoteTypeConfig(
         name="CustomType",
-        fields=[Field("Word", "W:"), Field("Translation", "Tr:")],
+        fields=[
+            Field("Word", "W:", is_identifying=True),
+            Field("Translation", "Tr:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(config)
 
     assert "CustomType" in registry.supported_note_types
     retrieved = registry.get("CustomType")
-    assert retrieved.fields == [Field("Word", "W:"), Field("Translation", "Tr:")]
+    assert retrieved.fields == [
+        Field("Word", "W:", is_identifying=True),
+        Field("Translation", "Tr:", is_identifying=True),
+    ]
 
 
 def test_register_custom_conflict_with_builtin(registry):
@@ -78,14 +84,20 @@ def test_mandatory_set_collision(registry):
     """Ensure two note types cannot have identical identifying fields."""
     config1 = NoteTypeConfig(
         name="Type1",
-        fields=[Field("Prop", "P:"), Field("Val", "V:")],
+        fields=[
+            Field("Prop", "P:", is_identifying=True),
+            Field("Val", "V:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(config1)
 
     config2 = NoteTypeConfig(
         name="Type2",
-        fields=[Field("Prop", "P:"), Field("Val", "V:")],
+        fields=[
+            Field("Prop", "P:", is_identifying=True),
+            Field("Val", "V:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
 
@@ -102,8 +114,8 @@ def test_load_custom_from_dir(registry):
         data = {
             "MyCustomType": {
                 "fields": [
-                    {"name": "Term", "prefix": "TM:"},
-                    {"name": "Definition", "prefix": "D:"},
+                    {"name": "Term", "prefix": "TM:", "is_identifying": True},
+                    {"name": "Definition", "prefix": "D:", "is_identifying": True},
                 ],
                 "styling": "MyCustomType/Styling.css",
             }
@@ -123,7 +135,8 @@ def test_load_custom_from_dir(registry):
 
         assert config.package_dir == note_types / "MyCustomType"
         # Only Term and Definition are identifying (have prefixes)
-        assert sorted([f.name for f in config.fields if f.prefix is not None]) == [
+        # Only Term and Definition are identifying
+        assert sorted([f.name for f in config.fields if f.is_identifying]) == [
             "Definition",
             "Term",
         ]
@@ -197,14 +210,17 @@ def test_prefix_sharing_custom_field(registry):
     """
     config1 = NoteTypeConfig(
         name="Type1",
-        fields=[Field("Description", "D:")],
+        fields=[Field("Description", "D:", is_identifying=True)],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(config1)
 
     config2 = NoteTypeConfig(
         name="Type2",
-        fields=[Field("Description", "D:"), Field("Other", "O:")],
+        fields=[
+            Field("Description", "D:", is_identifying=True),
+            Field("Other", "O:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     # Should Pass for CUSTOM fields
@@ -218,7 +234,7 @@ def test_strict_builtin_reservation(registry):
     # Attempt to use "Question" and "Q:" (Built-in)
     config = NoteTypeConfig(
         name="MyQA",
-        fields=[Field("Question", "Q:")],
+        fields=[Field("Question", "Q:", is_identifying=True)],
         styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved built-in prefix"):
@@ -229,7 +245,7 @@ def test_strict_builtin_reservation(registry):
     # but if prefix is new, it's caught by rule 3 strict name check)
     config_name = NoteTypeConfig(
         name="MyQA_Name",
-        fields=[Field("Question", "MyQ:")],
+        fields=[Field("Question", "MyQ:", is_identifying=True)],
         styling_paths=[Path("Styling.css")],
     )
     # Currently Name reservation is minimal (AnkiOps Key only).
@@ -247,7 +263,7 @@ def test_strict_builtin_reservation(registry):
     # mapped to "Question"
     config_prefix = NoteTypeConfig(
         name="MyQA_Prefix",
-        fields=[Field("MyQuestion", "Q:")],
+        fields=[Field("MyQuestion", "Q:", is_identifying=True)],
         styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved built-in prefix"):
@@ -259,7 +275,10 @@ def test_subset_inference(registry):
     # Create a base custom type first
     base_config = NoteTypeConfig(
         name="BaseType",
-        fields=[Field("BaseQ", "BQ:"), Field("BaseA", "BA:")],
+        fields=[
+            Field("BaseQ", "BQ:", is_identifying=True),
+            Field("BaseA", "BA:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(base_config)
@@ -267,7 +286,11 @@ def test_subset_inference(registry):
     # Create SupersetType {BaseQ, BaseA, Context}
     superset_config = NoteTypeConfig(
         name="SupersetType",
-        fields=[Field("BaseQ", "BQ:"), Field("BaseA", "BA:"), Field("Context", "C:")],
+        fields=[
+            Field("BaseQ", "BQ:", is_identifying=True),
+            Field("BaseA", "BA:", is_identifying=True),
+            Field("Context", "C:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(superset_config)
@@ -313,12 +336,19 @@ def test_inference_qa_vs_choice(mock_registry):
     """Verify {Q, A} matches QA (tighter) over Choice."""
     qa = NoteTypeConfig(
         "QA",
-        [Field("Question", "Q:"), Field("Answer", "A:")],
+        [
+            Field("Question", "Q:", is_identifying=True),
+            Field("Answer", "A:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     choice = NoteTypeConfig(
         "Choice",
-        [Field("Question", "Q:"), Field("Answer", "A:"), Field("Choice 1", "C1:")],
+        [
+            Field("Question", "Q:", is_identifying=True),
+            Field("Answer", "A:", is_identifying=True),
+            Field("Choice 1", "C1:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     mock_registry._configs = {"QA": qa, "Choice": choice}
@@ -338,12 +368,12 @@ def test_inference_choice_resilience(mock_registry):
     choice = NoteTypeConfig(
         "Choice",
         [
-            Field("Question", "Q:"),
-            Field("Answer", "A:"),
-            Field("Choice 1", "C1:"),
-            Field("Choice 2", "C2:"),
-            Field("Choice 5", "C5:"),
-            Field("Choice 6", "C6:"),
+            Field("Question", "Q:", is_identifying=True),
+            Field("Answer", "A:", is_identifying=True),
+            Field("Choice 1", "C1:", is_identifying=True),
+            Field("Choice 2", "C2:", is_identifying=True),
+            Field("Choice 5", "C5:", is_identifying=True),
+            Field("Choice 6", "C6:", is_identifying=True),
         ],
         is_choice=True,
         styling_paths=[Path("Styling.css")],
@@ -360,7 +390,11 @@ def test_inference_with_non_identifying_fields(mock_registry):
     """Verify non-identifying fields don't interfere with inference."""
     qa = NoteTypeConfig(
         "QA",
-        [Field("Question", "Q:"), Field("Answer", "A:"), Field("Extra", "E:")],
+        [
+            Field("Question", "Q:", is_identifying=True),
+            Field("Answer", "A:", is_identifying=True),
+            Field("Extra", "E:", is_identifying=False),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     mock_registry._configs = {"QA": qa}
@@ -413,7 +447,10 @@ def test_choice_validation(registry):
     config3 = NoteTypeConfig(
         name="NormalQA",
         is_choice=False,
-        fields=[Field("MyQuestion", "XQ:"), Field("MyAnswer", "XA:")],
+        fields=[
+            Field("MyQuestion", "XQ:", is_identifying=True),
+            Field("MyAnswer", "XA:", is_identifying=True),
+        ],
         styling_paths=[Path("Styling.css")],
     )
     registry.register(config3)

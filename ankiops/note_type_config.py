@@ -22,11 +22,11 @@ class Field:
 
     name: str
     prefix: str | None  # None is used for the AnkiOps Key field
-    is_identifying: bool = True
+    is_identifying: bool = False  # True if field is used to identify the note type
 
 
 # The mandatory field for all AnkiOps note types
-ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, is_identifying=False)
+ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None)
 
 @dataclass
 class NoteTypeConfig:
@@ -222,7 +222,7 @@ class NoteTypeRegistry:
                             Field(
                                 field_def["name"],
                                 field_def.get("prefix"),
-                                field_def.get("is_identifying", True),
+                                field_def.get("is_identifying", False),
                             )
                         )
 
@@ -269,7 +269,7 @@ class NoteTypeRegistry:
 
                 fields = []
                 for field in info.get("fields", []):
-                    is_identifying = field.get("is_identifying", True)
+                    is_identifying = field.get("is_identifying", False)
                     fields.append(
                         Field(field["name"], field["prefix"], is_identifying=is_identifying)
                     )
