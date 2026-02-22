@@ -1,7 +1,9 @@
-name: AnkiOpsCloze
+name: AnkiOpsReversed
 fields:
-  - name: Text
-    prefix: "T:"
+  - name: Front
+    prefix: "F:"
+  - name: Back
+    prefix: "B:"
   - name: Extra
     prefix: "E:"
     identifying: false
@@ -14,8 +16,10 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     identifying: false
-cloze: true
 templates:
-  - name: Cloze
+  - name: Card 1
     front: Front.template.anki
     back: Back.template.anki
+  - name: Card 2
+    front: Front2.template.anki
+    back: Back2.template.anki

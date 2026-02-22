@@ -91,8 +91,8 @@ def test_mandatory_set_collision(registry):
 def test_load_custom_from_dir(registry):
     """Test loading custom configurations from a directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        card_templates = Path(tmpdir)
-        yaml_path = card_templates / "note_types.yaml"
+        note_types = Path(tmpdir)
+        yaml_path = note_types / "note_types.yaml"
 
         data = {
             "MyCustomType": {
@@ -106,17 +106,17 @@ def test_load_custom_from_dir(registry):
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
         # In the new logic, we look for Styling.css in the package dir (local)
         # or the dir above it (root).
-        (card_templates / "MyCustomType").mkdir(parents=True, exist_ok=True)
-        (card_templates / "MyCustomType" / "Styling.css").write_text(
+        (note_types / "MyCustomType").mkdir(parents=True, exist_ok=True)
+        (note_types / "MyCustomType" / "Styling.css").write_text(
             ".custom { color: red; }", encoding="utf-8"
         )
 
-        registry.load(card_templates)
+        registry.load(note_types)
 
         assert "MyCustomType" in registry.supported_note_types
         config = registry.get("MyCustomType")
 
-        assert config.package_dir == card_templates / "MyCustomType"
+        assert config.package_dir == note_types / "MyCustomType"
         # Only Term and Definition are identifying (have prefixes)
         assert sorted([f.name for f in config.fields if f.prefix is not None]) == [
             "Definition",
@@ -128,12 +128,12 @@ def test_load_custom_from_dir(registry):
 def test_load_custom_fallback_css(registry):
     """Test that custom types fall back to built-in CSS if not specified."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        card_templates = Path(tmpdir)
-        yaml_path = card_templates / "note_types.yaml"
+        note_types = Path(tmpdir)
+        yaml_path = note_types / "note_types.yaml"
         data = {"NoCSSType": {"fields": [{"name": "XField", "prefix": "XF:"}]}}
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
 
-        registry.load(card_templates)
+        registry.load(note_types)
 
         config = registry.get("NoCSSType")
         # Just check it exists and has fields

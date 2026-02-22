@@ -1,9 +1,8 @@
-name: AnkiOpsQA
+name: AnkiOpsCloze
+cloze: true
 fields:
-  - name: Question
-    prefix: "Q:"
-  - name: Answer
-    prefix: "A:"
+  - name: Text
+    prefix: "T:"
   - name: Extra
     prefix: "E:"
     identifying: false
@@ -16,8 +15,7 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     identifying: false
-cloze: false
 templates:
-  - name: Card 1
+  - name: Cloze
     front: Front.template.anki
     back: Back.template.anki

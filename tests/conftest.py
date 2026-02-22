@@ -199,7 +199,7 @@ def run_ankiops(mock_anki):
         patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
         patch("ankiops.models.invoke", side_effect=mock_anki.invoke),
         patch("ankiops.markdown_to_anki.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.note_types.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.note_type_sync.invoke", side_effect=mock_anki.invoke),
         patch("ankiops.cli.invoke", side_effect=mock_anki.invoke),
     ):
         yield
@@ -218,7 +218,7 @@ def populate_registry():
 
     # Only populate if empty (to avoid redundant work)
     if not registry.supported_note_types:
-        src_root = resources.files("ankiops.card_templates")
+        src_root = resources.files("ankiops.note_types")
         with resources.as_file(src_root) as src_path:
             registry.load(src_path)
     yield

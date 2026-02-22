@@ -1,9 +1,9 @@
-name: AnkiOpsInput
+name: AnkiOpsQA
 fields:
   - name: Question
     prefix: "Q:"
-  - name: Input
-    prefix: "I:"
+  - name: Answer
+    prefix: "A:"
   - name: Extra
     prefix: "E:"
     identifying: false
@@ -16,7 +16,6 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     identifying: false
-cloze: false
 templates:
   - name: Card 1
     front: Front.template.anki

@@ -179,7 +179,7 @@ class NoteTypeRegistry:
     def eject_builtin_note_types(self, dst_dir: Path, force: bool = False) -> None:
         """Eject all built-in note type definitions to the filesystem."""
 
-        src_root = resources.files("ankiops.card_templates")
+        src_root = resources.files("ankiops.note_types")
 
         # We use as_file to handle cases where the package is in a zip/egg
         with resources.as_file(src_root) as src_path:
@@ -195,18 +195,18 @@ class NoteTypeRegistry:
         """Load built-in note types from the package resources."""
         # Use path relative to this file to avoid importlib.resources ambiguity
         # when multiple versions of the package might be present.
-        src_path = Path(__file__).parent / "card_templates"
+        src_path = Path(__file__).parent / "note_types"
         if src_path.exists():
             self.load(src_path)
 
     def load(self, directory: Path | None = None) -> None:
         """Scan a directory for Note Type definitions (folders with note_type.yaml)."""
-        card_templates_dir = directory or get_note_types_dir()
-        if not card_templates_dir.exists():
+        note_types_dir = directory or get_note_types_dir()
+        if not note_types_dir.exists():
             return
 
         # 1. Look for note_types.yaml in the root (legacy/test support)
-        root_config = card_templates_dir / "note_types.yaml"
+        root_config = note_types_dir / "note_types.yaml"
         if root_config.exists():
             data = yaml.safe_load(root_config.read_text(encoding="utf-8"))
             for name, config_data in data.items():
@@ -228,13 +228,13 @@ class NoteTypeRegistry:
                     fields=fields,
                     is_cloze=config_data.get("cloze", False),
                     is_choice=config_data.get("choice", False),
-                    package_dir=card_templates_dir / name,
+                    package_dir=note_types_dir / name,
                 )
                 self.register(config)
 
         # 2. Look for per-note-type folders
 
-        for subdir in card_templates_dir.iterdir():
+        for subdir in note_types_dir.iterdir():
             if not subdir.is_dir():
                 continue
 

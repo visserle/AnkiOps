@@ -27,7 +27,7 @@ from ankiops.models import (
     CollectionExportResult,
     CollectionImportResult,
 )
-from ankiops.note_types import ensure_note_types
+from ankiops.note_type_sync import ensure_note_types
 from ankiops.sync_media import (
     extract_media_references,
     sync_from_anki,
