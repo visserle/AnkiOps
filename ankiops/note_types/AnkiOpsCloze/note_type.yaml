@@ -1,5 +1,10 @@
 name: AnkiOpsCloze
 is_cloze: true
+styling: ../Styling.css
+templates:
+  - name: Cloze
+    front: Front.template.anki
+    back: Back.template.anki
 fields:
   - name: Text
     prefix: "T:"
@@ -15,7 +20,3 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     is_identifying: false
-templates:
-  - name: Cloze
-    front: Front.template.anki
-    back: Back.template.anki

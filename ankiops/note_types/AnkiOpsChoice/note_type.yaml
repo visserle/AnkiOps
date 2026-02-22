@@ -1,5 +1,10 @@
 name: AnkiOpsChoice
 is_choice: true
+styling: ../Styling.css
+templates:
+  - name: Card 1
+    front: Front.template.anki
+    back: Back.template.anki
 fields:
   - name: Question
     prefix: "Q:"
@@ -33,7 +38,3 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     is_identifying: false
-templates:
-  - name: Card 1
-    front: Front.template.anki
-    back: Back.template.anki

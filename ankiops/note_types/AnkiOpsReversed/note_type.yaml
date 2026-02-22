@@ -1,4 +1,12 @@
 name: AnkiOpsReversed
+styling: ../Styling.css
+templates:
+  - name: Card 1
+    front: Front.template.anki
+    back: Back.template.anki
+  - name: Card 2
+    front: Front2.template.anki
+    back: Back2.template.anki
 fields:
   - name: Front
     prefix: "F:"
@@ -16,10 +24,3 @@ fields:
   - name: AI Notes
     prefix: "AI:"
     is_identifying: false
-templates:
-  - name: Card 1
-    front: Front.template.anki
-    back: Back.template.anki
-  - name: Card 2
-    front: Front2.template.anki
-    back: Back2.template.anki

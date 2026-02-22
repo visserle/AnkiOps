@@ -42,6 +42,7 @@ def test_register_custom_type(registry):
     config = NoteTypeConfig(
         name="CustomType",
         fields=[Field("Word", "W:"), Field("Translation", "Tr:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(config)
 
@@ -55,6 +56,7 @@ def test_register_custom_conflict_with_builtin(registry):
     config = NoteTypeConfig(
         name="BadCustom",
         fields=[Field("MyQuestion", "Q:")],  # "Q:" is reserved
+        styling_paths=[Path("Styling.css")],
     )
     # Reservation check (Rule 1) now happens before Consistency check (Rule 2)
     with pytest.raises(ValueError, match="uses reserved built-in prefix"):
@@ -66,6 +68,7 @@ def test_register_conflict_with_reserved(registry):
     config = NoteTypeConfig(
         name="ConflictType",
         fields=[ANKIOPS_KEY_FIELD],  # reserved
+        styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved field name"):
         registry.register(config)
@@ -76,12 +79,14 @@ def test_mandatory_set_collision(registry):
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("Prop", "P:"), Field("Val", "V:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(config1)
 
     config2 = NoteTypeConfig(
         name="Type2",
         fields=[Field("Prop", "P:"), Field("Val", "V:")],
+        styling_paths=[Path("Styling.css")],
     )
 
     with pytest.raises(ValueError, match="identical identifying fields"):
@@ -100,6 +105,7 @@ def test_load_custom_from_dir(registry):
                     {"name": "Term", "prefix": "TM:"},
                     {"name": "Definition", "prefix": "D:"},
                 ],
+                "styling": "MyCustomType/Styling.css",
             }
         }
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
@@ -124,20 +130,32 @@ def test_load_custom_from_dir(registry):
         assert config.css
 
 
-def test_load_custom_fallback_css(registry):
-    """Test that custom types fall back to built-in CSS if not specified."""
+def test_load_custom_missing_styling(registry):
+    """Test that missing mandatory styling raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
         yaml_path = note_types / "note_types.yaml"
+        # Missing 'styling' key
         data = {"NoCSSType": {"fields": [{"name": "XField", "prefix": "XF:"}]}}
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
 
-        registry.load(note_types)
+        with pytest.raises(ValueError, match="missing mandatory 'styling' key"):
+            registry.load(note_types)
 
-        config = registry.get("NoCSSType")
-        # Just check it exists and has fields
-        assert config.fields
 
+def test_require_styling_key(registry):
+    """Test that missing mandatory styling in per-folder YAML raises ValueError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        note_types = Path(tmpdir)
+        subdir = note_types / "BadType"
+        subdir.mkdir()
+        yaml_path = subdir / "note_type.yaml"
+        # Missing 'styling' key
+        data = {"fields": [{"name": "XField", "prefix": "XF:"}]}
+        yaml_path.write_text(yaml.dump(data), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="missing mandatory 'styling' key"):
+            registry.load(note_types)
 
 def test_prefix_to_field_mapping(registry):
     """Test the global prefix -> field mapping."""
@@ -157,6 +175,7 @@ def test_prefix_collision_different_field(registry):
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("FieldA", "X:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(config1)
 
@@ -164,6 +183,7 @@ def test_prefix_collision_different_field(registry):
     config2 = NoteTypeConfig(
         name="Type2",
         fields=[Field("FieldB", "X:")],
+        styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(
         ValueError, match="matches existing prefix.*but maps to different field"
@@ -178,12 +198,14 @@ def test_prefix_sharing_custom_field(registry):
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("Description", "D:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(config1)
 
     config2 = NoteTypeConfig(
         name="Type2",
         fields=[Field("Description", "D:"), Field("Other", "O:")],
+        styling_paths=[Path("Styling.css")],
     )
     # Should Pass for CUSTOM fields
     registry.register(config2)
@@ -197,6 +219,7 @@ def test_strict_builtin_reservation(registry):
     config = NoteTypeConfig(
         name="MyQA",
         fields=[Field("Question", "Q:")],
+        styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved built-in prefix"):
         registry.register(config)
@@ -207,6 +230,7 @@ def test_strict_builtin_reservation(registry):
     config_name = NoteTypeConfig(
         name="MyQA_Name",
         fields=[Field("Question", "MyQ:")],
+        styling_paths=[Path("Styling.css")],
     )
     # Currently Name reservation is minimal (AnkiOps Key only).
     # If Question is not reserved, this won't raise.
@@ -224,6 +248,7 @@ def test_strict_builtin_reservation(registry):
     config_prefix = NoteTypeConfig(
         name="MyQA_Prefix",
         fields=[Field("MyQuestion", "Q:")],
+        styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved built-in prefix"):
         registry.register(config_prefix)
@@ -235,6 +260,7 @@ def test_subset_inference(registry):
     base_config = NoteTypeConfig(
         name="BaseType",
         fields=[Field("BaseQ", "BQ:"), Field("BaseA", "BA:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(base_config)
 
@@ -242,6 +268,7 @@ def test_subset_inference(registry):
     superset_config = NoteTypeConfig(
         name="SupersetType",
         fields=[Field("BaseQ", "BQ:"), Field("BaseA", "BA:"), Field("Context", "C:")],
+        styling_paths=[Path("Styling.css")],
     )
     registry.register(superset_config)
 
@@ -265,6 +292,7 @@ def test_reserved_ankiops_key(registry):
     config = NoteTypeConfig(
         name="BadName",
         fields=[Field(ANKIOPS_KEY_FIELD.name, "X:", is_identifying=False)],
+        styling_paths=[Path("Styling.css")],
     )
     with pytest.raises(ValueError, match="uses reserved field name"):
         registry.register(config)
@@ -283,10 +311,15 @@ def mock_registry():
 
 def test_inference_qa_vs_choice(mock_registry):
     """Verify {Q, A} matches QA (tighter) over Choice."""
-    qa = NoteTypeConfig("QA", [Field("Question", "Q:"), Field("Answer", "A:")])
+    qa = NoteTypeConfig(
+        "QA",
+        [Field("Question", "Q:"), Field("Answer", "A:")],
+        styling_paths=[Path("Styling.css")],
+    )
     choice = NoteTypeConfig(
         "Choice",
         [Field("Question", "Q:"), Field("Answer", "A:"), Field("Choice 1", "C1:")],
+        styling_paths=[Path("Styling.css")],
     )
     mock_registry._configs = {"QA": qa, "Choice": choice}
 
@@ -313,6 +346,7 @@ def test_inference_choice_resilience(mock_registry):
             Field("Choice 6", "C6:"),
         ],
         is_choice=True,
+        styling_paths=[Path("Styling.css")],
     )
     mock_registry._configs = {"Choice": choice}
 
@@ -325,7 +359,9 @@ def test_inference_choice_resilience(mock_registry):
 def test_inference_with_non_identifying_fields(mock_registry):
     """Verify non-identifying fields don't interfere with inference."""
     qa = NoteTypeConfig(
-        "QA", [Field("Question", "Q:"), Field("Answer", "A:"), Field("Extra", "E:")]
+        "QA",
+        [Field("Question", "Q:"), Field("Answer", "A:"), Field("Extra", "E:")],
+        styling_paths=[Path("Styling.css")],
     )
     mock_registry._configs = {"QA": qa}
 
@@ -337,7 +373,11 @@ def test_inference_with_non_identifying_fields(mock_registry):
 
 def test_inference_unknown_field_fails(mock_registry):
     """Verify that unknown fields cause inference failure."""
-    qa = NoteTypeConfig("QA", [Field("Question", "Q:"), Field("Answer", "A:")])
+    qa = NoteTypeConfig(
+        "QA",
+        [Field("Question", "Q:"), Field("Answer", "A:")],
+        styling_paths=[Path("Styling.css")],
+    )
     mock_registry._configs = {"QA": qa}
 
     with patch("ankiops.models.registry", mock_registry):
@@ -345,3 +385,36 @@ def test_inference_unknown_field_fails(mock_registry):
         note_fields = {"Question": "v", "Answer": "v", "Random": "r"}
         with pytest.raises(ValueError, match="Cannot determine note type"):
             models.Note.infer_note_type(note_fields)
+
+
+def test_choice_validation(registry):
+    """Ensure choice note types must have at least one field with 'choice' in name."""
+    # 1. is_choice=True, no choice field -> Fail
+    config1 = NoteTypeConfig(
+        name="BadChoice",
+        is_choice=True,
+        fields=[Field("MyQuestion", "XQ:"), Field("MyAnswer", "XA:")],
+        styling_paths=[Path("Styling.css")],
+    )
+    with pytest.raises(ValueError, match="containing the word 'choice' were found"):
+        registry.register(config1)
+
+    # 2. is_choice=True, has choice field -> Pass
+    config2 = NoteTypeConfig(
+        name="GoodChoice",
+        is_choice=True,
+        fields=[Field("MyQuestion", "XQ:"), Field("Choice 1", "XC1:")],
+        styling_paths=[Path("Styling.css")],
+    )
+    registry.register(config2)
+    assert "GoodChoice" in registry.supported_note_types
+
+    # 3. is_choice=False, no choice field -> Pass
+    config3 = NoteTypeConfig(
+        name="NormalQA",
+        is_choice=False,
+        fields=[Field("MyQuestion", "XQ:"), Field("MyAnswer", "XA:")],
+        styling_paths=[Path("Styling.css")],
+    )
+    registry.register(config3)
+    assert "NormalQA" in registry.supported_note_types

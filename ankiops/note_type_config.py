@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from typing import ClassVar
@@ -37,31 +37,20 @@ class NoteTypeConfig:
     is_cloze: bool = False
     is_choice: bool = False
     package_dir: Path | None = None  # Directory containing note_type.yaml and templates
+    styling_paths: list[Path] = field(default_factory=list)
     card_templates: list[dict[str, str]] | None = (
         None  # Explicit list of {Name, Front, Back}
     )
 
     @property
     def css(self) -> str:
-        """Get CSS: Global root Styling.css + Local package Styling.css."""
+        """Get CSS from explicit styling_paths."""
         css_parts = []
-
-        # 1. Global root Styling.css
-        root_css = get_note_types_dir() / "Styling.css"
-        if root_css.exists():
-            css_parts.append(root_css.read_text(encoding="utf-8"))
-
-        pkg_dir = self.package_dir
-        if pkg_dir is not None:
-            # 2. Parent-level Styling.css (important for tests using tempdirs)
-            parent_css = pkg_dir.parent / "Styling.css"
-            if parent_css.exists() and parent_css != root_css:
-                css_parts.append(parent_css.read_text(encoding="utf-8"))
-
-            # 3. Local package Styling.css
-            local_css = pkg_dir / "Styling.css"
-            if local_css.exists():
-                css_parts.append(local_css.read_text(encoding="utf-8"))
+        for path in self.styling_paths:
+            if path.exists():
+                css_parts.append(path.read_text(encoding="utf-8"))
+            else:
+                logger.warning(f"CSS file not found: {path}")
 
         return "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
 
@@ -101,6 +90,7 @@ class NoteTypeRegistry:
         self._validate_reservation(config)
         self._validate_global_consistency(config)
         self._validate_distinctness(config)
+        self._validate_choice_fields(config)
 
         self._configs[config.name] = config
 
@@ -170,6 +160,19 @@ class NoteTypeRegistry:
                     "which makes inference ambiguous."
                 )
 
+    def _validate_choice_fields(self, config: NoteTypeConfig) -> None:
+        """Ensure choice note types have at least one field containing 'choice'."""
+        if config.is_choice:
+            has_choice_field = any(
+                "choice" in field.name.lower() for field in config.fields
+            )
+            if not has_choice_field:
+                raise ValueError(
+                    f"Note type '{config.name}' is marked as 'is_choice', but no fields "
+                    "containing the word 'choice' were found. Choice note types must "
+                    "have at least one field with 'choice' in its name."
+                )
+
     def get(self, name: str) -> NoteTypeConfig:
         """Get configuration for a note type."""
         if name not in self._configs:
@@ -223,12 +226,27 @@ class NoteTypeRegistry:
                             )
                         )
 
+                # Parse styling paths
+                if "styling" not in config_data:
+                    raise ValueError(
+                        f"Note type '{name}' is missing mandatory 'styling' key"
+                    )
+
+                styling_input = config_data["styling"]
+                if isinstance(styling_input, str):
+                    styling_raw_paths = [styling_input]
+                else:
+                    styling_raw_paths = styling_input
+
                 config = NoteTypeConfig(
                     name=name,
                     fields=fields,
                     is_cloze=config_data.get("is_cloze", False),
                     is_choice=config_data.get("is_choice", False),
                     package_dir=note_types_dir / name,
+                    styling_paths=[
+                        (note_types_dir / p).resolve() for p in styling_raw_paths
+                    ],
                 )
                 self.register(config)
 
@@ -260,6 +278,18 @@ class NoteTypeRegistry:
                 if ANKIOPS_KEY_FIELD.name not in [field.name for field in fields]:
                     fields.append(ANKIOPS_KEY_FIELD)
 
+                # Parse styling paths
+                if "styling" not in info:
+                    raise ValueError(
+                        f"Note type '{name}' is missing mandatory 'styling' key in note_type.yaml"
+                    )
+
+                styling_input = info["styling"]
+                if isinstance(styling_input, str):
+                    styling_raw_paths = [styling_input]
+                else:
+                    styling_raw_paths = styling_input
+
                 self.register(
                     NoteTypeConfig(
                         name=name,
@@ -268,9 +298,13 @@ class NoteTypeRegistry:
                         is_choice=bool(info.get("is_choice", False)),
                         package_dir=subdir,
                         card_templates=info.get("templates"),
+                        styling_paths=[(subdir / p).resolve() for p in styling_raw_paths],
                     )
                 )
                 logger.debug(f"Registered note type definition: {name}")
+            except ValueError as e:
+                # Re-raise validation errors to make them strictly mandatory
+                raise
             except Exception as e:
                 logger.error(
                     f"Failed to load note type definition '{subdir.name}': {e}"
