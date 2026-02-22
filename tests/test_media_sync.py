@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ankiops.sync_media import (
+from ankiops.media_sync import (
     LOCAL_MEDIA_DIR,
     _calculate_hash,
     _get_hashed_filename,
@@ -174,7 +174,7 @@ def test_apply_hashing(tmp_path):
     # Verify markdown update
     content = md_file.read_text()
     assert f"media/image1_{h1}.png" in content
-    # Note: sync_media.py uses replace(path, new_path)
+    # Note: media_sync.py uses replace(path, new_path)
     # If the original was ![1](media/image1.png), it replaces "media/image1.png" with "<media/image1_hash.png>"
     # Result: ![1](<media/image1_hash.png>)
     assert f"![1](<media/image1_{h1}.png>)" in content
