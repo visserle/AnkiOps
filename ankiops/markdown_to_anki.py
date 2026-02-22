@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError, invoke
 from ankiops.config import get_collection_dir
-from ankiops.key_map import KeyMap
+from ankiops.db import AnkiOpsDB
 from ankiops.log import format_changes
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
@@ -186,7 +186,7 @@ def _sync_file(
     fs: FileState,
     anki: AnkiState,
     converter: MarkdownToHTML,
-    key_map: KeyMap,
+    db: AnkiOpsDB,
     only_add_new: bool = False,
     global_keys: set[str] | None = None,
 ) -> tuple[NoteSyncResult, _PendingWrite]:
@@ -207,7 +207,7 @@ def _sync_file(
     # Resolve deck by Key (if present)
     resolved_deck_id = None
     if fs.deck_key:
-        resolved_deck_id = key_map.get_deck_id(fs.deck_key)
+        resolved_deck_id = db.get_deck_id(fs.deck_key)
         if resolved_deck_id:
             deck_name = anki.deck_names_by_id.get(resolved_deck_id)
             if deck_name:
@@ -235,16 +235,16 @@ def _sync_file(
     # Ensure deck has Key assignment
     if resolved_deck_id:
         # Check mapping
-        current_key = key_map.get_deck_key(resolved_deck_id)
+        current_key = db.get_deck_key(resolved_deck_id)
 
         if not current_key:
             if fs.deck_key:
                 # Import existing Key from file
-                key_map.set_deck(fs.deck_key, resolved_deck_id)
+                db.set_deck(fs.deck_key, resolved_deck_id)
             else:
                 # Generate new Key
-                new_key = KeyMap.generate_key()
-                key_map.set_deck(new_key, resolved_deck_id)
+                new_key = AnkiOpsDB.generate_key()
+                db.set_deck(new_key, resolved_deck_id)
                 deck_key_to_write = new_key
 
             # File has wrong Key or no Key, strict sync enforces mapped Key
@@ -255,7 +255,7 @@ def _sync_file(
         if fs.deck_key:
             deck_key_to_write = fs.deck_key
         else:
-            deck_key_to_write = KeyMap.generate_key()
+            deck_key_to_write = AnkiOpsDB.generate_key()
 
     result = NoteSyncResult(
         deck_name=deck_name,
@@ -279,7 +279,7 @@ def _sync_file(
 
         if parsed_note.note_key:
             # Note has a Key — look up the Anki note_id from mapping
-            note_id = key_map.get_note_id(parsed_note.note_key)
+            note_id = db.get_note_id(parsed_note.note_key)
             found_ids = None
 
             # --- RECOVERY LOGIC START ---
@@ -297,7 +297,7 @@ def _sync_file(
                             f"Recovered link for key {parsed_note.note_key} -> note_id {note_id}"
                         )
                         # Immediately update the map so subsequent lookups (and moves/updates) work
-                        key_map.set_note(parsed_note.note_key, note_id)
+                        db.set_note(parsed_note.note_key, note_id)
                 except AnkiConnectError as e:
                     logger.warning(
                         f"Recovery lookup failed for {parsed_note.note_key}: {e}"
@@ -403,7 +403,7 @@ def _sync_file(
 
         else:
             # New note (no Key yet)
-            new_key = KeyMap.generate_key()
+            new_key = AnkiOpsDB.generate_key()
             changes.append(
                 Change(
                     ChangeType.CREATE,
@@ -421,7 +421,7 @@ def _sync_file(
     # Build the set of Anki note_ids that are referenced by this file's Keys
     md_anki_ids = set()
     for key_str in fs.note_keys:
-        nid = key_map.get_note_id(key_str)
+        nid = db.get_note_id(key_str)
         if nid is not None:
             md_anki_ids.add(nid)
 
@@ -432,13 +432,13 @@ def _sync_file(
     if global_keys:
         global_anki_ids = set()
         for u in global_keys:
-            nid = key_map.get_note_id(u)
+            nid = db.get_note_id(u)
             if nid is not None:
                 global_anki_ids.add(nid)
         orphaned -= global_anki_ids
 
     for nid in orphaned:
-        orphan_key = key_map.get_note_key(nid)
+        orphan_key = db.get_note_key(nid)
         repr_str = f"note_key: {orphan_key}" if orphan_key else f"note_id: {nid}"
         changes.append(Change(ChangeType.DELETE, nid, repr_str))
 
@@ -470,7 +470,7 @@ def _sync_file(
                     anki.deck_names_by_id[new_deck_id] = deck_name
 
                     if deck_key_to_write:
-                        key_map.set_deck(deck_key_to_write, new_deck_id)
+                        db.set_deck(deck_key_to_write, new_deck_id)
 
                     logger.info(f"Created new deck '{deck_name}' (id: {new_deck_id})")
 
@@ -503,7 +503,7 @@ def _sync_file(
                         and (key_str := change.context.get("note_key"))
                     ):
                         # Assign Key: use pre-generated key
-                        key_map.set_note(key_str, res)
+                        db.set_note(key_str, res)
                         key_assignments.append((note, key_str))
                         change.entity_id = res
 
@@ -544,13 +544,13 @@ def import_file(
     converter = MarkdownToHTML()
     if collection_dir is None:
         collection_dir = get_collection_dir()
-    key_map = KeyMap.load(collection_dir)
+    db = AnkiOpsDB.load(collection_dir)
 
     result, pending = _sync_file(
-        fs, anki, converter, key_map, only_add_new=only_add_new
+        fs, anki, converter, db, only_add_new=only_add_new
     )
     _flush_writes([pending])
-    key_map.save(collection_dir)
+    db.save(collection_dir)
 
     return result
 
@@ -623,7 +623,7 @@ def import_collection(
     # Phase 3: Fetch all Anki state
     anki = AnkiState.fetch()
     converter = MarkdownToHTML()
-    key_map = KeyMap.load(collection_path)
+    db = AnkiOpsDB.load(collection_path)
 
     # Phase 5: Sync each file
     results: list[NoteSyncResult] = []
@@ -635,7 +635,7 @@ def import_collection(
             fs,
             anki,
             converter,
-            key_map,
+            db,
             only_add_new=only_add_new,
             global_keys=global_keys,
         )
@@ -660,7 +660,7 @@ def import_collection(
 
     # Phase 6: Flush all file writes
     _flush_writes(pending_writes)
-    key_map.save(collection_path)
+    db.save(collection_path)
 
     # Phase 7: Detect untracked decks
     untracked_decks: list[UntrackedDeck] = []

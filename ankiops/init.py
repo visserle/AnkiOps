@@ -8,26 +8,14 @@ from pathlib import Path
 
 from ankiops.config import (
     LOCAL_MEDIA_DIR,
-    MARKER_FILE,
     NOTE_TYPES_DIR,
     get_collection_dir,
 )
+from ankiops.db import AnkiOpsDB
 from ankiops.log import clickable_path
 from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
-
-
-def _setup_marker(collection_dir: Path, profile: str):
-    """Write the .ankiops marker file with the active profile name."""
-    marker = collection_dir / MARKER_FILE
-    config = configparser.ConfigParser()
-    config["ankiops"] = {
-        "profile": profile,
-    }
-    with open(marker, "w") as f:
-        f.write("# AnkiOps collection \u2014 do not delete this file.\n\n")
-        config.write(f)
 
 
 def _setup_vscode_settings(collection_dir: Path):
@@ -72,14 +60,19 @@ def _setup_git(collection_dir: Path):
 def initialize_collection(profile: str) -> Path:
     """Initialize the current directory as an AnkiOps collection.
 
-    Creates the collection directory (if needed), writes the marker file,
+    Creates the collection directory (if needed), initializes the database,
     creates the local media directory, and configures VSCode settings.
     Idempotent — safe to run multiple times.
     """
     collection_dir = get_collection_dir()
     collection_dir.mkdir(parents=True, exist_ok=True)
 
-    _setup_marker(collection_dir, profile)
+    db = AnkiOpsDB.load(collection_dir)
+    try:
+        db.set_config("profile", profile)
+    finally:
+        db.close()
+
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
     _setup_git(collection_dir)

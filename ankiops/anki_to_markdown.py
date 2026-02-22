@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ankiops.config import NOTE_SEPARATOR, sanitize_filename
 from ankiops.html_converter import HTMLToMarkdown
-from ankiops.key_map import KeyMap
+from ankiops.db import AnkiOpsDB
 from ankiops.log import clickable_path, format_changes
 from ankiops.models import (
     AnkiState,
@@ -32,11 +32,11 @@ def _format_blocks(
     note_ids: set[int],
     anki: AnkiState,
     converter: HTMLToMarkdown,
-    key_map: KeyMap,
+    db: AnkiOpsDB,
 ) -> dict[str, tuple[int, str]]:
     """Format Anki notes into markdown blocks.
 
-    Returns {block_key: (note_id, formatted_block)}.
+    Uses AnkiOpsDB to find/assign note keys.
     """
     block_by_id: dict[str, tuple[int, str]] = {}
 
@@ -48,10 +48,10 @@ def _format_blocks(
             continue
 
         # Look up or generate Key for this note
-        note_key = key_map.get_note_key(nid)
+        note_key = db.get_note_key(nid)
         if not note_key:
-            note_key = KeyMap.generate_key()
-            key_map.set_note(note_key, nid)
+            note_key = AnkiOpsDB.generate_key()
+            db.set_note(note_key, nid)
 
         block = anki_note.to_markdown(converter, note_key=note_key)
         match = re.match(r"<!--\s*(note_key:\s*[a-zA-Z0-9-]+)\s*-->", block)
@@ -134,16 +134,15 @@ def _sync_deck(
     deck_id: int,
     anki: AnkiState,
     converter: HTMLToMarkdown,
-    key_map: KeyMap,
+    db: AnkiOpsDB,
     existing_file: FileState | None,
 ) -> tuple[NoteSyncResult, str | None]:
     """Synchronize one Anki deck to markdown content.
 
-    Returns (result, new_content). new_content is None if the deck
-    is empty (no notes to export).
+    Uses AnkiOpsDB to resolve deck keys and persist changes.
     """
     note_ids = anki.note_ids_by_deck_name.get(deck_name, set())
-    block_by_id = _format_blocks(note_ids, anki, converter, key_map)
+    block_by_id = _format_blocks(note_ids, anki, converter, db)
     if not block_by_id:
         return NoteSyncResult(
             deck_name=deck_name,
@@ -151,15 +150,15 @@ def _sync_deck(
         ), None
 
     # Resolve Deck Key
-    deck_key = key_map.get_deck_key(deck_id)
+    deck_key = db.get_deck_key(deck_id)
     if not deck_key:
         # Check if existing file has a Key we should adopt
         if existing_file and existing_file.deck_key:
             deck_key = existing_file.deck_key
-            key_map.set_deck(deck_key, deck_id)
+            db.set_deck(deck_key, deck_id)
         else:
-            deck_key = KeyMap.generate_key()
-            key_map.set_deck(deck_key, deck_id)
+            deck_key = AnkiOpsDB.generate_key()
+            db.set_deck(deck_key, deck_id)
 
     deck_id_line = f"<!-- deck_key: {deck_key} -->\n"
 
@@ -207,7 +206,7 @@ def export_deck(
     output_path = Path(output_dir) / (sanitize_filename(deck_name) + ".md")
     existing_file = FileState.from_file(output_path) if output_path.exists() else None
 
-    key_map = KeyMap.load(Path(output_dir))
+    db = AnkiOpsDB.load(Path(output_dir))
 
     # Check for untracked notes before overwriting
     if existing_file and existing_file.has_untracked:
@@ -229,7 +228,7 @@ def export_deck(
             raise SystemExit(0)
 
     result, new_content = _sync_deck(
-        deck_name, deck_id, anki, converter, key_map, existing_file
+        deck_name, deck_id, anki, converter, db, existing_file
     )
 
     if new_content is not None:
@@ -238,7 +237,7 @@ def export_deck(
             output_path.write_text(new_content, encoding="utf-8")
         result.file_path = output_path
 
-    key_map.save(Path(output_dir))
+    db.save(Path(output_dir))
     return result
 
 
@@ -264,7 +263,7 @@ def export_collection(
     registry.load()
     anki = AnkiState.fetch()
     converter = HTMLToMarkdown()
-    key_map = KeyMap.load(output_path)
+    db = AnkiOpsDB.load(output_path)
 
     # Phase 2: Read all existing markdown files
     files_by_deck_id: dict[int, FileState] = {}
@@ -275,10 +274,10 @@ def export_collection(
         fs = FileState.from_file(md_file)
         files_by_path[md_file] = fs
         if fs.deck_key:
-            # We need to resolve deck_id from deck_key via KeyMap
-            # But the KeyMap might not be loaded yet or we need to look it up.
+            # We need to resolve deck_id from deck_key via AnkiOpsDB
+            # But the AnkiOpsDB might not be loaded yet or we need to look it up.
             # Actually, we can just use the mapped deck_id if available.
-            resolved_deck_id = key_map.get_deck_id(fs.deck_key)
+            resolved_deck_id = db.get_deck_id(fs.deck_key)
             if resolved_deck_id:
                 files_by_deck_id[resolved_deck_id] = fs
             else:
@@ -368,7 +367,7 @@ def export_collection(
 
         logger.debug(f"Processing {deck_name} (id: {deck_id})...")
         result, new_content = _sync_deck(
-            deck_name, deck_id, anki, converter, key_map, existing_file
+            deck_name, deck_id, anki, converter, db, existing_file
         )
 
         if new_content is not None:
@@ -428,7 +427,7 @@ def export_collection(
         for _ in range(renamed_files):
             extra_changes.append(Change(ChangeType.HASH, None, "renamed_file"))
 
-    key_map.save(output_path)
+    db.save(output_path)
 
     return CollectionExportResult(
         results=deck_results,

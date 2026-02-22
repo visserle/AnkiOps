@@ -6,10 +6,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-MARKER_FILE = ".ankiops"
+ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
-KEY_MAP_DB = "key_map.db"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -71,35 +70,33 @@ def get_note_types_dir() -> Path:
     return get_collection_dir() / NOTE_TYPES_DIR
 
 
-def _read_marker(marker: Path) -> configparser.ConfigParser:
-    """Read and return the parsed marker file."""
-    config = configparser.ConfigParser()
-    config.read(marker)
-    return config
-
-
 def require_collection_dir(active_profile: str) -> Path:
     """Return the collection directory, or exit if not initialized.
 
     Also exits if the active profile doesn't match.
     """
+    from ankiops.db import AnkiOpsDB
+
     collection_dir = get_collection_dir()
-    marker = collection_dir / MARKER_FILE
-    if not marker.exists():
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
         logger.error(
             f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
         )
         raise SystemExit(1)
 
-    config = _read_marker(marker)
-    expected_profile = config.get("ankiops", "profile", fallback=None)
-    if expected_profile and expected_profile != active_profile:
-        logger.error(
-            f"Profile mismatch: collection in {collection_dir} is linked to "
-            f"'{expected_profile}', but Anki has '{active_profile}' "
-            f"open. Switch profiles in Anki, or re-run "
-            f"'ankiops init' to re-link."
-        )
-        raise SystemExit(1)
+    db = AnkiOpsDB.load(collection_dir)
+    try:
+        expected_profile = db.get_config("profile")
+        if expected_profile and expected_profile != active_profile:
+            logger.error(
+                f"Profile mismatch: collection in {collection_dir} is linked to "
+                f"'{expected_profile}', but Anki has '{active_profile}' "
+                f"open. Switch profiles in Anki, or re-run "
+                f"'ankiops init' to re-link."
+            )
+            raise SystemExit(1)
+    finally:
+        db.close()
 
     return collection_dir

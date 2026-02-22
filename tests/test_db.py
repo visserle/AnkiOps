@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ankiops.config import KEY_MAP_DB
-from ankiops.key_map import KeyMap
+from ankiops.config import ANKIOPS_DB
+from ankiops.db import AnkiOpsDB
 from ankiops.markdown_to_anki import _build_anki_actions, _sync_file
 from ankiops.models import AnkiState, ChangeType, FileState, Note
 
@@ -20,83 +20,97 @@ from ankiops.models import AnkiState, ChangeType, FileState, Note
 
 
 @pytest.fixture
-def key_map(tmp_path):
-    """Create a temporary KeyMap for testing."""
-    return KeyMap.load(tmp_path)
+def db(tmp_path):
+    """Create a temporary AnkiOpsDB for testing."""
+    return AnkiOpsDB.load(tmp_path)
 
 
-def test_load_creates_tables(key_map, tmp_path):
+def test_load_creates_tables(db, tmp_path):
     """Test that loading creates the necessary tables."""
-    db_path = tmp_path / KEY_MAP_DB
+    db_path = tmp_path / ANKIOPS_DB
     assert db_path.exists()
 
 
-def test_load_empty(key_map):
+def test_load_empty(db):
     """Loading from a non-existent file should return empty map."""
-    assert key_map.get_note_id("any-key") is None
-    assert key_map.get_deck_id("any-key") is None
-    key_map.close()
+    assert db.get_note_id("any-key") is None
+    assert db.get_deck_id("any-key") is None
+    assert db.get_config("any-config") is None
+    db.close()
 
 
 def test_persistence(tmp_path):
-    """Test that mappings persist across loads."""
+    """Test that mappings and config persist across loads."""
     # First instance
-    km1 = KeyMap.load(tmp_path)
-    km1.set_deck("deck-1", 100)
-    km1.set_note("note-1", 200)
-    km1.close()
+    db1 = AnkiOpsDB.load(tmp_path)
+    db1.set_deck("deck-1", 100)
+    db1.set_note("note-1", 200)
+    db1.set_config("profile", "default")
+    db1.close()
 
     # Reload
-    km2 = KeyMap.load(tmp_path)
-    assert km2.get_deck_id("deck-1") == 100
-    assert km2.get_note_id("note-1") == 200
-    km2.close()
+    db2 = AnkiOpsDB.load(tmp_path)
+    assert db2.get_deck_id("deck-1") == 100
+    assert db2.get_note_id("note-1") == 200
+    assert db2.get_config("profile") == "default"
+    db2.close()
 
 
-def test_note_mapping(key_map):
+def test_config_mapping(db):
+    """Test setting and getting config values."""
+    db.set_config("test-key", "test-value")
+    assert db.get_config("test-key") == "test-value"
+
+    # Overwrite
+    db.set_config("test-key", "new-value")
+    assert db.get_config("test-key") == "new-value"
+    db.close()
+
+
+def test_note_mapping(db):
     """Test setting and getting note mappings."""
     key = "test-note-key"
     note_id = 67890
 
-    key_map.set_note(key, note_id)
-    assert key_map.get_note_id(key) == note_id
-    assert key_map.get_note_key(note_id) == key
+    db.set_note(key, note_id)
+    assert db.get_note_id(key) == note_id
+    assert db.get_note_key(note_id) == key
 
     # Non-existent
-    assert key_map.get_note_id("key-2") is None
-    key_map.close()
+    assert db.get_note_id("key-2") is None
+    db.close()
 
 
-def test_deck_mapping(key_map):
+def test_deck_mapping(db):
     """Test setting and getting deck mappings."""
     key = "test-deck-key"
     deck_id = 12345
 
-    key_map.set_deck(key, deck_id)
-    assert key_map.get_deck_id(key) == deck_id
-    assert key_map.get_deck_key(deck_id) == key
+    db.set_deck(key, deck_id)
+    assert db.get_deck_id(key) == deck_id
+    assert db.get_deck_key(deck_id) == key
 
-    assert key_map.get_note_id("deck-key-A") is None  # Should not be in notes
-    key_map.close()
+    assert db.get_note_id("deck-key-A") is None  # Should not be in notes
+    db.close()
 
 
-def test_overwrite_mapping(key_map):
+def test_overwrite_mapping(db):
     """Test updating an existing mapping enforces 1:1 behavior where possible."""
-    key_map.set_note("key-1", 101)
+    db.set_note("key-1", 101)
 
     # Reassign key-1 to new note ID
-    key_map.set_note("key-1", 999)
+    db.set_note("key-1", 999)
 
-    assert key_map.get_note_id("key-1") == 999
+    assert db.get_note_id("key-1") == 999
     # The old ID 101 is mostly orphaned in the reverse sense
-    assert key_map.get_note_key(101) is None
+    assert db.get_note_key(101) is None
 
-    key_map.close()
+    db.close()
 
 
 def test_generate_key():
     """Test key generation."""
-    key = KeyMap.generate_key()
+    key = AnkiOpsDB.generate_key()
     assert isinstance(key, str)
     assert len(key) > 10  # Reasonable length check for UUID-like string
 
@@ -105,10 +119,10 @@ def test_generate_key():
 
 
 @pytest.fixture
-def mock_key_map_instance(tmp_path):
+def mock_db_instance(tmp_path):
     # Using real DB or mock? The original test mocked it, but real is safer.
     # Let's mock to strictly control return values for missing IDs.
-    return MagicMock(spec=KeyMap)
+    return MagicMock(spec=AnkiOpsDB)
 
 
 @pytest.fixture
@@ -118,8 +132,8 @@ def mock_invoke():
 
 
 @pytest.fixture
-def mock_key_map_class():
-    with patch("ankiops.markdown_to_anki.KeyMap") as mock:
+def mock_db_class():
+    with patch("ankiops.markdown_to_anki.AnkiOpsDB") as mock:
         mock.generate_key.return_value = "generated-key"
         yield mock
 
@@ -141,7 +155,7 @@ def anki_state():
 
 
 def test_recovery_success(
-    mock_key_map_instance, mock_invoke, anki_state, mock_converter
+    mock_db_instance, mock_invoke, anki_state, mock_converter
 ):
     """Test that a missing ID map entry is recovered via AnkiOps Key lookup."""
 
@@ -160,9 +174,9 @@ def test_recovery_success(
     )
 
     # 2. Setup ID Map to return None (missing)
-    mock_key_map_instance.get_note_id.return_value = None
-    mock_key_map_instance.get_deck_id.return_value = 1  # Resolve deck
-    mock_key_map_instance.get_deck_key.return_value = "deck-key-1"
+    mock_db_instance.get_note_id.return_value = None
+    mock_db_instance.get_deck_id.return_value = 1  # Resolve deck
+    mock_db_instance.get_deck_key.return_value = "deck-key-1"
 
     # 3. Setup Anki to find the note via "AnkiOps Key"
     recovered_note_id = 999
@@ -188,23 +202,22 @@ def test_recovery_success(
 
     # 4. Run Sync
     result, _ = _sync_file(
-        file_state, anki_state, mock_converter, mock_key_map_instance
+        file_state, anki_state, mock_converter, mock_db_instance
     )
 
-    # 5. Verify Recovery
     # Should have called findNotes
     mock_invoke.assert_any_call("findNotes", query=f'"AnkiOps Key:{note_key}"')
 
     # Should have updated ID Map
-    mock_key_map_instance.set_note.assert_called_with(note_key, recovered_note_id)
+    mock_db_instance.set_note.assert_called_with(note_key, recovered_note_id)
 
 
 def test_create_injects_id(
-    mock_key_map_instance,
+    mock_db_instance,
     mock_invoke,
     anki_state,
     mock_converter,
-    mock_key_map_class,
+    mock_db_class,
 ):
     """Test that creating a note injects the AnkiOps Key field."""
     note = Note(
@@ -218,19 +231,19 @@ def test_create_injects_id(
         parsed_notes=[note],
     )
 
-    mock_key_map_instance.get_note_id.return_value = None
-    mock_key_map_instance.get_deck_id.return_value = 1
-    mock_key_map_instance.get_deck_key.return_value = "deck-key-1"
+    mock_db_instance.get_note_id.return_value = None
+    mock_db_instance.get_deck_id.return_value = 1
+    mock_db_instance.get_deck_key.return_value = "deck-key-1"
 
     # Run Sync
     result, _ = _sync_file(
-        file_state, anki_state, mock_converter, mock_key_map_instance
+        file_state, anki_state, mock_converter, mock_db_instance
     )
 
     # Check changes
     change = result.changes[0]
     assert change.change_type == ChangeType.CREATE
-    # Generated key from KeyMap.generate_key()
+    # Generated key from AnkiOpsDB.generate_key()
     assert change.context["note_key"] == "generated-key"
 
     # Now verify _build_anki_actions injects it
@@ -248,11 +261,11 @@ def test_create_injects_id(
 def test_corruption_recovery(tmp_path):
     """Test that if the DB is corrupt, it attempts to recover."""
     # Create a valid DB with one entry
-    km = KeyMap.load(tmp_path)
-    km.set_note("n1", 100)
-    km.close()
+    db = AnkiOpsDB.load(tmp_path)
+    db.set_note("n1", 100)
+    db.close()
 
-    db_path = tmp_path / KEY_MAP_DB
+    db_path = tmp_path / ANKIOPS_DB
     assert db_path.exists()
 
     # Corrupt the DB file
@@ -262,10 +275,10 @@ def test_corruption_recovery(tmp_path):
     # Attempt to load
     # It should detect corruption (SQLiteError), backup .db -> .db.corrupt,
     # and start fresh
-    km = KeyMap.load(tmp_path)
+    db = AnkiOpsDB.load(tmp_path)
 
     # Should be empty (fresh DB)
-    assert km.get_note_id("n1") is None
+    assert db.get_note_id("n1") is None
     # Backup should exist
-    assert (tmp_path / (KEY_MAP_DB + ".corrupt")).exists()
-    km.close()
+    assert (tmp_path / (ANKIOPS_DB + ".corrupt")).exists()
+    db.close()

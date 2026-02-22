@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import MARKER_FILE, get_collection_dir
+from ankiops.config import ANKIOPS_DB, get_collection_dir
 from ankiops.log import clickable_path
 from ankiops.models import FileState, Note
 from ankiops.note_type_config import registry
@@ -29,9 +29,9 @@ def serialize_collection_to_json(
         Dictionary containing the serialized data
     """
     # Read collection config
-    marker_path = collection_dir / MARKER_FILE
-    if not marker_path.exists():
-        raise ValueError(f"Not a AnkiOps collection: {collection_dir}")
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
+        raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
 
     # Build JSON structure
     serialized_data = {
@@ -227,9 +227,8 @@ def deserialize_collection_from_json(
         f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {root_dir}"
     )
 
-    # Check if .ankiops marker file exists
-    marker_path = root_dir / MARKER_FILE
-    if not marker_path.exists():
+    db_path = root_dir / ANKIOPS_DB
+    if not db_path.exists():
         logger.info(
             "Run 'ankiops init' to set up this collection with your Anki profile."
         )

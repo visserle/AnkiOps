@@ -7,7 +7,7 @@ from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
-from ankiops.config import MARKER_FILE
+from ankiops.config import ANKIOPS_DB
 
 
 class TestDeserialization:
@@ -47,8 +47,8 @@ class TestDeserialization:
         collection_dir = tmp_path / "collection"
         collection_dir.mkdir()
 
-        # Create marker
-        (collection_dir / MARKER_FILE).touch()
+        # Create marker DB
+        (collection_dir / ANKIOPS_DB).touch()
 
         # Deserialize with no_ids=True, ensuring we are in the target dir
         original_cwd = os.getcwd()
@@ -79,7 +79,7 @@ class TestDeserialization:
         serialized_file = self.create_test_json(tmp_path)
         collection_dir = tmp_path / "collection"
         collection_dir.mkdir()
-        (collection_dir / MARKER_FILE).touch()
+        (collection_dir / ANKIOPS_DB).touch()
 
         original_cwd = os.getcwd()
         try:
@@ -106,7 +106,7 @@ class TestSerialization:
         """Verify serialization uses deck_key and note_key."""
         collection_dir = tmp_path / "collection"
         collection_dir.mkdir()
-        (collection_dir / MARKER_FILE).touch()
+        (collection_dir / ANKIOPS_DB).touch()
 
         # Create a markdown file with keys
         deck_file = collection_dir / "Source Deck.md"
@@ -156,7 +156,7 @@ class TestSerialization:
 
         collection_dir = tmp_path / "collection"
         collection_dir.mkdir()
-        (collection_dir / MARKER_FILE).touch()
+        (collection_dir / ANKIOPS_DB).touch()
 
         original_cwd = os.getcwd()
         try:
@@ -197,7 +197,7 @@ class TestSerialization:
 
         collection_dir = tmp_path / "collection"
         collection_dir.mkdir()
-        (collection_dir / MARKER_FILE).touch()
+        (collection_dir / ANKIOPS_DB).touch()
 
         original_cwd = os.getcwd()
         try:

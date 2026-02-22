@@ -9,6 +9,7 @@ These tests simulate the entire application stack:
 
 from ankiops.anki_to_markdown import export_collection, export_deck
 from ankiops.markdown_to_anki import import_collection, import_file
+from ankiops.db import AnkiOpsDB
 
 
 def test_import_with_stale_deck_key_mapping(
@@ -244,7 +245,6 @@ def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):
 def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     """Test that AnkiOps Key is populated when updating an existing note that misses it."""
     # 1. Create a note in Anki that has content but NO AnkiOps Key
-    from ankiops.key_map import KeyMap as KM
 
     # Create dummy existing note in mock
     field_data = {"Question": "OldQ", "Answer": "OldA", "AnkiOps Key": ""}
@@ -266,13 +266,13 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
         "modelName": "AnkiOpsQA",
     }
 
-    # Setup KeyMap with fixed keys
-    km = KM.load(tmp_path)
+    # Setup AnkiOpsDB with fixed keys
+    db = AnkiOpsDB.load(tmp_path)
     deck_key = "deckkeyexisting"
     note_key = "notekeyexisting"
-    km.set_deck(deck_key, deck_id)
-    km.set_note(note_key, note_id)
-    km.close()
+    db.set_deck(deck_key, deck_id)
+    db.set_note(note_key, note_id)
+    db.close()
 
     # Create File
     deck_file = tmp_path / "ReproDeck.md"

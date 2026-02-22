@@ -12,7 +12,7 @@ from ankiops.collection_serializer import (
     serialize_collection_to_json,
 )
 from ankiops.config import (
-    MARKER_FILE,
+    ANKIOPS_DB,
     get_collection_dir,
     require_collection_dir,
 )
@@ -180,8 +180,8 @@ def run_ma(args):
 def run_serialize(args):
     """Serialize collection to JSON format."""
     collection_dir = get_collection_dir()
-    marker = collection_dir / MARKER_FILE
-    if not marker.exists():
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
         logger.error(
             f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
         )

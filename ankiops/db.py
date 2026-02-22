@@ -15,22 +15,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ankiops.config import KEY_MAP_DB
+from ankiops.config import ANKIOPS_DB
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class KeyMap:
-    """Bidirectional Key ↔ ID mapping for notes and decks using SQLite."""
+class AnkiOpsDB:
+    """Bidirectional Key ↔ ID mapping and project configuration using SQLite."""
 
     _conn: sqlite3.Connection
     _db_path: Path
 
     @staticmethod
-    def load(collection_dir: Path) -> "KeyMap":
-        """Load mapping from the collection's key_map.db (migrating from json if needed)."""
-        db_path = collection_dir / KEY_MAP_DB
+    def load(collection_dir: Path) -> "AnkiOpsDB":
+        """Load mapping and config from the collection's .ankiops.db."""
+        db_path = collection_dir / ANKIOPS_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         conn = None
@@ -51,6 +51,12 @@ class KeyMap:
                         id INTEGER NOT NULL
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS config (
+                        key TEXT PRIMARY KEY,
+                        value TEXT
+                    )
+                """)
                 # Index on ID for fast reverse lookup
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(id)")
@@ -68,9 +74,9 @@ class KeyMap:
                     logger.error(f"Failed to rename corrupt database: {e}")
 
             # Recursive retry (should match clean state now)
-            return KeyMap.load(collection_dir)
+            return AnkiOpsDB.load(collection_dir)
 
-        map_obj = KeyMap(conn, db_path)
+        map_obj = AnkiOpsDB(conn, db_path)
 
         return map_obj
 
@@ -81,6 +87,21 @@ class KeyMap:
     def close(self) -> None:
         """Close database connection."""
         self._conn.close()
+
+    # --- Config Methods ---
+
+    def get_config(self, key: str) -> Optional[str]:
+        """Look up a configuration value."""
+        cursor = self._conn.execute("SELECT value FROM config WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def set_config(self, key: str, value: str) -> None:
+        """Add or update a configuration value."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", (key, value)
+            )
 
     # --- Note Methods ---
 
