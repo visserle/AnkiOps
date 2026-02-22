@@ -100,7 +100,6 @@ def test_load_custom_from_dir(registry):
                     {"name": "Term", "prefix": "TM:"},
                     {"name": "Definition", "prefix": "D:"},
                 ],
-                "reversed": True,
             }
         }
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
@@ -265,7 +264,7 @@ def test_reserved_ankiops_key(registry):
     """Ensure reserved AnkiOps Key name cannot be used."""
     config = NoteTypeConfig(
         name="BadName",
-        fields=[Field(ANKIOPS_KEY_FIELD.name, "X:")],
+        fields=[Field(ANKIOPS_KEY_FIELD.name, "X:", is_identifying=False)],
     )
     with pytest.raises(ValueError, match="uses reserved field name"):
         registry.register(config)

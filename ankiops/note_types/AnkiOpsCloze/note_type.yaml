@@ -1,20 +1,20 @@
 name: AnkiOpsCloze
-cloze: true
+is_cloze: true
 fields:
   - name: Text
     prefix: "T:"
   - name: Extra
     prefix: "E:"
-    identifying: false
+    is_identifying: false
   - name: More
     prefix: "M:"
-    identifying: false
+    is_identifying: false
   - name: Source
     prefix: "S:"
-    identifying: false
+    is_identifying: false
   - name: AI Notes
     prefix: "AI:"
-    identifying: false
+    is_identifying: false
 templates:
   - name: Cloze
     front: Front.template.anki

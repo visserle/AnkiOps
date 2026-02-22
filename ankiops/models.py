@@ -177,7 +177,7 @@ class Note:
            For is_choice types, we require all base identifying fields PLUS at least one choice.
         """
         reserved_names = registry._RESERVED_NAMES
-        note_fields = {k for k in fields.keys() if k not in reserved_names}
+        note_fields = {key for key in fields.keys() if key not in reserved_names}
 
         candidates = []
 
@@ -190,7 +190,7 @@ class Note:
                 continue
 
             # Check 2: Identification requirements
-            type_ident_fields = {field.name for field in config.fields if field.identifying}
+            type_ident_fields = {field.name for field in config.fields if field.is_identifying}
 
             if config.is_choice:
                 # Choice types: base identifying (e.g. Q, A) must be present
@@ -293,11 +293,17 @@ class Note:
                 f"in block starting with: '{block.strip()[:50]}...'"
             )
 
-        return Note(
+        note = Note(
             note_key=note_key,
             note_type=Note.infer_note_type(fields),
             fields=fields,
         )
+
+        errors = note.validate()
+        if errors:
+            raise ValueError(f"Invalid note in block starting with '{block.strip()[:50]}...':\n  " + "\n  ".join(errors))
+
+        return note
 
     @property
     def first_line(self) -> str:
@@ -352,7 +358,7 @@ class Note:
             # internal fields (prefix is None) are implicitly optional in markdown.
             if (
                 field.prefix is not None
-                and field.identifying
+                and field.is_identifying
                 and not self.fields.get(field.name)
             ):
                 errors.append(

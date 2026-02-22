@@ -22,11 +22,11 @@ class Field:
 
     name: str
     prefix: str | None  # None is used for the AnkiOps Key field
-    identifying: bool = True
+    is_identifying: bool = True
 
 
 # The mandatory field for all AnkiOps note types
-ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, identifying=False)
+ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, is_identifying=False)
 
 @dataclass
 class NoteTypeConfig:
@@ -71,7 +71,7 @@ class NoteTypeConfig:
         return {
             str(field.prefix)
             for field in self.fields
-            if field.prefix is not None and field.identifying
+            if field.prefix is not None and field.is_identifying
         }
 
     def get_field_by_prefix(self, prefix: str) -> Field | None:
@@ -211,23 +211,23 @@ class NoteTypeRegistry:
             data = yaml.safe_load(root_config.read_text(encoding="utf-8"))
             for name, config_data in data.items():
                 fields = []
-                for f in config_data.get("fields", []):
-                    if isinstance(f, str):
-                        fields.append(Field(f, None))
+                for field_def in config_data.get("fields", []):
+                    if isinstance(field_def, str):
+                        fields.append(Field(field_def, None))
                     else:
                         fields.append(
                             Field(
-                                f["name"],
-                                f.get("prefix"),
-                                f.get("identifying", True),
+                                field_def["name"],
+                                field_def.get("prefix"),
+                                field_def.get("is_identifying", True),
                             )
                         )
 
                 config = NoteTypeConfig(
                     name=name,
                     fields=fields,
-                    is_cloze=config_data.get("cloze", False),
-                    is_choice=config_data.get("choice", False),
+                    is_cloze=config_data.get("is_cloze", False),
+                    is_choice=config_data.get("is_choice", False),
                     package_dir=note_types_dir / name,
                 )
                 self.register(config)
@@ -251,9 +251,9 @@ class NoteTypeRegistry:
 
                 fields = []
                 for field in info.get("fields", []):
-                    identifying = field.get("identifying", True)
+                    is_identifying = field.get("is_identifying", True)
                     fields.append(
-                        Field(field["name"], field["prefix"], identifying=identifying)
+                        Field(field["name"], field["prefix"], is_identifying=is_identifying)
                     )
 
                 # Ensure AnkiOps Key is at the end
@@ -264,8 +264,8 @@ class NoteTypeRegistry:
                     NoteTypeConfig(
                         name=name,
                         fields=fields,
-                        is_cloze=bool(info.get("cloze", False)),
-                        is_choice=bool(info.get("choice", False)),
+                        is_cloze=bool(info.get("is_cloze", False)),
+                        is_choice=bool(info.get("is_choice", False)),
                         package_dir=subdir,
                         card_templates=info.get("templates"),
                     )

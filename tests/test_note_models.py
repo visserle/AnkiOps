@@ -66,7 +66,7 @@ class TestParseChoiceBlock:
         assert parsed_note.fields["More"] == "More info"
 
     def test_choice_multiline_question(self):
-        block = "Q: First line\nSecond line\nC1: Choice 1\nA: 1"
+        block = "Q: First line\nSecond line\nC1: Choice 1\nC2: Choice 2\nA: 1"
         parsed_note = Note.from_block(block)
         assert parsed_note.fields["Question"] == "First line\nSecond line"
 
@@ -139,36 +139,31 @@ class TestValidateChoiceNote:
 
     def test_invalid_answer_not_integer(self):
         block = "Q: Question?\nC1: A\nC2: B\nA: abc"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert any("integers" in e for e in errors)
+        with pytest.raises(ValueError, match="must contain integers"):
+            Note.from_block(block)
 
     def test_invalid_answer_mixed_content(self):
         block = "Q: Question?\nC1: A\nC2: B\nA: 1, abc, 2"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert any("integers" in e for e in errors)
+        with pytest.raises(ValueError, match="must contain integers"):
+            Note.from_block(block)
 
     def test_answer_out_of_range_too_high(self):
         """Answer references choice number that doesn't exist."""
         block = "Q: Question?\nC1: A\nC2: B\nA: 3"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert any("only 2 choice(s) are provided" in e for e in errors)
+        with pytest.raises(ValueError, match="only 2 choice\(s\) are provided"):
+            Note.from_block(block)
 
     def test_answer_out_of_range_zero(self):
         """Answer with 0 is invalid (choices start at 1)."""
         block = "Q: Question?\nC1: A\nC2: B\nA: 0"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert len(errors) > 0
+        with pytest.raises(ValueError):
+            Note.from_block(block)
 
     def test_answer_out_of_range_negative(self):
         """Negative answer is invalid."""
         block = "Q: Question?\nC1: A\nC2: B\nA: -1"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert len(errors) > 0
+        with pytest.raises(ValueError):
+            Note.from_block(block)
 
     def test_valid_with_seven_choices(self):
         """All 7 choices can be used."""
@@ -180,9 +175,8 @@ class TestValidateChoiceNote:
     def test_answer_exceeds_seven(self):
         """Answer > 7 is always invalid."""
         block = "Q: Question?\nC1: A\nC2: B\nA: 8"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert len(errors) > 0
+        with pytest.raises(ValueError):
+            Note.from_block(block)
 
     def test_valid_sparse_choices(self):
         """Choices don't have to be consecutive (e.g., C1, C2, C4)."""
@@ -195,9 +189,8 @@ class TestValidateChoiceNote:
     def test_multiple_answers_one_out_of_range(self):
         """If any answer in multi-choice is out of range, it's an error."""
         block = "Q: Question?\nC1: A\nC2: B\nC3: C\nA: 1, 2, 5"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert any("only 3 choice(s) are provided" in e for e in errors)
+        with pytest.raises(ValueError, match="only 3 choice\(s\) are provided"):
+            Note.from_block(block)
 
 
 class TestParseClozeBlock:
@@ -404,16 +397,15 @@ class TestValidateNote:
 
     def test_choice_with_missing_early_choices_identified(self):
         """Regression test for robust choice matching (e.g., Q, A, C3 without C1, C2)."""
-        block = "Q: Test\nA: 1\nC3: Choice 3"
+        block = "Q: Test\nA: 1\nC1: Choice 1\nC3: Choice 3"
         parsed_note = Note.from_block(block)
         assert parsed_note.note_type == "AnkiOpsChoice"
         assert parsed_note.fields["Choice 3"] == "Choice 3"
 
     def test_cloze_without_cloze_syntax(self):
         block = "T: This has no cloze deletions"
-        parsed_note = Note.from_block(block)
-        errors = parsed_note.validate()
-        assert any("cloze syntax" in e for e in errors)
+        with pytest.raises(ValueError, match="cloze syntax"):
+            Note.from_block(block)
 
     def test_cloze_with_valid_syntax(self):
         block = "T: The {{c1::answer}} is here"

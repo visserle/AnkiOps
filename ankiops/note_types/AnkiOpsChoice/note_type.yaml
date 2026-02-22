@@ -1,5 +1,5 @@
 name: AnkiOpsChoice
-choice: true
+is_choice: true
 fields:
   - name: Question
     prefix: "Q:"
@@ -23,16 +23,16 @@ fields:
     prefix: "A:"
   - name: Extra
     prefix: "E:"
-    identifying: false
+    is_identifying: false
   - name: More
     prefix: "M:"
-    identifying: false
+    is_identifying: false
   - name: Source
     prefix: "S:"
-    identifying: false
+    is_identifying: false
   - name: AI Notes
     prefix: "AI:"
-    identifying: false
+    is_identifying: false
 templates:
   - name: Card 1
     front: Front.template.anki

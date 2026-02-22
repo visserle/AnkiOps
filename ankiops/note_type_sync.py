@@ -398,7 +398,7 @@ def ensure_note_types() -> None:
 
     for model_name in models_to_create:
         write_actions.extend(
-            _create_model_actions(model_name, is_cloze="cloze" in model_name.lower())
+            _create_model_actions(model_name, is_cloze=registry.get(model_name).is_cloze)
         )
         created_models.append(model_name)
 
