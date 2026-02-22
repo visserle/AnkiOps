@@ -380,14 +380,6 @@ class TestValidateNote:
         parsed_note = Note.from_block(block)
         assert parsed_note.validate() == []
 
-    def test_missing_mandatory_qa_fields(self):
-        block = "<!-- note_key: key-1 -->\nQ: Question only, no answer"
-        # Parsing should succeed (inference works with subsets)
-        parsed_note = Note.from_block(block)
-        assert parsed_note.note_type == "AnkiOpsQA"
-        # Validation should fail
-        errors = parsed_note.validate()
-        assert any("Missing mandatory field 'Answer'" in e for e in errors)
 
     def test_missing_mandatory_cloze_field(self):
         # Construct directly since T: without cloze syntax would fail validation

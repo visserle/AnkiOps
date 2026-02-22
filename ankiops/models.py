@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 from ankiops.anki_client import invoke
 from ankiops.config import NOTE_SEPARATOR
 from ankiops.log import format_changes
-from ankiops.note_type_config import COMMON_FIELD_MAP, registry
+from ankiops.note_type_config import registry
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
@@ -180,15 +180,7 @@ class Note:
         reserved_names = registry._RESERVED_NAMES
         note_fields = {k for k in fields.keys() if k not in reserved_names}
 
-        # We also filter out common fields for the purpose of ensuring
-        # at least one core field is present.
-        common_prefixes = set(COMMON_FIELD_MAP.values())
-        common_field_names = set(COMMON_FIELD_MAP.keys())
-
-        identifying_note_fields = note_fields - common_field_names
-        if not identifying_note_fields:
-            raise ValueError("Cannot determine note type: only common fields found")
-
+        # Infer note type
         candidates = []
 
         for name in registry.supported_note_types:

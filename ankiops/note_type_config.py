@@ -28,15 +28,6 @@ class Field:
 # The mandatory field for all AnkiOps note types
 ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, identifying=False)
 
-# Common fields shared across many note types
-COMMON_FIELD_MAP = {
-    "Extra": "E:",
-    "More": "M:",
-    "Source": "S:",
-    "AI Notes": "AI:",
-}
-
-
 @dataclass
 class NoteTypeConfig:
     """Configuration for a single note type."""
@@ -53,7 +44,7 @@ class NoteTypeConfig:
     def css(self) -> str:
         """Get CSS: Global root Styling.css + Local package Styling.css."""
         css_parts = []
-        
+
         # 1. Global root Styling.css
         root_css = get_note_types_dir() / "Styling.css"
         if root_css.exists():
@@ -77,7 +68,9 @@ class NoteTypeConfig:
     def identifying_prefixes(self) -> set[str]:
         """Return prefixes of identifying fields."""
         return {
-            str(f.prefix) for f in self.fields if f.prefix is not None and f.identifying
+            str(field.prefix)
+            for field in self.fields
+            if field.prefix is not None and field.identifying
         }
 
     def get_field_by_prefix(self, prefix: str) -> Field | None:
@@ -130,11 +123,11 @@ class NoteTypeRegistry:
                     )
 
         # 2. Prefixes
-        reserved_prefixes = set(COMMON_FIELD_MAP.values())
+        reserved_prefixes: set[str] = set()
         # Add built-in prefixes from already registered built-ins
-        for c in self._configs.values():
-            if c.name.startswith("AnkiOps"):
-                reserved_prefixes.update(c.identifying_prefixes)
+        for registered_config in self._configs.values():
+            if registered_config.name.startswith("AnkiOps"):
+                reserved_prefixes.update(registered_config.identifying_prefixes)
 
         for field in config.fields:
             if field.prefix is not None and field.prefix in reserved_prefixes:
@@ -142,7 +135,7 @@ class NoteTypeRegistry:
                     continue
 
                 raise ValueError(
-                    f"Note type '{config.name}' uses reserved built-in/common "
+                    f"Note type '{config.name}' uses reserved built-in "
                     f"prefix '{field.prefix}'"
                 )
 
@@ -245,23 +238,21 @@ class NoteTypeRegistry:
                 continue
 
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    info = yaml.safe_load(f) or {}
+                with open(config_path, "r", encoding="utf-8") as file:
+                    info = yaml.safe_load(file) or {}
 
                 # Use name from YAML if present, fallback to folder name
                 name = info.get("name", subdir.name)
 
                 fields = []
-                for f in info.get("fields", []):
-                    # Hardcoded default for common optional fields if not specified
-                    is_common = f["name"] in COMMON_FIELD_MAP
-                    identifying = f.get("identifying", not is_common)
+                for field in info.get("fields", []):
+                    identifying = field.get("identifying", True)
                     fields.append(
-                        Field(f["name"], f["prefix"], identifying=identifying)
+                        Field(field["name"], field["prefix"], identifying=identifying)
                     )
 
                 # Ensure AnkiOps Key is at the end
-                if ANKIOPS_KEY_FIELD.name not in [f.name for f in fields]:
+                if ANKIOPS_KEY_FIELD.name not in [field.name for field in fields]:
                     fields.append(ANKIOPS_KEY_FIELD)
 
                 self.register(

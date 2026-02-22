@@ -57,7 +57,7 @@ def test_register_custom_conflict_with_builtin(registry):
         fields=[Field("MyQuestion", "Q:")],  # "Q:" is reserved
     )
     # Reservation check (Rule 1) now happens before Consistency check (Rule 2)
-    with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
+    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
         registry.register(config)
 
 
@@ -199,7 +199,7 @@ def test_strict_builtin_reservation(registry):
         name="MyQA",
         fields=[Field("Question", "Q:")],
     )
-    with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
+    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
         registry.register(config)
 
     # Attempt to use just the name "Question" with different prefix
@@ -226,7 +226,7 @@ def test_strict_builtin_reservation(registry):
         name="MyQA_Prefix",
         fields=[Field("MyQuestion", "Q:")],
     )
-    with pytest.raises(ValueError, match="uses reserved built-in/common prefix"):
+    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
         registry.register(config_prefix)
 
 

@@ -6,12 +6,16 @@ fields:
     prefix: "A:"
   - name: Extra
     prefix: "E:"
+    identifying: false
   - name: More
     prefix: "M:"
+    identifying: false
   - name: Source
     prefix: "S:"
+    identifying: false
   - name: AI Notes
     prefix: "AI:"
+    identifying: false
 cloze: false
 templates:
   - name: Card 1
