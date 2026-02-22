@@ -35,6 +35,7 @@ class NoteTypeConfig:
     name: str
     fields: list[Field]
     is_cloze: bool = False
+    is_choice: bool = False
     package_dir: Path | None = None  # Directory containing note_type.yaml and templates
     card_templates: list[dict[str, str]] | None = (
         None  # Explicit list of {Name, Front, Back}
@@ -89,6 +90,7 @@ class NoteTypeRegistry:
 
     def __init__(self):
         self._configs: dict[str, NoteTypeConfig] = {}
+        self.discover_builtins()
 
     def register(self, config: NoteTypeConfig) -> None:
         """Register a new note type configuration with strict validation."""
@@ -191,8 +193,10 @@ class NoteTypeRegistry:
 
     def discover_builtins(self) -> None:
         """Load built-in note types from the package resources."""
-        src_root = resources.files("ankiops.card_templates")
-        with resources.as_file(src_root) as src_path:
+        # Use path relative to this file to avoid importlib.resources ambiguity
+        # when multiple versions of the package might be present.
+        src_path = Path(__file__).parent / "card_templates"
+        if src_path.exists():
             self.load(src_path)
 
     def load(self, directory: Path | None = None) -> None:
@@ -223,6 +227,7 @@ class NoteTypeRegistry:
                     name=name,
                     fields=fields,
                     is_cloze=config_data.get("cloze", False),
+                    is_choice=config_data.get("choice", False),
                     package_dir=card_templates_dir / name,
                 )
                 self.register(config)
@@ -260,6 +265,7 @@ class NoteTypeRegistry:
                         name=name,
                         fields=fields,
                         is_cloze=bool(info.get("cloze", False)),
+                        is_choice=bool(info.get("choice", False)),
                         package_dir=subdir,
                         card_templates=info.get("templates"),
                     )

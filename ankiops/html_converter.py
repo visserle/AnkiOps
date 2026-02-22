@@ -10,9 +10,9 @@ from ankiops.config import LOCAL_MEDIA_DIR
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
     "*": "\u200dMDESCASTERISK\u200d",
-    "\\": "\u200dMDESCBACKSLASH\u200d",
     "+": "\u200dMDESPLUS\u200d",
     "#": "\u200dMDESCHASH\u200d",
+    "\\": "\u200dMDESCBACKSLASH\u200d",
 }
 
 
@@ -76,8 +76,12 @@ def _protect_literal_chars(html: str) -> str:
             text = "".join(parts)
         else:
             # No math, escape normally
+            # Order matters: escape backslashes first
+            if "\\" in text:
+                text = text.replace("\\", _MD_SPECIAL_CHARS["\\"])
             for char, placeholder in _MD_SPECIAL_CHARS.items():
-                text = text.replace(char, placeholder)
+                if char != "\\":
+                    text = text.replace(char, placeholder)
 
         text_node.replace_with(text)
 
@@ -87,6 +91,9 @@ def _protect_literal_chars(html: str) -> str:
 def _restore_escaped_chars(md: str) -> str:
     """Restore placeholders as escaped markdown characters."""
     for char, placeholder in _MD_SPECIAL_CHARS.items():
+        # Restore as escaped characters (e.g. \* or \\)
+        # This ensures that when passed back to MarkdownToHTML,
+        # they are treated literally.
         md = md.replace(placeholder, "\\" + char)
     return md
 

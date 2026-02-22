@@ -396,6 +396,19 @@ class TestValidateNote:
         with pytest.raises(ValueError, match="Cannot determine note type"):
             Note.from_block(block)
 
+    def test_only_question_raises(self):
+        """Regression test: Q: alone is ambiguous/incomplete."""
+        block = "Q: What is the capital of France?"
+        with pytest.raises(ValueError, match="Cannot determine note type"):
+            Note.from_block(block)
+
+    def test_choice_with_missing_early_choices_identified(self):
+        """Regression test for robust choice matching (e.g., Q, A, C3 without C1, C2)."""
+        block = "Q: Test\nA: 1\nC3: Choice 3"
+        parsed_note = Note.from_block(block)
+        assert parsed_note.note_type == "AnkiOpsChoice"
+        assert parsed_note.fields["Choice 3"] == "Choice 3"
+
     def test_cloze_without_cloze_syntax(self):
         block = "T: This has no cloze deletions"
         parsed_note = Note.from_block(block)

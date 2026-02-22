@@ -191,6 +191,20 @@ def mock_anki():
     return MockAnki()
 
 
+@pytest.fixture
+def run_ankiops(mock_anki):
+    """Fixture to run ankiops with mocked invoke."""
+    # We must patch where it's imported in all touched modules
+    with (
+        patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.models.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.markdown_to_anki.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.note_types.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.cli.invoke", side_effect=mock_anki.invoke),
+    ):
+        yield
+
+
 @pytest.fixture(autouse=True)
 def mock_input():
     """Always answer 'y' to confirmation prompts."""

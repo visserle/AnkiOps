@@ -171,46 +171,50 @@ class Note:
     def infer_note_type(fields: dict[str, str]) -> str:
         """Infer note type from parsed fields.
 
-        Finds the note type that contains all fields present in the note.
-        If multiple types match (e.g. QA matches {Q, A}, Choice matches {Q, A, C1}),
-        prefers the "tightest" fit (smallest number of identifying fields).
+        A note type is a candidate if:
+        1. All fields in the note are valid for that type (subset of total configuration).
+        2. All identifying fields for the type are present in the note (strict matching).
+           For is_choice types, we require all base identifying fields PLUS at least one choice.
         """
-        # Exclude internal mandatory fields (AnkiOps Key) from logic
-        # as they do not distinguish note types.
         reserved_names = registry._RESERVED_NAMES
         note_fields = {k for k in fields.keys() if k not in reserved_names}
 
-        # Infer note type
         candidates = []
 
         for name in registry.supported_note_types:
             config = registry.get(name)
-            type_fields = {field.name for field in config.fields}
+            type_all_fields = {field.name for field in config.fields}
 
             # Check 1: Note fields must be a subset of the Type's fields
-            if note_fields.issubset(type_fields):
-                # Specificity is based on identifying fields only
-                type_ident_prefixes = config.identifying_prefixes
-                candidates.append((name, len(type_ident_prefixes)))
+            if not note_fields.issubset(type_all_fields):
+                continue
+
+            # Check 2: Identification requirements
+            type_ident_fields = {field.name for field in config.fields if field.identifying}
+
+            if config.is_choice:
+                # Choice types: base identifying (e.g. Q, A) must be present
+                # PLUS at least one choice field.
+                base_ident = {f for f in type_ident_fields if "Choice" not in f}
+                choice_fields = {f for f in type_all_fields if "Choice" in f}
+                if base_ident.issubset(note_fields) and (note_fields & choice_fields):
+                    candidates.append(name)
+            else:
+                # Standard types: all identifying fields must be present
+                if type_ident_fields.issubset(note_fields):
+                    candidates.append(name)
 
         if not candidates:
             raise ValueError(
                 "Cannot determine note type from fields: " + ", ".join(fields.keys())
             )
 
-        # Sort by size (ascending).
-        candidates.sort(key=lambda x: x[1])
-
-        # Check for ambiguity among the best fits
-        best_size = candidates[0][1]
-        best_fits = [c[0] for c in candidates if c[1] == best_size]
-
-        if len(best_fits) > 1:
+        if len(candidates) > 1:
             raise ValueError(
-                f"Ambiguous note type: matches multiple types with same specificity: {', '.join(best_fits)}"
+                f"Ambiguous note type: matches multiple types: {', '.join(candidates)}"
             )
 
-        return best_fits[0]
+        return candidates[0]
 
     @staticmethod
     def from_block(block: str) -> Note:

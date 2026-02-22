@@ -163,33 +163,9 @@ class MarkdownToHTML:
         # Pattern: </ol> or </ul> followed by newline then <br>, make it <br><br>
         html = re.sub(r"(</(?:ol|ul)>)\n(<br>)", r"\1\n<br>\2", html)
 
-        # Unescape brackets that were escaped in markdown, but NOT math delimiters
-        # Only unescape \[ and \] if they don't contain LaTeX-like content
-        # Math expressions have backslash commands, underscores, braces, etc.
-        def replace_non_math_brackets(text):
-            # Pattern to match \[...\] and check if it's math or not
-            # Math typically contains: \commands, _, ^, {, }, etc.
-            def is_math_content(content):
-                # Check for LaTeX indicators
-                return bool(re.search(r"[\\_{}\^]|\\[a-zA-Z]+", content))
+        # Unescape characters that were explicitly escaped in HTMLToMarkdown
+        # to ensure roundtrip stability for our dialect-specific markers.
+        # Mistune unescapes most things but can be conservative.
+        html = html.replace("\\+", "+").replace("\\#", "#").replace("\\*", "*")
 
-            result = []
-            pos = 0
-            # Find all \[...\] patterns
-            for match in re.finditer(r"\\\[(.*?)\\\]", text, re.DOTALL):
-                # Add text before this pattern
-                result.append(text[pos : match.start()])
-                # Check if content looks like math
-                if is_math_content(match.group(1)):
-                    # Keep as is (math delimiter)
-                    result.append(match.group(0))
-                else:
-                    # Unescape (not math)
-                    result.append("[" + match.group(1) + "]")
-                pos = match.end()
-            # Add remaining text
-            result.append(text[pos:])
-            return "".join(result)
-
-        html = replace_non_math_brackets(html)
         return html

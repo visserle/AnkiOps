@@ -310,13 +310,16 @@ def test_inference_choice_resilience(mock_registry):
             Field("Answer", "A:"),
             Field("Choice 1", "C1:"),
             Field("Choice 2", "C2:"),
+            Field("Choice 5", "C5:"),
+            Field("Choice 6", "C6:"),
         ],
+        is_choice=True,
     )
     mock_registry._configs = {"Choice": choice}
 
     with patch("ankiops.models.registry", mock_registry):
         # {Q, A, C2} -> Choice
-        note_fields = {"Question": "v", "Answer": "v", "Choice 2": "v"}
+        note_fields = {"Question": "v", "Answer": "v", "Choice 5": "v", "Choice 6": "v"}
         assert models.Note.infer_note_type(note_fields) == "Choice"
 
 
