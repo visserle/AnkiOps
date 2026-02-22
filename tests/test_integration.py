@@ -315,3 +315,53 @@ def test_import_idempotency(tmp_path, mock_anki, run_ankiops):
     assert summary2.results[0].summary.updated == 0, (
         f"Expected 0 updates on second run, got {summary2.results[0].summary.updated}"
     )
+
+def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
+    """Test that existing AnkiOps Key in Anki is reused, not regenerated."""
+    # 1. Setup Anki with a note that already has an AnkiOps Key
+    existing_note_key = "a1b2c3d4e5f6"
+    deck_name = "ExistingKeyDeck"
+
+    # Manually structure the note in mock_anki to have the key in its fields
+    field_data = {
+        "Question": "Q1",
+        "Answer": "A1",
+        "AnkiOps Key": existing_note_key
+    }
+
+    deck_id = mock_anki.invoke("createDeck", deck=deck_name)
+    note_id = 12345
+
+    mock_anki.notes[note_id] = {
+        "noteId": note_id,
+        "modelName": "AnkiOpsQA",
+        "fields": {k: {"value": v} for k, v in field_data.items()},
+        "cards": [20001],
+    }
+    mock_anki.cards[20001] = {
+        "cardId": 20001,
+        "note": note_id,
+        "deckName": deck_name,
+        "modelName": "AnkiOpsQA",
+    }
+
+    # 2. Ensure the local DB does NOT have this mapping yet (simulating first export)
+    db = AnkiOpsDB.load(tmp_path)
+    assert db.get_note_key(note_id) is None
+    db.close()
+
+    # 3. Run export
+    export_collection(output_dir=str(tmp_path))
+
+    # 4. Verify the markdown file uses the EXISTING key
+    md_file = tmp_path / f"{deck_name}.md"
+    assert md_file.exists()
+
+    content = md_file.read_text()
+    assert f"<!-- note_key: {existing_note_key} -->" in content
+
+    # 5. Verify the DB was updated with the EXISTING key, not a new one
+    db = AnkiOpsDB.load(tmp_path)
+    stored_key = db.get_note_key(note_id)
+    assert stored_key == existing_note_key, f"Expected key {existing_note_key}, but got {stored_key}"
+    db.close()

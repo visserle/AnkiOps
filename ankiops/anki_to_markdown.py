@@ -50,7 +50,13 @@ def _format_blocks(
         # Look up or generate Key for this note
         note_key = db.get_note_key(nid)
         if not note_key:
-            note_key = AnkiOpsDB.generate_key()
+            # Check if Anki note already has an AnkiOps Key field
+            note_key = anki_note.fields.get("AnkiOps Key")
+            if note_key:
+                logger.debug(f"Reusing existing AnkiOps Key '{note_key}' for note {nid}")
+            else:
+                note_key = AnkiOpsDB.generate_key()
+
             db.set_note(note_key, nid)
 
         block = anki_note.to_markdown(converter, note_key=note_key)
