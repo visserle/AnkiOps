@@ -6,40 +6,89 @@
         min-width: 40px;
         min-height: 1.2em;
         background-color: #eee;
-        color: transparent; /* hides the text inside */
+        color: transparent;
         vertical-align: middle;
         margin: 0 2px;
+        transition: color 0.2s ease;
+    }
+    .inactive-cloze.revealed {
+        color: inherit;
     }
 </style>
 
-<!-- Anki requires at least one cloze filter for valid cloze templates -->
-<div style="display:none;">{{cloze:Hidden Text}}</div>
+<!-- Anki renders the active cloze here; we parse it to detect which index is active -->
+<div id="cloze_rendered" style="display:none;">{{cloze:Hidden Text}}</div>
 <div id="hidden_raw" style="display:none;">{{Hidden Text}}</div>
 <div id="content_display"></div>
 
 <script>
     (function(){
-        let raw = document.getElementById("hidden_raw").innerHTML;
-        
-        let activeMatch = "{{Card}}".match(/\d+/);
-        let activeIdx = activeMatch ? activeMatch[0] : "1";
-        
-        let clozeRegex = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
-        
-        let replaced = raw.replace(clozeRegex, function(match, idx, inner) {
-            let parts = inner.split("::");
-            let content = parts.shift();
-            
+        var raw = document.getElementById("hidden_raw").innerHTML;
+        var rendered = document.getElementById("cloze_rendered").innerHTML;
+
+        // Detect the active cloze index.
+        // On the back side, Anki wraps the active cloze answer in
+        // <span class="cloze">content</span>, inactive clozes shown as
+        // plain content. We extract the .cloze span content and match it.
+        var clozeIndices = [];
+        var idxRegex = /\{\{c(\d+)::/g;
+        var m;
+        while ((m = idxRegex.exec(raw)) !== null) {
+            if (clozeIndices.indexOf(m[1]) === -1) clozeIndices.push(m[1]);
+        }
+
+        var activeIdx = clozeIndices.length > 0 ? clozeIndices[0] : "1";
+
+        // Extract the content inside Anki's .cloze span from rendered HTML
+        var tempDiv = document.createElement("div");
+        tempDiv.innerHTML = rendered;
+        var clozeSpan = tempDiv.querySelector(".cloze");
+        if (clozeSpan) {
+            var activeContent = clozeSpan.innerHTML.trim();
+            // Find which cloze index this content belongs to
+            // Walk through raw clozes in order — if multiple clozes have the
+            // same content, we match by position using the surrounding context
+            var clozeRegex = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
+            var match;
+            while ((match = clozeRegex.exec(raw)) !== null) {
+                var idx = match[1];
+                var content = match[2].split("::")[0];
+                if (content.trim() === activeContent) {
+                    activeIdx = idx;
+                    break;
+                }
+            }
+        }
+
+        // Render: active cloze revealed, inactive clozes hidden
+        var result = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
+            var content = inner.split("::")[0];
+
             if (idx === activeIdx) {
                 return "<span class='cloze'>" + content + "</span>";
             } else {
                 return "<span class='inactive-cloze'>" + content + "</span>";
             }
         });
-        
-        document.getElementById("content_display").innerHTML = replaced;
+
+        document.getElementById("content_display").innerHTML = result;
     })();
 </script>
+
+<div style="text-align:center; margin-top:10px;">
+    <div class="more cloze-toggle" onclick="
+        var els = document.querySelectorAll('.inactive-cloze');
+        var anyHidden = false;
+        for (var i = 0; i < els.length; i++) {
+            if (!els[i].classList.contains('revealed')) { anyHidden = true; break; }
+        }
+        for (var i = 0; i < els.length; i++) {
+            if (anyHidden) els[i].classList.add('revealed');
+            else els[i].classList.remove('revealed');
+        }
+        this.textContent = anyHidden ? 'Hide All' : 'Show All';
+    ">Show All</div>
+</div>
 
 <hr>
 

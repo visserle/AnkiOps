@@ -9,41 +9,80 @@
         min-width: 40px;
         min-height: 1.2em;
         background-color: #eee;
-        color: transparent; /* hides the text inside */
+        color: transparent;
         vertical-align: middle;
         margin: 0 2px;
     }
 </style>
 
-<!-- Anki requires at least one cloze filter for valid cloze templates -->
-<div style="display:none;">{{cloze:Hidden Text}}</div>
+<!-- Anki renders the active cloze here; we parse it to detect which index is active -->
+<div id="cloze_rendered" style="display:none;">{{cloze:Hidden Text}}</div>
 <div id="hidden_raw" style="display:none;">{{Hidden Text}}</div>
 <div id="content_display"></div>
 
 <script>
     (function(){
-        let raw = document.getElementById("hidden_raw").innerHTML;
-        
-        // Find the active cloze index from the card name (e.g. "Cloze 1")
-        let activeMatch = "{{Card}}".match(/\d+/);
-        let activeIdx = activeMatch ? activeMatch[0] : "1";
-        
-        // Match Anki clozes: {c1::content} or {c1::content::hint}
-        let clozeRegex = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
-        
-        let replaced = raw.replace(clozeRegex, function(match, idx, inner) {
-            let parts = inner.split("::");
-            let content = parts.shift();
-            let hint = parts.length > 0 ? parts.join("::") : "";
-            
+        var raw = document.getElementById("hidden_raw").innerHTML;
+        var rendered = document.getElementById("cloze_rendered").innerHTML;
+
+        // Detect the active cloze index.
+        // Anki's {{cloze:}} on the front side strips inactive cloze markers
+        // (showing just content) and replaces the active one with
+        // <span class="cloze">[...]</span> or <span class="cloze">[hint]</span>.
+        //
+        // Strategy: collect unique cloze indices from raw text, then for each
+        // index, simulate what Anki would render if that index were active.
+        // The one that matches the actual rendered output is the active index.
+
+        var clozeIndices = [];
+        var idxRegex = /\{\{c(\d+)::/g;
+        var m;
+        while ((m = idxRegex.exec(raw)) !== null) {
+            if (clozeIndices.indexOf(m[1]) === -1) clozeIndices.push(m[1]);
+        }
+
+        var activeIdx = clozeIndices.length > 0 ? clozeIndices[0] : "1";
+
+        // Normalize HTML for comparison: strip tags + collapse whitespace
+        function textOnly(html) {
+            return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
+        }
+
+        var renderedText = textOnly(rendered);
+
+        for (var i = 0; i < clozeIndices.length; i++) {
+            var testIdx = clozeIndices[i];
+            // Simulate Anki's rendering for this index being active
+            var simulated = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
+                var parts = inner.split("::");
+                var content = parts.shift();
+                var hint = parts.length > 0 ? parts.join("::") : "";
+                if (idx === testIdx) {
+                    return hint ? "[" + hint + "]" : "[...]";
+                } else {
+                    return content;
+                }
+            });
+            if (textOnly(simulated) === renderedText) {
+                activeIdx = testIdx;
+                break;
+            }
+        }
+
+        // Render with detected active index
+        var result = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
+            var parts = inner.split("::");
+            var content = parts.shift();
+            var hint = parts.length > 0 ? parts.join("::") : "";
+
             if (idx === activeIdx) {
-                let displayTxt = hint ? "[" + hint + "]" : "[...]";
+                var displayTxt = hint ? "[" + hint + "]" : "[...]";
                 return "<span class='cloze'>" + displayTxt + "</span>";
             } else {
                 return "<span class='inactive-cloze'>" + content + "</span>";
             }
         });
-        
-        document.getElementById("content_display").innerHTML = replaced;
+
+        document.getElementById("content_display").innerHTML = result;
     })();
 </script>

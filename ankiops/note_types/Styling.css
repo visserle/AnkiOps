@@ -167,6 +167,24 @@ blockquote {
 	/* Dark background for night mode in mobile */
 }
 
+/* Cloze toggle button (Show All / Hide All) */
+.cloze-toggle {
+	padding: 4px 20px;
+	font-size: 14px;
+}
+
+.night-mode .cloze-toggle {
+	color: white;
+	background-color: #333;
+	border-color: #666;
+}
+
+.mobile .night_mode .cloze-toggle {
+	color: white;
+	background-color: #333;
+	border-color: #666;
+}
+
 /* Highlight (==text==) */
 mark {
 	background: none;
