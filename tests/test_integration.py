@@ -487,3 +487,43 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
         f"Expected key {existing_note_key}, but got {stored_key}"
     )
     db3.close()
+
+
+def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankiops):
+    """Test that note_key is correctly placed above the prefix line even if the field has a trailing space."""
+    deck_file = tmp_path / "TrailingSpaceDeck.md"
+    # Notice the trailing space after 'Question'
+    original_content = "Q: Trailing Space Question \nA: Normal Answer\n"
+    deck_file.write_text(original_content, encoding="utf-8")
+
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
+
+    # Check file was updated with Key at the correct position
+    content = deck_file.read_text(encoding="utf-8")
+    assert "<!-- note_key:" in content
+    
+    # Verify the note_key comment is placed correctly ABOVE the "Q: " prefix,
+    # NOT after it. We expect:
+    # <!-- note_key: ... -->
+    # Q: Trailing Space Question 
+    lines = content.splitlines()
+    key_line_idx = -1
+    for i, line in enumerate(lines):
+        if line.startswith("<!-- note_key:"):
+            key_line_idx = i
+            break
+            
+    assert key_line_idx != -1
+    assert key_line_idx + 1 < len(lines)
+    assert lines[key_line_idx + 1].startswith("Q: Trailing Space Question ")

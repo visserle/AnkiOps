@@ -169,11 +169,13 @@ class Note:
                 errors.append(f"Missing mandatory field '{f.name}' ({f.prefix})")
 
         if config.is_cloze:
-            text = self.fields.get("Text", "")
-            if text and not _CLOZE_PATTERN.search(text):
+            has_cloze = any(
+                _CLOZE_PATTERN.search(val) for val in self.fields.values() if val
+            )
+            if not has_cloze:
                 errors.append(
                     f"{self.note_type} note must contain cloze syntax "
-                    "(e.g. {{c1::answer}}) in the T: field"
+                    "(e.g. {{c1::answer}})"
                 )
 
         if has_choices:

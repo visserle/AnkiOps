@@ -1,0 +1,49 @@
+<style>
+    #_flag {
+        visibility: hidden;
+    }
+    .inactive-cloze {
+        display: inline-block;
+        border: 1px solid #999;
+        border-radius: 3px;
+        min-width: 40px;
+        min-height: 1.2em;
+        background-color: #eee;
+        color: transparent; /* hides the text inside */
+        vertical-align: middle;
+        margin: 0 2px;
+    }
+</style>
+
+<!-- Anki requires at least one cloze filter for valid cloze templates -->
+<div style="display:none;">{{cloze:Hidden Text}}</div>
+<div id="hidden_raw" style="display:none;">{{Hidden Text}}</div>
+<div id="content_display"></div>
+
+<script>
+    (function(){
+        let raw = document.getElementById("hidden_raw").innerHTML;
+        
+        // Find the active cloze index from the card name (e.g. "Cloze 1")
+        let activeMatch = "{{Card}}".match(/\d+/);
+        let activeIdx = activeMatch ? activeMatch[0] : "1";
+        
+        // Match Anki clozes: {c1::content} or {c1::content::hint}
+        let clozeRegex = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
+        
+        let replaced = raw.replace(clozeRegex, function(match, idx, inner) {
+            let parts = inner.split("::");
+            let content = parts.shift();
+            let hint = parts.length > 0 ? parts.join("::") : "";
+            
+            if (idx === activeIdx) {
+                let displayTxt = hint ? "[" + hint + "]" : "[...]";
+                return "<span class='cloze'>" + displayTxt + "</span>";
+            } else {
+                return "<span class='inactive-cloze'>" + content + "</span>";
+            }
+        });
+        
+        document.getElementById("content_display").innerHTML = replaced;
+    })();
+</script>

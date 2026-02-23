@@ -1,0 +1,23 @@
+name: AnkiOpsClozeHideAll
+is_cloze: true
+styling: ../Styling.css
+templates:
+  - name: Cloze Hide All
+    front: Front.template.anki
+    back: Back.template.anki
+fields:
+  - name: Hidden Text
+    prefix: "HT:"
+    identifying: true
+  - name: Extra
+    prefix: "E:"
+    identifying: false
+  - name: More
+    prefix: "M:"
+    identifying: false
+  - name: Source
+    prefix: "S:"
+    identifying: false
+  - name: AI Notes
+    prefix: "AI:"
+    identifying: false

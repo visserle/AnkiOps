@@ -83,8 +83,8 @@ def test_load_custom_from_dir():
         fs = FileSystemAdapter()
         configs = fs.load_note_type_configs(note_types)
 
-        # 5 built-in types + 1 custom type = 6
-        assert len(configs) == 6
+        # 6 built-in types + 1 custom type = 7
+        assert len(configs) == 7
         config = next(c for c in configs if c.name == "MyCustomType")
 
         assert sorted([f.name for f in config.fields if f.identifying]) == [

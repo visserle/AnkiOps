@@ -39,14 +39,22 @@ def _build_first_markdown_line(note: Note, fs: MarkdownFile) -> str:
     if not first_value:
         return ""
 
+    first_value_stripped = first_value.strip()
+    if not first_value_stripped:
+        return first_value
+
     # Search raw content for a line containing this value with a prefix
     for line in fs.raw_content.split("\n"):
         stripped = line.strip()
-        if stripped.endswith(first_value) and ":" in stripped:
+        if stripped.endswith(first_value_stripped) and ":" in stripped:
             # Verify it's a field prefix line (e.g., "Q: Question 1")
-            prefix_part = stripped[: stripped.index(first_value)].rstrip()
-            if prefix_part.endswith(":"):
-                return stripped
+            try:
+                idx = stripped.rindex(first_value_stripped)
+                prefix_part = stripped[:idx].rstrip()
+                if prefix_part.endswith(":"):
+                    return line
+            except ValueError:
+                pass
     # Fallback to raw first line
     return first_value
 
