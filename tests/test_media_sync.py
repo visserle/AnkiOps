@@ -5,6 +5,7 @@ import hashlib
 import pytest
 
 from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.sync_media import _extract_media_references
 
 
 @pytest.fixture
@@ -67,6 +68,57 @@ class TestMediaReferenceDetection:
         md.write_text("Q: What?\nA: Plain answer")
         result = fs.read_markdown_file(md)
         assert "media/" not in result.notes[0].fields["Answer"]
+
+    def test_extract_media_references_parentheses(self):
+        
+        # Regular link
+        assert _extract_media_references("![img](media/a.jpg)") == {"a.jpg"}
+        # Link with parentheses inside it
+        assert _extract_media_references("![img](media/a(b).jpg)") == {"a(b).jpg"}
+        assert _extract_media_references("![img](<media/a(b).jpg>)") == {"a(b).jpg"}
+        
+    def test_extract_media_references_url_encoding(self):
+        
+        assert _extract_media_references("![img](media/a%20b.jpg)") == {"a b.jpg"}
+        assert _extract_media_references("![img](media/a%27s.jpg)") == {"a's.jpg"}
+
+    def test_extract_media_references_html(self):
+        
+        # HTML tags shouldn't get messed up if they have parentheses or spaces
+        assert _extract_media_references('<img src="a(b).jpg">') == {"a(b).jpg"}
+        assert _extract_media_references('<img src="a b.jpg">') == {"a b.jpg"}
+        assert _extract_media_references('<img src="media/a%20b.jpg">') == {"a b.jpg"}
+
+    def test_extract_media_references_ignores_external(self):
+        
+        assert _extract_media_references('<img src="http://example.com/a.jpg">') == set()
+        assert _extract_media_references('![img](https://example.com/a.jpg)') == set()
+
+    def test_update_media_references_parentheses_and_html(self, fs, tmp_path):
+        md_dir = tmp_path / "collection"
+        md_dir.mkdir()
+        md_file = md_dir / "deck.md"
+        
+        original_content = (
+            "1. ![img](media/a(b).jpg)\n"
+            "2. <img src=\"a b.jpg\">\n"
+            "3. [sound:a%20b.mp3]\n"
+        )
+        md_file.write_text(original_content)
+        
+        rename_map = {
+            "media/a(b).jpg": "media/hashed1.jpg",
+            "a b.jpg": "media/hashed2.jpg",
+            "a b.mp3": "hashed3.mp3",
+        }
+        
+        updated_count = fs.update_media_references(md_dir, rename_map)
+        assert updated_count == 1
+        
+        new_content = md_file.read_text()
+        assert "![img](<media/hashed1.jpg>)" in new_content
+        assert "<img src=\"media/hashed2.jpg\">" in new_content
+        assert "[sound:hashed3.mp3]" in new_content
 
 
 # -- Media Directory Tests --------------------------------------------------

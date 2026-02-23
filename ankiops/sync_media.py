@@ -11,11 +11,13 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
 from ankiops.models import Change, ChangeType, MediaSyncResult
 
+from urllib.parse import unquote
+
 logger = logging.getLogger(__name__)
 
 HASH_SUFFIX_PATTERN = re.compile(r"_([a-f0-9]{8})\.[^.]+$")
 ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
-MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\(([^)]+?)\)(?:\{[^}]*\})?"
+MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\((?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))\)(?:\{[^}]*\})?"
 HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
 
 
@@ -30,8 +32,19 @@ def _extract_media_references(text: str) -> set[str]:
     media_files = set()
     for pattern in [MARKDOWN_IMAGE_PATTERN, ANKI_SOUND_PATTERN, HTML_IMG_PATTERN]:
         for match in re.finditer(pattern, text):
-            path = _normalize_media_path(match.group(1))
-            if path:
+            # For Markdown pattern, path is in group 1 OR group 2. For others, it's group 1.
+            # Using len(match.groups()) > 1 to safely check if it's the Markdown pattern.
+            if len(match.groups()) > 1 and match.re.pattern == MARKDOWN_IMAGE_PATTERN:
+                raw_path = match.group(1) or match.group(2)
+            else:
+                raw_path = match.group(1)
+            
+            if not raw_path:
+                continue
+
+            decoded_path = unquote(raw_path)
+            path = _normalize_media_path(decoded_path)
+            if path and not path.startswith(("http://", "https://")):
                 media_files.add(path)
     return media_files
 

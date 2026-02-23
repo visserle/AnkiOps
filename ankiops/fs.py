@@ -6,6 +6,7 @@ import re
 import shutil
 from importlib import resources
 from pathlib import Path
+from urllib.parse import unquote
 
 import yaml
 
@@ -300,21 +301,43 @@ class FileSystemAdapter:
     def update_media_references(
         self, directory: Path, rename_map: dict[str, str]
     ) -> int:
+
         if not rename_map:
             return 0
 
         updated_files = 0
-        pattern = re.compile(r'(!\[.*?\]\((.+?)\)|src=["\'](.+?)["\']|\[sound:(.+?)\])')
+        pattern = re.compile(
+            r'(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)'   # Markdown Image
+            r'|(src=["\'])(.+?)(["\'])'                                                  # HTML src
+            r'|(\[sound:)(.+?)(\])'                                                      # Sound
+        )
 
         def replace_callback(match: re.Match) -> str:
-            full_match = match.group(1)
-            path = match.group(2) or match.group(3) or match.group(4)
-            lookup_path = path.strip("<>").replace("\\", "/")
+            # Determine which pattern matched
+            if match.group(1) is not None:
+                prefix = match.group(1)
+                # the path could be in group 2 (angle brackets) or group 3 (no angle brackets)
+                path = match.group(2) or match.group(3) 
+                suffix = match.group(4)
+                is_markdown = True
+            elif match.group(5) is not None:
+                prefix, path, suffix = match.group(5), match.group(6), match.group(7)
+                is_markdown = False
+            else:
+                prefix, path, suffix = match.group(8), match.group(9), match.group(10)
+                is_markdown = False
+
+            decoded_path = unquote(path)
+            lookup_path = decoded_path.strip("<>").replace("\\", "/")
 
             if lookup_path in rename_map:
-                new_path = f"<{rename_map[lookup_path]}>"
-                return full_match.replace(path, new_path)
-            return full_match
+                new_path = rename_map[lookup_path]
+                if is_markdown:
+                    # Always wrap markdown links in angle brackets for safety if replacing
+                    if not new_path.startswith("<"):
+                        new_path = f"<{new_path}>"
+                return f"{prefix}{new_path}{suffix}"
+            return match.group(0)
 
         for md_file in directory.glob("*.md"):
             content = md_file.read_text(encoding="utf-8")
