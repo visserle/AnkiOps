@@ -5,10 +5,9 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import ANKIOPS_DB, get_collection_dir
+from ankiops.config import ANKIOPS_DB, get_collection_dir, get_note_types_dir
+from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
-from ankiops.models import FileState, Note
-from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +22,18 @@ def serialize_collection_to_json(
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
-        no_ids: If True, exclude note_key and deck_key from serialized output
+        no_ids: If True, exclude note_key from serialized output
 
     Returns:
         Dictionary containing the serialized data
     """
-    # Read collection config
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
 
-    # Build JSON structure
+    fs = FileSystemAdapter()
+    fs.load_note_type_configs(get_note_types_dir())
+
     serialized_data = {
         "collection": {
             "serialized_at": datetime.now(timezone.utc).isoformat(),
@@ -41,58 +41,31 @@ def serialize_collection_to_json(
         "decks": [],
     }
 
-    # Track errors during serialization
     errors = []
-
-    # Process all markdown files in collection
-    md_files = sorted(collection_dir.glob("*.md"))
+    md_files = fs.find_markdown_files(collection_dir)
     logger.debug(f"Found {len(md_files)} deck file(s) to serialize")
 
     for md_file in md_files:
         logger.debug(f"Processing {md_file.name}...")
-        content = md_file.read_text()
 
-        # Extract deck_key and remaining content
-        deck_key, remaining_content = FileState.extract_deck_key(content)
+        try:
+            parsed = fs.read_markdown_file(md_file)
+        except Exception as e:
+            errors.append(f"Error parsing {md_file.name}: {e}")
+            continue
 
-        # Split into note blocks
-        note_blocks_raw = remaining_content.split("\n\n---\n\n")
-
-        # Build deck data with deck_id first (matching markdown convention)
         deck_data = {}
-        if not no_ids:
-            deck_data["deck_key"] = deck_key
 
-        deck_data["name"] = md_file.stem.replace("__", "::")  # Restore :: from __
+        deck_data["name"] = md_file.stem.replace("__", "::")
         deck_data["notes"] = []
 
-        line_number = 1  # Track for error reporting
-        for block_text in note_blocks_raw:
-            block_text = block_text.strip()
-            if not block_text:
-                continue
-
-            try:
-                parsed = Note.from_block(block_text)
-
-                # Convert to JSON-friendly format with note_key first (matching markdown)
-                note_data = {}
-                if not no_ids:
-                    note_data["note_key"] = parsed.note_key
-                note_data["note_type"] = parsed.note_type
-                note_data["fields"] = parsed.fields
-
-                deck_data["notes"].append(note_data)
-                line_number += block_text.count("\n") + 3  # +3 for the separator
-
-            except Exception as e:
-                error_msg = (
-                    f"Error parsing note in {md_file.name} at line {line_number}: {e}"
-                )
-                logger.error(error_msg)
-                errors.append(error_msg)
-                # Continue processing other notes
-                line_number += block_text.count("\n") + 3
+        for note in parsed.notes:
+            note_data = {}
+            if not no_ids:
+                note_data["note_key"] = note.note_key
+            note_data["note_type"] = note.note_type
+            note_data["fields"] = note.fields
+            deck_data["notes"].append(note_data)
 
         if deck_data["notes"]:
             serialized_data["decks"].append(deck_data)
@@ -107,7 +80,6 @@ def serialize_collection_to_json(
         f"Serialized {total_decks} deck(s), {total_notes} note(s) to {output_file}"
     )
 
-    # Report any errors encountered during serialization
     if errors:
         logger.warning(
             f"Serialization completed with {len(errors)} error(s). "
@@ -125,21 +97,16 @@ def deserialize_collection_from_json(
     In development mode (pyproject.toml with name="ankiops" in cwd),
     unpacks to ./collection. Otherwise, unpacks to the current working directory.
 
-    Note: This only extracts markdown files. Run 'ankiops init' after
-    deserializing to set up the .ankiops config file with your profile settings.
-
     Args:
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
-        no_ids: If True, skip writing deck_key and note_key comments to markdown
+        no_ids: If True, skip writing note_key comments to markdown
     """
-    # Use collection directory (respects development mode)
     root_dir = get_collection_dir()
 
     logger.debug(f"Importing serialized collection from: {json_file}")
     logger.debug(f"Target directory: {root_dir}")
 
-    # Check for existing markdown files that would be overwritten
     if not overwrite:
         existing_md_files = list(root_dir.glob("*.md"))
         if existing_md_files:
@@ -148,59 +115,49 @@ def deserialize_collection_from_json(
                 f"in {root_dir}. Use --overwrite to replace them."
             )
 
-    # Load JSON data directly
     with json_file.open("r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # Process each deck
+    fs = FileSystemAdapter()
+    configs = fs.load_note_type_configs(get_note_types_dir())
+    config_by_name = {c.name: c for c in configs}
+
     total_decks = 0
     total_notes = 0
 
     for deck in data["decks"]:
         deck_name = deck["name"]
-        deck_key = deck.get("deck_key")
-
         notes = deck["notes"]
 
-        # Sanitize filename (replace :: with __)
         filename = deck_name.replace("::", "__") + ".md"
         output_path = root_dir / filename
 
-        # Build markdown content
         lines = []
 
-        # Add deck_key if present and not ignoring IDs
-        if deck_key and not no_ids:
-            lines.append(f"<!-- deck_key: {deck_key} -->")
-
-        # Process each note
         for note in notes:
             note_key = note.get("note_key")
             fields = note["fields"]
 
-            # Get note type (prefer explicit from JSON, fallback to inference)
             note_type = note.get("note_type")
             if not note_type:
                 try:
-                    note_type = Note.infer_note_type(fields)
+                    note_type = fs._infer_note_type(fields)
                 except ValueError as e:
                     logger.warning(
-                        f"Cannot infer note type in deck '{deck_name}': {e}, skipping note"
+                        f"Cannot infer note type in deck '{deck_name}': {e}, skipping"
                     )
                     continue
 
-            # Add note_key if present and not ignoring IDs
             if note_key and not no_ids:
                 lines.append(f"<!-- note_key: {note_key} -->")
 
-            # Format fields according to note type configuration
-            config = registry.get(note_type)
-            for field in config.fields:
-                field_content = fields.get(field.name)
-                if field_content:
-                    lines.append(f"{field.prefix} {field_content}")
+            config = config_by_name.get(note_type)
+            if config:
+                for field in config.fields:
+                    field_content = fields.get(field.name)
+                    if field_content and field.prefix:
+                        lines.append(f"{field.prefix} {field_content}")
 
-            # Add separator between notes
             lines.append("")
             lines.append("---")
             lines.append("")
@@ -209,7 +166,6 @@ def deserialize_collection_from_json(
         while lines and lines[-1] in ("", "---"):
             lines.pop()
 
-        # Write file
         content = "\n".join(lines)
         if overwrite or not output_path.exists():
             output_path.write_text(content, encoding="utf-8")

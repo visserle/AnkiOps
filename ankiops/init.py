@@ -1,6 +1,5 @@
 """Collection initialization for AnkiOps."""
 
-import configparser
 import json
 import logging
 import subprocess
@@ -11,9 +10,9 @@ from ankiops.config import (
     NOTE_TYPES_DIR,
     get_collection_dir,
 )
-from ankiops.db import AnkiOpsDB
+from ankiops.db import SQLiteDbAdapter
+from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
-from ankiops.note_type_config import registry
 
 logger = logging.getLogger(__name__)
 
@@ -67,18 +66,18 @@ def initialize_collection(profile: str) -> Path:
     collection_dir = get_collection_dir()
     collection_dir.mkdir(parents=True, exist_ok=True)
 
-    db = AnkiOpsDB.load(collection_dir)
-    try:
-        db.set_config("profile", profile)
-    finally:
-        db.close()
+    db = SQLiteDbAdapter.load(collection_dir)
+    db.set_config("profile", profile)
+    db.save()
+    db.close()
 
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
     _setup_git(collection_dir)
 
-    # Eject built-in note types by default via the Registry
-    registry.eject_builtin_note_types(collection_dir / NOTE_TYPES_DIR)
+    # Eject built-in note types
+    fs = FileSystemAdapter()
+    fs.eject_builtin_note_types(collection_dir / NOTE_TYPES_DIR)
 
     return collection_dir
 

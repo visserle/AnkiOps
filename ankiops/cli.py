@@ -2,11 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from ankiops.anki_client import invoke
-from ankiops.anki_to_markdown import (
-    export_collection,
-    export_deck,
-)
+from ankiops.anki import AnkiAdapter
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
@@ -14,44 +10,40 @@ from ankiops.collection_serializer import (
 from ankiops.config import (
     ANKIOPS_DB,
     get_collection_dir,
+    get_note_types_dir,
     require_collection_dir,
 )
+from ankiops.db import SQLiteDbAdapter
+from ankiops.export_notes import export_collection
+from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
+from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.log import configure_logging
-from ankiops.markdown_to_anki import (
-    import_collection,
-    import_file,
-)
-from ankiops.models import (
-    CollectionExportResult,
-    CollectionImportResult,
-)
-from ankiops.note_type_sync import ensure_note_types
-from ankiops.media_sync import (
-    extract_media_references,
-    sync_from_anki,
-    sync_to_anki,
-)
+from ankiops.models import CollectionExportResult, CollectionImportResult
+from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
+from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
 
 
-def connect_or_exit():
-    """Verify AnkiConnect is reachable; exit on failure."""
+def connect_or_exit() -> AnkiAdapter:
+    """Verify AnkiConnect is reachable; exit on failure. Returns the adapter."""
+    anki = AnkiAdapter()
     try:
-        version = invoke("version")
+        version = anki.get_version()
         logger.debug(f"Connected to AnkiConnect (version {version})")
     except Exception as e:
         logger.error(f"Error connecting to AnkiConnect: {e}")
         logger.error("Make sure Anki is running and AnkiConnect is installed.")
         raise SystemExit(1)
+    return anki
 
 
 def run_init(args):
     """Initialize the current directory as an AnkiOps collection."""
-    connect_or_exit()
-    profile = invoke("getActiveProfile")
+    anki = connect_or_exit()
+    profile = anki.get_active_profile()
 
     collection_dir = initialize_collection(profile)
 
@@ -65,101 +57,86 @@ def run_init(args):
 
 def run_am(args):
     """Anki -> Markdown: export decks to markdown files."""
-    connect_or_exit()
-    active_profile = invoke("getActiveProfile")
+    anki = connect_or_exit()
+    active_profile = anki.get_active_profile()
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "export")
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(collection_dir)
+    note_types_dir = get_note_types_dir()
 
-    if args.deck:
-        logger.debug(f"Processing deck: {args.deck}...")
-        result = export_deck(args.deck, output_dir=str(collection_dir))
-        note_summary = result.summary
-        files_count = 1 if result.file_path else 0
-    else:
-        export_summary: CollectionExportResult = export_collection(
-            output_dir=str(collection_dir),
-            keep_orphans=args.keep_orphans,
-        )
-        note_summary = export_summary.summary
-        files_count = len(export_summary.results)
+    export_summary: CollectionExportResult = export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=collection_dir,
+        note_types_dir=note_types_dir,
+        keep_orphans=args.keep_orphans,
+    )
+    note_summary = export_summary.summary
+    files_count = len(export_summary.results)
 
-    logger.info(f"Export complete: {files_count} files — {note_summary}")
+    logger.info(f"Export complete: {files_count} files — {note_summary.format()}")
 
     # Sync referenced media from Anki to local
     try:
-        media_dir = invoke("getMediaDirPath")
-        all_refs = set()
-        for md_file in collection_dir.glob("*.md"):
-            all_refs.update(extract_media_references(md_file.read_text()))
-
-        if all_refs:
-            logger.debug("Syncing referenced media from Anki...")
-            media_result = sync_from_anki(collection_dir, Path(media_dir), all_refs)
-            media_summary = media_result.summary
-            if media_summary.format() != "no changes":
-                logger.info(
-                    f"Media sync complete: {media_summary.total} files — {media_summary}"
-                )
-            else:
-                logger.debug("Media sync complete: no changes")
-    except Exception as e:
-        logger.warning(f"Media sync failed: {e}")
-
-
-def run_ma(args):
-    """Markdown -> Anki: import markdown files into Anki."""
-    connect_or_exit()
-    active_profile = invoke("getActiveProfile")
-
-    collection_dir = require_collection_dir(active_profile)
-    logger.debug(f"Collection directory: {collection_dir}")
-
-    # Sync local media to Anki (and rename if needed)
-    try:
-        media_dir = invoke("getMediaDirPath")
-        media_result = sync_to_anki(collection_dir, Path(media_dir))
+        media_result = sync_media_from_anki(anki, fs, collection_dir)
         media_summary = media_result.summary
         if media_summary.format() != "no changes":
             logger.info(
-                f"Media sync complete: {media_summary.total} files — {media_summary}"
+                f"Media sync complete: {media_summary.total} files — {media_summary.format()}"
             )
         else:
             logger.debug("Media sync complete: no changes")
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
-    ensure_note_types()
+
+def run_ma(args):
+    """Markdown -> Anki: import markdown files into Anki."""
+    anki = connect_or_exit()
+    active_profile = anki.get_active_profile()
+
+    collection_dir = require_collection_dir(active_profile)
+    logger.debug(f"Collection directory: {collection_dir}")
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(collection_dir)
+    note_types_dir = get_note_types_dir()
+
+    try:
+        media_result = sync_media_to_anki(anki, fs, collection_dir)
+        media_summary = media_result.summary
+        if media_summary.format() != "no changes":
+            logger.info(
+                f"Media sync complete: {media_summary.total} files — {media_summary.format()}"
+            )
+        else:
+            logger.debug("Media sync complete: no changes")
+    except Exception as e:
+        logger.warning(f"Media sync failed: {e}")
+
+    sync_note_types(anki, fs, note_types_dir)
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "import")
 
-    deleted_notes = 0
+    import_summary: CollectionImportResult = import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=collection_dir,
+        note_types_dir=note_types_dir,
+        only_add_new=args.only_add_new,
+    )
+    note_summary = import_summary.summary
+    files_stat = len(import_summary.results)
+    untracked = import_summary.untracked_decks
 
-    if args.file:
-        logger.debug(f"Processing {Path(args.file).name}...")
-        result = import_file(
-            Path(args.file),
-            only_add_new=args.only_add_new,
-        )
-        note_summary = result.summary
-        files_stat = 1
-        untracked = []
-    else:
-        import_summary: CollectionImportResult = import_collection(
-            str(collection_dir), only_add_new=args.only_add_new
-        )
-        note_summary = import_summary.summary
-        files_stat = len(import_summary.results)
-        untracked = import_summary.untracked_decks
-
-    # Add back explicit deleted notes from CLI prompt
-    note_summary.deleted += deleted_notes
-
-    logger.info(f"Import complete: {files_stat} files — {note_summary}")
+    logger.info(f"Import complete: {files_stat} files — {note_summary.format()}")
 
     if untracked:
         logger.warning(
@@ -246,11 +223,6 @@ def main():
         help="Anki -> Markdown (export)",
     )
     am_parser.add_argument(
-        "--deck",
-        "-d",
-        help="Single deck to export (by name)",
-    )
-    am_parser.add_argument(
         "--keep-orphans",
         action="store_true",
         help="Keep deck files and notes whose IDs no longer exist in Anki",
@@ -268,11 +240,6 @@ def main():
         "markdown-to-anki",
         aliases=["ma"],
         help="Markdown -> Anki (import)",
-    )
-    ma_parser.add_argument(
-        "--file",
-        "-f",
-        help="Single file to import",
     )
     ma_parser.add_argument(
         "--only-add-new",
@@ -300,10 +267,7 @@ def main():
     serialize_parser.add_argument(
         "--no-ids",
         action="store_true",
-        help=(
-            "Exclude note_key and deck_key from serialized output "
-            "(useful for sharing/templates)"
-        ),
+        help=("Exclude note_key from serialized output (useful for sharing/templates)"),
     )
     serialize_parser.set_defaults(handler=run_serialize)
 
@@ -325,7 +289,7 @@ def main():
     deserialize_parser.add_argument(
         "--no-ids",
         action="store_true",
-        help="Skip writing deck_key and note_key comments (useful for templates/sharing)",
+        help="Skip writing note_key comments (useful for templates/sharing)",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 

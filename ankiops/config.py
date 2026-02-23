@@ -1,6 +1,5 @@
 """Configuration for Anki to Markdown conversion."""
 
-import configparser
 import logging
 from pathlib import Path
 
@@ -75,7 +74,7 @@ def require_collection_dir(active_profile: str) -> Path:
 
     Also exits if the active profile doesn't match.
     """
-    from ankiops.db import AnkiOpsDB
+    from ankiops.db import SQLiteDbAdapter
 
     collection_dir = get_collection_dir()
     db_path = collection_dir / ANKIOPS_DB
@@ -85,18 +84,17 @@ def require_collection_dir(active_profile: str) -> Path:
         )
         raise SystemExit(1)
 
-    db = AnkiOpsDB.load(collection_dir)
-    try:
-        expected_profile = db.get_config("profile")
-        if expected_profile and expected_profile != active_profile:
-            logger.error(
-                f"Profile mismatch: collection in {collection_dir} is linked to "
-                f"'{expected_profile}', but Anki has '{active_profile}' "
-                f"open. Switch profiles in Anki, or re-run "
-                f"'ankiops init' to re-link."
-            )
-            raise SystemExit(1)
-    finally:
+    db = SQLiteDbAdapter.load(collection_dir)
+    expected_profile = db.get_config("profile")
+    if expected_profile and expected_profile != active_profile:
+        logger.error(
+            f"Profile mismatch: collection in {collection_dir} is linked to "
+            f"'{expected_profile}', but Anki has '{active_profile}' "
+            f"open. Switch profiles in Anki, or re-run "
+            f"'ankiops init' to re-link."
+        )
         db.close()
+        raise SystemExit(1)
+    db.close()
 
     return collection_dir

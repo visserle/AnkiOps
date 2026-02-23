@@ -7,21 +7,32 @@ These tests simulate the entire application stack:
 4.  Verify end-to-end behavior (files created, Anki updated).
 """
 
-from ankiops.anki_to_markdown import export_collection, export_deck
-from ankiops.markdown_to_anki import import_collection, import_file
-from ankiops.db import AnkiOpsDB
+from ankiops.anki import AnkiAdapter
+from ankiops.config import get_note_types_dir
+from ankiops.db import SQLiteDbAdapter
+from ankiops.export_notes import export_collection
+from ankiops.fs import FileSystemAdapter
+from ankiops.import_notes import import_collection
 
 
-def test_import_with_stale_deck_key_mapping(
-    tmp_path, mock_anki, run_ankiops, monkeypatch
-):
+def test_import_with_stale_mapping(tmp_path, mock_anki, run_ankiops, monkeypatch):
     """Test exporting a collection from Anki to an empty directory."""
     # Setup Anki state
     mock_anki.add_note("Deck A", "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
     mock_anki.add_note("Deck B", "AnkiOpsQA", {"Question": "Q2", "Answer": "A2"})
 
     # Run export
-    summary = export_collection(output_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    summary = export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # Assertions
     assert len(summary.results) == 2
@@ -36,7 +47,6 @@ def test_import_with_stale_deck_key_mapping(
     assert "Q: Q1" in content_a
     assert "A: A1" in content_a
     assert "<!-- note_key:" in content_a
-    assert "<!-- deck_key:" in content_a
 
     content_b = file_b.read_text()
     assert "Q: Q2" in content_b
@@ -46,11 +56,21 @@ def test_import_creates_new_notes(tmp_path, mock_anki, run_ankiops):
     """Test importing new notes from markdown to Anki."""
     # Setup markdown files
     deck_c = tmp_path / "Deck C.md"
-    # We use a preset Key to simulate an existing deck file or forcing a Key
-    deck_c.write_text("<!-- deck_key: deck-key-999 -->\nQ: New Question\nA: New Answer")
+    deck_c.write_text("Q: New Question\nA: New Answer")
 
     # Run import
-    summary = import_collection(collection_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    summary = import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # Assertions
     # Should create deck "Deck C"
@@ -66,8 +86,6 @@ def test_import_creates_new_notes(tmp_path, mock_anki, run_ankiops):
     assert "<!-- note_key:" in content
     # Note ID should NOT be in the file
     assert "<!-- note_id:" not in content
-    # Deck Key should be present (Deck ID replaced by Key)
-    assert "<!-- deck_key:" in content
 
 
 def test_roundtrip_sync_update(tmp_path, mock_anki, run_ankiops):
@@ -79,7 +97,16 @@ def test_roundtrip_sync_update(tmp_path, mock_anki, run_ankiops):
     note_id = list(mock_anki.notes.keys())[0]
 
     # 2. Export
-    export_collection(output_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(tmp_path)
+    export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
     file_path = tmp_path / "Deck X.md"
 
     # 3. Modify File
@@ -88,7 +115,14 @@ def test_roundtrip_sync_update(tmp_path, mock_anki, run_ankiops):
     file_path.write_text(new_content)
 
     # 4. Import
-    import_collection(collection_dir=str(tmp_path))
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # 5. Verify Anki updated
     updated_note = mock_anki.notes[note_id]
@@ -102,7 +136,17 @@ def test_sync_move_cards(tmp_path, mock_anki, run_ankiops):
     note_id = list(mock_anki.notes.keys())[0]
 
     # 2. Export
-    export_collection(output_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
     source_file = tmp_path / "SourceDeck.md"
     target_file = tmp_path / "TargetDeck.md"
 
@@ -113,15 +157,21 @@ def test_sync_move_cards(tmp_path, mock_anki, run_ankiops):
     deck_line = lines[0]
     note_block = "\n".join(lines[1:])
 
-    # Empty source file (keep deck id)
-    source_file.write_text(deck_line)
+    # Empty source file
+    source_file.write_text("")
 
     # Write target file
-    # We use a new Key or rely on filename matching
-    target_file.write_text("<!-- deck_key: deck-key-move-target -->\n" + note_block)
+    target_file.write_text(note_block)
 
     # 4. Import
-    import_collection(collection_dir=str(tmp_path))
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # 5. Verify card moved in Anki
     # Need to check card, not note (notes don't have deck, cards do)
@@ -136,15 +186,30 @@ def test_sync_delete_orphan_in_anki(tmp_path, mock_anki, run_ankiops):
     note_id = list(mock_anki.notes.keys())[0]
 
     # 2. Export
-    export_collection(output_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    db = SQLiteDbAdapter.load(tmp_path)
+    export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
     file_path = tmp_path / "Deck D.md"
 
-    # 3. Delete note from file (keep deck ID)
-    lines = file_path.read_text().splitlines()
-    file_path.write_text(lines[0])  # Only deck ID line
+    # 3. Delete note from file
+    file_path.write_text("")
 
     # 4. Import
-    import_collection(collection_dir=str(tmp_path))
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # 5. Verify deleted in Anki
     assert note_id not in mock_anki.notes
@@ -176,8 +241,19 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     md_file.write_text(content)
 
     # 2. Import
-    result = import_file(md_file, collection_dir=tmp_path)
-    assert not result.errors
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    result = import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
+    assert not result.results[0].errors
     assert result.summary.created == 5
 
     # 3. Verify MockAnki state
@@ -213,10 +289,15 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     # 5. Export and verify roundtrip
     md_file.unlink()
 
-    export_result = export_deck(deck_name, output_dir=str(tmp_path))
-    assert export_result.file_path.exists()
-
-    new_content = export_result.file_path.read_text()
+    export_result = export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
+    assert export_result.results[0].file_path.exists()
+    new_content = export_result.results[0].file_path.read_text()
 
     assert "Q: QA Question" in new_content
     assert "F: Reversed Front" in new_content
@@ -230,7 +311,18 @@ def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):
     deck_file = tmp_path / "ReproDeck.md"
     deck_file.write_text("Q: Question\nA: Answer")
 
-    import_collection(collection_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     assert len(mock_anki.notes) == 1
     new_note = list(mock_anki.notes.values())[0]
@@ -267,21 +359,27 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     }
 
     # Setup AnkiOpsDB with fixed keys
-    db = AnkiOpsDB.load(tmp_path)
-    deck_key = "deckkeyexisting"
+    db_setup = SQLiteDbAdapter.load(tmp_path)
     note_key = "notekeyexisting"
-    db.set_deck(deck_key, deck_id)
-    db.set_note(note_key, note_id)
-    db.close()
+    db_setup.set_note(note_key, note_id)
+    db_setup.close()
 
     # Create File
     deck_file = tmp_path / "ReproDeck.md"
-    deck_file.write_text(
-        f"<!-- deck_key: {deck_key} -->\n<!-- note_key: {note_key} -->\nQ: OldQ\nA: UpdatedA"
-    )
+    deck_file.write_text(f"<!-- note_key: {note_key} -->\nQ: OldQ\nA: UpdatedA")
 
-    # Run Import
-    import_collection(collection_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db2 = SQLiteDbAdapter.load(tmp_path)
+
+    import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db2,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # Verify Anki note was updated
     updated_note = mock_anki.notes[note_id]
@@ -302,19 +400,36 @@ def test_import_idempotency(tmp_path, mock_anki, run_ankiops):
     content = "Q: Question 1\nA: Answer 1"
     md_file.write_text(content)
 
-    # 2. First import: should create the note
-    summary1 = import_collection(collection_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+    db = SQLiteDbAdapter.load(tmp_path)
+
+    summary1 = import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
     assert len(summary1.results) == 1
     assert summary1.results[0].summary.created == 1
     assert summary1.results[0].summary.updated == 0
 
     # 3. Second import: should NOT update anything
-    summary2 = import_collection(collection_dir=str(tmp_path))
+    summary2 = import_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
     assert len(summary2.results) == 1
     assert summary2.results[0].summary.created == 0
     assert summary2.results[0].summary.updated == 0, (
         f"Expected 0 updates on second run, got {summary2.results[0].summary.updated}"
     )
+
 
 def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
     """Test that existing AnkiOps Key in Anki is reused, not regenerated."""
@@ -323,11 +438,7 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
     deck_name = "ExistingKeyDeck"
 
     # Manually structure the note in mock_anki to have the key in its fields
-    field_data = {
-        "Question": "Q1",
-        "Answer": "A1",
-        "AnkiOps Key": existing_note_key
-    }
+    field_data = {"Question": "Q1", "Answer": "A1", "AnkiOps Key": existing_note_key}
 
     deck_id = mock_anki.invoke("createDeck", deck=deck_name)
     note_id = 12345
@@ -346,12 +457,21 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
     }
 
     # 2. Ensure the local DB does NOT have this mapping yet (simulating first export)
-    db = AnkiOpsDB.load(tmp_path)
-    assert db.get_note_key(note_id) is None
-    db.close()
+    db_setup = SQLiteDbAdapter.load(tmp_path)
+    assert db_setup.get_note_key(note_id) is None
+    db_setup.close()
 
-    # 3. Run export
-    export_collection(output_dir=str(tmp_path))
+    anki = AnkiAdapter()
+    fs = FileSystemAdapter()
+    db2 = SQLiteDbAdapter.load(tmp_path)
+
+    export_collection(
+        anki_port=anki,
+        fs_port=fs,
+        db_port=db2,
+        collection_dir=tmp_path,
+        note_types_dir=get_note_types_dir(),
+    )
 
     # 4. Verify the markdown file uses the EXISTING key
     md_file = tmp_path / f"{deck_name}.md"
@@ -361,7 +481,9 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
     assert f"<!-- note_key: {existing_note_key} -->" in content
 
     # 5. Verify the DB was updated with the EXISTING key, not a new one
-    db = AnkiOpsDB.load(tmp_path)
-    stored_key = db.get_note_key(note_id)
-    assert stored_key == existing_note_key, f"Expected key {existing_note_key}, but got {stored_key}"
-    db.close()
+    db3 = SQLiteDbAdapter.load(tmp_path)
+    stored_key = db3.get_note_key(note_id)
+    assert stored_key == existing_note_key, (
+        f"Expected key {existing_note_key}, but got {stored_key}"
+    )
+    db3.close()

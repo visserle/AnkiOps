@@ -1,13 +1,30 @@
 """Shared fixtures for AnkiOps tests."""
 
-from importlib import resources
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 
 from ankiops.anki_client import AnkiConnectError
-from ankiops.note_type_config import registry
+from ankiops.config import get_note_types_dir
+from ankiops.fs import FileSystemAdapter
+
+
+# -- Shared Adapters (session-scoped to avoid repeated YAML I/O) -------------
+
+
+@pytest.fixture(scope="session")
+def fs():
+    """FileSystemAdapter pre-loaded with built-in note types (shared across all tests)."""
+    adapter = FileSystemAdapter()
+    adapter.set_configs(adapter.load_note_type_configs(get_note_types_dir()))
+    return adapter
+
+
+@pytest.fixture(scope="session")
+def choice_config(fs):
+    """AnkiOpsChoice config for validation tests."""
+    return next(c for c in fs._note_type_configs if c.name == "AnkiOpsChoice")
 
 
 class MockAnki:
@@ -96,6 +113,74 @@ class MockAnki:
                     results.append(res)
                 return results
 
+            case "modelNames":
+                return [
+                    "AnkiOpsQA",
+                    "AnkiOpsReversed",
+                    "AnkiOpsCloze",
+                    "AnkiOpsInput",
+                    "AnkiOpsChoice",
+                ]
+
+            case "modelFieldNames":
+                model = params.get("modelName")
+                if model == "AnkiOpsQA":
+                    return [
+                        "Question",
+                        "Answer",
+                        "Extra",
+                        "More",
+                        "Source",
+                        "AI Notes",
+                        "AnkiOps Key",
+                    ]
+                elif model == "AnkiOpsReversed":
+                    return [
+                        "Front",
+                        "Back",
+                        "Extra",
+                        "More",
+                        "Source",
+                        "AI Notes",
+                        "AnkiOps Key",
+                    ]
+                elif model == "AnkiOpsCloze":
+                    return [
+                        "Text",
+                        "Extra",
+                        "More",
+                        "Source",
+                        "AI Notes",
+                        "AnkiOps Key",
+                    ]
+                elif model == "AnkiOpsInput":
+                    return [
+                        "Question",
+                        "Input",
+                        "Answer",
+                        "Extra",
+                        "More",
+                        "Source",
+                        "AI Notes",
+                        "AnkiOps Key",
+                    ]
+                elif model == "AnkiOpsChoice":
+                    return [
+                        "Question",
+                        "Choice 1",
+                        "Choice 2",
+                        "Choice 3",
+                        "Choice 4",
+                        "Choice 5",
+                        "Answer",
+                        "Extra",
+                        "More",
+                        "Source",
+                        "AI Notes",
+                        "AnkiOps Key",
+                    ]
+                return []
+
             case "createDeck":
                 name = params["deck"]
                 new_id = self.next_deck_id
@@ -161,8 +246,8 @@ class MockAnki:
                 return None
 
             case "findNotes":
-                # "AnkiOps Key:xyz"
                 query = params.get("query", "")
+                # Handle "AnkiOps Key:xyz" queries
                 if "AnkiOps Key:" in query:
                     key = query.split(":")[1].strip('"')
                     found = []
@@ -170,7 +255,38 @@ class MockAnki:
                         if note["fields"].get("AnkiOps Key", {}).get("value") == key:
                             found.append(nid)
                     return found
-                return []
+
+                # Handle "note:ModelName" queries (OR-separated)
+                or_groups = query.split(" OR ")
+                found_notes = []
+                for nid, note in self.notes.items():
+                    for group in or_groups:
+                        terms = group.strip().split()
+                        match_all = True
+                        for term in terms:
+                            if term.startswith("note:"):
+                                model = term.split(":", 1)[1]
+                                if note["modelName"] != model:
+                                    match_all = False
+                                    break
+                            elif term.startswith("deck:"):
+                                # find deck for this note via cards
+                                deck_match = False
+                                target_deck = term.split(":", 1)[1]
+                                for cid, card in self.cards.items():
+                                    if (
+                                        card["note"] == nid
+                                        and card["deckName"] == target_deck
+                                    ):
+                                        deck_match = True
+                                        break
+                                if not deck_match:
+                                    match_all = False
+                                    break
+                        if match_all:
+                            found_notes.append(nid)
+                            break
+                return found_notes
 
             case _:
                 return None
@@ -194,13 +310,9 @@ def mock_anki():
 @pytest.fixture
 def run_ankiops(mock_anki):
     """Fixture to run ankiops with mocked invoke."""
-    # We must patch where it's imported in all touched modules
     with (
         patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.models.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.markdown_to_anki.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.note_type_sync.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.cli.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
     ):
         yield
 
@@ -210,15 +322,3 @@ def mock_input():
     """Always answer 'y' to confirmation prompts."""
     with patch("builtins.input", return_value="y"):
         yield
-
-
-@pytest.fixture(autouse=True)
-def populate_registry():
-    """Ensure the global registry is populated with standard types for tests."""
-
-    # Only populate if empty (to avoid redundant work)
-    if not registry.supported_note_types:
-        src_root = resources.files("ankiops.note_types")
-        with resources.as_file(src_root) as src_path:
-            registry.load(src_path)
-    yield

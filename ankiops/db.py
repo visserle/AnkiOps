@@ -1,43 +1,30 @@
-"""Key to Anki ID mapping for Notes and Decks (SQLite backed).
-
-Maintains a bidirectional mapping between user-managed Keys (stored in markdown)
-and Anki-assigned integer IDs (used for API calls).
-Supports separate namespaces for "keys" and "decks".
-
-The mapping file is per-profile and should be gitignored.
-Now uses SQLite for atomic writes and crash safety.
-"""
+"""SQLite Database Adapter mapping Keys to Anki IDs."""
 
 import logging
 import secrets
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from ankiops.config import ANKIOPS_DB
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class AnkiOpsDB:
-    """Bidirectional Key ↔ ID mapping and project configuration using SQLite."""
+class SQLiteDbAdapter:
+    """Bidirectional Key ↔ ID mapping using SQLite."""
 
-    _conn: sqlite3.Connection
-    _db_path: Path
+    def __init__(self, conn: sqlite3.Connection, db_path: Path):
+        self._conn = conn
+        self._db_path = db_path
 
-    @staticmethod
-    def load(collection_dir: Path) -> "AnkiOpsDB":
-        """Load mapping and config from the collection's .ankiops.db."""
+    @classmethod
+    def load(cls, collection_dir: Path) -> "SQLiteDbAdapter":
         db_path = collection_dir / ANKIOPS_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         conn = None
         try:
             conn = sqlite3.connect(db_path)
-
-            # Create schema
             with conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS notes (
@@ -47,7 +34,7 @@ class AnkiOpsDB:
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS decks (
-                        key TEXT PRIMARY KEY,
+                        name TEXT PRIMARY KEY,
                         id INTEGER NOT NULL
                     )
                 """)
@@ -57,7 +44,6 @@ class AnkiOpsDB:
                         value TEXT
                     )
                 """)
-                # Index on ID for fast reverse lookup
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(id)")
 
@@ -65,7 +51,7 @@ class AnkiOpsDB:
             if conn:
                 conn.close()
             logger.error(
-                f"Database at {db_path} is corrupt. Backing up and creating new."
+                f"Database at {db_path} is corrupt. Backing up and recreating."
             )
             if db_path.exists():
                 try:
@@ -73,108 +59,77 @@ class AnkiOpsDB:
                 except OSError as e:
                     logger.error(f"Failed to rename corrupt database: {e}")
 
-            # Recursive retry (should match clean state now)
-            return AnkiOpsDB.load(collection_dir)
+            return cls.load(collection_dir)
 
-        map_obj = AnkiOpsDB(conn, db_path)
+        return cls(conn, db_path)
 
-        return map_obj
-
-    def save(self, collection_dir: Path) -> None:
-        """No-op for SQLite implementation (auto-commits)."""
+    def save(self) -> None:
+        """Intentional no-op: each write auto-commits via ``with self._conn:``."""
         pass
 
     def close(self) -> None:
-        """Close database connection."""
         self._conn.close()
 
-    # --- Config Methods ---
-
-    def get_config(self, key: str) -> Optional[str]:
-        """Look up a configuration value."""
+    def get_config(self, key: str) -> str | None:
         cursor = self._conn.execute("SELECT value FROM config WHERE key = ?", (key,))
         row = cursor.fetchone()
         return row[0] if row else None
 
     def set_config(self, key: str, value: str) -> None:
-        """Add or update a configuration value."""
         with self._conn:
             self._conn.execute(
                 "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", (key, value)
             )
 
-    # --- Note Methods ---
-
-    def get_note_id(self, key_str: str) -> Optional[int]:
-        """Look up Anki note_id by Key."""
-        cursor = self._conn.execute("SELECT id FROM notes WHERE key = ?", (key_str,))
+    def get_note_id(self, key: str) -> int | None:
+        cursor = self._conn.execute("SELECT id FROM notes WHERE key = ?", (key,))
         row = cursor.fetchone()
-        res = row[0] if row else None
-        return res
+        return row[0] if row else None
 
-    def get_key(self, note_id: int) -> Optional[str]:
-        """Look up Key by Anki note_id (alias for get_note_key)."""
-        return self.get_note_key(note_id)
-
-    def get_note_key(self, note_id: int) -> Optional[str]:
-        """Look up Key by Anki note_id."""
+    def get_note_key(self, note_id: int) -> str | None:
         cursor = self._conn.execute("SELECT key FROM notes WHERE id = ?", (note_id,))
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def set_note(self, key_str: str, note_id: int) -> None:
-        """Add or update a Note Key ↔ note_id mapping."""
-        # SQLite REPLACE handles the primary key conflict on 'key'.
-
+    def set_note(self, key: str, note_id: int) -> None:
         with self._conn:
-            # Enforce 1-to-1: if this ID is already assigned to another Key, remove that mapping first
             self._conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
             self._conn.execute(
                 "INSERT OR REPLACE INTO notes (key, id) VALUES (?, ?)",
-                (key_str, note_id),
+                (key, note_id),
             )
 
-    def remove_note_by_key(self, key_str: str) -> None:
-        """Remove a note mapping by Key."""
+    def remove_note_by_key(self, key: str) -> None:
         with self._conn:
-            self._conn.execute("DELETE FROM notes WHERE key = ?", (key_str,))
+            self._conn.execute("DELETE FROM notes WHERE key = ?", (key,))
 
     def remove_note_by_id(self, note_id: int) -> None:
-        """Remove a note mapping by note_id."""
         with self._conn:
             self._conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
 
-    # --- Deck Methods ---
+    # -- Deck mapping (deck_name ↔ deck_id) ----------------------------------
 
-    def get_deck_id(self, key_str: str) -> Optional[int]:
-        """Look up Anki deck_id by Key."""
-        cursor = self._conn.execute("SELECT id FROM decks WHERE key = ?", (key_str,))
+    def get_deck_id(self, name: str) -> int | None:
+        cursor = self._conn.execute("SELECT id FROM decks WHERE name = ?", (name,))
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def get_deck_key(self, deck_id: int) -> Optional[str]:
-        """Look up Key by Anki deck_id."""
-        cursor = self._conn.execute("SELECT key FROM decks WHERE id = ?", (deck_id,))
+    def get_deck_name(self, deck_id: int) -> str | None:
+        cursor = self._conn.execute("SELECT name FROM decks WHERE id = ?", (deck_id,))
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def set_deck(self, key_str: str, deck_id: int) -> None:
-        """Add or update a Deck Key ↔ deck_id mapping."""
+    def set_deck(self, name: str, deck_id: int) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
             self._conn.execute(
-                "INSERT OR REPLACE INTO decks (key, id) VALUES (?, ?)",
-                (key_str, deck_id),
+                "INSERT OR REPLACE INTO decks (name, id) VALUES (?, ?)",
+                (name, deck_id),
             )
 
-    def remove_deck_by_key(self, key_str: str) -> None:
-        """Remove a deck mapping by Key."""
+    def remove_deck(self, name: str) -> None:
         with self._conn:
-            self._conn.execute("DELETE FROM decks WHERE key = ?", (key_str,))
+            self._conn.execute("DELETE FROM decks WHERE name = ?", (name,))
 
-    # --- Helpers ---
-
-    @staticmethod
-    def generate_key() -> str:
-        """Generate a new 12-char hex string (used as Key)."""
+    def generate_key(self) -> str:
         return secrets.token_hex(6)

@@ -1,369 +1,172 @@
-"""Core data models for AnkiOps.
+"""Core Domain Models for AnkiOps.
 
-Provides typed data classes for both the markdown side (Note, FileState)
-and the Anki side (AnkiNote, AnkiState), plus sync result types
-(SyncResult, ImportSummary, ExportSummary) shared by import/export paths.
+These classes are pure data representations with no dependencies on
+external systems (AnkiConnect, file system, SQLite).
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from ankiops.markdown_converter import MarkdownToHTML
-
-from ankiops.anki_client import invoke
-from ankiops.config import NOTE_SEPARATOR
-from ankiops.log import format_changes
-from ankiops.note_type_config import registry
+from typing import Any
 
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
-_NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
-_DECK_KEY_PATTERN = re.compile(r"<!--\s*deck_key:\s*([a-zA-Z0-9-]+)\s*-->\n?")
-_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 
-logger = logging.getLogger(__name__)
+@dataclass(frozen=True)
+class Field:
+    """Definition of a field in a note type."""
+
+    name: str
+    prefix: str | None
+    identifying: bool
+
+
+ANKIOPS_KEY_FIELD = Field("AnkiOps Key", None, identifying=False)
 
 
 @dataclass
-class FileState:
-    """All data parsed from one markdown file in a single read.
+class NoteTypeConfig:
+    """Pure data configuration for a single note type."""
 
-    Unified class used by both import and export paths.
-    """
+    name: str
+    fields: list[Field]
+    css: str = ""
+    is_cloze: bool = False
+    is_choice: bool = False
+    templates: list[dict[str, str]] = field(default_factory=list)
 
-    file_path: Path
-    raw_content: str
-    deck_key: str | None
-    parsed_notes: list[Note]
+    @property
+    def identifying_prefixes(self) -> set[str]:
+        """Return prefixes of identifying fields."""
+        return {
+            str(f.prefix) for f in self.fields if f.prefix is not None and f.identifying
+        }
 
-    @staticmethod
-    def extract_deck_key(content: str) -> tuple[str | None, str]:
-        """Extract deck_key from the first line.
-
-        Returns (deck_key, remaining_content).
+    @classmethod
+    def validate_configs(cls, configs: list[NoteTypeConfig]) -> None:
+        """Validate a set of note type configurations to ensure data integrity,
+        global consistency of field mappings, strict built-in reservations,
+        and lack of ambiguity.
         """
-        match = _DECK_KEY_PATTERN.match(content)
-        if match:
-            return match.group(1), content[match.end() :]
+        reserved_names = {ANKIOPS_KEY_FIELD.name}
 
-        return None, content
+        # Gather global prefix mappings and built-in prefixes first
+        prefix_to_field: dict[str, str] = {}
+        built_in_prefixes: set[str] = set()
 
-    @staticmethod
-    def extract_note_blocks(cards_content: str) -> dict[str, str]:
-        """Extract identified note blocks from content.
+        for config in configs:
+            is_builtin = config.name.startswith("AnkiOps")
+            if is_builtin:
+                built_in_prefixes.update(config.identifying_prefixes)
 
-        Args:
-            cards_content: Content with deck_key already stripped.
+            # Build global prefix mapping / validate global consistency
+            for field in config.fields:
+                if field.prefix is not None:
+                    if field.prefix in prefix_to_field:
+                        existing_name = prefix_to_field[field.prefix]
+                        if existing_name != field.name:
+                            raise ValueError(
+                                f"Prefix '{field.prefix}' matches existing prefix for "
+                                f"'{existing_name}', but maps to different field "
+                                f"'{field.name}' in '{config.name}'"
+                            )
+                    else:
+                        prefix_to_field[field.prefix] = field.name
 
-        Returns {"note_key: a1b2c3d4...": block_content, ...}.
-        """
+        for config in configs:
+            is_builtin = config.name.startswith("AnkiOps")
 
-        notes: dict[str, str] = {}
-        for block in cards_content.split(NOTE_SEPARATOR):
-            stripped = block.strip()
-            if not stripped:
-                continue
-            match = _NOTE_KEY_PATTERN.match(stripped)
-            if match:
-                notes[f"note_key: {match.group(1)}"] = stripped
-        return notes
+            # 1. Reservation Checks (Names and Prefixes)
+            for field in config.fields:
+                if field.name in reserved_names:
+                    if field.prefix != ANKIOPS_KEY_FIELD.prefix:
+                        raise ValueError(
+                            f"Note type '{config.name}' uses reserved "
+                            f"field name '{field.name}' with invalid prefix. "
+                            f"Expected no prefix."
+                        )
+                    if field.identifying != ANKIOPS_KEY_FIELD.identifying:
+                        raise ValueError(
+                            f"Note type '{config.name}' uses reserved "
+                            f"field name '{field.name}' as identifying, which is not allowed."
+                        )
 
-    @staticmethod
-    def from_file(file_path: Path) -> FileState:
-        """Read and parse a markdown file."""
-        raw_content = file_path.read_text(encoding="utf-8")
-        deck_key, remaining = FileState.extract_deck_key(raw_content)
-        blocks = remaining.split(NOTE_SEPARATOR)
-        parsed_notes = []
-        for block in blocks:
-            # Skip empty or dashes-only blocks
-            # (whitespace/trailing separators)
-            if not block.strip() or set(block.strip()) <= {"-"}:
-                continue
+                if field.prefix is not None and field.prefix in built_in_prefixes:
+                    if not is_builtin:
+                        raise ValueError(
+                            f"Note type '{config.name}' uses reserved built-in "
+                            f"prefix '{field.prefix}'"
+                        )
 
-            note = Note.from_block(block)
-            parsed_notes.append(note)
+            # 2. Distinctness Checks
+            new_prefixes = config.identifying_prefixes
+            for existing_config in configs:
+                if existing_config.name == config.name:
+                    continue
 
-        return FileState(
-            file_path=file_path,
-            raw_content=raw_content,
-            deck_key=deck_key,
-            parsed_notes=parsed_notes,
-        )
+                if new_prefixes == existing_config.identifying_prefixes:
+                    raise ValueError(
+                        f"Note type '{config.name}' has identical identifying fields "
+                        f"to '{existing_config.name}' ({new_prefixes}), "
+                        "which makes inference ambiguous."
+                    )
 
-    @property
-    def note_keys(self) -> set[str]:
-        """All note keys present in this file."""
-        return {n.note_key for n in self.parsed_notes if n.note_key is not None}
-
-    @property
-    def has_untracked(self) -> bool:
-        """True if the file contains notes without a note_key."""
-        return any(n.note_key is None for n in self.parsed_notes)
-
-    @property
-    def existing_notes(self) -> list[Note]:
-        """Notes that already have a note_key."""
-        return [n for n in self.parsed_notes if n.note_key is not None]
-
-    @property
-    def new_notes(self) -> list[Note]:
-        """Notes that do not have a note_key (newly created)."""
-        return [n for n in self.parsed_notes if n.note_key is None]
-
-    @property
-    def existing_blocks(self) -> dict[str, str]:
-        """Identified note blocks keyed by ``"note_key: a1b2..."``.
-
-        Used by the export path for block-level text comparison.
-        Derived from the file's raw content (not from individual notes).
-        """
-        _, remaining = FileState.extract_deck_key(self.raw_content)
-        return FileState.extract_note_blocks(remaining)
-
-    def validate_no_duplicate_first_lines(
-        self,
-        key_assignments: list[tuple[Note, str]],
-    ) -> None:
-        """Raise if new notes share a first line.
-
-        Would break text-based key insertion.
-        """
-        first_lines: dict[str, list[str]] = {}
-        for note, _ in key_assignments:
-            if note.note_key is not None:
-                continue
-            first_line = note.first_line
-            first_lines.setdefault(first_line, []).append(note.identifier)
-
-        duplicates = {line: ids for line, ids in first_lines.items() if len(ids) > 1}
-        if duplicates:
-            msg = f"ERROR: Duplicate first lines detected in {self.file_path.name}:\n"
-            for first_line, ids in duplicates.items():
-                msg += f"  '{first_line[:60]}...' in notes: {', '.join(ids)}\n"
-            msg += (
-                "Cannot safely assign keys. "
-                "Please ensure each note has a unique first line."
-            )
-            raise ValueError(msg)
+            # 3. Choice Validation
+            if config.is_choice:
+                has_choice_field = any(
+                    "choice" in field.name.lower() for field in config.fields
+                )
+                if not has_choice_field:
+                    raise ValueError(
+                        f"Note type '{config.name}' is marked as 'is_choice', but no fields "
+                        "containing the word 'choice' were found. Choice note types must "
+                        "have at least one field with 'choice' in its name."
+                    )
 
 
 @dataclass
 class Note:
-    """A note parsed from a markdown block.
-
-    Single class for all note types.  The ``note_type`` field (e.g.
-    ``"AnkiOpsQA"``, ``"AnkiOpsCloze"``) drives behaviour via config lookup.
-    """
+    """A note parsed from markdown."""
 
     note_key: str | None
     note_type: str
     fields: dict[str, str]  # {field_name: markdown_content}
-
-    @staticmethod
-    def infer_note_type(fields: dict[str, str]) -> str:
-        """Infer note type from parsed fields.
-
-        A note type is a candidate if:
-        1. All fields in the note are valid for that type (subset of total configuration).
-        2. All identifying fields for the type are present in the note (strict matching).
-           For is_choice types, we require all base identifying fields PLUS at least one choice.
-        """
-        reserved_names = registry._RESERVED_NAMES
-        note_fields = {key for key in fields.keys() if key not in reserved_names}
-
-        candidates = []
-
-        for name in registry.supported_note_types:
-            config = registry.get(name)
-            type_all_fields = {field.name for field in config.fields}
-
-            # Check 1: Note fields must be a subset of the Type's fields
-            if not note_fields.issubset(type_all_fields):
-                continue
-
-            # Check 2: Identification requirements
-            type_ident_fields = {field.name for field in config.fields if field.identifying}
-
-            if config.is_choice:
-                # Choice types: base identifying (e.g. Q, A) must be present
-                # PLUS at least one choice field.
-                base_ident = {f for f in type_ident_fields if "Choice" not in f}
-                choice_fields = {f for f in type_all_fields if "Choice" in f}
-                if base_ident.issubset(note_fields) and (note_fields & choice_fields):
-                    candidates.append(name)
-            else:
-                # Standard types: all identifying fields must be present
-                if type_ident_fields.issubset(note_fields):
-                    candidates.append(name)
-
-        if not candidates:
-            raise ValueError(
-                "Cannot determine note type from fields: " + ", ".join(fields.keys())
-            )
-
-        if len(candidates) > 1:
-            raise ValueError(
-                f"Ambiguous note type: matches multiple types: {', '.join(candidates)}"
-            )
-
-        return candidates[0]
-
-    @staticmethod
-    def from_block(block: str) -> Note:
-        """Parse a raw markdown block into a Note."""
-        lines = block.strip().split("\n")
-        note_key: str | None = None
-        fields: dict[str, str] = {}
-        current_field: str | None = None
-        current_content: list[str] = []
-        in_code_block = False
-        seen: set[str] = set()
-
-        for line in lines:
-            stripped = line.lstrip()
-
-            # Track fenced code blocks to avoid detecting prefixes inside code
-            if _CODE_FENCE_PATTERN.match(stripped):
-                in_code_block = not in_code_block
-                if current_field:
-                    current_content.append(line)
-                continue
-
-            # Key comment
-            key_match = _NOTE_KEY_PATTERN.match(line)
-            if key_match:
-                note_key = key_match.group(1)
-                continue
-
-            # Inside code blocks, don't detect field prefixes
-            if in_code_block:
-                if current_field:
-                    current_content.append(line)
-                continue
-
-            # Try to match a field prefix
-            matched_field = None
-            for prefix, field_name in registry.prefix_to_field.items():
-                if line.startswith(prefix + " ") or line == prefix:
-                    # Duplicate field check
-                    if field_name in seen:
-                        ctx = f"in note_key: {note_key}" if note_key else "in this note"
-                        msg = (
-                            f"Duplicate field '{prefix}' {ctx}. "
-                            f"Did you forget to end the previous note with "
-                            f"'\\n\\n---\\n\\n' "
-                            f"or is there an accidental duplicate prefix?"
-                        )
-                        logger.error(msg)
-                        raise ValueError(msg)
-
-                    seen.add(field_name)
-                    if current_field:
-                        fields[str(current_field)] = "\n".join(current_content).strip()
-
-                    matched_field = field_name
-                    current_content = (
-                        [line[len(prefix) + 1 :]]
-                        if line.startswith(prefix + " ")
-                        else []
-                    )
-                    current_field = field_name
-                    break
-
-            if matched_field is None and current_field:
-                current_content.append(line)
-
-        if current_field:
-            fields[str(current_field)] = "\n".join(current_content).strip()
-
-        if not fields:
-            # We reached here with a non-empty block
-            # (guaranteed by from_file filtering) but found
-            # no fields — block has content but no prefixes.
-            raise ValueError(
-                f"Found content but no valid field prefixes (e.g. 'Q: ', 'A: ') "
-                f"in block starting with: '{block.strip()[:50]}...'"
-            )
-
-        note = Note(
-            note_key=note_key,
-            note_type=Note.infer_note_type(fields),
-            fields=fields,
-        )
-
-        errors = note.validate()
-        if errors:
-            raise ValueError(f"Invalid note in block starting with '{block.strip()[:50]}...':\n  " + "\n  ".join(errors))
-
-        return note
-
-    @property
-    def first_line(self) -> str:
-        """First content line of the note block (prefix + first line of content).
-
-        Used for text-based note_id insertion in ``_flush_writes`` and
-        for duplicate detection.  Reconstructed from parsed fields.
-        """
-        for field_name, content in self.fields.items():
-            prefix = registry.field_to_prefix.get(field_name, "")
-            first_content = content.split("\n")[0] if content else ""
-            if prefix and first_content:
-                return f"{prefix} {first_content}"
-            if prefix:
-                return prefix
-        return ""
 
     @property
     def identifier(self) -> str:
         """Stable identifier for error messages."""
         if self.note_key is not None:
             return f"note_key: {self.note_key}"
-        return f"'{self.first_line[:60]}...'"
+        # For new notes falling back to first line
+        return f"'{self.first_field_line()[:60]}...'"
 
-    def validate(self) -> list[str]:
-        """Validate mandatory fields and note-type-specific rules.
+    def first_field_line(self) -> str:
+        """Return the first non-empty line of the first populated field."""
+        for content in self.fields.values():
+            if content:
+                return content.split("\n")[0]
+        return ""
 
-        Returns a list of error messages (empty if valid).
-        """
+    def validate(self, config: NoteTypeConfig) -> list[str]:
+        """Validate mandatory fields and note-type-specific rules."""
         errors: list[str] = []
-        try:
-            config = registry.get(self.note_type)
-        except KeyError:
-            errors.append(f"Unknown note type '{self.note_type}'")
-            return errors
-
         choice_count: int = 0
         choice_fields = []
 
-        # Check if this is a Choice-like note type
-        # We detect this by checking if it has choice-like fields in its definition
         has_choices = any("Choice" in f.name for f in config.fields)
 
-        for field in config.fields:
-            if "Choice" in field.name:
-                choice_fields.append(field.name)
-                if self.fields.get(field.name):
+        for f in config.fields:
+            if "Choice" in f.name:
+                choice_fields.append(f.name)
+                if self.fields.get(f.name):
                     choice_count += 1
-                continue  # Skip individual Choice field check in mandatory loop
+                continue
 
-            # Mandatory fields must be present if marked as identifying in config.
-            # internal fields (prefix is None) are implicitly optional in markdown.
-            if (
-                field.prefix is not None
-                and field.identifying
-                and not self.fields.get(field.name)
-            ):
-                errors.append(
-                    f"Missing mandatory field '{field.name}' ({field.prefix})"
-                )
+            if f.prefix is not None and f.identifying and not self.fields.get(f.name):
+                errors.append(f"Missing mandatory field '{f.name}' ({f.prefix})")
 
         if config.is_cloze:
             text = self.fields.get("Text", "")
@@ -407,155 +210,15 @@ class Note:
                 ]
         return []
 
-    def to_html(self, converter: "MarkdownToHTML") -> dict[str, str]:
-        """Convert all field values from markdown to HTML.
-
-        The returned dict contains an entry for every field defined by
-        this note type.  Fields absent from ``self.fields`` get an empty
-        string, so that Anki clears them when the user removes an
-        optional field from the markdown.
-
-        Args:
-            converter: MarkdownToHTML converter instance
-
-        Returns:
-            Dictionary mapping field names to HTML content.
-        """
-        html = {
-            name: converter.convert(content) for name, content in self.fields.items()
-        }
-
-        config = registry.get(self.note_type)
-        for field in config.fields:
-            if field.prefix is None:  # key-only field, not present in markdown
-                continue
-            html.setdefault(field.name, "")
-
-        return html
-
-    def html_fields_match(
-        self, html_fields: dict[str, str], anki_note: AnkiNote
-    ) -> bool:
-        """Check if converted HTML fields match an AnkiNote's fields.
-
-        Args:
-            html_fields: Output of ``self.to_html(converter)``.
-            anki_note: The Anki-side note to compare against.
-
-        Returns:
-            True if no update is needed.
-        """
-        return all(anki_note.fields.get(k) == v for k, v in html_fields.items())
-
-
-@dataclass
-class AnkiState:
-    """All Anki-side data, fetched once.
-
-    Built by ``AnkiState.fetch()`` with 3-4 API calls:
-      1. deckNamesAndIds
-      2. findCards  (all AnkiOps cards)
-      3. cardsInfo  (details for found cards)
-      4. notesInfo  (details for discovered note IDs)
-    """
-
-    deck_ids_by_name: dict[str, int]
-    deck_names_by_id: dict[int, str]
-    notes_by_id: dict[int, AnkiNote]  # note_id -> typed AnkiNote
-    cards_by_id: dict[int, dict]  # card_id -> raw AnkiConnect card dict
-    note_ids_by_deck_name: dict[str, set[int]]  # deck_name -> {note_id, ...}
-
-    @staticmethod
-    def fetch() -> AnkiState:
-        deck_ids_by_name = invoke("deckNamesAndIds")
-        deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
-
-        query = " OR ".join(f"note:{nt}" for nt in registry.supported_note_types)
-        all_card_ids = invoke("findCards", query=query)
-
-        cards_by_id: dict[int, dict] = {}
-        note_ids_by_deck_name: dict[str, set[int]] = {}
-        all_note_ids: set[int] = set()
-
-        if all_card_ids:
-            for card in invoke("cardsInfo", cards=all_card_ids):
-                cards_by_id[card["cardId"]] = card
-                note_ids_by_deck_name.setdefault(card["deckName"], set()).add(
-                    card["note"]
-                )
-                all_note_ids.add(card["note"])
-
-        notes_by_id: dict[int, AnkiNote] = {}
-        if all_note_ids:
-            for note in invoke("notesInfo", notes=list(all_note_ids)):
-                if not note:
-                    continue
-                model = note.get("modelName")
-                if model and model not in registry.supported_note_types:
-                    raise ValueError(
-                        f"Safety check failed: Note {note['noteId']} has template "
-                        f"'{model}' but expected a AnkiOps note type. "
-                        f"AnkiOps will never modify notes with non-AnkiOps templates."
-                    )
-                anki_note = AnkiNote.from_raw(note)
-                notes_by_id[anki_note.note_id] = anki_note
-
-        return AnkiState(
-            deck_ids_by_name=deck_ids_by_name,
-            deck_names_by_id=deck_names_by_id,
-            notes_by_id=notes_by_id,
-            cards_by_id=cards_by_id,
-            note_ids_by_deck_name=note_ids_by_deck_name,
-        )
-
 
 @dataclass
 class AnkiNote:
-    """A note as it exists in Anki (wrapping the raw AnkiConnect dict).
-
-    Provides typed access to note data instead of raw dict indexing.
-    """
+    """A note as it exists in Anki."""
 
     note_id: int
-    note_type: str  # modelName
-    fields: dict[str, str]  # {field_name: value} (HTML content, extracted)
+    note_type: str
+    fields: dict[str, str]  # HTML content
     card_ids: list[int]
-
-    @staticmethod
-    def from_raw(raw_note: dict) -> AnkiNote:
-        """Create an AnkiNote from a raw AnkiConnect notesInfo dict.
-
-        Extracts fields from raw_note["fields"][field_name]["value"] structure.
-        """
-        return AnkiNote(
-            note_id=raw_note["noteId"],
-            note_type=raw_note.get("modelName", ""),
-            fields={name: data["value"] for name, data in raw_note["fields"].items()},
-            card_ids=raw_note.get("cards", []),
-        )
-
-    def to_markdown(self, converter, note_key: str) -> str:
-        """Format this Anki note as a markdown block.
-
-        Args:
-            converter: HTMLToMarkdown converter instance
-            note_key: The key to write in the markdown header
-
-        Returns:
-            Markdown block string starting with ``<!-- note_key: ... -->``.
-        """
-        config = registry.get(self.note_type)
-        note_fields = config.fields
-        lines = [f"<!-- note_key: {note_key} -->"]
-
-        for field in note_fields:
-            value = self.fields.get(field.name, "")
-            if value:
-                md = converter.convert(value)
-                if md and field.prefix:
-                    lines.append(f"{field.prefix} {md}")
-
-        return "\n".join(lines)
 
 
 class ChangeType(Enum):
@@ -579,8 +242,6 @@ class Change:
 
 @dataclass
 class SyncSummary:
-    """Unified summary of synchronization operations."""
-
     total: int = 0
     created: int = 0
     updated: int = 0
@@ -598,27 +259,86 @@ class SyncSummary:
             **{f: getattr(self, f) + getattr(other, f) for f in self.__annotations__}
         )
 
-    def __radd__(self, other: int) -> "SyncSummary":
-        return self if other == 0 else NotImplemented
-
     def to_dict(self) -> dict[str, int]:
         return {f: getattr(self, f) for f in self.__annotations__}
 
     def format(self) -> str:
-        """Format non-zero change counts into a compact string."""
-        return format_changes(**self.to_dict())
+        parts = []
+        for key in [
+            "created",
+            "updated",
+            "deleted",
+            "moved",
+            "skipped",
+            "errors",
+            "hashed",
+            "synced",
+        ]:
+            val = getattr(self, key)
+            if val > 0:
+                parts.append(f"{val} {key}")
+        if not parts:
+            return "no changes"
+        return ", ".join(parts)
 
-    def __str__(self) -> str:
-        return self.format()
+
+# Priority order for deduplicating overlapping changes on the same entity.
+_CHANGE_PRIORITY = {
+    ct: i
+    for i, ct in enumerate(
+        [
+            ChangeType.SKIP,
+            ChangeType.HASH,
+            ChangeType.SYNC,
+            ChangeType.UPDATE,
+            ChangeType.CREATE,
+            ChangeType.MOVE,
+            ChangeType.DELETE,
+            ChangeType.CONFLICT,
+        ]
+    )
+}
+
+
+def _compute_summary(
+    changes: list[Change],
+    errors: list[str],
+    mapping: dict[ChangeType, str],
+) -> SyncSummary:
+    """Compute a SyncSummary from a list of changes, deduplicating by entity."""
+    effective: dict[int | str, ChangeType] = {}
+    for c in changes:
+        eid = c.entity_id or c.entity_repr
+        prev = effective.get(eid)
+        if prev is None or _CHANGE_PRIORITY[c.change_type] > _CHANGE_PRIORITY[prev]:
+            effective[eid] = c.change_type
+
+    res = {"total": 0, "errors": len(errors)}
+    for ct in effective.values():
+        if field_name := mapping.get(ct):
+            res[field_name] = res.get(field_name, 0) + 1
+        if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
+            res["total"] += 1
+    return SyncSummary(**res)
+
+
+_NOTE_MAPPING = {
+    ChangeType.CREATE: "created",
+    ChangeType.UPDATE: "updated",
+    ChangeType.DELETE: "deleted",
+    ChangeType.MOVE: "moved",
+    ChangeType.SKIP: "skipped",
+}
+
+_MEDIA_MAPPING = {
+    **_NOTE_MAPPING,
+    ChangeType.HASH: "hashed",
+    ChangeType.SYNC: "synced",
+}
 
 
 @dataclass
 class NoteSyncResult:
-    """Result of syncing a single file or deck.
-
-    Used by both import (markdown → Anki) and export (Anki → markdown) paths.
-    """
-
     deck_name: str
     file_path: Path | None
     changes: list[Change] = field(default_factory=list)
@@ -626,99 +346,21 @@ class NoteSyncResult:
 
     @property
     def summary(self) -> SyncSummary:
-        """Generate a distilled summary of changes in this result."""
-        sig = {
-            ct: i
-            for i, ct in enumerate(
-                [
-                    ChangeType.SKIP,
-                    ChangeType.HASH,
-                    ChangeType.SYNC,
-                    ChangeType.UPDATE,
-                    ChangeType.CREATE,
-                    ChangeType.MOVE,
-                    ChangeType.DELETE,
-                    ChangeType.CONFLICT,
-                ]
-            )
-        }
-        mapping = {
-            ChangeType.CREATE: "created",
-            ChangeType.UPDATE: "updated",
-            ChangeType.DELETE: "deleted",
-            ChangeType.MOVE: "moved",
-            ChangeType.SKIP: "skipped",
-        }
-
-        effective: dict[int | str, ChangeType] = {}
-        for c in self.changes:
-            eid = c.entity_id or c.entity_repr
-            if (prev := effective.get(eid)) is None or sig[c.change_type] > sig[prev]:
-                effective[eid] = c.change_type
-
-        res = {"total": 0, "errors": len(self.errors)}
-        for ct in effective.values():
-            if field := mapping.get(ct):
-                res[field] = res.get(field, 0) + 1
-            if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
-                res["total"] += 1
-        return SyncSummary(**res)
+        return _compute_summary(self.changes, self.errors, _NOTE_MAPPING)
 
 
 @dataclass
 class MediaSyncResult:
-    """Result of a media sync operation."""
-
     changes: list[Change] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> SyncSummary:
-        """Generate a distilled summary of media changes."""
-        sig = {
-            ct: i
-            for i, ct in enumerate(
-                [
-                    ChangeType.SKIP,
-                    ChangeType.HASH,
-                    ChangeType.SYNC,
-                    ChangeType.UPDATE,
-                    ChangeType.CREATE,
-                    ChangeType.MOVE,
-                    ChangeType.DELETE,
-                    ChangeType.CONFLICT,
-                ]
-            )
-        }
-        mapping = {
-            ChangeType.CREATE: "created",
-            ChangeType.UPDATE: "updated",
-            ChangeType.DELETE: "deleted",
-            ChangeType.MOVE: "moved",
-            ChangeType.SKIP: "skipped",
-            ChangeType.HASH: "hashed",
-            ChangeType.SYNC: "synced",
-        }
-
-        effective: dict[str, ChangeType] = {}
-        for c in self.changes:
-            eid = c.entity_id or c.entity_repr
-            if (prev := effective.get(eid)) is None or sig[c.change_type] > sig[prev]:
-                effective[eid] = c.change_type
-
-        res = {"total": 0, "errors": len(self.errors)}
-        for ct in effective.values():
-            if field := mapping.get(ct):
-                res[field] = res.get(field, 0) + 1
-            if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
-                res["total"] += 1
-        return SyncSummary(**res)
+        return _compute_summary(self.changes, self.errors, _MEDIA_MAPPING)
 
 
 @dataclass
 class UntrackedDeck:
-    """An Anki deck with AnkiOps notes but no matching markdown file."""
-
     deck_name: str
     deck_id: int
     note_ids: list[int]
@@ -726,30 +368,22 @@ class UntrackedDeck:
 
 @dataclass
 class CollectionImportResult:
-    """Aggregate result of a full collection import."""
-
     results: list[NoteSyncResult] = field(default_factory=list)
     untracked_decks: list[UntrackedDeck] = field(default_factory=list)
 
     @property
     def summary(self) -> SyncSummary:
-        """Aggregate summary of all results."""
         return sum((r.summary for r in self.results), SyncSummary())
 
 
 @dataclass
 class CollectionExportResult:
-    """Aggregate result of a full collection export."""
-
     results: list[NoteSyncResult] = field(default_factory=list)
     extra_changes: list[Change] = field(default_factory=list)
 
     @property
     def summary(self) -> SyncSummary:
-        """Aggregate summary of all results plus extra changes."""
         base = sum((r.summary for r in self.results), SyncSummary())
-
-        # Add stats from extra changes
         mapping = {
             ChangeType.CREATE: "created",
             ChangeType.UPDATE: "updated",
@@ -760,7 +394,21 @@ class CollectionExportResult:
             ChangeType.SYNC: "synced",
         }
         for c in self.extra_changes:
-            if field := mapping.get(c.change_type):
-                setattr(base, field, getattr(base, field) + 1)
-
+            if field_name := mapping.get(c.change_type):
+                setattr(base, field_name, getattr(base, field_name) + 1)
         return base
+
+
+@dataclass
+class Deck:
+    deck_id: int
+    name: str
+
+
+@dataclass
+class MarkdownFile:
+    """Represents a parsed Markdown file, fully detached from IO."""
+
+    file_path: Path
+    raw_content: str
+    notes: list[Note]

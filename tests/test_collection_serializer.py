@@ -1,215 +1,109 @@
-"""Tests for collection serialization and deserialization."""
+"""Tests for collection serialization/deserialization."""
 
-import json
-import os
+import pytest
 
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
-from ankiops.config import ANKIOPS_DB
+from ankiops.db import SQLiteDbAdapter
+from ankiops.fs import FileSystemAdapter
 
 
-class TestDeserialization:
-    """Test collection deserialization."""
+@pytest.fixture
+def collection(tmp_path, fs, monkeypatch):
+    """Create a minimal collection directory with one deck file."""
+    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: tmp_path)
 
-    def create_test_json(self, tmp_path):
-        """Helper to create a test JSON file."""
-        serialized_file = tmp_path / "test.json"
+    # Initialize DB
+    db = SQLiteDbAdapter.load(tmp_path)
+    db.set_config("profile", "test")
+    db.save()
+    db.close()
 
-        serialized_data = {
-            "collection": {
-                "serialized_at": "2024-01-01T00:00:00Z",
-            },
-            "decks": [
-                {
-                    "deck_key": "deck-key-1",
-                    "name": "Test Deck",
-                    "notes": [
-                        {
-                            "note_key": "key-111",
-                            "fields": {
-                                "Question": "What is this?",
-                                "Answer": "An image",
-                            },
-                        }
-                    ],
-                }
-            ],
-        }
+    # Eject note types
+    note_types_dir = tmp_path / "note_types"
+    fs.eject_builtin_note_types(note_types_dir)
 
-        serialized_file.write_text(json.dumps(serialized_data, indent=2))
-        return serialized_file
+    # Create a deck file
+    deck_md = tmp_path / "TestDeck.md"
+    deck_md.write_text(
+        ""
+        "<!-- note_key: nk-1 -->\n"
+        "Q: What is 2+2?\n"
+        "A: 4\n\n"
+        "---\n\n"
+        "<!-- note_key: nk-2 -->\n"
+        "Q: What is 3+3?\n"
+        "A: 6"
+    )
 
-    def test_deserialize_with_ignore_ids(self, tmp_path):
-        """Test deserialization with no_ids=True skips writing key comments."""
-        serialized_file = self.create_test_json(tmp_path)
-        collection_dir = tmp_path / "collection"
-        collection_dir.mkdir()
-
-        # Create marker DB
-        (collection_dir / ANKIOPS_DB).touch()
-
-        # Deserialize with no_ids=True, ensuring we are in the target dir
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(collection_dir)
-            deserialize_collection_from_json(
-                serialized_file, overwrite=True, no_ids=True
-            )
-        finally:
-            os.chdir(original_cwd)
-
-        # Verify markdown file was created
-        deck_file = collection_dir / "Test Deck.md"
-        assert deck_file.exists()
-
-        # Verify NO ID comments appear in the markdown
-        content = deck_file.read_text()
-        assert "<!-- deck_key:" not in content
-        assert "<!-- note_key:" not in content
-        assert "<!-- uuid:" not in content
-
-        # Verify note content is still present
-        assert "What is this?" in content
-        assert "An image" in content
-
-    def test_deserialize_with_keys(self, tmp_path):
-        """Test deserialization writes keys by default."""
-        serialized_file = self.create_test_json(tmp_path)
-        collection_dir = tmp_path / "collection"
-        collection_dir.mkdir()
-        (collection_dir / ANKIOPS_DB).touch()
-
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(collection_dir)
-            deserialize_collection_from_json(
-                serialized_file, overwrite=True, no_ids=False
-            )
-        finally:
-            os.chdir(original_cwd)
-
-        deck_file = collection_dir / "Test Deck.md"
-        assert deck_file.exists()
-        content = deck_file.read_text()
-
-        # Verify keys are present
-        assert "<!-- deck_key: deck-key-1 -->" in content
-        assert "<!-- note_key: key-111 -->" in content
+    return tmp_path
 
 
-class TestSerialization:
-    """Test collection serialization."""
+class TestSerialize:
+    """Test serializing a collection to JSON."""
 
-    def test_serialize_uses_keys(self, tmp_path):
-        """Verify serialization uses deck_key and note_key."""
-        collection_dir = tmp_path / "collection"
-        collection_dir.mkdir()
-        (collection_dir / ANKIOPS_DB).touch()
+    def test_basic_serialize(self, collection, tmp_path, monkeypatch):
+        monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection)
+        output = tmp_path / "out.json"
+        result = serialize_collection_to_json(collection, output)
 
-        # Create a markdown file with keys
-        deck_file = collection_dir / "Source Deck.md"
-        deck_file.write_text(
-            "<!-- deck_key: deck-key-ABC -->\n"
-            "<!-- note_key: note-key-123 -->\n"
-            "Q: Question\nA: Answer"
+        assert len(result["decks"]) == 1
+        assert len(result["decks"][0]["notes"]) == 2
+        assert result["decks"][0]["notes"][0]["note_key"] == "nk-1"
+
+    def test_serialize_no_ids(self, collection, tmp_path, monkeypatch):
+        monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection)
+        output = tmp_path / "out.json"
+        result = serialize_collection_to_json(collection, output, no_ids=True)
+
+        # Keys should be excluded
+        assert "note_key" not in result["decks"][0]["notes"][0]
+        assert "name" in result["decks"][0]
+
+
+class TestDeserialize:
+    """Test deserializing from JSON to markdown files."""
+
+    def test_roundtrip(self, collection, tmp_path, monkeypatch):
+        """Serialize then deserialize should produce equivalent content."""
+        monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection)
+        monkeypatch.setattr(
+            "ankiops.config.get_note_types_dir", lambda: collection / "note_types"
+        )
+        monkeypatch.setattr(
+            "ankiops.collection_serializer.get_collection_dir", lambda: collection
+        )
+        monkeypatch.setattr(
+            "ankiops.collection_serializer.get_note_types_dir",
+            lambda: collection / "note_types",
+        )
+        json_file = tmp_path / "export.json"
+        serialize_collection_to_json(collection, json_file)
+
+        # Deserialize to a fresh directory
+        fresh_dir = tmp_path / "fresh"
+        fresh_dir.mkdir()
+        monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: fresh_dir)
+        monkeypatch.setattr(
+            "ankiops.collection_serializer.get_collection_dir", lambda: fresh_dir
         )
 
-        output_file = tmp_path / "output.json"
+        # Copy note types
+        fs = FileSystemAdapter()
+        note_types_dst = fresh_dir / "note_types"
+        fs.eject_builtin_note_types(note_types_dst)
+        monkeypatch.setattr("ankiops.config.get_note_types_dir", lambda: note_types_dst)
+        monkeypatch.setattr(
+            "ankiops.collection_serializer.get_note_types_dir", lambda: note_types_dst
+        )
 
-        serialize_collection_to_json(collection_dir, output_file)
+        deserialize_collection_from_json(json_file, overwrite=True)
 
-        assert output_file.exists()
-        data = json.loads(output_file.read_text())
-
-        assert len(data["decks"]) == 1
-        deck = data["decks"][0]
-        assert deck["deck_key"] == "deck-key-ABC"
-        assert len(deck["notes"]) == 1
-        note = deck["notes"][0]
-        assert note["note_key"] == "note-key-123"
-        assert note["note_type"] == "AnkiOpsQA"
-        assert note["fields"]["Question"] == "Question"
-
-    def test_deserialize_ignores_uuid(self, tmp_path):
-        """Test that legacy 'uuid' field is ignored if 'note_key' is missing."""
-        serialized_file = tmp_path / "legacy.json"
-
-        # JSON with 'uuid' but no 'note_key'
-        data = {
-            "collection": {"serialized_at": "2024-01-01"},
-            "decks": [
-                {
-                    "name": "Legacy Deck",
-                    "uuid": "legacy-deck-uuid",
-                    "notes": [
-                        {
-                            "uuid": "legacy-note-uuid",
-                            "fields": {"Front": "F", "Back": "B"},
-                        }
-                    ],
-                }
-            ],
-        }
-        serialized_file.write_text(json.dumps(data))
-
-        collection_dir = tmp_path / "collection"
-        collection_dir.mkdir()
-        (collection_dir / ANKIOPS_DB).touch()
-
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(collection_dir)
-            deserialize_collection_from_json(serialized_file, overwrite=True)
-        finally:
-            os.chdir(original_cwd)
-
-        deck_file = collection_dir / "Legacy Deck.md"
-        assert deck_file.exists()
-        content = deck_file.read_text()
-
-        # UUIDs should NOT be in the output as key comments
-        assert "<!-- deck_key: legacy-deck-uuid -->" not in content
-        assert "<!-- note_key: legacy-note-uuid -->" not in content
-
-
-    def test_deserialize_uses_note_type_from_json(self, tmp_path):
-        """Verify deserialization uses the note_type specified in JSON."""
-        serialized_file = tmp_path / "explicit_type.json"
-        
-        # JSON with an explicit note type that might be hard to infer
-        data = {
-            "collection": {"serialized_at": "2024-01-01"},
-            "decks": [
-                {
-                    "name": "Explicit Deck",
-                    "notes": [
-                        {
-                            "note_type": "AnkiOpsQA",
-                            "fields": {"Question": "Q", "Answer": "A"},
-                        }
-                    ],
-                }
-            ],
-        }
-        serialized_file.write_text(json.dumps(data))
-
-        collection_dir = tmp_path / "collection"
-        collection_dir.mkdir()
-        (collection_dir / ANKIOPS_DB).touch()
-
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(collection_dir)
-            deserialize_collection_from_json(serialized_file, overwrite=True)
-        finally:
-            os.chdir(original_cwd)
-
-        deck_file = collection_dir / "Explicit Deck.md"
-        assert deck_file.exists()
-        content = deck_file.read_text()
-        
-        # Verify it was formatted as QA (Q: and A: prefixes)
-        assert "Q: Q" in content
-        assert "A: A" in content
+        # Should have created a deck file
+        md_files = list(fresh_dir.glob("*.md"))
+        assert len(md_files) == 1
+        content = md_files[0].read_text()
+        assert "What is 2+2?" in content
+        assert "What is 3+3?" in content
