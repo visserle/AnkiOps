@@ -8,6 +8,7 @@ from pathlib import Path
 from ankiops.anki import AnkiAdapter
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.fs import FileSystemAdapter
+from ankiops.log import clickable_path
 from ankiops.models import Change, ChangeType, MediaSyncResult
 
 logger = logging.getLogger(__name__)
@@ -60,8 +61,8 @@ def hash_and_update_references(
     # 1. Find directly referenced files first
     referenced = set()
     for md_file in fs_port.find_markdown_files(collection_dir):
-        doc = fs_port.read_markdown_file(md_file)
-        referenced.update(_extract_media_references(doc.raw_content))
+        raw_content = md_file.read_text(encoding="utf-8")
+        referenced.update(_extract_media_references(raw_content))
 
     rename_map = {}
 
@@ -100,7 +101,9 @@ def hash_and_update_references(
                 )
 
         except Exception as e:
-            logger.warning(f"Failed to hash media file {file_path.name}: {e}")
+            logger.warning(
+                f"Failed to hash media file {clickable_path(file_path)}: {e}"
+            )
             result.errors.append(str(e))
 
     # 3. Update Markdown files in bulk
@@ -111,8 +114,8 @@ def hash_and_update_references(
     # 4. Re-collect now-correctly-hashed active references
     final_referenced = set()
     for md_file in fs_port.find_markdown_files(collection_dir):
-        doc = fs_port.read_markdown_file(md_file)
-        final_referenced.update(_extract_media_references(doc.raw_content))
+        raw_content = md_file.read_text(encoding="utf-8")
+        final_referenced.update(_extract_media_references(raw_content))
 
     return final_referenced
 
@@ -124,7 +127,14 @@ def sync_media_to_anki(
 ) -> MediaSyncResult:
     """Push local media to Anki."""
     result = MediaSyncResult()
-    media_root = collection_dir / LOCAL_MEDIA_DIR
+    media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
+
+    anki_media_dir = anki_port.get_media_dir().resolve()
+    if media_root == anki_media_dir:
+        raise ValueError(
+            f"Local media directory ({media_root}) is the same as Anki's media "
+            "directory. Syncing would rename files inside Anki directly. Aborting."
+        )
 
     active_refs = hash_and_update_references(fs_port, collection_dir, result)
     if not media_root.exists():
@@ -139,10 +149,14 @@ def sync_media_to_anki(
             # Push safely via Port
             anki_port.push_media(file_path, name)
             result.changes.append(Change(ChangeType.SYNC, name, name))
+            logger.debug(f"  Synced {clickable_path(file_path)}")
         elif name not in active_refs and not name.startswith("_"):
             try:
+                # Store the path before unlinking it so clickable_path can see it exists
+                p = file_path
                 file_path.unlink()
                 result.changes.append(Change(ChangeType.DELETE, name, name))
+                logger.debug(f"  Deleted orphan {clickable_path(p)}")
             except Exception as e:
                 result.errors.append(str(e))
 
@@ -161,8 +175,8 @@ def sync_media_from_anki(
 
     referenced = set()
     for md_file in fs_port.find_markdown_files(collection_dir):
-        doc = fs_port.read_markdown_file(md_file)
-        referenced.update(_extract_media_references(doc.raw_content))
+        raw_content = md_file.read_text(encoding="utf-8")
+        referenced.update(_extract_media_references(raw_content))
 
     for name in referenced:
         target = media_root / name
@@ -170,7 +184,7 @@ def sync_media_from_anki(
             success = anki_port.pull_media(name, target)
             if success:
                 result.changes.append(Change(ChangeType.SYNC, name, name))
-                logger.debug(f"Pulled {name} from Anki")
+                logger.debug(f"  Pulled {clickable_path(target)} from Anki")
             else:
                 logger.warning(f"Media {name} missing in Anki")
                 result.changes.append(Change(ChangeType.SKIP, name, name))

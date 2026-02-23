@@ -171,6 +171,7 @@ def _sync_file(
                         },
                     )
                 )
+                logger.debug(f"  Create {parsed_note.identifier}")
             else:
                 c_to_move = []
                 for cid in anki_note.card_ids:
@@ -210,6 +211,7 @@ def _sync_file(
                             {"html_fields": html_fields},
                         )
                     )
+                    logger.debug(f"  Update {parsed_note.identifier}")
         else:
             new_key = db_port.generate_key()
             creates.append(
@@ -224,6 +226,7 @@ def _sync_file(
                     },
                 )
             )
+            logger.debug(f"  Create (new) {parsed_note.identifier}")
 
     md_anki_ids = set()
     for n in fs.notes:
@@ -247,6 +250,9 @@ def _sync_file(
                     nid,
                     f"note_key: {key}" if key else f"note_id: {nid}",
                 )
+            )
+            logger.debug(
+                f"  Delete {f'note_key: {key}' if key else f'note_id: {nid}'}"
             )
 
     key_assignments = []
@@ -356,6 +362,9 @@ def import_collection(
 
         results.append(res)
         pending.append(p)
+        summary = res.summary
+        if summary.format() != "no changes":
+            logger.debug(f"File '{fs.file_path.name}': {summary.format()}")
 
     _flush_writes(fs_port, pending)
     db_port.save()

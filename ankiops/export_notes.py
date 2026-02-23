@@ -28,10 +28,14 @@ def _from_html(
     """Convert an AnkiNote into a Domain Note using the FS Port."""
     fields = {}
     for f in config.fields:
+        if f.name == "AnkiOps Key":
+            continue
         if f.name in anki_note.fields:
-            fields[f.name] = fs_port.convert_to_markdown(anki_note.fields[f.name])
+            md_val = fs_port.convert_to_markdown(anki_note.fields[f.name])
+            if md_val:
+                fields[f.name] = md_val
 
-    note_key = anki_note.fields.get("AnkiOps Key", "")
+    note_key = anki_note.fields.get("AnkiOps Key", "").strip()
     return Note(
         note_key=note_key if note_key else None,
         note_type=anki_note.note_type,
@@ -107,6 +111,7 @@ def _sync_deck(
             creates.append(
                 Change(ChangeType.CREATE, anki_note.note_id, domain_note.identifier)
             )
+            logger.debug(f"  Created {domain_note.identifier}")
             final_notes.append(domain_note)
         else:
             if local_match.fields == domain_note.fields:
@@ -118,6 +123,7 @@ def _sync_deck(
                 updates.append(
                     Change(ChangeType.UPDATE, anki_note.note_id, domain_note.identifier)
                 )
+                logger.debug(f"  Updated {domain_note.identifier}")
                 final_notes.append(domain_note)
 
     # Rebuild file content
@@ -150,6 +156,7 @@ def _sync_deck(
             # Note was deleted in Anki
             db_port.remove_note_by_key(old_note.note_key)
             result.changes.append(Change(ChangeType.DELETE, None, old_note.identifier))
+            logger.debug(f"  Deleted {old_note.identifier}")
 
     result.changes.extend(creates + updates + skips)
     return result
@@ -227,6 +234,9 @@ def export_collection(
         )
         db_port.set_deck(deck_name, deck_id)
         results.append(res)
+        summary = res.summary
+        if summary.format() != "no changes":
+            logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
     extra_changes = []
     if not keep_orphans:

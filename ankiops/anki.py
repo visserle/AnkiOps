@@ -1,7 +1,7 @@
 """AnkiConnect Adapter."""
 
-import base64
 import logging
+import shutil
 from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError, invoke
@@ -32,6 +32,9 @@ def _action(action_str: str, **params) -> dict:
 
 class AnkiAdapter:
     """Adapter for AnkiConnect HTTP API."""
+
+    def __init__(self) -> None:
+        self._media_dir: Path | None = None
 
     def get_version(self) -> int:
         """Get AnkiConnect version."""
@@ -342,15 +345,22 @@ class AnkiAdapter:
 
         return created_ids, errors
 
+    def get_media_dir(self) -> Path:
+        """Return Anki's collection.media directory, cached after first call."""
+        cached = self._media_dir
+        if cached is None:
+            cached = Path(invoke("getMediaDirPath"))
+            self._media_dir = cached
+        return cached
+
     def push_media(self, local_path: Path, remote_filename: str) -> None:
-        data = base64.b64encode(local_path.read_bytes()).decode("utf-8")
-        invoke("storeMediaFile", filename=remote_filename, data=data)
+        shutil.copy2(local_path, self.get_media_dir() / remote_filename)
 
     def pull_media(self, remote_filename: str, local_path: Path) -> bool:
-        b64_data = invoke("retrieveMediaFile", filename=remote_filename)
-        if not b64_data:
+        source = self.get_media_dir() / remote_filename
+        if not source.exists():
             return False
-        local_path.write_bytes(base64.b64decode(b64_data))
+        shutil.copy2(source, local_path)
         return True
 
     def find_notes_by_ankiops_key(self, key: str) -> list[int]:

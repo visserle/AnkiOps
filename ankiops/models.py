@@ -269,7 +269,6 @@ class SyncSummary:
             "updated",
             "deleted",
             "moved",
-            "skipped",
             "errors",
             "hashed",
             "synced",

@@ -19,7 +19,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.log import configure_logging
+from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionExportResult, CollectionImportResult
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
 from ankiops.sync_note_types import sync_note_types
@@ -78,9 +78,18 @@ def run_am(args):
         keep_orphans=args.keep_orphans,
     )
     note_summary = export_summary.summary
-    files_count = len(export_summary.results)
+    deck_count = len(export_summary.results)
+    note_count = note_summary.total
+    changes = note_summary.format()
 
-    logger.info(f"Export complete: {files_count} files — {note_summary.format()}")
+    logger.info(
+        f"Export: {deck_count} decks with {note_count} notes — {changes}"
+    )
+    for res in export_summary.results:
+        s = res.summary
+        deck_fmt = s.format()
+        if deck_fmt != "no changes" and res.file_path:
+            logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
 
     # Sync referenced media from Anki to local
     try:
@@ -88,10 +97,10 @@ def run_am(args):
         media_summary = media_result.summary
         if media_summary.format() != "no changes":
             logger.info(
-                f"Media sync complete: {media_summary.total} files — {media_summary.format()}"
+                f"Media: {media_summary.total} files — {media_summary.format()}"
             )
         else:
-            logger.debug("Media sync complete: no changes")
+            logger.debug("Media: no changes")
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
@@ -112,14 +121,16 @@ def run_ma(args):
         media_summary = media_result.summary
         if media_summary.format() != "no changes":
             logger.info(
-                f"Media sync complete: {media_summary.total} files — {media_summary.format()}"
+                f"Media: {media_summary.total} files — {media_summary.format()}"
             )
         else:
-            logger.debug("Media sync complete: no changes")
+            logger.debug("Media: no changes")
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
-    sync_note_types(anki, fs, note_types_dir)
+    nt_summary = sync_note_types(anki, fs, note_types_dir)
+    if nt_summary:
+        logger.info(f"Note types: {nt_summary}")
 
     if not args.no_auto_commit:
         git_snapshot(collection_dir, "import")
@@ -133,10 +144,19 @@ def run_ma(args):
         only_add_new=args.only_add_new,
     )
     note_summary = import_summary.summary
-    files_stat = len(import_summary.results)
+    deck_count = len(import_summary.results)
+    note_count = note_summary.total
     untracked = import_summary.untracked_decks
+    changes = note_summary.format()
 
-    logger.info(f"Import complete: {files_stat} files — {note_summary.format()}")
+    logger.info(
+        f"Import: {deck_count} decks with {note_count} notes — {changes}"
+    )
+    for res in import_summary.results:
+        s = res.summary
+        deck_fmt = s.format()
+        if deck_fmt != "no changes" and res.file_path:
+            logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
 
     if untracked:
         logger.warning(
@@ -145,7 +165,7 @@ def run_ma(args):
         )
         for deck in untracked:
             logger.warning(f"  - {deck.deck_name} ({len(deck.note_ids)} notes)")
-        logger.warning("Use 'ankiops export' to bring them into your collection.")
+        logger.warning("Use 'ankiops am' to bring them into your collection.")
 
     if note_summary.errors:
         logger.critical(
