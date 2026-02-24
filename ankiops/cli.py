@@ -156,7 +156,7 @@ def run_ma(args):
         s = res.summary
         deck_fmt = s.format()
         if deck_fmt != "no changes" and res.file_path:
-            logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
+            logger.info(f"  {res.deck_name}  {deck_fmt}")
 
     if untracked:
         logger.warning(
