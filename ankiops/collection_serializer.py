@@ -15,14 +15,12 @@ logger = logging.getLogger(__name__)
 def serialize_collection_to_json(
     collection_dir: Path,
     output_file: Path,
-    no_ids: bool = False,
 ) -> dict:
     """Serialize entire collection to JSON format.
 
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
-        no_ids: If True, exclude note_key from serialized output
 
     Returns:
         Dictionary containing the serialized data
@@ -61,8 +59,7 @@ def serialize_collection_to_json(
 
         for note in parsed.notes:
             note_data = {}
-            if not no_ids:
-                note_data["note_key"] = note.note_key
+            note_data["note_key"] = note.note_key
             note_data["note_type"] = note.note_type
             note_data["fields"] = note.fields
             deck_data["notes"].append(note_data)
@@ -90,7 +87,7 @@ def serialize_collection_to_json(
 
 
 def deserialize_collection_from_json(
-    json_file: Path, overwrite: bool = False, no_ids: bool = False
+    json_file: Path, overwrite: bool = False,
 ) -> None:
     """Deserialize collection from JSON format.
 
@@ -100,7 +97,6 @@ def deserialize_collection_from_json(
     Args:
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
-        no_ids: If True, skip writing note_key comments to markdown
     """
     root_dir = get_collection_dir()
 
@@ -148,7 +144,7 @@ def deserialize_collection_from_json(
                     )
                     continue
 
-            if note_key and not no_ids:
+            if note_key:
                 lines.append(f"<!-- note_key: {note_key} -->")
 
             config = config_by_name.get(note_type)

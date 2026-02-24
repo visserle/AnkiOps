@@ -284,11 +284,6 @@ def main():
         "-o",
         help="Output file path (default: <collection-name>.json)",
     )
-    serialize_parser.add_argument(
-        "--no-ids",
-        action="store_true",
-        help=("Exclude note_key from serialized output (useful for sharing/templates)"),
-    )
     serialize_parser.set_defaults(handler=run_serialize)
 
     # Deserialize parser
@@ -305,11 +300,6 @@ def main():
         "--overwrite",
         action="store_true",
         help="Overwrite existing markdown files",
-    )
-    deserialize_parser.add_argument(
-        "--no-ids",
-        action="store_true",
-        help="Skip writing note_key comments (useful for templates/sharing)",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
