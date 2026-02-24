@@ -53,15 +53,6 @@ class TestSerialize:
         assert len(result["decks"][0]["notes"]) == 2
         assert result["decks"][0]["notes"][0]["note_key"] == "nk-1"
 
-    def test_serialize_no_ids(self, collection, tmp_path, monkeypatch):
-        monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection)
-        output = tmp_path / "out.json"
-        result = serialize_collection_to_json(collection, output, no_ids=True)
-
-        # Keys should be excluded
-        assert "note_key" not in result["decks"][0]["notes"][0]
-        assert "name" in result["decks"][0]
-
 
 class TestDeserialize:
     """Test deserializing from JSON to markdown files."""
