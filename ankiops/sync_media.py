@@ -87,13 +87,13 @@ def hash_and_update_references(
             continue
 
         try:
-            digest = fs_port.calculate_blake2b(file_path)
+            digest = fs_port.calculate_blake3(file_path)
             new_name = _get_hashed_name(file_path, digest)
 
             if new_name != file_path.name:
                 new_path = file_path.with_name(new_name)
                 if new_path.exists():
-                    if fs_port.calculate_blake2b(new_path) == digest:
+                    if fs_port.calculate_blake3(new_path) == digest:
                         file_path.unlink()
                     else:
                         continue

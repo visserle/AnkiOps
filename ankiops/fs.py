@@ -1,6 +1,5 @@
 """FileSystem Adapter for Reading/Writing Markdown, Configs, and Media."""
 
-import hashlib
 import logging
 import re
 import shutil
@@ -8,6 +7,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import unquote
 
+from blake3 import blake3
 import yaml
 
 from ankiops.config import LOCAL_MEDIA_DIR, NOTE_SEPARATOR
@@ -291,12 +291,12 @@ class FileSystemAdapter:
         self.set_configs(configs)
         return configs
 
-    def calculate_blake2b(self, file_path: Path) -> str:
-        h = hashlib.blake2b(digest_size=4)
+    def calculate_blake3(self, file_path: Path) -> str:
+        h = blake3()
         with open(file_path, "rb") as f:
             for chunk in iter(lambda: f.read(65536), b""):
                 h.update(chunk)
-        return h.hexdigest()
+        return h.hexdigest(length=4)
 
     def update_media_references(
         self, directory: Path, rename_map: dict[str, str]

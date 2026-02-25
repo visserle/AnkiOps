@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import pytest
+from blake3 import blake3
 
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.sync_media import _extract_media_references
 
 
-def _blake2b(path: Path) -> str:
-    return hashlib.blake2b(path.read_bytes(), digest_size=4).hexdigest()
+def _blake3(path: Path) -> str:
+    return blake3(path.read_bytes()).hexdigest(length=4)
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ class TestMediaHashing:
         first.write_bytes(content)
         second.write_bytes(content)
 
-        assert _blake2b(first) == _blake2b(second)
+        assert _blake3(first) == _blake3(second)
 
     def test_different_files_have_different_hash(self, media_dir):
         first = media_dir / "img1.png"
@@ -40,7 +40,7 @@ class TestMediaHashing:
         first.write_bytes(b"content1")
         second.write_bytes(b"content2")
 
-        assert _blake2b(first) != _blake2b(second)
+        assert _blake3(first) != _blake3(second)
 
 
 class TestMediaReferenceDetection:
