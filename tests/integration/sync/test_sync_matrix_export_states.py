@@ -64,17 +64,17 @@ def test_export_create_is_full_sync_across_states(case, world):
 
 @pytest.mark.parametrize("case", UPDATE_CASES, ids=lambda c: c.id)
 def test_export_update_is_full_sync_across_states(case, world):
-    key = f"exp-state-update-{case.state.lower()}"
+    note_key = f"exp-state-update-{case.state.lower()}"
     note_id = world.add_qa_note(
         deck_name="ExportUpdateDeck",
         question="Update Q",
         answer="Anki Answer",
-        note_key=key,
+        note_key=note_key,
     )
 
-    world.write_qa_deck("ExportUpdateDeck", [("Update Q", "Markdown Old", key)])
+    world.write_qa_deck("ExportUpdateDeck", [("Update Q", "Markdown Old", note_key)])
 
-    with world.db_session(case.state, note_map={key: note_id}) as db:
+    with world.db_session(case.state, note_map={note_key: note_id}) as db:
         result = world.sync_export(db)
 
     assert_summary(result.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
@@ -97,24 +97,26 @@ def test_export_delete_removes_orphan_file_across_states(case, world):
 
 @pytest.mark.parametrize("case", RENAME_CASES, ids=lambda c: c.id)
 def test_export_deck_rename_converges_to_new_file_across_states(case, world):
-    key = f"exp-state-rename-{case.state.lower()}"
+    note_key = f"exp-state-rename-{case.state.lower()}"
     note_id = world.add_qa_note(
         deck_name="NewDeckName",
         question="Rename Export Q",
         answer="Rename Export A",
-        note_key=key,
+        note_key=note_key,
     )
 
     old_file = world.write_qa_deck(
         "OldDeckName",
-        [("Rename Export Q", "Rename Export A", key)],
+        [("Rename Export Q", "Rename Export A", note_key)],
     )
 
     deck_map = {}
     if case.state in {"RUN", "CORR"}:
         deck_map = {"OldDeckName": world.mock_anki.decks["NewDeckName"]}
 
-    with world.db_session(case.state, note_map={key: note_id}, deck_map=deck_map) as db:
+    with world.db_session(
+        case.state, note_map={note_key: note_id}, deck_map=deck_map
+    ) as db:
         world.sync_export(db)
 
     assert world.deck_path("NewDeckName").exists()
@@ -123,17 +125,19 @@ def test_export_deck_rename_converges_to_new_file_across_states(case, world):
 
 @pytest.mark.parametrize("case", CONFLICT_CASES, ids=lambda c: c.id)
 def test_export_conflict_prefers_anki_content_across_states(case, world):
-    key = f"exp-state-conflict-{case.state.lower()}"
+    note_key = f"exp-state-conflict-{case.state.lower()}"
     note_id = world.add_qa_note(
         deck_name="ConflictExportDeck",
         question="Conflict Q",
         answer="Anki Winner",
-        note_key=key,
+        note_key=note_key,
     )
 
-    world.write_qa_deck("ConflictExportDeck", [("Conflict Q", "Markdown Loser", key)])
+    world.write_qa_deck(
+        "ConflictExportDeck", [("Conflict Q", "Markdown Loser", note_key)]
+    )
 
-    with world.db_session(case.state, note_map={key: note_id}) as db:
+    with world.db_session(case.state, note_map={note_key: note_id}) as db:
         world.sync_export(db)
 
     assert "A: Anki Winner" in world.read_deck("ConflictExportDeck")

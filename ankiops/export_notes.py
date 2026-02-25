@@ -55,7 +55,7 @@ def _sync_deck(
     db_port: SQLiteDbAdapter,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
-    note_fingerprints_by_key: dict[str, tuple[str, str]],
+    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_fingerprints: list[tuple[str, str, str]],
 ) -> NoteSyncResult:
     result = NoteSyncResult(deck_name=deck_name, file_path=existing_file_path)
@@ -73,7 +73,7 @@ def _sync_deck(
         # Sort by note_id (creation timestamp) for first-time exports
         anki_notes = sorted(anki_notes, key=lambda n: n.note_id)
 
-    local_notes_by_key = {n.note_key: n for n in fs.notes if n.note_key}
+    local_notes_by_note_key = {n.note_key: n for n in fs.notes if n.note_key}
     local_notes_by_content = {
         n.first_field_line(): n for n in fs.notes if not n.note_key
     }
@@ -81,42 +81,42 @@ def _sync_deck(
     creates, updates, skips = [], [], []
     final_notes = []
 
-    def _queue_note_mapping(key: str, note_id: int) -> None:
-        if note_keys_by_id.get(note_id) == key:
+    def _queue_note_mapping(note_key: str, note_id: int) -> None:
+        if note_keys_by_id.get(note_id) == note_key:
             return
-        note_keys_by_id[note_id] = key
-        pending_note_mappings.append((key, note_id))
+        note_keys_by_id[note_id] = note_key
+        pending_note_mappings.append((note_key, note_id))
 
-    def _queue_fingerprint(key: str, md_hash: str, anki_hash: str) -> None:
-        if note_fingerprints_by_key.get(key) == (md_hash, anki_hash):
+    def _queue_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
+        if note_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
             return
-        note_fingerprints_by_key[key] = (md_hash, anki_hash)
-        pending_fingerprints.append((key, md_hash, anki_hash))
+        note_fingerprints_by_note_key[note_key] = (md_hash, anki_hash)
+        pending_fingerprints.append((note_key, md_hash, anki_hash))
 
     for anki_note in anki_notes:
-        key = note_keys_by_id.get(anki_note.note_id)
-        embedded = anki_note.fields.get("AnkiOps Key", "").strip()
+        note_key = note_keys_by_id.get(anki_note.note_id)
+        embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
         current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
 
-        # Stale id->key mapping: prefer embedded key from Anki note.
-        if key and embedded and key != embedded:
-            _queue_note_mapping(embedded, anki_note.note_id)
-            key = embedded
+        # Stale note_id->note_key mapping: prefer embedded note_key from Anki note.
+        if note_key and embedded_note_key and note_key != embedded_note_key:
+            _queue_note_mapping(embedded_note_key, anki_note.note_id)
+            note_key = embedded_note_key
 
-        elif not key and embedded:
-            _queue_note_mapping(embedded, anki_note.note_id)
-            key = embedded
+        elif not note_key and embedded_note_key:
+            _queue_note_mapping(embedded_note_key, anki_note.note_id)
+            note_key = embedded_note_key
 
-        local_match = local_notes_by_key.get(key) if key else None
-        if key and local_match:
+        local_match = local_notes_by_note_key.get(note_key) if note_key else None
+        if note_key and local_match:
             local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
-            cached = note_fingerprints_by_key.get(key)
+            cached = note_fingerprints_by_note_key.get(note_key)
             if cached == (local_md_hash, current_anki_hash):
                 skips.append(
                     Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
                 )
                 final_notes.append(local_match)
-                _queue_fingerprint(key, local_md_hash, current_anki_hash)
+                _queue_fingerprint(note_key, local_md_hash, current_anki_hash)
                 continue
 
         cfg = config_by_name.get(anki_note.note_type)
@@ -128,26 +128,26 @@ def _sync_deck(
 
         domain_note = _from_html(anki_note, cfg, fs_port)
 
-        if not key:
-            # Match by content when no mapped/embedded key exists.
+        if not note_key:
+            # Match by content when no mapped/embedded note_key exists.
             first_line = domain_note.first_field_line()
             match = local_notes_by_content.get(first_line)
             if match and match.note_key:
-                key = match.note_key
-                _queue_note_mapping(key, anki_note.note_id)
+                note_key = match.note_key
+                _queue_note_mapping(note_key, anki_note.note_id)
             else:
-                key = db_port.generate_key()
-                _queue_note_mapping(key, anki_note.note_id)
+                note_key = db_port.generate_note_key()
+                _queue_note_mapping(note_key, anki_note.note_id)
 
-        domain_note.note_key = key
-        local_match = local_notes_by_key.get(key)
+        domain_note.note_key = note_key
+        local_match = local_notes_by_note_key.get(note_key)
         if local_match and local_match.fields == domain_note.fields:
             skips.append(
                 Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
             )
             final_notes.append(local_match)
             md_hash = note_fingerprint(local_match.note_type, local_match.fields)
-            _queue_fingerprint(key, md_hash, current_anki_hash)
+            _queue_fingerprint(note_key, md_hash, current_anki_hash)
             continue
 
         if not local_match:
@@ -163,7 +163,7 @@ def _sync_deck(
 
         final_notes.append(domain_note)
         md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
-        _queue_fingerprint(key, md_hash, current_anki_hash)
+        _queue_fingerprint(note_key, md_hash, current_anki_hash)
 
     # Rebuild file content
     content_parts = []
@@ -189,11 +189,11 @@ def _sync_deck(
         fs_port.write_markdown_file(result.file_path, final_text)
 
     # Detect deleted notes
-    final_keys = {n.note_key for n in final_notes if n.note_key}
+    final_note_keys = {n.note_key for n in final_notes if n.note_key}
     for old_note in fs.notes:
-        if old_note.note_key and old_note.note_key not in final_keys:
+        if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
-            db_port.remove_note_by_key(old_note.note_key)
+            db_port.remove_note_by_note_key(old_note.note_key)
             result.changes.append(Change(ChangeType.DELETE, None, old_note.identifier))
             logger.debug(f"  Deleted {old_note.identifier}")
 
@@ -217,12 +217,14 @@ def export_collection(
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
         note_keys_by_id = db_port.get_note_keys_bulk(all_note_ids)
         pending_note_mappings: list[tuple[str, int]] = []
-        key_candidates = set(note_keys_by_id.values())
+        note_key_candidates = set(note_keys_by_id.values())
         for anki_note in anki_notes.values():
-            embedded_key = anki_note.fields.get("AnkiOps Key", "").strip()
-            if embedded_key:
-                key_candidates.add(embedded_key)
-        note_fingerprints_by_key = db_port.get_note_fingerprints_bulk(key_candidates)
+            embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+            if embedded_note_key:
+                note_key_candidates.add(embedded_note_key)
+        note_fingerprints_by_note_key = db_port.get_note_fingerprints_bulk(
+            note_key_candidates
+        )
         pending_fingerprints: list[tuple[str, str, str]] = []
 
         # Fetch cards info to map notes to decks
@@ -280,7 +282,7 @@ def export_collection(
                 db_port,
                 note_keys_by_id,
                 pending_note_mappings,
-                note_fingerprints_by_key,
+                note_fingerprints_by_note_key,
                 pending_fingerprints,
             )
             db_port.set_deck(deck_name, deck_id)

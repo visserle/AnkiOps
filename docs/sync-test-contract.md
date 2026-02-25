@@ -44,8 +44,8 @@ Each direction/state combination must cover these operation families.
 
 The suite distinguishes drift modes so failures are diagnosable.
 
-- D1 Missing note mapping: note key exists but DB has no key->id row
-- D2 Stale note mapping: DB maps key->id but id no longer matches the true note
+- D1 Missing note mapping: note_key exists but DB has no note_key->note_id row
+- D2 Stale note mapping: DB maps note_key->note_id but note_id no longer matches the true note
 - D3 Missing deck mapping: deck exists in Anki but DB has no deck row
 - D4 Stale deck mapping: DB has prior deck name for current deck id (rename)
 - D5 Data loss drift: DB was recreated after corruption and mappings must be rebuilt
@@ -54,7 +54,7 @@ The suite distinguishes drift modes so failures are diagnosable.
 
 - C1 Duplicate `note_key` values in markdown across files
 - C2 Directional content divergence for the same `note_key` (both sides changed)
-- C3 Mapping conflict where one id is associated with a different key than expected
+- C3 Mapping conflict where one note_id is associated with a different note_key than expected
 
 Current required policy:
 

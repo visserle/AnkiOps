@@ -51,13 +51,13 @@ def _replace_answer(content: str, new_answer: str) -> str:
 def _assert_db_bijection(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute("SELECT key, note_id FROM notes").fetchall()
+        rows = conn.execute("SELECT note_key, note_id FROM notes").fetchall()
     finally:
         conn.close()
 
-    keys = [r[0] for r in rows]
+    note_keys = [r[0] for r in rows]
     ids = [r[1] for r in rows]
-    assert len(keys) == len(set(keys))
+    assert len(note_keys) == len(set(note_keys))
     assert len(ids) == len(set(ids))
 
 
@@ -135,8 +135,8 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
 
                     elif op == "anki_update":
                         if mock_anki.notes:
-                            nid = next(iter(mock_anki.notes.keys()))
-                            mock_anki.notes[nid]["fields"]["Answer"] = {
+                            note_id = next(iter(mock_anki.notes.keys()))
+                            mock_anki.notes[note_id]["fields"]["Answer"] = {
                                 "value": f"A{step}-anki"
                             }
 

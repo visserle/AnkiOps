@@ -1,4 +1,4 @@
-"""SQLite Database Adapter mapping Keys to Anki IDs."""
+"""SQLite database adapter for AnkiOps note and media metadata caching."""
 
 import logging
 import secrets
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class SQLiteDbAdapter:
-    """Bidirectional Key ↔ ID mapping using SQLite."""
+    """Bidirectional note_key ↔ note_id mapping using SQLite,
+    plus additional tables for caching note and media metadata."""
 
     def __init__(self, conn: sqlite3.Connection, db_path: Path):
         self._conn = conn
@@ -32,7 +33,7 @@ class SQLiteDbAdapter:
             with conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS notes (
-                        key TEXT PRIMARY KEY,
+                        note_key TEXT PRIMARY KEY,
                         note_id INTEGER NOT NULL
                     )
                 """)
@@ -50,7 +51,7 @@ class SQLiteDbAdapter:
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS note_fingerprints (
-                        key TEXT PRIMARY KEY,
+                        note_key TEXT PRIMARY KEY,
                         md_hash TEXT NOT NULL,
                         anki_hash TEXT NOT NULL
                     )
@@ -84,16 +85,20 @@ class SQLiteDbAdapter:
                         digest TEXT NOT NULL
                     )
                 """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(note_id)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(deck_id)")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(note_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(deck_id)"
+                )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_markdown_media_refs_media "
                     "ON markdown_media_refs(media_name)"
                 )
 
-                # Schema validation: ensure 'note_id' exists in 'notes' table.
+                # Schema validation: ensure note mapping columns exist in 'notes' table.
                 # If not, it will raise OperationalError and trigger recovery.
-                conn.execute("SELECT note_id FROM notes LIMIT 0")
+                conn.execute("SELECT note_key, note_id FROM notes LIMIT 0")
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             if conn:
@@ -168,19 +173,19 @@ class SQLiteDbAdapter:
         for i in range(0, len(items), chunk_size):
             yield items[i : i + chunk_size]
 
-    def get_note_ids_bulk(self, keys: Iterable[str]) -> dict[str, int]:
-        key_list = list(keys)
-        if not key_list:
+    def get_note_ids_bulk(self, note_keys: Iterable[str]) -> dict[str, int]:
+        note_key_list = list(note_keys)
+        if not note_key_list:
             return {}
 
         out: dict[str, int] = {}
-        for chunk in self._chunked(key_list):
+        for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT key, note_id FROM notes WHERE key IN ({placeholders})",
+                f"SELECT note_key, note_id FROM notes WHERE note_key IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
-            out.update({k: note_id for k, note_id in rows})
+            out.update({note_key: note_id for note_key, note_id in rows})
         return out
 
     def get_note_keys_bulk(self, note_ids: Iterable[int]) -> dict[int, str]:
@@ -192,28 +197,28 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(id_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT note_id, key FROM notes WHERE note_id IN ({placeholders})",
+                f"SELECT note_id, note_key FROM notes WHERE note_id IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
-            out.update({note_id: key for note_id, key in rows})
+            out.update({note_id: note_key for note_id, note_key in rows})
         return out
 
     def set_notes_bulk(self, mappings: Iterable[tuple[str, int]]) -> None:
-        """Set many key->id mappings with the same semantics as set_note()."""
-        rows = [(key, note_id) for key, note_id in mappings]
+        """Set many note_key->note_id mappings with set_note() semantics."""
+        rows = [(note_key, note_id) for note_key, note_id in mappings]
         if not rows:
             return
 
-        # Preserve last-write-wins semantics per id and key.
-        seen_keys: set[str] = set()
+        # Preserve last-write-wins semantics per note_id and note_key.
+        seen_note_keys: set[str] = set()
         seen_ids: set[int] = set()
         ordered_rows: list[tuple[str, int]] = []
-        for key, note_id in reversed(rows):
-            if key in seen_keys or note_id in seen_ids:
+        for note_key, note_id in reversed(rows):
+            if note_key in seen_note_keys or note_id in seen_ids:
                 continue
-            seen_keys.add(key)
+            seen_note_keys.add(note_key)
             seen_ids.add(note_id)
-            ordered_rows.append((key, note_id))
+            ordered_rows.append((note_key, note_id))
         ordered_rows.reverse()
 
         ids = [note_id for _, note_id in ordered_rows]
@@ -226,77 +231,86 @@ class SQLiteDbAdapter:
             )
         self._write_many(statements)
         self._executemany(
-            "INSERT OR REPLACE INTO notes (key, note_id) VALUES (?, ?)", ordered_rows
+            "INSERT OR REPLACE INTO notes (note_key, note_id) VALUES (?, ?)",
+            ordered_rows,
         )
 
-    def remove_notes_by_keys_bulk(self, keys: Iterable[str]) -> None:
-        key_list = list(keys)
-        if not key_list:
+    def remove_notes_by_note_keys_bulk(self, note_keys: Iterable[str]) -> None:
+        note_key_list = list(note_keys)
+        if not note_key_list:
             return
         statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(key_list):
+        for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
-                (f"DELETE FROM notes WHERE key IN ({placeholders})", tuple(chunk))
+                (
+                    f"DELETE FROM notes WHERE note_key IN ({placeholders})",
+                    tuple(chunk),
+                )
             )
             statements.append(
                 (
-                    f"DELETE FROM note_fingerprints WHERE key IN ({placeholders})",
+                    f"DELETE FROM note_fingerprints WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
 
     def get_note_fingerprints_bulk(
-        self, keys: Iterable[str]
+        self, note_keys: Iterable[str]
     ) -> dict[str, tuple[str, str]]:
-        key_list = list(keys)
-        if not key_list:
+        note_key_list = list(note_keys)
+        if not note_key_list:
             return {}
 
         out: dict[str, tuple[str, str]] = {}
-        for chunk in self._chunked(key_list):
+        for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT key, md_hash, anki_hash "
-                f"FROM note_fingerprints WHERE key IN ({placeholders})",
+                "SELECT note_key, md_hash, anki_hash "
+                f"FROM note_fingerprints WHERE note_key IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
-            out.update({key: (md_hash, anki_hash) for key, md_hash, anki_hash in rows})
+            out.update(
+                {
+                    note_key: (md_hash, anki_hash)
+                    for note_key, md_hash, anki_hash in rows
+                }
+            )
         return out
 
-    def set_note_fingerprints_bulk(
-        self, rows: Iterable[tuple[str, str, str]]
-    ) -> None:
+    def set_note_fingerprints_bulk(self, rows: Iterable[tuple[str, str, str]]) -> None:
         entries = list(rows)
         if not entries:
             return
 
-        seen_keys: set[str] = set()
+        seen_note_keys: set[str] = set()
         deduped: list[tuple[str, str, str]] = []
-        for key, md_hash, anki_hash in reversed(entries):
-            if key in seen_keys:
+        for note_key, md_hash, anki_hash in reversed(entries):
+            if note_key in seen_note_keys:
                 continue
-            seen_keys.add(key)
-            deduped.append((key, md_hash, anki_hash))
+            seen_note_keys.add(note_key)
+            deduped.append((note_key, md_hash, anki_hash))
         deduped.reverse()
 
         self._executemany(
             "INSERT OR REPLACE INTO note_fingerprints "
-            "(key, md_hash, anki_hash) VALUES (?, ?, ?)",
+            "(note_key, md_hash, anki_hash) VALUES (?, ?, ?)",
             deduped,
         )
 
-    def remove_note_fingerprints_by_keys_bulk(self, keys: Iterable[str]) -> None:
-        key_list = list(keys)
-        if not key_list:
+    def remove_note_fingerprints_by_note_keys_bulk(
+        self, note_keys: Iterable[str]
+    ) -> None:
+        note_key_list = list(note_keys)
+        if not note_key_list:
             return
         statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(key_list):
+        for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM note_fingerprints WHERE key IN ({placeholders})",
+                    f"DELETE FROM note_fingerprints WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
@@ -318,7 +332,10 @@ class SQLiteDbAdapter:
                 tuple(chunk),
             ).fetchall()
             state_by_path.update(
-                {md_path: (md_mtime_ns, md_size) for md_path, md_mtime_ns, md_size in rows}
+                {
+                    md_path: (md_mtime_ns, md_size)
+                    for md_path, md_mtime_ns, md_size in rows
+                }
             )
 
         refs_by_path: dict[str, set[str]] = defaultdict(set)
@@ -531,21 +548,27 @@ class SQLiteDbAdapter:
             (key, value),
         )
 
-    def get_note_id(self, key: str) -> int | None:
-        cursor = self._conn.execute("SELECT note_id FROM notes WHERE key = ?", (key,))
+    def get_note_id(self, note_key: str) -> int | None:
+        cursor = self._conn.execute(
+            "SELECT note_id FROM notes WHERE note_key = ?",
+            (note_key,),
+        )
         row = cursor.fetchone()
         return row[0] if row else None
 
     def get_note_key(self, note_id: int) -> str | None:
-        cursor = self._conn.execute("SELECT key FROM notes WHERE note_id = ?", (note_id,))
+        cursor = self._conn.execute(
+            "SELECT note_key FROM notes WHERE note_id = ?",
+            (note_id,),
+        )
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def set_note(self, key: str, note_id: int) -> None:
-        self.set_notes_bulk([(key, note_id)])
+    def set_note(self, note_key: str, note_id: int) -> None:
+        self.set_notes_bulk([(note_key, note_id)])
 
-    def remove_note_by_key(self, key: str) -> None:
-        self.remove_notes_by_keys_bulk([key])
+    def remove_note_by_note_key(self, note_key: str) -> None:
+        self.remove_notes_by_note_keys_bulk([note_key])
 
     def remove_note_by_id(self, note_id: int) -> None:
         self._write("DELETE FROM notes WHERE note_id = ?", (note_id,))
@@ -558,7 +581,9 @@ class SQLiteDbAdapter:
         return row[0] if row else None
 
     def get_deck_name(self, deck_id: int) -> str | None:
-        cursor = self._conn.execute("SELECT name FROM decks WHERE deck_id = ?", (deck_id,))
+        cursor = self._conn.execute(
+            "SELECT name FROM decks WHERE deck_id = ?", (deck_id,)
+        )
         row = cursor.fetchone()
         return row[0] if row else None
 
@@ -576,5 +601,5 @@ class SQLiteDbAdapter:
     def remove_deck(self, name: str) -> None:
         self._write("DELETE FROM decks WHERE name = ?", (name,))
 
-    def generate_key(self) -> str:
+    def generate_note_key(self) -> str:
         return secrets.token_hex(6)

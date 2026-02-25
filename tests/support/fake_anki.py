@@ -68,7 +68,7 @@ class MockAnki:
 
             case "notesInfo":
                 note_ids = params.get("notes", [])
-                return [self.notes[nid] for nid in note_ids if nid in self.notes]
+                return [self.notes[note_id] for note_id in note_ids if note_id in self.notes]
 
             case "multi":
                 actions = params.get("actions", [])
@@ -182,21 +182,21 @@ class MockAnki:
 
             case "updateNoteFields":
                 note_info = params["note"]
-                nid = note_info["id"]
-                if nid in self.notes:
+                note_id = note_info["id"]
+                if note_id in self.notes:
                     for k, v in note_info["fields"].items():
-                        self.notes[nid]["fields"][k] = {"value": v}
+                        self.notes[note_id]["fields"][k] = {"value": v}
                 return None
 
             case "deleteNotes":
-                nids = params["notes"]
-                for nid in nids:
-                    if nid in self.notes:
-                        card_ids = self.notes[nid]["cards"]
+                note_ids = params["notes"]
+                for note_id in note_ids:
+                    if note_id in self.notes:
+                        card_ids = self.notes[note_id]["cards"]
                         for cid in card_ids:
                             if cid in self.cards:
                                 del self.cards[cid]
-                        del self.notes[nid]
+                        del self.notes[note_id]
                 return None
 
             case "changeDeck":
@@ -211,16 +211,16 @@ class MockAnki:
                 query = params.get("query", "")
 
                 if "AnkiOps Key:" in query:
-                    key = query.split(":")[1].strip('"')
+                    note_key = query.split(":")[1].strip('"')
                     found = []
-                    for nid, note in self.notes.items():
-                        if note["fields"].get("AnkiOps Key", {}).get("value") == key:
-                            found.append(nid)
+                    for note_id, note in self.notes.items():
+                        if note["fields"].get("AnkiOps Key", {}).get("value") == note_key:
+                            found.append(note_id)
                     return found
 
                 or_groups = query.split(" OR ")
                 found_notes = []
-                for nid, note in self.notes.items():
+                for note_id, note in self.notes.items():
                     for group in or_groups:
                         terms = group.strip().split()
                         match_all = True
@@ -235,7 +235,7 @@ class MockAnki:
                                 target_deck = term.split(":", 1)[1]
                                 for card in self.cards.values():
                                     if (
-                                        card["note"] == nid
+                                        card["note"] == note_id
                                         and card["deckName"] == target_deck
                                     ):
                                         deck_match = True
@@ -244,7 +244,7 @@ class MockAnki:
                                     match_all = False
                                     break
                         if match_all:
-                            found_notes.append(nid)
+                            found_notes.append(note_id)
                             break
                 return found_notes
 

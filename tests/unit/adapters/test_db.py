@@ -57,12 +57,12 @@ def test_config_mapping(db):
 
 
 def test_note_mapping(db):
-    key = "test-note-key"
+    note_key = "test-note-key"
     note_id = 67890
 
-    db.set_note(key, note_id)
-    assert db.get_note_id(key) == note_id
-    assert db.get_note_key(note_id) == key
+    db.set_note(note_key, note_id)
+    assert db.get_note_id(note_key) == note_id
+    assert db.get_note_key(note_id) == note_key
     assert db.get_note_id("key-2") is None
 
 
@@ -85,10 +85,10 @@ def test_overwrite_mapping(db):
     assert db.get_note_key(101) is None
 
 
-def test_generate_key(db):
-    key = db.generate_key()
-    assert isinstance(key, str)
-    assert len(key) > 10
+def test_generate_note_key(db):
+    note_key = db.generate_note_key()
+    assert isinstance(note_key, str)
+    assert len(note_key) > 10
 
 
 def test_corruption_recovery(tmp_path):
@@ -176,8 +176,8 @@ def test_bulk_note_mapping_last_write_wins(tmp_path):
             [
                 ("k1", 1),
                 ("k2", 2),
-                ("k1", 3),  # key remapped to new id
-                ("k3", 2),  # id remapped to new key
+                ("k1", 3),  # note_key remapped to new note_id
+                ("k3", 2),  # note_id remapped to new note_key
             ]
         )
 
@@ -237,12 +237,12 @@ def test_bulk_note_fingerprints_last_write_wins(tmp_path):
         adapter.close()
 
 
-def test_remove_note_by_key_removes_fingerprint(tmp_path):
+def test_remove_note_by_note_key_removes_fingerprint(tmp_path):
     adapter = SQLiteDbAdapter.load(tmp_path)
     try:
         adapter.set_note("k1", 101)
         adapter.set_note_fingerprints_bulk([("k1", "md", "a")])
-        adapter.remove_note_by_key("k1")
+        adapter.remove_note_by_note_key("k1")
 
         assert adapter.get_note_id("k1") is None
         assert adapter.get_note_fingerprints_bulk(["k1"]) == {}

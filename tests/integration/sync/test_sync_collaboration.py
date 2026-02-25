@@ -36,30 +36,30 @@ def test_collab_import_move_without_db_mapping_moves_existing_note(world):
 
 
 def test_collab_import_recovers_all_keys_without_db(world):
-    """With empty DB, import recovers key->id mapping from embedded Anki keys."""
-    key_a = "collab-recover-001-a"
-    key_b = "collab-recover-001-b"
-    id_a = world.add_qa_note(
+    """With empty DB, import recovers note_key->note_id mapping from Anki."""
+    note_key_a = "collab-recover-001-a"
+    note_key_b = "collab-recover-001-b"
+    note_id_a = world.add_qa_note(
         deck_name="DeckA",
         question="Qa",
         answer="Aa",
-        note_key=key_a,
+        note_key=note_key_a,
     )
-    id_b = world.add_qa_note(
+    note_id_b = world.add_qa_note(
         deck_name="DeckB",
         question="Qb",
         answer="Ab",
-        note_key=key_b,
+        note_key=note_key_b,
     )
 
-    world.write_qa_deck("DeckA", [("Qa", "Aa", key_a)])
-    world.write_qa_deck("DeckB", [("Qb", "Ab", key_b)])
+    world.write_qa_deck("DeckA", [("Qa", "Aa", note_key_a)])
+    world.write_qa_deck("DeckB", [("Qb", "Ab", note_key_b)])
 
     with world.db_session() as db:
         result = world.sync_import(db)
 
         # Mock Anki notes may miss optional fields (Extra/More/...), so updates
-        # are allowed here. What must remain stable is key-based identity.
+        # are allowed here. What must remain stable is note_key-based identity.
         assert_summary(
             result.summary,
             created=0,
@@ -67,11 +67,11 @@ def test_collab_import_recovers_all_keys_without_db(world):
             deleted=0,
             errors=0,
         )
-        assert db.get_note_id(key_a) == id_a
-        assert db.get_note_id(key_b) == id_b
+        assert db.get_note_id(note_key_a) == note_id_a
+        assert db.get_note_id(note_key_b) == note_id_b
 
 
-def test_collab_export_recovers_mapping_from_embedded_key(world):
+def test_collab_export_recovers_mapping_from_embedded_note_key(world):
     """With empty DB, export should keep stable note_key identity."""
     note_key = "collab-export-001"
     note_id = world.add_qa_note(

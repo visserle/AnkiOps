@@ -17,12 +17,15 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
         assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
         assert len(world.mock_anki.notes) == 1
 
-        keys = world.extract_note_keys("FreshDeck")
-        assert len(keys) == 1
+        note_keys = world.extract_note_keys("FreshDeck")
+        assert len(note_keys) == 1
 
         note_id = next(iter(world.mock_anki.notes.keys()))
-        assert world.mock_anki.notes[note_id]["fields"]["AnkiOps Key"]["value"] == keys[0]
-        assert db.get_note_id(keys[0]) == note_id
+        assert (
+            world.mock_anki.notes[note_id]["fields"]["AnkiOps Key"]["value"]
+            == note_keys[0]
+        )
+        assert db.get_note_id(note_keys[0]) == note_id
 
 
 def test_imp_run_update_001_updates_existing_note(world):
@@ -133,10 +136,10 @@ def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
 
 def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
     """IMP-RUN-CONFLICT-001."""
-    duplicate_key = "duplicate-key"
+    duplicate_note_key = "duplicate-key"
 
-    world.write_qa_deck("DeckA", [("A", "A1", duplicate_key)])
-    world.write_qa_deck("DeckB", [("B", "B1", duplicate_key)])
+    world.write_qa_deck("DeckA", [("A", "A1", duplicate_note_key)])
+    world.write_qa_deck("DeckB", [("B", "B1", duplicate_note_key)])
 
     with world.db_session() as db:
         with pytest.raises(ValueError, match="Duplicate note_key"):

@@ -42,7 +42,7 @@ def test_corr_db_003_schema_corruption_is_auto_recovered(tmp_path):
 
     conn = sqlite3.connect(db_path)
     try:
-        conn.execute("CREATE TABLE notes (key TEXT PRIMARY KEY)")
+        conn.execute("CREATE TABLE notes (note_key TEXT PRIMARY KEY)")
         conn.commit()
     finally:
         conn.close()

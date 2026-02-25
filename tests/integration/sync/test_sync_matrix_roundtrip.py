@@ -167,8 +167,7 @@ def test_rt_corr_operations_recover_after_db_corruption(operation, world):
         if operation == "update":
             assert_summary(imp.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
         else:
-            # After DB loss this converges as delete+create instead of tracked move.
-            assert_summary(imp.summary, created=1, updated=0, moved=0, deleted=1, errors=0)
+            assert_summary(imp.summary, created=0, updated=0, moved=1, deleted=0, errors=0)
 
         exp = world.sync_export(recovered)
         assert_summary(exp.summary, errors=0)

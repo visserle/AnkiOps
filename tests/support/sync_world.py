@@ -41,8 +41,8 @@ class SyncWorld:
         db = self.open_db()
 
         if state in {"RUN", "CORR"}:
-            for key, note_id in (note_map or {}).items():
-                db.set_note(key, note_id)
+            for note_key, note_id in (note_map or {}).items():
+                db.set_note(note_key, note_id)
             for deck_name, deck_id in (deck_map or {}).items():
                 db.set_deck(deck_name, deck_id)
 
