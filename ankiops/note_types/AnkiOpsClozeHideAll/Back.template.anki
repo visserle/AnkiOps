@@ -28,8 +28,14 @@
 
         // Detect the active cloze index.
         // On the back side, Anki wraps the active cloze answer in
-        // <span class="cloze">content</span>, inactive clozes shown as
-        // plain content. We extract the .cloze span content and match it.
+        // <span class="cloze">content</span> and strips markers from
+        // inactive clozes (showing plain content).
+        //
+        // Strategy: collect unique cloze indices from raw text, then for each
+        // index, simulate what Anki would render if that index were active.
+        // The one that matches the actual rendered output is the active index.
+        // This correctly handles duplicate cloze content (e.g. c1::the, c2::the).
+
         var clozeIndices = [];
         var idxRegex = /\{\{c(\d+)::/g;
         var m;
@@ -39,24 +45,28 @@
 
         var activeIdx = clozeIndices.length > 0 ? clozeIndices[0] : "1";
 
-        // Extract the content inside Anki's .cloze span from rendered HTML
-        var tempDiv = document.createElement("div");
-        tempDiv.innerHTML = rendered;
-        var clozeSpan = tempDiv.querySelector(".cloze");
-        if (clozeSpan) {
-            var activeContent = clozeSpan.innerHTML.trim();
-            // Find which cloze index this content belongs to
-            // Walk through raw clozes in order — if multiple clozes have the
-            // same content, we match by position using the surrounding context
-            var clozeRegex = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
-            var match;
-            while ((match = clozeRegex.exec(raw)) !== null) {
-                var idx = match[1];
-                var content = match[2].split("::")[0];
-                if (content.trim() === activeContent) {
-                    activeIdx = idx;
-                    break;
+        // Normalize HTML for comparison: collapse whitespace, normalize quotes
+        function normalizeHtml(html) {
+            return html.replace(/\s+/g, " ").replace(/'/g, '"').trim();
+        }
+
+        var renderedNorm = normalizeHtml(rendered);
+
+        for (var i = 0; i < clozeIndices.length; i++) {
+            var testIdx = clozeIndices[i];
+            // Simulate Anki's back-side rendering for this index being active:
+            // active cloze → <span class="cloze">content</span>
+            // inactive clozes → plain content (markers stripped)
+            var simulated = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
+                var content = inner.split("::")[0];
+                if (idx === testIdx) {
+                    return '<span class="cloze">' + content + '</span>';
                 }
+                return content;
+            });
+            if (normalizeHtml(simulated) === renderedNorm) {
+                activeIdx = testIdx;
+                break;
             }
         }
 
