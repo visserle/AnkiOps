@@ -67,9 +67,7 @@ class AnkiAdapter:
         for note_data in notes:
             if not note_data:
                 continue
-            fields = {
-                name: data["value"] for name, data in note_data["fields"].items()
-            }
+            fields = {name: data["value"] for name, data in note_data["fields"].items()}
             notes_by_id[note_data["noteId"]] = AnkiNote(
                 note_id=note_data["noteId"],
                 note_type=note_data.get("modelName", ""),
@@ -148,7 +146,9 @@ class AnkiAdapter:
 
         results = invoke("multi", actions=actions)
         errors = [
-            result for result in results if result is not None and isinstance(result, str)
+            result
+            for result in results
+            if result is not None and isinstance(result, str)
         ]
         if errors:
             raise AnkiConnectError(f"Failed to create models: {errors}")
@@ -247,7 +247,10 @@ class AnkiAdapter:
             current_fonts = state["fonts"]
 
             for field_name, desc in FIELD_DESCRIPTIONS.items():
-                if current_desc.get(field_name) != desc and field_name in expected_fields:
+                if (
+                    current_desc.get(field_name) != desc
+                    and field_name in expected_fields
+                ):
                     actions.append(
                         _action(
                             "modelFieldSetDescription",

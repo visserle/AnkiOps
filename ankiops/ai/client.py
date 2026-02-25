@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import random
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from types import TracebackType
 from typing import Any
 
 import httpx
-from tenacity import (
-    AsyncRetrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from .errors import AIRequestError, AIResponseError
 from .types import InlineEditedNote, InlineNotePayload, PromptConfig, RuntimeAIConfig
@@ -20,10 +19,21 @@ from .validators import normalize_batch_response
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_MIN_SECONDS = 0.25
 DEFAULT_RETRY_MAX_SECONDS = 2.0
+DEFAULT_RETRY_JITTER_FACTOR = 0.25
+DEFAULT_RETRY_AFTER_MAX_SECONDS = 30.0
 
 
 class _RetryableRequestError(RuntimeError):
     """Request failure class that should be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: float | None = None,
+    ):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class OpenAICompatibleAsyncEditor:
@@ -31,6 +41,34 @@ class OpenAICompatibleAsyncEditor:
 
     def __init__(self, config: RuntimeAIConfig):
         self._config = config
+        self._endpoint = f"{self._config.base_url.rstrip('/')}/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self._config.api_key:
+            headers["Authorization"] = f"Bearer {self._config.api_key}"
+        self._headers = headers
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> OpenAICompatibleAsyncEditor:
+        self._get_or_create_client()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        _ = exc_type
+        _ = exc
+        _ = traceback
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client, if initialized."""
+        client = self._client
+        self._client = None
+        if client is not None and not client.is_closed:
+            await client.aclose()
 
     async def edit_notes(
         self,
@@ -41,11 +79,6 @@ class OpenAICompatibleAsyncEditor:
         if not notes:
             return {}
 
-        endpoint = f"{self._config.base_url.rstrip('/')}/chat/completions"
-        headers = {"Content-Type": "application/json"}
-        if self._config.api_key:
-            headers["Authorization"] = f"Bearer {self._config.api_key}"
-
         payload = _build_chat_payload(
             model=self._config.model,
             temperature=prompt.temperature,
@@ -53,7 +86,12 @@ class OpenAICompatibleAsyncEditor:
             notes=notes,
         )
 
-        raw = await self._send_with_retry(endpoint, headers, payload)
+        raw = await self._send_with_retry(
+            client=self._get_or_create_client(),
+            endpoint=self._endpoint,
+            headers=self._headers,
+            payload=payload,
+        )
 
         content = _extract_assistant_content(raw)
         if not content:
@@ -61,41 +99,53 @@ class OpenAICompatibleAsyncEditor:
 
         return normalize_batch_response(content)
 
+    def _get_or_create_client(self) -> httpx.AsyncClient:
+        client = self._client
+        if client is None or client.is_closed:
+            client = httpx.AsyncClient(timeout=self._config.timeout_seconds)
+            self._client = client
+        return client
+
     async def _send_with_retry(
         self,
+        client: httpx.AsyncClient,
         endpoint: str,
         headers: dict[str, str],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        retrying = AsyncRetrying(
-            retry=retry_if_exception_type(_RetryableRequestError),
-            stop=stop_after_attempt(DEFAULT_MAX_ATTEMPTS),
-            wait=wait_exponential(
-                multiplier=DEFAULT_RETRY_MIN_SECONDS,
-                min=DEFAULT_RETRY_MIN_SECONDS,
-                max=DEFAULT_RETRY_MAX_SECONDS,
-            ),
-            reraise=True,
-        )
-        try:
-            async for attempt in retrying:
-                with attempt:
-                    return await self._send_once(endpoint, headers, payload)
-            raise RuntimeError("retry loop exhausted without returning")
-        except _RetryableRequestError as error:
-            raise AIRequestError(str(error)) from error
+        last_error: _RetryableRequestError | None = None
+        for attempt in range(1, DEFAULT_MAX_ATTEMPTS + 1):
+            try:
+                return await self._send_once(
+                    client=client,
+                    endpoint=endpoint,
+                    headers=headers,
+                    payload=payload,
+                )
+            except _RetryableRequestError as error:
+                last_error = error
+                if attempt >= DEFAULT_MAX_ATTEMPTS:
+                    break
+                await asyncio.sleep(
+                    _retry_delay(
+                        attempt,
+                        retry_after_seconds=error.retry_after_seconds,
+                    )
+                )
+
+        message = str(last_error) if last_error is not None else "AI request failed"
+        raise AIRequestError(message) from last_error
 
     async def _send_once(
         self,
+        *,
+        client: httpx.AsyncClient,
         endpoint: str,
         headers: dict[str, str],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
-                timeout=self._config.timeout_seconds
-            ) as client:
-                response = await client.post(endpoint, headers=headers, json=payload)
+            response = await client.post(endpoint, headers=headers, json=payload)
         except httpx.TimeoutException as error:
             raise _RetryableRequestError(
                 f"AI request timed out after {self._config.timeout_seconds}s"
@@ -104,7 +154,10 @@ class OpenAICompatibleAsyncEditor:
             raise _RetryableRequestError(f"AI request failed: {error}") from error
 
         if response.status_code == 429 or response.status_code >= 500:
-            raise _RetryableRequestError(_http_error_message(response))
+            raise _RetryableRequestError(
+                _http_error_message(response),
+                retry_after_seconds=_retry_after_seconds(response),
+            )
         if response.status_code >= 400:
             raise AIRequestError(_http_error_message(response))
 
@@ -181,3 +234,46 @@ def _extract_assistant_content(response: dict[str, Any]) -> str | None:
 def _http_error_message(response: httpx.Response) -> str:
     body = " ".join(response.text.split())[:200] or "<empty>"
     return f"AI request failed ({response.status_code}): {body}"
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    raw = response.headers.get("Retry-After")
+    if raw is None:
+        return None
+    retry_after = raw.strip()
+    if not retry_after:
+        return None
+
+    try:
+        parsed_seconds = float(retry_after)
+    except ValueError:
+        parsed_seconds = None
+
+    if parsed_seconds is not None:
+        if parsed_seconds < 0:
+            return None
+        return min(parsed_seconds, DEFAULT_RETRY_AFTER_MAX_SECONDS)
+
+    try:
+        parsed_date = parsedate_to_datetime(retry_after)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if parsed_date.tzinfo is None:
+        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+    delay_seconds = (parsed_date - datetime.now(timezone.utc)).total_seconds()
+    if delay_seconds <= 0:
+        return 0.0
+    return min(delay_seconds, DEFAULT_RETRY_AFTER_MAX_SECONDS)
+
+
+def _retry_delay(
+    attempt: int,
+    *,
+    retry_after_seconds: float | None = None,
+) -> float:
+    if retry_after_seconds is not None:
+        return retry_after_seconds
+    backoff = DEFAULT_RETRY_MIN_SECONDS * float(2 ** (attempt - 1))
+    jitter = random.uniform(0.0, backoff * DEFAULT_RETRY_JITTER_FACTOR)
+    return float(min(DEFAULT_RETRY_MAX_SECONDS, backoff + jitter))

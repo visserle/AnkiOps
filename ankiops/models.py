@@ -369,8 +369,7 @@ class SyncSummary:
 
     def to_dict(self) -> dict[str, int]:
         return {
-            field_name: getattr(self, field_name)
-            for field_name in self.__annotations__
+            field_name: getattr(self, field_name) for field_name in self.__annotations__
         }
 
     def format(self) -> str:

@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ankiops.config import (
     ANKIOPS_DB,
@@ -18,19 +19,8 @@ from ankiops.log import clickable_path
 logger = logging.getLogger(__name__)
 
 
-def serialize_collection_to_json(
-    collection_dir: Path,
-    output_file: Path,
-) -> dict:
-    """Serialize entire collection to JSON format.
-
-    Args:
-        collection_dir: Path to the collection directory
-        output_file: Path where JSON file will be written
-
-    Returns:
-        Dictionary containing the serialized data
-    """
+def serialize_collection(collection_dir: Path) -> dict[str, Any]:
+    """Serialize the collection into an in-memory JSON-compatible mapping."""
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
@@ -38,7 +28,7 @@ def serialize_collection_to_json(
     fs = FileSystemAdapter()
     fs.load_note_type_configs(get_note_types_dir())
 
-    serialized_data = {
+    serialized_data: dict[str, Any] = {
         "collection": {
             "serialized_at": datetime.now(timezone.utc).isoformat(),
         },
@@ -58,21 +48,61 @@ def serialize_collection_to_json(
             errors.append(f"Error parsing {md_file.name}: {error}")
             continue
 
-        deck_data = {}
-        deck_data["name"] = file_stem_to_deck_name(md_file.stem)
-        deck_data["notes"] = []
-
+        deck_data: dict[str, Any] = {
+            "name": file_stem_to_deck_name(md_file.stem),
+            "notes": [],
+        }
+        notes_data: list[dict[str, Any]] = deck_data["notes"]
         for note in parsed.notes:
-            note_data = {}
-            note_data["note_key"] = note.note_key
-            note_data["note_type"] = note.note_type
-            note_data["fields"] = note.fields
-            deck_data["notes"].append(note_data)
+            notes_data.append(
+                {
+                    "note_key": note.note_key,
+                    "note_type": note.note_type,
+                    "fields": note.fields,
+                }
+            )
 
-        if deck_data["notes"]:
-            serialized_data["decks"].append(deck_data)
+        if notes_data:
+            decks_data = serialized_data["decks"]
+            if isinstance(decks_data, list):
+                decks_data.append(deck_data)
 
-    total_notes = sum(len(deck["notes"]) for deck in serialized_data["decks"])
+    total_notes = sum(
+        len(deck.get("notes", []))
+        for deck in serialized_data["decks"]
+        if isinstance(deck, dict)
+    )
+    total_decks = len(serialized_data["decks"])
+    logger.debug(f"Serialized {total_decks} deck(s), {total_notes} note(s) in memory")
+
+    if errors:
+        logger.warning(
+            f"Serialization completed with {len(errors)} error(s). "
+            "Some notes were skipped. Review errors above."
+        )
+
+    return serialized_data
+
+
+def serialize_collection_to_json(
+    collection_dir: Path,
+    output_file: Path,
+) -> dict[str, Any]:
+    """Serialize entire collection to JSON format.
+
+    Args:
+        collection_dir: Path to the collection directory
+        output_file: Path where JSON file will be written
+
+    Returns:
+        Dictionary containing the serialized data
+    """
+    serialized_data = serialize_collection(collection_dir)
+    total_notes = sum(
+        len(deck.get("notes", []))
+        for deck in serialized_data["decks"]
+        if isinstance(deck, dict)
+    )
     total_decks = len(serialized_data["decks"])
 
     with output_file.open("w", encoding="utf-8") as output_handle:
@@ -81,12 +111,6 @@ def serialize_collection_to_json(
     logger.info(
         f"Serialized {total_decks} deck(s), {total_notes} note(s) to {output_file}"
     )
-
-    if errors:
-        logger.warning(
-            f"Serialization completed with {len(errors)} error(s). "
-            "Some notes were skipped. Review errors above."
-        )
 
     return serialized_data
 
@@ -104,10 +128,28 @@ def deserialize_collection_from_json(
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
     """
-    root_dir = get_collection_dir()
+    with json_file.open("r", encoding="utf-8") as input_handle:
+        data = json.load(input_handle)
 
     logger.debug(f"Importing serialized collection from: {json_file}")
+    deserialize_collection_data(data, overwrite=overwrite)
+
+
+def deserialize_collection_data(
+    data: dict[str, Any],
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Deserialize collection from an in-memory JSON-compatible mapping."""
+    root_dir = get_collection_dir()
     logger.debug(f"Target directory: {root_dir}")
+
+    if not isinstance(data, dict):
+        raise ValueError("Serialized data must be a JSON object mapping")
+
+    decks = data.get("decks")
+    if not isinstance(decks, list):
+        raise ValueError("Serialized data must contain a top-level 'decks' list")
 
     if not overwrite:
         existing_md_files = list(root_dir.glob("*.md"))
@@ -117,9 +159,6 @@ def deserialize_collection_from_json(
                 f"in {root_dir}. Use --overwrite to replace them."
             )
 
-    with json_file.open("r", encoding="utf-8") as input_handle:
-        data = json.load(input_handle)
-
     fs = FileSystemAdapter()
     configs = fs.load_note_type_configs(get_note_types_dir())
     config_by_name = {config.name: config for config in configs}
@@ -128,9 +167,13 @@ def deserialize_collection_from_json(
     total_notes = 0
     skipped_notes = 0
 
-    for deck in data["decks"]:
-        deck_name = deck["name"]
-        notes = deck["notes"]
+    for deck in decks:
+        if not isinstance(deck, dict):
+            continue
+        deck_name = deck.get("name")
+        notes = deck.get("notes")
+        if not isinstance(deck_name, str) or not isinstance(notes, list):
+            continue
 
         filename = deck_name_to_file_stem(deck_name) + ".md"
         output_path = root_dir / filename

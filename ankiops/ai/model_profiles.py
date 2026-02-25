@@ -6,10 +6,11 @@ import os
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .config_utils import load_yaml_mapping, validate_config_model
 from .errors import AIConfigError
+from .paths import AIPaths
 from .types import ModelProfile, ModelsConfig, RuntimeAIConfig
 
 MODELS_FILE_NAME = "models.yaml"
@@ -20,7 +21,7 @@ _VALID_PROVIDERS = frozenset({"local", "remote"})
 
 
 class _RawModelProfile(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     provider: Literal["local", "remote"]
     model: str
@@ -39,10 +40,20 @@ class _RawModelProfile(BaseModel):
 
 
 class _RawModelsConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
+    version: int | None = None
     default_profile: str | None = None
     profiles: dict[str, _RawModelProfile]
+
+    @field_validator("version")
+    @classmethod
+    def _validate_version(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value <= 0:
+            raise ValueError("must be > 0")
+        return value
 
     @field_validator("profiles", mode="before")
     @classmethod
@@ -71,16 +82,30 @@ class _RawModelsConfig(BaseModel):
         return normalized
 
 
-def models_config_path(prompts_dir: Path) -> Path:
+def models_config_path(ai_paths: AIPaths) -> Path:
     """Return path to the collection-scoped model profile config."""
-    return prompts_dir / MODELS_FILE_NAME
+    return ai_paths.models
 
 
-def load_model_profiles(prompts_dir: Path) -> ModelsConfig:
-    """Load model profiles from prompts/models.yaml."""
-    path = models_config_path(prompts_dir)
-    raw = _load_yaml_mapping(path)
-    parsed = _validate_raw_models_config(raw, path)
+def load_model_profiles(ai_paths: AIPaths) -> ModelsConfig:
+    """Load model profiles from ai/models.yaml."""
+    path = models_config_path(ai_paths)
+    raw = load_yaml_mapping(
+        path,
+        error_type=AIConfigError,
+        mapping_label="Model profile config",
+        missing_message=(
+            f"Model profile config not found: {path}. "
+            "Run 'ankiops init' to eject built-in AI assets."
+        ),
+    )
+    parsed = validate_config_model(
+        raw,
+        model_type=_RawModelsConfig,
+        path=path,
+        error_type=AIConfigError,
+        config_label="models config",
+    )
 
     default_profile = parsed.default_profile or next(iter(parsed.profiles))
     if default_profile not in parsed.profiles:
@@ -167,33 +192,6 @@ def resolve_runtime_config(
         max_in_flight=runtime_max_in_flight,
         api_key=resolved_api_key,
     )
-
-
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        raise AIConfigError(
-            f"Model profile config not found: {path}. "
-            "Run 'ankiops init' to eject built-in AI assets."
-        )
-    with path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
-    if not isinstance(raw, dict):
-        raise AIConfigError(f"Model profile config must be a YAML mapping: {path}")
-    return raw
-
-
-def _validate_raw_models_config(raw: dict[str, Any], path: Path) -> _RawModelsConfig:
-    try:
-        return _RawModelsConfig.model_validate(raw)
-    except ValidationError as error:
-        first = error.errors()[0]
-        field_path = ".".join(str(part) for part in first.get("loc", ()))
-        detail = first.get("msg", "invalid value")
-        if field_path:
-            raise AIConfigError(
-                f"Invalid models config '{path}' field '{field_path}': {detail}"
-            ) from None
-        raise AIConfigError(f"Invalid models config '{path}': {detail}") from None
 
 
 def _coerce_provider(value: str) -> str:

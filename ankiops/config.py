@@ -8,19 +8,19 @@ logger = logging.getLogger(__name__)
 
 ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
-PROMPTS_DIR = "prompts"
+AI_DIR = "ai"
+AI_PROMPTS_DIR = "prompts"
 LOCAL_MEDIA_DIR = "media"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
+
 
 def sanitize_filename(deck_name: str) -> str:
     """Convert deck name to a safe filename (``::`` → ``__``).
 
     Raises ValueError for invalid characters or Windows reserved names.
     """
-    invalid = [
-        char for char in r'/\\?*|"<>' if char in deck_name and char != ":"
-    ]
+    invalid = [char for char in r'/\\?*|"<>' if char in deck_name and char != ":"]
     if invalid:
         raise ValueError(
             f"Deck name '{deck_name}' contains invalid filename characters: "
@@ -87,9 +87,14 @@ def get_note_types_dir() -> Path:
     return get_collection_dir() / NOTE_TYPES_DIR
 
 
-def get_prompts_dir() -> Path:
-    """Get the standard prompts directory path."""
-    return get_collection_dir() / PROMPTS_DIR
+def get_ai_dir() -> Path:
+    """Get the standard AI directory path."""
+    return get_collection_dir() / AI_DIR
+
+
+def get_ai_prompts_dir() -> Path:
+    """Get the standard AI prompts directory path."""
+    return get_ai_dir() / AI_PROMPTS_DIR
 
 
 def require_collection_dir(active_profile: str) -> Path:

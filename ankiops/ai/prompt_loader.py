@@ -5,18 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .config_utils import load_yaml_mapping, validate_config_model
 from .errors import PromptConfigError
 from .model_profiles import MODELS_FILE_NAME
+from .paths import AIPaths
 from .types import PromptConfig
+
+_VALID_PROMPT_SUFFIXES = frozenset({".yaml", ".yml"})
 
 
 class _RawPromptConfig(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
+    description: str | None = None
     prompt: str
     target_fields: list[str] | None = None
     send_fields: list[str] | None = None
@@ -24,7 +28,7 @@ class _RawPromptConfig(BaseModel):
     model_profile: str | None = None
     temperature: float = Field(default=0.0, ge=0, le=2)
 
-    @field_validator("name", "model_profile")
+    @field_validator("name", "description", "model_profile")
     @classmethod
     def _normalize_optional_string(cls, value: str | None) -> str | None:
         if value is None:
@@ -60,15 +64,10 @@ class _RawPromptConfig(BaseModel):
         return normalized
 
 
-def resolve_prompt_path(prompts_dir: Path, prompt_ref: str) -> Path:
+def resolve_prompt_path(ai_paths: AIPaths, prompt_ref: str) -> Path:
     """Resolve a prompt name/path to a YAML file path."""
     raw = _require_prompt_ref(prompt_ref)
-
-    direct = Path(raw)
-    if direct.exists() and direct.is_file():
-        return _assert_is_prompt_file(direct)
-
-    candidates = _candidate_prompt_paths(prompts_dir, raw)
+    candidates = _candidate_prompt_paths(ai_paths.prompts, raw)
     for candidate in candidates:
         if candidate.exists() and candidate.is_file():
             return _assert_is_prompt_file(candidate)
@@ -77,21 +76,21 @@ def resolve_prompt_path(prompts_dir: Path, prompt_ref: str) -> Path:
     raise PromptConfigError(f"Prompt not found: '{prompt_ref}'. Tried: {tried}")
 
 
-def load_prompt(prompts_dir: Path, prompt_ref: str) -> PromptConfig:
+def load_prompt(ai_paths: AIPaths, prompt_ref: str) -> PromptConfig:
     """Load a prompt YAML file into a validated PromptConfig."""
-    path = resolve_prompt_path(prompts_dir, prompt_ref)
-    raw = _load_yaml_mapping(path)
-
-    normalized = {
-        "name": raw.get("name"),
-        "prompt": raw.get("prompt"),
-        "target_fields": raw.get("target_fields", raw.get("fields_to_edit")),
-        "send_fields": raw.get("send_fields", raw.get("fields_to_send")),
-        "note_types": raw.get("note_types"),
-        "model_profile": raw.get("model_profile"),
-        "temperature": raw.get("temperature", 0),
-    }
-    parsed = _validate_raw_prompt(normalized, path)
+    path = resolve_prompt_path(ai_paths, prompt_ref)
+    raw = load_yaml_mapping(
+        path,
+        error_type=PromptConfigError,
+        mapping_label="Prompt file",
+    )
+    parsed = validate_config_model(
+        raw,
+        model_type=_RawPromptConfig,
+        path=path,
+        error_type=PromptConfigError,
+        config_label="prompt",
+    )
 
     target_fields = parsed.target_fields or ["*"]
     send_fields = parsed.send_fields or list(target_fields)
@@ -115,39 +114,24 @@ def _require_prompt_ref(prompt_ref: str) -> str:
 
 
 def _assert_is_prompt_file(path: Path) -> Path:
+    if path.suffix.lower() not in _VALID_PROMPT_SUFFIXES:
+        raise PromptConfigError(f"Prompt file must use .yaml or .yml extension: {path}")
     if path.name == MODELS_FILE_NAME:
         raise PromptConfigError(f"'{MODELS_FILE_NAME}' is model config, not a prompt.")
     return path
 
 
 def _candidate_prompt_paths(prompts_dir: Path, prompt_ref: str) -> list[Path]:
-    candidate_in_dir = prompts_dir / prompt_ref
-    if candidate_in_dir.suffix:
+    ref_path = Path(prompt_ref)
+    if ref_path.is_absolute():
+        if ref_path.suffix:
+            return [ref_path]
+        return [ref_path.with_suffix(".yaml"), ref_path.with_suffix(".yml")]
+
+    candidate_in_dir = prompts_dir / ref_path
+    if ref_path.suffix:
         return [candidate_in_dir]
     return [
-        prompts_dir / f"{prompt_ref}.yaml",
-        prompts_dir / f"{prompt_ref}.yml",
-        prompts_dir / prompt_ref,
+        candidate_in_dir.with_suffix(".yaml"),
+        candidate_in_dir.with_suffix(".yml"),
     ]
-
-
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
-    if not isinstance(raw, dict):
-        raise PromptConfigError(f"Prompt file must contain a YAML mapping: {path}")
-    return raw
-
-
-def _validate_raw_prompt(raw: dict[str, Any], path: Path) -> _RawPromptConfig:
-    try:
-        return _RawPromptConfig.model_validate(raw)
-    except ValidationError as error:
-        first = error.errors()[0]
-        field_path = ".".join(str(part) for part in first.get("loc", ()))
-        detail = first.get("msg", "invalid value")
-        if field_path:
-            raise PromptConfigError(
-                f"Invalid prompt '{path}' field '{field_path}': {detail}"
-            ) from None
-        raise PromptConfigError(f"Invalid prompt '{path}': {detail}") from None

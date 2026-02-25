@@ -160,7 +160,9 @@ class FileSystemAdapter:
                     if "Choice" not in field_name
                 }
                 choice_fields = {
-                    field_name for field_name in type_all_fields if "Choice" in field_name
+                    field_name
+                    for field_name in type_all_fields
+                    if "Choice" in field_name
                 }
                 if base_ident.issubset(note_fields) and (note_fields & choice_fields):
                     candidates.append(config.name)
@@ -435,14 +437,25 @@ class FileSystemAdapter:
             )
         logger.debug(f"Ejected built-in note types to {dst_dir}")
 
-    def eject_builtin_prompts(self, dst_dir: Path) -> None:
-        """Copy built-in prompt YAML files to the filesystem."""
-        src_root = resources.files("ankiops.prompts")
-        with resources.as_file(src_root) as src_path:
+    def eject_builtin_ai_assets(self, dst_dir: Path) -> None:
+        """Copy built-in AI config and prompt YAML files to the filesystem."""
+        src_root = resources.files("ankiops.ai")
+        models_ref = src_root.joinpath("models.yaml")
+        prompts_ref = src_root.joinpath("prompts")
+
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        prompts_dst_dir = dst_dir / "prompts"
+        prompts_dst_dir.mkdir(parents=True, exist_ok=True)
+
+        with (
+            resources.as_file(models_ref) as models_path,
+            resources.as_file(prompts_ref) as prompts_path,
+        ):
+            shutil.copy2(models_path, dst_dir / "models.yaml")
             shutil.copytree(
-                src_path,
-                dst_dir,
+                prompts_path,
+                prompts_dst_dir,
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
             )
-        logger.debug(f"Ejected built-in prompts to {dst_dir}")
+        logger.debug(f"Ejected built-in AI assets to {dst_dir}")

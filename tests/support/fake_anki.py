@@ -65,9 +65,7 @@ class MockAnki:
             case "cardsInfo":
                 card_ids = params.get("cards", [])
                 return [
-                    self.cards[card_id]
-                    for card_id in card_ids
-                    if card_id in self.cards
+                    self.cards[card_id] for card_id in card_ids if card_id in self.cards
                 ]
 
             case "notesInfo":

@@ -4,7 +4,7 @@ model_profile: remote-fast
 temperature: 0
 note_types:
   - "AnkiOps*"
-fields_to_edit:
+target_fields:
   - "Question"
   - "Answer"
   - "Front"
@@ -16,7 +16,7 @@ fields_to_edit:
   - "Extra"
   - "More"
   - "Source"
-fields_to_send:
+send_fields:
   - "Question"
   - "Answer"
   - "Front"

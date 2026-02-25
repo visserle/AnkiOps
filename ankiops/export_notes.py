@@ -78,7 +78,9 @@ def _sync_deck(
         anki_notes = sorted(anki_notes, key=lambda anki_note: anki_note.note_id)
 
     local_notes_by_note_key = {
-        local_note.note_key: local_note for local_note in fs.notes if local_note.note_key
+        local_note.note_key: local_note
+        for local_note in fs.notes
+        if local_note.note_key
     }
     local_notes_by_content = {
         local_note.first_field_line(): local_note

@@ -65,7 +65,9 @@ def _math_plugin(md):
             "inline_math_bracket",
             lambda _, token_text: "\\[" + token_text + "\\]",
         )
-        md.renderer.register("block_math", lambda _, token_text: "\\[" + token_text + "\\]")
+        md.renderer.register(
+            "block_math", lambda _, token_text: "\\[" + token_text + "\\]"
+        )
 
 
 class AnkiRenderer(mistune.HTMLRenderer):

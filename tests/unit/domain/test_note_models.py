@@ -44,9 +44,16 @@ class TestParseChoiceBlock:
         result = fs.read_markdown_file(md)
         note = result.notes[0]
         assert note.note_type == "AnkiOpsChoice"
-        assert len(
-            [field_name for field_name in note.fields if field_name.startswith("Choice")]
-        ) == 7
+        assert (
+            len(
+                [
+                    field_name
+                    for field_name in note.fields
+                    if field_name.startswith("Choice")
+                ]
+            )
+            == 7
+        )
 
 
 class TestValidateChoiceNote:
@@ -111,8 +118,7 @@ class TestValidateChoiceNote:
         )
         errors = note.validate(choice_config)
         assert any(
-            "missing mandatory field" in error.lower()
-            or "Missing mandatory" in error
+            "missing mandatory field" in error.lower() or "Missing mandatory" in error
             for error in errors
         )
 

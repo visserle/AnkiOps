@@ -30,7 +30,6 @@ dependencies = [
     "pygments>=2.14.0",
     "PyYAML>=6.0",
     "requests>=2.28.0",
-    "tenacity>=9.1.0",
 ]
 [project.urls]
 Repository = "https://github.com/visserle/AnkiOps"
@@ -54,7 +53,7 @@ where = ["."]
 include = ["ankiops*"]
 
 [tool.setuptools.package-data]
-ankiops = ["tutorial/*.md", "note_types/**/*.anki", "note_types/**/*.css", "note_types/**/*.yaml", "prompts/**/*.yaml"]
+ankiops = ["tutorial/*.md", "note_types/**/*.anki", "note_types/**/*.css", "note_types/**/*.yaml", "ai/models.yaml", "ai/prompts/**/*.yaml"]
 
 [tool.ruff]
 line-length = 88

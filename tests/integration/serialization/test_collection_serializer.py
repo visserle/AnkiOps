@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 
 from ankiops.collection_serializer import (
+    deserialize_collection_data,
     deserialize_collection_from_json,
+    serialize_collection,
     serialize_collection_to_json,
 )
 from ankiops.config import deck_name_to_file_stem
@@ -70,6 +72,15 @@ def test_basic_serialize(collection, tmp_path, monkeypatch):
     assert result["decks"][0]["notes"][0]["note_key"] == "nk-1"
 
 
+def test_in_memory_serialize(collection, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    result = serialize_collection(collection)
+
+    assert len(result["decks"]) == 1
+    assert len(result["decks"][0]["notes"]) == 2
+    assert result["decks"][0]["notes"][1]["note_key"] == "nk-2"
+
+
 def test_roundtrip(collection, tmp_path, monkeypatch):
     """Serialize then deserialize should preserve deck note content."""
     _set_collection_paths(monkeypatch, collection)
@@ -88,6 +99,30 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
     _set_note_type_paths(monkeypatch, note_types_dst)
 
     deserialize_collection_from_json(json_file, overwrite=True)
+
+    md_files = list(fresh_dir.glob("*.md"))
+    assert len(md_files) == 1
+    content = md_files[0].read_text(encoding="utf-8")
+    assert "What is 2+2?" in content
+    assert "What is 3+3?" in content
+
+
+def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    _set_note_type_paths(monkeypatch, collection / "note_types")
+
+    serialized_data = serialize_collection(collection)
+
+    fresh_dir = tmp_path / "fresh-in-memory"
+    fresh_dir.mkdir()
+    _set_collection_paths(monkeypatch, fresh_dir)
+
+    fs = FileSystemAdapter()
+    note_types_dst = fresh_dir / "note_types"
+    fs.eject_builtin_note_types(note_types_dst)
+    _set_note_type_paths(monkeypatch, note_types_dst)
+
+    deserialize_collection_data(serialized_data, overwrite=True)
 
     md_files = list(fresh_dir.glob("*.md"))
     assert len(md_files) == 1

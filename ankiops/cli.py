@@ -1,32 +1,32 @@
 import argparse
-import json
 import logging
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from ankiops.ai import (
     AIConfigError,
+    AIPaths,
     AIRequestError,
     AIResponseError,
+    AIRuntimeOverrides,
     OpenAICompatibleAsyncEditor,
     PromptConfigError,
     PromptExecutionError,
     PromptRunner,
     PromptRunOptions,
-    load_model_profiles,
-    load_prompt,
-    resolve_runtime_config,
+    prepare_ai_run,
 )
+from ankiops.ai.model_profiles import load_model_profiles, resolve_runtime_config
 from ankiops.anki import AnkiAdapter
 from ankiops.collection_serializer import (
+    deserialize_collection_data,
     deserialize_collection_from_json,
+    serialize_collection,
     serialize_collection_to_json,
 )
 from ankiops.config import (
     ANKIOPS_DB,
     get_collection_dir,
     get_note_types_dir,
-    get_prompts_dir,
     require_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -250,28 +250,42 @@ def run_deserialize(args):
     )
 
 
+def _runtime_overrides_from_args(args) -> AIRuntimeOverrides:
+    return AIRuntimeOverrides(
+        profile=args.profile,
+        provider=args.provider,
+        model=args.model,
+        base_url=args.base_url,
+        api_key_env=args.api_key_env,
+        timeout_seconds=args.timeout,
+        max_in_flight=args.max_in_flight,
+        api_key=args.api_key,
+    )
+
+
 def run_ai_config(args):
-    """Show the resolved AI runtime configuration from prompts/models.yaml."""
-    _ = require_initialized_collection_dir()
-    prompts_dir = get_prompts_dir()
+    """Show the resolved AI runtime configuration from ai/models.yaml."""
+    collection_dir = require_initialized_collection_dir()
+    ai_paths = AIPaths.from_collection_dir(collection_dir)
 
     try:
-        models_config = load_model_profiles(prompts_dir)
+        models_config = load_model_profiles(ai_paths)
     except AIConfigError as error:
         logger.error(f"Invalid model profile configuration: {error}")
         raise SystemExit(1)
 
+    overrides = _runtime_overrides_from_args(args)
     try:
         runtime = resolve_runtime_config(
             models_config,
-            profile=args.profile,
-            provider=args.provider,
-            model=args.model,
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
-            timeout_seconds=args.timeout,
-            max_in_flight=args.max_in_flight,
-            api_key=args.api_key,
+            profile=overrides.profile,
+            provider=overrides.provider,
+            model=overrides.model,
+            base_url=overrides.base_url,
+            api_key_env=overrides.api_key_env,
+            timeout_seconds=overrides.timeout_seconds,
+            max_in_flight=overrides.max_in_flight,
+            api_key=overrides.api_key,
         )
     except AIConfigError as error:
         logger.error(f"Invalid AI configuration: {error}")
@@ -292,7 +306,6 @@ def run_ai_config(args):
 def run_ai_prompt(args):
     """Run prompt-driven inline JSON edits over serialized collection data."""
     collection_dir = require_initialized_collection_dir()
-    prompts_dir = get_prompts_dir()
 
     if not args.prompt:
         logger.error("Missing required argument: --prompt")
@@ -301,31 +314,16 @@ def run_ai_prompt(args):
         logger.error("--batch-size must be > 0")
         raise SystemExit(2)
 
+    overrides = _runtime_overrides_from_args(args)
     try:
-        prompt_config = load_prompt(prompts_dir, args.prompt)
+        prompt_config, runtime = prepare_ai_run(
+            collection_dir=collection_dir,
+            prompt_ref=args.prompt,
+            overrides=overrides,
+        )
     except PromptConfigError as error:
         logger.error(f"Invalid prompt configuration: {error}")
         raise SystemExit(1)
-
-    try:
-        models_config = load_model_profiles(prompts_dir)
-    except AIConfigError as error:
-        logger.error(f"Invalid model profile configuration: {error}")
-        raise SystemExit(1)
-
-    profile_name = args.profile or prompt_config.model_profile
-    try:
-        runtime = resolve_runtime_config(
-            models_config,
-            profile=profile_name,
-            provider=args.provider,
-            model=args.model,
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
-            timeout_seconds=args.timeout,
-            max_in_flight=args.max_in_flight,
-            api_key=args.api_key,
-        )
     except AIConfigError as error:
         logger.error(f"Invalid AI configuration: {error}")
         raise SystemExit(1)
@@ -345,23 +343,7 @@ def run_ai_prompt(args):
         f"batch_size={args.batch_size} max_in_flight={runtime.max_in_flight}"
     )
 
-    temp_serialized_path: Path | None = None
-    try:
-        with NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            delete=False,
-            encoding="utf-8",
-        ) as tmp:
-            temp_serialized_path = Path(tmp.name)
-
-        serialized_data = serialize_collection_to_json(
-            collection_dir=collection_dir,
-            output_file=temp_serialized_path,
-        )
-    finally:
-        if temp_serialized_path and temp_serialized_path.exists():
-            temp_serialized_path.unlink()
+    serialized_data = serialize_collection(collection_dir)
 
     client = OpenAICompatibleAsyncEditor(runtime)
     options = PromptRunOptions(
@@ -400,8 +382,9 @@ def run_ai_prompt(args):
 
     for warning in result.warnings[:20]:
         logger.warning(warning)
-    if len(result.warnings) > 20:
-        logger.warning(f"... and {len(result.warnings) - 20} more warning(s)")
+    remaining_warnings = max(0, len(result.warnings) - 20) + result.dropped_warnings
+    if remaining_warnings:
+        logger.warning(f"... and {remaining_warnings} more warning(s)")
 
     if result.changed_fields == 0:
         logger.info("No changes to write.")
@@ -412,24 +395,10 @@ def run_ai_prompt(args):
         "decks": result.changed_decks,
     }
 
-    temp_apply_path: Path | None = None
-    try:
-        with NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            delete=False,
-            encoding="utf-8",
-        ) as tmp:
-            temp_apply_path = Path(tmp.name)
-            json.dump(apply_payload, tmp, indent=2, ensure_ascii=False)
-
-        deserialize_collection_from_json(
-            temp_apply_path,
-            overwrite=True,
-        )
-    finally:
-        if temp_apply_path and temp_apply_path.exists():
-            temp_apply_path.unlink()
+    deserialize_collection_data(
+        apply_payload,
+        overwrite=True,
+    )
 
     logger.info(f"Applied changes to {len(result.changed_decks)} deck(s).")
 
@@ -437,7 +406,7 @@ def run_ai_prompt(args):
 def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--profile",
-        help="Model profile name from prompts/models.yaml",
+        help="Model profile name from ai/models.yaml",
     )
     parser.add_argument(
         "--provider",
@@ -572,7 +541,7 @@ def main():
     ai_parser.add_argument(
         "--prompt",
         default=None,
-        help="Prompt file name/path from prompts/ (or absolute path)",
+        help="Prompt file name/path from ai/prompts/ (or absolute path)",
     )
     ai_parser.add_argument(
         "--batch-size",
@@ -586,7 +555,7 @@ def main():
 
     ai_config_parser = ai_subparsers.add_parser(
         "config",
-        help="Show resolved runtime config from prompts/models.yaml",
+        help="Show resolved runtime config from ai/models.yaml",
     )
     add_ai_runtime_args(ai_config_parser)
     ai_config_parser.set_defaults(handler=run_ai_config)

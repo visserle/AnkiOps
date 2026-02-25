@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .errors import AIResponseError
 from .types import InlineEditedNote
+
+_JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_JSON_DECODER = json.JSONDecoder()
 
 
 def parse_json_object(content: str) -> dict[str, Any]:
@@ -19,17 +23,14 @@ def parse_json_object(content: str) -> dict[str, Any]:
     if parsed is not None:
         return parsed
 
-    fenced = _extract_json_fence(body)
-    if fenced is not None:
+    for fenced in _extract_json_fences(body):
         parsed = _try_parse_json_dict(fenced)
         if parsed is not None:
             return parsed
 
-    candidate = _extract_first_json_object(body)
-    if candidate is not None:
-        parsed = _try_parse_json_dict(candidate)
-        if parsed is not None:
-            return parsed
+    parsed = _extract_first_json_dict(body)
+    if parsed is not None:
+        return parsed
 
     raise AIResponseError("AI response was not a valid JSON object")
 
@@ -40,6 +41,8 @@ def normalize_batch_response(content: str) -> dict[str, InlineEditedNote]:
     notes_payload = parsed.get("notes", parsed)
 
     if isinstance(notes_payload, list):
+        if not notes_payload:
+            raise AIResponseError("Batch response notes list cannot be empty")
         normalized: dict[str, InlineEditedNote] = {}
         for raw_note in notes_payload:
             note = _normalize_note_object(raw_note)
@@ -59,6 +62,9 @@ def normalize_batch_response(content: str) -> dict[str, InlineEditedNote]:
     if _looks_like_single_note(notes_payload):
         note = _normalize_note_object(notes_payload)
         return {note.note_key: note}
+
+    if not notes_payload:
+        raise AIResponseError("Batch response notes mapping cannot be empty")
 
     normalized_by_key: dict[str, InlineEditedNote] = {}
     for raw_key, raw_note in notes_payload.items():
@@ -137,55 +143,22 @@ def _try_parse_json_dict(raw: str) -> dict[str, Any] | None:
     return None
 
 
-def _extract_json_fence(content: str) -> str | None:
-    prefix = "```json"
-    lower = content.lower()
-    start = lower.find(prefix)
-    if start == -1:
-        start = content.find("```")
-        if start == -1:
-            return None
-        fence_start = start + 3
-    else:
-        fence_start = start + len(prefix)
-
-    end = content.find("```", fence_start)
-    if end == -1:
-        return None
-    return content[fence_start:end].strip()
+def _extract_json_fences(content: str) -> list[str]:
+    return [
+        match.group(1).strip()
+        for match in _JSON_FENCE_PATTERN.finditer(content)
+        if match.group(1).strip()
+    ]
 
 
-def _extract_first_json_object(content: str) -> str | None:
-    start = content.find("{")
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escape_next = False
-
-    for index, char in enumerate(content[start:], start):
-        if in_string:
-            if escape_next:
-                escape_next = False
-                continue
-            if char == "\\":
-                escape_next = True
-                continue
-            if char == '"':
-                in_string = False
-                continue
+def _extract_first_json_dict(content: str) -> dict[str, Any] | None:
+    for start_index, char in enumerate(content):
+        if char != "{":
             continue
-
-        if char == '"':
-            in_string = True
+        try:
+            parsed, _ = _JSON_DECODER.raw_decode(content[start_index:])
+        except json.JSONDecodeError:
             continue
-        if char == "{":
-            depth += 1
-            continue
-        if char == "}":
-            depth -= 1
-            if depth == 0:
-                return content[start : index + 1]
-
+        if isinstance(parsed, dict):
+            return parsed
     return None

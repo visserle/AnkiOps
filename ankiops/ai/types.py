@@ -71,6 +71,7 @@ class PromptRunOptions:
     include_decks: list[str] | None = None
     batch_size: int = 1
     max_in_flight: int = 4
+    max_warnings: int = 200
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,7 @@ class PromptRunResult:
     changes: list[PromptChange] = field(default_factory=list)
     changed_decks: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    dropped_warnings: int = 0
 
 
 @dataclass(frozen=True)

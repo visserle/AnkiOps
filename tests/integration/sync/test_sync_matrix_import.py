@@ -235,10 +235,7 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert_summary(
             result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
         )
-        assert all(
-            deck.deck_name != "OldDeck"
-            for deck in result.untracked_decks
-        )
+        assert all(deck.deck_name != "OldDeck" for deck in result.untracked_decks)
         assert db.get_deck_id("OldDeck") is None
         assert db.get_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
         card_id = world.mock_anki.notes[note_id]["cards"][0]
