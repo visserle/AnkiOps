@@ -15,8 +15,8 @@ from ankiops.models import AnkiNote, MarkdownFile, Note
 from tests.support.assertions import assert_summary
 
 
-def _mk_markdown_state(path: Path, raw: str) -> MarkdownFile:
-    return MarkdownFile(file_path=path, raw_content=raw, notes=[])
+def _mk_markdown_state(path: Path, raw: str, notes: list[Note] | None = None) -> MarkdownFile:
+    return MarkdownFile(file_path=path, raw_content=raw, notes=notes or [])
 
 
 def test_flush_writes_rejects_duplicate_first_lines(tmp_path):
@@ -28,7 +28,7 @@ def test_flush_writes_rejects_duplicate_first_lines(tmp_path):
     first = Note(note_key=None, note_type="AnkiOpsQA", fields={"Question": "Same", "Answer": "One"})
     second = Note(note_key=None, note_type="AnkiOpsQA", fields={"Question": "Same", "Answer": "Two"})
     pending = _PendingWrite(
-        file_state=_mk_markdown_state(md_path, raw),
+        file_state=_mk_markdown_state(md_path, raw, notes=[first, second]),
         key_assignments=[(first, "k1"), (second, "k2")],
     )
 
@@ -44,7 +44,7 @@ def test_flush_writes_updates_existing_key_comment(tmp_path):
 
     note = Note(note_key="old-key", note_type="AnkiOpsQA", fields={"Question": "Q1", "Answer": "A1"})
     pending = _PendingWrite(
-        file_state=_mk_markdown_state(md_path, raw),
+        file_state=_mk_markdown_state(md_path, raw, notes=[note]),
         key_assignments=[(note, "new-key")],
     )
 
@@ -70,11 +70,15 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
             deck_name="UnknownDeck",
             deck_id=10,
             anki_notes=[unknown],
-            configs=configs,
+            config_by_name={c.name: c for c in configs},
             existing_file_path=None,
             collection_dir=tmp_path,
             fs_port=fs_port,
             db_port=db,
+            note_keys_by_id={},
+            pending_note_mappings=[],
+            note_fingerprints_by_key={},
+            pending_fingerprints=[],
         )
 
         assert len(result.errors) == 1

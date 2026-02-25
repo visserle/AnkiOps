@@ -32,13 +32,13 @@ class SQLiteDbAdapter:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS notes (
                         key TEXT PRIMARY KEY,
-                        id INTEGER NOT NULL
+                        note_id INTEGER NOT NULL
                     )
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS decks (
                         name TEXT PRIMARY KEY,
-                        id INTEGER NOT NULL
+                        deck_id INTEGER NOT NULL
                     )
                 """)
                 conn.execute("""
@@ -54,8 +54,12 @@ class SQLiteDbAdapter:
                         anki_hash TEXT NOT NULL
                     )
                 """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(id)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(note_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(deck_id)")
+
+                # Schema validation: ensure 'note_id' exists in 'notes' table.
+                # If not, it will raise OperationalError and trigger recovery.
+                conn.execute("SELECT note_id FROM notes LIMIT 0")
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             if conn:
@@ -139,7 +143,7 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT key, id FROM notes WHERE key IN ({placeholders})",
+                f"SELECT key, note_id FROM notes WHERE key IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update({k: note_id for k, note_id in rows})
@@ -154,7 +158,7 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(id_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT id, key FROM notes WHERE id IN ({placeholders})",
+                f"SELECT note_id, key FROM notes WHERE note_id IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update({note_id: key for note_id, key in rows})
@@ -184,11 +188,11 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(ids):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
-                (f"DELETE FROM notes WHERE id IN ({placeholders})", tuple(chunk))
+                (f"DELETE FROM notes WHERE note_id IN ({placeholders})", tuple(chunk))
             )
         self._write_many(statements)
         self._executemany(
-            "INSERT OR REPLACE INTO notes (key, id) VALUES (?, ?)", ordered_rows
+            "INSERT OR REPLACE INTO notes (key, note_id) VALUES (?, ?)", ordered_rows
         )
 
     def remove_notes_by_keys_bulk(self, keys: Iterable[str]) -> None:
@@ -276,12 +280,12 @@ class SQLiteDbAdapter:
         )
 
     def get_note_id(self, key: str) -> int | None:
-        cursor = self._conn.execute("SELECT id FROM notes WHERE key = ?", (key,))
+        cursor = self._conn.execute("SELECT note_id FROM notes WHERE key = ?", (key,))
         row = cursor.fetchone()
         return row[0] if row else None
 
     def get_note_key(self, note_id: int) -> str | None:
-        cursor = self._conn.execute("SELECT key FROM notes WHERE id = ?", (note_id,))
+        cursor = self._conn.execute("SELECT key FROM notes WHERE note_id = ?", (note_id,))
         row = cursor.fetchone()
         return row[0] if row else None
 
@@ -292,26 +296,26 @@ class SQLiteDbAdapter:
         self.remove_notes_by_keys_bulk([key])
 
     def remove_note_by_id(self, note_id: int) -> None:
-        self._write("DELETE FROM notes WHERE id = ?", (note_id,))
+        self._write("DELETE FROM notes WHERE note_id = ?", (note_id,))
 
     # -- Deck mapping (deck_name ↔ deck_id) ----------------------------------
 
     def get_deck_id(self, name: str) -> int | None:
-        cursor = self._conn.execute("SELECT id FROM decks WHERE name = ?", (name,))
+        cursor = self._conn.execute("SELECT deck_id FROM decks WHERE name = ?", (name,))
         row = cursor.fetchone()
         return row[0] if row else None
 
     def get_deck_name(self, deck_id: int) -> str | None:
-        cursor = self._conn.execute("SELECT name FROM decks WHERE id = ?", (deck_id,))
+        cursor = self._conn.execute("SELECT name FROM decks WHERE deck_id = ?", (deck_id,))
         row = cursor.fetchone()
         return row[0] if row else None
 
     def set_deck(self, name: str, deck_id: int) -> None:
         self._write_many(
             [
-                ("DELETE FROM decks WHERE id = ?", (deck_id,)),
+                ("DELETE FROM decks WHERE deck_id = ?", (deck_id,)),
                 (
-                    "INSERT OR REPLACE INTO decks (name, id) VALUES (?, ?)",
+                    "INSERT OR REPLACE INTO decks (name, deck_id) VALUES (?, ?)",
                     (name, deck_id),
                 ),
             ]

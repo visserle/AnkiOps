@@ -51,7 +51,7 @@ def _replace_answer(content: str, new_answer: str) -> str:
 def _assert_db_bijection(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute("SELECT key, id FROM notes").fetchall()
+        rows = conn.execute("SELECT key, note_id FROM notes").fetchall()
     finally:
         conn.close()
 

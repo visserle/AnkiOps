@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from ankiops.config import (
+    ANKIOPS_DB,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     get_collection_dir,
@@ -32,6 +33,22 @@ def _setup_vscode_settings(collection_dir: Path):
 
     settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
+
+
+def _setup_gitignore(collection_dir: Path):
+    """Ensure .ankiops.db is in .gitignore."""
+    gitignore_path = collection_dir / ".gitignore"
+
+    content = ""
+    if gitignore_path.exists():
+        content = gitignore_path.read_text()
+
+    if ANKIOPS_DB not in content:
+        if content and not content.endswith("\n"):
+            content += "\n"
+        content += f"{ANKIOPS_DB}\n"
+        gitignore_path.write_text(content)
+        logger.debug(f"Added {ANKIOPS_DB} to .gitignore")
 
 
 def _setup_git(collection_dir: Path):
@@ -73,6 +90,7 @@ def initialize_collection(profile: str) -> Path:
 
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
+    _setup_gitignore(collection_dir)
     _setup_git(collection_dir)
 
     # Eject built-in note types
