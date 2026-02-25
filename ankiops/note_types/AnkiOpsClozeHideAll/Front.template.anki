@@ -2,25 +2,6 @@
     #_flag {
         visibility: hidden;
     }
-    .inactive-cloze {
-        display: inline-block;
-        width: 4.6em;
-        min-width: 4.6em;
-        height: 1em;
-        line-height: 1em;
-        border: 1px solid #999;
-        border-radius: 4px;
-        background-color: #e5e5e5;
-        box-sizing: border-box;
-        overflow: hidden;
-        vertical-align: -0.12em;
-        margin: 0 0.1em;
-    }
-    .night-mode .inactive-cloze,
-    .mobile .night_mode .inactive-cloze {
-        border-color: #777;
-        background-color: #4a4a4a;
-    }
 </style>
 
 <!-- Anki renders the active cloze here; we use this as a fallback if needed -->
