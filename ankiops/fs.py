@@ -7,10 +7,10 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import unquote
 
-from blake3 import blake3
 import yaml
+from blake3 import blake3
 
-from ankiops.config import LOCAL_MEDIA_DIR, NOTE_SEPARATOR
+from ankiops.config import NOTE_SEPARATOR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
@@ -32,9 +32,12 @@ class FileSystemAdapter:
         self._md_to_html = MarkdownToHTML()
         self._html_to_md = HTMLToMarkdown()
         self._note_type_configs: list[NoteTypeConfig] = []
+        self._note_type_cache_signature: tuple | None = None
 
     def set_configs(self, configs: list[NoteTypeConfig]):
         self._note_type_configs = configs
+        # External callers can override configs in-memory; invalidate disk cache.
+        self._note_type_cache_signature = None
 
     def read_markdown_file(self, file_path: Path) -> MarkdownFile:
         raw_content = file_path.read_text(encoding="utf-8")
@@ -112,7 +115,8 @@ class FileSystemAdapter:
 
             if not fields:
                 raise ValueError(
-                    f"Found content but no valid field prefixes in block starting with: '{block.strip()[:50]}...'"
+                    "Found content but no valid field prefixes in block starting "
+                    f"with: '{block.strip()[:50]}...'"
                 )
 
             # Infer Note Type
@@ -171,10 +175,8 @@ class FileSystemAdapter:
     def find_markdown_files(self, directory: Path) -> list[Path]:
         return sorted(directory.glob("*.md"))
 
-    def load_note_type_configs(self, note_types_dir: Path) -> list[NoteTypeConfig]:
-        configs_dict: dict[str, NoteTypeConfig] = {}
+    def _resolve_note_type_dirs(self, note_types_dir: Path) -> list[Path]:
         directories_to_scan = []
-
         builtin_dir = Path(__file__).parent / "note_types"
         if builtin_dir.exists():
             directories_to_scan.append(builtin_dir)
@@ -185,6 +187,41 @@ class FileSystemAdapter:
                     directories_to_scan.append(note_types_dir)
             except Exception:
                 directories_to_scan.append(note_types_dir)
+
+        return directories_to_scan
+
+    def _note_type_signature(self, note_types_dir: Path) -> tuple:
+        """Build a filesystem signature to invalidate note type cache on changes."""
+        signature_parts: list[tuple[str, str, int, int]] = []
+        for target_dir in self._resolve_note_type_dirs(note_types_dir):
+            signature_parts.append(("dir", str(target_dir.resolve()), 0, 0))
+            for subdir in sorted(target_dir.iterdir(), key=lambda p: p.name):
+                if not subdir.is_dir():
+                    continue
+                signature_parts.append(
+                    ("subdir", str(subdir.relative_to(target_dir)), 0, 0)
+                )
+                for file_path in sorted(subdir.rglob("*"), key=lambda p: str(p)):
+                    if not file_path.is_file():
+                        continue
+                    stat = file_path.stat()
+                    signature_parts.append(
+                        (
+                            "file",
+                            str(file_path.relative_to(target_dir)),
+                            stat.st_mtime_ns,
+                            stat.st_size,
+                        )
+                    )
+        return tuple(signature_parts)
+
+    def load_note_type_configs(self, note_types_dir: Path) -> list[NoteTypeConfig]:
+        configs_dict: dict[str, NoteTypeConfig] = {}
+        signature = self._note_type_signature(note_types_dir)
+        if self._note_type_configs and self._note_type_cache_signature == signature:
+            return self._note_type_configs
+
+        directories_to_scan = self._resolve_note_type_dirs(note_types_dir)
 
         # Builtin & folder-based
         for target_dir in directories_to_scan:
@@ -204,7 +241,8 @@ class FileSystemAdapter:
                 is_builtin = name.startswith("AnkiOps")
                 if not is_builtin and "styling" not in info:
                     raise ValueError(
-                        f"Note type '{name}' is missing mandatory 'styling' key in note_type.yaml"
+                        f"Note type '{name}' is missing mandatory 'styling' key "
+                        "in note_type.yaml"
                     )
 
                 fields = []
@@ -288,7 +326,8 @@ class FileSystemAdapter:
 
         configs = list(configs_dict.values())
         NoteTypeConfig.validate_configs(configs)
-        self.set_configs(configs)
+        self._note_type_configs = configs
+        self._note_type_cache_signature = signature
         return configs
 
     def calculate_blake3(self, file_path: Path) -> str:
@@ -306,18 +345,19 @@ class FileSystemAdapter:
             return 0
 
         updated_files = 0
+        # Markdown image links, HTML src attributes, and Anki sound refs.
         pattern = re.compile(
-            r'(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)'   # Markdown Image
-            r'|(src=["\'])(.+?)(["\'])'                                                  # HTML src
-            r'|(\[sound:)(.+?)(\])'                                                      # Sound
+            r'(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)'
+            r'|(src=["\'])(.+?)(["\'])'
+            r'|(\[sound:)(.+?)(\])'
         )
 
         def replace_callback(match: re.Match) -> str:
             # Determine which pattern matched
             if match.group(1) is not None:
                 prefix = match.group(1)
-                # the path could be in group 2 (angle brackets) or group 3 (no angle brackets)
-                path = match.group(2) or match.group(3) 
+                # Path can be in group 2 (angle brackets) or group 3 (plain).
+                path = match.group(2) or match.group(3)
                 suffix = match.group(4)
                 is_markdown = True
             elif match.group(5) is not None:
@@ -333,7 +373,7 @@ class FileSystemAdapter:
             if lookup_path in rename_map:
                 new_path = rename_map[lookup_path]
                 if is_markdown:
-                    # Always wrap markdown links in angle brackets for safety if replacing
+                    # Wrap markdown links in angle brackets for safer parsing.
                     if not new_path.startswith("<"):
                         new_path = f"<{new_path}>"
                 return f"{prefix}{new_path}{suffix}"

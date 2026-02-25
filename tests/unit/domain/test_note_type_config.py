@@ -113,6 +113,80 @@ def test_require_styling_key():
             fs.load_note_type_configs(note_types)
 
 
+def test_note_type_load_uses_cache_when_unchanged(tmp_path, monkeypatch):
+    note_types = tmp_path / "note_types"
+    (note_types / "MyCustomType").mkdir(parents=True, exist_ok=True)
+    (note_types / "MyCustomType" / "note_type.yaml").write_text(
+        yaml.dump(
+            {
+                "fields": [
+                    {"name": "Term", "prefix": "TM:", "identifying": True},
+                    {"name": "Definition", "prefix": "D:", "identifying": True},
+                ],
+                "styling": "Styling.css",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (note_types / "MyCustomType" / "Styling.css").write_text(
+        ".custom { color: red; }", encoding="utf-8"
+    )
+
+    calls = {"count": 0}
+    original = yaml.safe_load
+
+    def _counting_safe_load(*args, **kwargs):
+        calls["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(yaml, "safe_load", _counting_safe_load)
+
+    fs = FileSystemAdapter()
+    fs.load_note_type_configs(note_types)
+    first_call_count = calls["count"]
+    assert first_call_count > 0
+
+    fs.load_note_type_configs(note_types)
+    assert calls["count"] == first_call_count
+
+
+def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
+    note_types = tmp_path / "note_types"
+    (note_types / "MyCustomType").mkdir(parents=True, exist_ok=True)
+    yaml_path = note_types / "MyCustomType" / "note_type.yaml"
+    yaml_path.write_text(
+        yaml.dump(
+            {
+                "fields": [
+                    {"name": "Term", "prefix": "TM:", "identifying": True},
+                    {"name": "Definition", "prefix": "D:", "identifying": True},
+                ],
+                "styling": "Styling.css",
+            }
+        ),
+        encoding="utf-8",
+    )
+    css_path = note_types / "MyCustomType" / "Styling.css"
+    css_path.write_text(".custom { color: red; }", encoding="utf-8")
+
+    calls = {"count": 0}
+    original = yaml.safe_load
+
+    def _counting_safe_load(*args, **kwargs):
+        calls["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(yaml, "safe_load", _counting_safe_load)
+
+    fs = FileSystemAdapter()
+    fs.load_note_type_configs(note_types)
+    first_call_count = calls["count"]
+
+    css_path.write_text(".custom { color: blue; }", encoding="utf-8")
+    fs.load_note_type_configs(note_types)
+    assert calls["count"] > first_call_count
+
+
 def test_prefix_collision_different_field():
     """Ensure a prefix cannot map to two different fields globally."""
     config1 = NoteTypeConfig(

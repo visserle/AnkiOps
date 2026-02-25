@@ -1,11 +1,14 @@
 """Use Case: Import Markdown Notes into Anki."""
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
+from ankiops.config import NOTE_SEPARATOR
 from ankiops.db import SQLiteDbAdapter
+from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
 from ankiops.models import (
     AnkiNote,
@@ -20,6 +23,7 @@ from ankiops.models import (
 )
 
 logger = logging.getLogger(__name__)
+_NOTE_KEY_LINE_RE = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
 
 
 @dataclass
@@ -28,35 +32,48 @@ class _PendingWrite:
     key_assignments: list[tuple[Note, str]]
 
 
-def _build_first_markdown_line(note: Note, fs: MarkdownFile) -> str:
-    """Find the full markdown line (prefix + value) for the first field of a note.
-
-    We search the raw file content for the first field's prefixed line.
-    This is needed because first_field_line() returns just the field value,
-    which could match inside a prefixed line and corrupt the file.
-    """
+def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
+    """Find the line index of the first field line within a note block."""
     first_value = note.first_field_line()
     if not first_value:
-        return ""
+        return next((i for i, line in enumerate(lines) if line.strip()), 0)
 
     first_value_stripped = first_value.strip()
     if not first_value_stripped:
-        return first_value
+        return next((i for i, line in enumerate(lines) if line.strip()), 0)
 
-    # Search raw content for a line containing this value with a prefix
-    for line in fs.raw_content.split("\n"):
+    # Search the note block for a line containing this value with a prefix.
+    for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.endswith(first_value_stripped) and ":" in stripped:
-            # Verify it's a field prefix line (e.g., "Q: Question 1")
+            # Verify this is a prefixed line (e.g. "Q: Question 1").
             try:
                 idx = stripped.rindex(first_value_stripped)
                 prefix_part = stripped[:idx].rstrip()
                 if prefix_part.endswith(":"):
-                    return line
+                    return i
             except ValueError:
                 pass
-    # Fallback to raw first line
-    return first_value
+
+    return next((i for i, line in enumerate(lines) if line.strip()), 0)
+
+
+def _upsert_note_key_in_block(block: str, note: Note, key_str: str) -> str:
+    """Insert or replace note_key in a single markdown note block."""
+    new_key = f"<!-- note_key: {key_str} -->"
+    lines = block.split("\n")
+
+    # Replace an existing note_key comment in place.
+    for i, line in enumerate(lines):
+        if _NOTE_KEY_LINE_RE.match(line):
+            if line.strip() == new_key:
+                return block
+            lines[i] = new_key
+            return "\n".join(lines)
+
+    insert_idx = _find_first_markdown_line_index(note, lines)
+    lines.insert(insert_idx, new_key)
+    return "\n".join(lines)
 
 
 def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> None:
@@ -64,34 +81,42 @@ def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> No
         if not w.key_assignments:
             continue
 
-        content = w.file_state.raw_content
+        key_by_note = {id(note): key for note, key in w.key_assignments}
+        blocks = w.file_state.raw_content.split(NOTE_SEPARATOR)
+        out_blocks: list[str] = []
+        note_idx = 0
+        changed = False
 
-        if w.key_assignments:
-            # Check for duplicates on first line to ensure safe insertion
-            first_lines = {}
-            for n, _ in w.key_assignments:
-                fl = n.first_field_line()
-                first_lines.setdefault(fl, []).append(n.identifier)
-            dupes = {k: v for k, v in first_lines.items() if len(v) > 1}
-            if dupes:
-                raise ValueError(
-                    f"Duplicate first lines prevent key assignment in {w.file_state.file_path.name}"
-                )
+        for block in blocks:
+            if not block.strip() or set(block.strip()) <= {"-"}:
+                out_blocks.append(block)
+                continue
 
-            for note, key_str in w.key_assignments:
-                new_key = f"<!-- note_key: {key_str} -->"
-                if note.note_key:
-                    old_key = f"<!-- note_key: {note.note_key} -->"
-                    content = content.replace(old_key, new_key, 1)
-                else:
-                    # Build the full markdown line (prefix + value) to find in the raw content
-                    # Using just the field value would match inside a prefixed line and corrupt it
-                    first_line = _build_first_markdown_line(note, w.file_state)
-                    content = content.replace(
-                        first_line, new_key + "\n" + first_line, 1
-                    )
+            if note_idx >= len(w.file_state.notes):
+                out_blocks.append(block)
+                continue
 
-        fs_port.write_markdown_file(w.file_state.file_path, content)
+            note = w.file_state.notes[note_idx]
+            note_idx += 1
+            key_str = key_by_note.get(id(note))
+            if key_str is None:
+                out_blocks.append(block)
+                continue
+
+            updated_block = _upsert_note_key_in_block(block, note, key_str)
+            changed = changed or updated_block != block
+            out_blocks.append(updated_block)
+
+        if note_idx != len(w.file_state.notes):
+            raise ValueError(
+                "Failed to align parsed notes with markdown blocks in "
+                f"{w.file_state.file_path.name}"
+            )
+
+        if changed:
+            fs_port.write_markdown_file(
+                w.file_state.file_path, NOTE_SEPARATOR.join(out_blocks)
+            )
 
 
 def _to_html(
@@ -114,7 +139,7 @@ def _html_match(html: dict[str, str], anki: AnkiNote) -> bool:
 
 def _sync_file(
     fs: MarkdownFile,
-    configs: list[NoteTypeConfig],
+    config_by_name: dict[str, NoteTypeConfig],
     anki_port: AnkiAdapter,
     db_port: SQLiteDbAdapter,
     fs_port: FileSystemAdapter,
@@ -122,6 +147,10 @@ def _sync_file(
     deck_ids_by_name: dict[str, int],
     anki_notes: dict[int, AnkiNote],
     anki_cards: dict[int, dict],
+    note_ids_by_key: dict[str, int],
+    pending_note_mappings: list[tuple[str, int]],
+    note_fingerprints_by_key: dict[str, tuple[str, str]],
+    pending_fingerprints: list[tuple[str, str, str]],
     global_keys: set[str],
     all_anki_note_ids: set[int],
 ) -> tuple[NoteSyncResult, _PendingWrite]:
@@ -139,18 +168,31 @@ def _sync_file(
     creates, updates, deletes, skips, moves = [], [], [], [], []
     cards_to_move = []
 
+    def _queue_note_mapping(key: str, note_id: int) -> None:
+        if note_ids_by_key.get(key) == note_id:
+            return
+        note_ids_by_key[key] = note_id
+        pending_note_mappings.append((key, note_id))
+
+    def _queue_fingerprint(key: str, md_hash: str, anki_hash: str) -> None:
+        if note_fingerprints_by_key.get(key) == (md_hash, anki_hash):
+            return
+        note_fingerprints_by_key[key] = (md_hash, anki_hash)
+        pending_fingerprints.append((key, md_hash, anki_hash))
+
     for parsed_note in fs.notes:
-        cfg = next(c for c in configs if c.name == parsed_note.note_type)
-        html_fields = _to_html(parsed_note, cfg, fs_port)
+        cfg = config_by_name[parsed_note.note_type]
+        md_hash = note_fingerprint(parsed_note.note_type, parsed_note.fields)
 
         if parsed_note.note_key:
-            note_id = db_port.get_note_id(parsed_note.note_key)
+            note_key = parsed_note.note_key
+            note_id = note_ids_by_key.get(note_key)
             if note_id is None:
                 # Recovery
-                found = anki_port.find_notes_by_ankiops_key(parsed_note.note_key)
+                found = anki_port.find_notes_by_ankiops_key(note_key)
                 if found:
                     note_id = found[0]
-                    db_port.set_note(parsed_note.note_key, note_id)
+                    _queue_note_mapping(note_key, note_id)
 
             anki_note = anki_notes.get(note_id) if note_id else None
 
@@ -162,16 +204,18 @@ def _sync_file(
                     anki_notes[note_id] = anki_note
                 else:
                     # Stale key->id mapping: recover via embedded AnkiOps Key.
-                    found = anki_port.find_notes_by_ankiops_key(parsed_note.note_key)
+                    found = anki_port.find_notes_by_ankiops_key(note_key)
                     if found:
                         note_id = found[0]
-                        db_port.set_note(parsed_note.note_key, note_id)
+                        _queue_note_mapping(note_key, note_id)
                         info = anki_port.fetch_notes_info([note_id])
                         if info:
                             anki_note = info[note_id]
                             anki_notes[note_id] = anki_note
 
             if not anki_note:
+                html_fields = _to_html(parsed_note, cfg, fs_port)
+                html_fields["AnkiOps Key"] = note_key
                 creates.append(
                     Change(
                         ChangeType.CREATE,
@@ -180,7 +224,11 @@ def _sync_file(
                         {
                             "note": parsed_note,
                             "html_fields": html_fields,
-                            "note_key": parsed_note.note_key,
+                            "note_key": note_key,
+                            "md_hash": md_hash,
+                            "anki_hash": note_fingerprint(
+                                parsed_note.note_type, html_fields
+                            ),
                         },
                     )
                 )
@@ -208,25 +256,48 @@ def _sync_file(
                     )
                     continue
 
-                if anki_note.fields.get("AnkiOps Key", "") != parsed_note.note_key:
-                    html_fields["AnkiOps Key"] = parsed_note.note_key
+                current_anki_hash = note_fingerprint(
+                    anki_note.note_type, anki_note.fields
+                )
+                cached = note_fingerprints_by_key.get(note_key)
+                if cached == (md_hash, current_anki_hash):
+                    skips.append(
+                        Change(ChangeType.SKIP, note_id, parsed_note.identifier)
+                    )
+                    _queue_fingerprint(note_key, md_hash, current_anki_hash)
+                    continue
+
+                html_fields = _to_html(parsed_note, cfg, fs_port)
+                if anki_note.fields.get("AnkiOps Key", "") != note_key:
+                    html_fields["AnkiOps Key"] = note_key
 
                 if _html_match(html_fields, anki_note):
                     skips.append(
                         Change(ChangeType.SKIP, note_id, parsed_note.identifier)
                     )
+                    _queue_fingerprint(note_key, md_hash, current_anki_hash)
                 else:
+                    target_anki_hash = note_fingerprint(
+                        parsed_note.note_type, html_fields
+                    )
                     updates.append(
                         Change(
                             ChangeType.UPDATE,
                             note_id,
                             parsed_note.identifier,
-                            {"html_fields": html_fields},
+                            {
+                                "html_fields": html_fields,
+                                "note_key": note_key,
+                                "md_hash": md_hash,
+                                "anki_hash": target_anki_hash,
+                            },
                         )
                     )
                     logger.debug(f"  Update {parsed_note.identifier}")
         else:
             new_key = db_port.generate_key()
+            html_fields = _to_html(parsed_note, cfg, fs_port)
+            html_fields["AnkiOps Key"] = new_key
             creates.append(
                 Change(
                     ChangeType.CREATE,
@@ -236,6 +307,10 @@ def _sync_file(
                         "note": parsed_note,
                         "html_fields": html_fields,
                         "note_key": new_key,
+                        "md_hash": md_hash,
+                        "anki_hash": note_fingerprint(
+                            parsed_note.note_type, html_fields
+                        ),
                     },
                 )
             )
@@ -244,14 +319,18 @@ def _sync_file(
     md_anki_ids = set()
     for n in fs.notes:
         if n.note_key:
-            nid = db_port.get_note_id(n.note_key)
+            nid = note_ids_by_key.get(n.note_key)
             if nid:
                 md_anki_ids.add(nid)
 
     # Orphans
     orphaned = all_anki_note_ids - md_anki_ids
     if global_keys:
-        g_ids = {db_port.get_note_id(k) for k in global_keys if db_port.get_note_id(k)}
+        g_ids = set()
+        for key in global_keys:
+            mapped = note_ids_by_key.get(key)
+            if mapped:
+                g_ids.add(mapped)
         orphaned -= g_ids
 
     for nid in orphaned:
@@ -262,6 +341,7 @@ def _sync_file(
                     ChangeType.DELETE,
                     nid,
                     f"note_key: {key}" if key else f"note_id: {nid}",
+                    {"note_key": key} if key else {},
                 )
             )
             logger.debug(
@@ -274,13 +354,29 @@ def _sync_file(
             deck_name, needs_create_deck, creates, updates, deletes, cards_to_move
         )
         result.errors.extend(errors)
+        delete_failed = any(err.startswith("Failed delete") for err in errors)
 
         # Link mapped created IDs
         for cid, c in zip(created_ids, creates):
             k = c.context["note_key"]
-            db_port.set_note(k, cid)
+            _queue_note_mapping(k, cid)
+            _queue_fingerprint(k, c.context["md_hash"], c.context["anki_hash"])
             c.entity_id = cid
             key_assignments.append((c.context["note"], k))
+
+        for c in updates:
+            _queue_fingerprint(
+                c.context["note_key"], c.context["md_hash"], c.context["anki_hash"]
+            )
+
+        if deletes and not delete_failed:
+            delete_keys = [c.context.get("note_key") for c in deletes if c.context]
+            delete_keys = [k for k in delete_keys if k]
+            if delete_keys:
+                db_port.remove_notes_by_keys_bulk(delete_keys)
+                for key in delete_keys:
+                    note_ids_by_key.pop(key, None)
+                    note_fingerprints_by_key.pop(key, None)
 
         # Deck recovery logic for needs_create_deck
         if needs_create_deck:
@@ -304,6 +400,7 @@ def import_collection(
     note_types_dir: Path,
 ) -> CollectionImportResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
+    config_by_name = {c.name: c for c in configs}
     md_files = fs_port.find_markdown_files(collection_dir)
 
     fs_docs = [fs_port.read_markdown_file(f) for f in md_files]
@@ -323,68 +420,93 @@ def import_collection(
 
     if duplicates:
         raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
+    note_ids_by_key = db_port.get_note_ids_bulk(global_keys)
+    note_fingerprints_by_key = db_port.get_note_fingerprints_bulk(global_keys)
+    pending_note_mappings: list[tuple[str, int]] = []
+    pending_fingerprints: list[tuple[str, str, str]] = []
 
-    deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
-    deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
+    with db_port.transaction():
+        deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
+        deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
 
-    all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
-    anki_notes = anki_port.fetch_notes_info(all_note_ids)
+        all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
+        anki_notes = anki_port.fetch_notes_info(all_note_ids)
 
-    # We need to compute anki_cards and group note_ids by deck
-    # For performance in the UseCase, doing one massive fetch of cards info is faster.
-    all_card_ids = []
-    for n in anki_notes.values():
-        all_card_ids.extend(n.card_ids)
-    anki_cards = anki_port.fetch_cards_info(all_card_ids)
+        # Collaboration mode: rebuild key->id mappings from embedded AnkiOps Key
+        # so move/delete decisions do not depend on a pre-existing local DB.
+        for anki_note in anki_notes.values():
+            embedded_key = anki_note.fields.get("AnkiOps Key", "").strip()
+            if not embedded_key or embedded_key not in global_keys:
+                continue
+            if note_ids_by_key.get(embedded_key) == anki_note.note_id:
+                continue
+            note_ids_by_key[embedded_key] = anki_note.note_id
+            pending_note_mappings.append((embedded_key, anki_note.note_id))
 
-    note_ids_by_deck_name = {}
-    for cid, c in anki_cards.items():
-        dname = c.get("deckName")
-        nid = c.get("note")
-        if dname and nid:
-            note_ids_by_deck_name.setdefault(dname, set()).add(nid)
+        # We need to compute anki_cards and group note_ids by deck.
+        # A single bulk cardsInfo fetch is faster than many smaller calls.
+        all_card_ids = []
+        for n in anki_notes.values():
+            all_card_ids.extend(n.card_ids)
+        anki_cards = anki_port.fetch_cards_info(all_card_ids)
 
-    results = []
-    pending = []
-    md_deck_ids = set()
+        note_ids_by_deck_name = {}
+        for cid, c in anki_cards.items():
+            dname = c.get("deckName")
+            nid = c.get("note")
+            if dname and nid:
+                note_ids_by_deck_name.setdefault(dname, set()).add(nid)
 
-    for fs in fs_docs:
-        # Determine actual anki_deck_note_ids for this specific file
-        # We find what the deck name maps to...
-        dn = fs.file_path.stem.replace("__", "::")
+        results = []
+        pending = []
+        md_deck_ids = set()
 
-        file_anki_note_ids = note_ids_by_deck_name.get(dn, set())
+        for fs in fs_docs:
+            # Determine actual anki_deck_note_ids for this specific file
+            # We find what the deck name maps to...
+            dn = fs.file_path.stem.replace("__", "::")
 
-        res, p = _sync_file(
-            fs,
-            configs,
-            anki_port,
-            db_port,
-            fs_port,
-            deck_names_by_id,
-            deck_ids_by_name,
-            anki_notes,
-            anki_cards,
-            global_keys,
-            file_anki_note_ids,
-        )
-        if res.deck_name in deck_ids_by_name:
-            md_deck_ids.add(deck_ids_by_name[res.deck_name])
+            file_anki_note_ids = note_ids_by_deck_name.get(dn, set())
 
-        results.append(res)
-        pending.append(p)
-        summary = res.summary
-        if summary.format() != "no changes":
-            logger.debug(f"File '{fs.file_path.name}': {summary.format()}")
+            res, p = _sync_file(
+                fs,
+                config_by_name,
+                anki_port,
+                db_port,
+                fs_port,
+                deck_names_by_id,
+                deck_ids_by_name,
+                anki_notes,
+                anki_cards,
+                note_ids_by_key,
+                pending_note_mappings,
+                note_fingerprints_by_key,
+                pending_fingerprints,
+                global_keys,
+                file_anki_note_ids,
+            )
+            if res.deck_name in deck_ids_by_name:
+                md_deck_ids.add(deck_ids_by_name[res.deck_name])
 
-    _flush_writes(fs_port, pending)
-    db_port.save()
+            results.append(res)
+            pending.append(p)
+            summary = res.summary
+            if summary.format() != "no changes":
+                logger.debug(f"File '{fs.file_path.name}': {summary.format()}")
 
-    untracked = []
-    for dname, nids in note_ids_by_deck_name.items():
-        did = deck_ids_by_name.get(dname)
-        if did is None or did in md_deck_ids:
-            continue
-        untracked.append(UntrackedDeck(dname, did, list(nids)))
+        if pending_note_mappings:
+            db_port.set_notes_bulk(pending_note_mappings)
+        if pending_fingerprints:
+            db_port.set_note_fingerprints_bulk(pending_fingerprints)
+
+        _flush_writes(fs_port, pending)
+        db_port.save()
+
+        untracked = []
+        for dname, nids in note_ids_by_deck_name.items():
+            did = deck_ids_by_name.get(dname)
+            if did is None or did in md_deck_ids:
+                continue
+            untracked.append(UntrackedDeck(dname, did, list(nids)))
 
     return CollectionImportResult(results, untracked)

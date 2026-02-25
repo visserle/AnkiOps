@@ -6,6 +6,7 @@ from pathlib import Path
 from ankiops.anki import AnkiAdapter
 from ankiops.config import NOTE_SEPARATOR
 from ankiops.db import SQLiteDbAdapter
+from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
 from ankiops.models import (
     AnkiNote,
@@ -47,11 +48,15 @@ def _sync_deck(
     deck_name: str,
     deck_id: int,
     anki_notes: list[AnkiNote],
-    configs: list[NoteTypeConfig],
+    config_by_name: dict[str, NoteTypeConfig],
     existing_file_path: Path | None,
     collection_dir: Path,
     fs_port: FileSystemAdapter,
     db_port: SQLiteDbAdapter,
+    note_keys_by_id: dict[int, str],
+    pending_note_mappings: list[tuple[str, int]],
+    note_fingerprints_by_key: dict[str, tuple[str, str]],
+    pending_fingerprints: list[tuple[str, str, str]],
 ) -> NoteSyncResult:
     result = NoteSyncResult(deck_name=deck_name, file_path=existing_file_path)
 
@@ -76,8 +81,45 @@ def _sync_deck(
     creates, updates, skips = [], [], []
     final_notes = []
 
+    def _queue_note_mapping(key: str, note_id: int) -> None:
+        if note_keys_by_id.get(note_id) == key:
+            return
+        note_keys_by_id[note_id] = key
+        pending_note_mappings.append((key, note_id))
+
+    def _queue_fingerprint(key: str, md_hash: str, anki_hash: str) -> None:
+        if note_fingerprints_by_key.get(key) == (md_hash, anki_hash):
+            return
+        note_fingerprints_by_key[key] = (md_hash, anki_hash)
+        pending_fingerprints.append((key, md_hash, anki_hash))
+
     for anki_note in anki_notes:
-        cfg = next((c for c in configs if c.name == anki_note.note_type), None)
+        key = note_keys_by_id.get(anki_note.note_id)
+        embedded = anki_note.fields.get("AnkiOps Key", "").strip()
+        current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
+
+        # Stale id->key mapping: prefer embedded key from Anki note.
+        if key and embedded and key != embedded:
+            _queue_note_mapping(embedded, anki_note.note_id)
+            key = embedded
+
+        elif not key and embedded:
+            _queue_note_mapping(embedded, anki_note.note_id)
+            key = embedded
+
+        local_match = local_notes_by_key.get(key) if key else None
+        if key and local_match:
+            local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
+            cached = note_fingerprints_by_key.get(key)
+            if cached == (local_md_hash, current_anki_hash):
+                skips.append(
+                    Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
+                )
+                final_notes.append(local_match)
+                _queue_fingerprint(key, local_md_hash, current_anki_hash)
+                continue
+
+        cfg = config_by_name.get(anki_note.note_type)
         if not cfg:
             result.errors.append(
                 f"Unknown note type {anki_note.note_type} for note {anki_note.note_id}"
@@ -85,51 +127,43 @@ def _sync_deck(
             continue
 
         domain_note = _from_html(anki_note, cfg, fs_port)
-        key = db_port.get_note_key(anki_note.note_id)
-        embedded = anki_note.fields.get("AnkiOps Key", "").strip()
-
-        # Stale id->key mapping: prefer embedded key from Anki note.
-        if key and embedded and key != embedded:
-            db_port.set_note(embedded, anki_note.note_id)
-            key = embedded
 
         if not key:
-            # Maybe it has an embedded key
-            if embedded:
-                db_port.set_note(embedded, anki_note.note_id)
-                key = embedded
+            # Match by content when no mapped/embedded key exists.
+            first_line = domain_note.first_field_line()
+            match = local_notes_by_content.get(first_line)
+            if match and match.note_key:
+                key = match.note_key
+                _queue_note_mapping(key, anki_note.note_id)
             else:
-                # Match by content
-                first_line = domain_note.first_field_line()
-                match = local_notes_by_content.get(first_line)
-                if match and match.note_key:
-                    key = match.note_key
-                    db_port.set_note(key, anki_note.note_id)
-                else:
-                    key = db_port.generate_key()
-                    db_port.set_note(key, anki_note.note_id)
+                key = db_port.generate_key()
+                _queue_note_mapping(key, anki_note.note_id)
 
         domain_note.note_key = key
         local_match = local_notes_by_key.get(key)
+        if local_match and local_match.fields == domain_note.fields:
+            skips.append(
+                Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
+            )
+            final_notes.append(local_match)
+            md_hash = note_fingerprint(local_match.note_type, local_match.fields)
+            _queue_fingerprint(key, md_hash, current_anki_hash)
+            continue
 
         if not local_match:
             creates.append(
                 Change(ChangeType.CREATE, anki_note.note_id, domain_note.identifier)
             )
             logger.debug(f"  Created {domain_note.identifier}")
-            final_notes.append(domain_note)
         else:
-            if local_match.fields == domain_note.fields:
-                skips.append(
-                    Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
-                )
-                final_notes.append(local_match)
-            else:
-                updates.append(
-                    Change(ChangeType.UPDATE, anki_note.note_id, domain_note.identifier)
-                )
-                logger.debug(f"  Updated {domain_note.identifier}")
-                final_notes.append(domain_note)
+            updates.append(
+                Change(ChangeType.UPDATE, anki_note.note_id, domain_note.identifier)
+            )
+            logger.debug(f"  Updated {domain_note.identifier}")
+
+        final_notes.append(domain_note)
+        md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
+        _queue_fingerprint(key, md_hash, current_anki_hash)
 
     # Rebuild file content
     content_parts = []
@@ -139,7 +173,7 @@ def _sync_deck(
         if note.note_key:
             parts.append(f"<!-- note_key: {note.note_key} -->")
 
-        cfg = next(c for c in configs if c.name == note.note_type)
+        cfg = config_by_name[note.note_type]
         for f in cfg.fields:
             if f.prefix and f.name in note.fields and note.fields[f.name]:
                 lines = note.fields[f.name].split("\n")
@@ -175,83 +209,103 @@ def export_collection(
     note_types_dir: Path,
 ) -> CollectionExportResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
+    config_by_name = {c.name: c for c in configs}
+    with db_port.transaction():
+        deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
 
-    deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
-    deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
+        all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
+        anki_notes = anki_port.fetch_notes_info(all_note_ids)
+        note_keys_by_id = db_port.get_note_keys_bulk(all_note_ids)
+        pending_note_mappings: list[tuple[str, int]] = []
+        key_candidates = set(note_keys_by_id.values())
+        for anki_note in anki_notes.values():
+            embedded_key = anki_note.fields.get("AnkiOps Key", "").strip()
+            if embedded_key:
+                key_candidates.add(embedded_key)
+        note_fingerprints_by_key = db_port.get_note_fingerprints_bulk(key_candidates)
+        pending_fingerprints: list[tuple[str, str, str]] = []
 
-    all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
-    anki_notes = anki_port.fetch_notes_info(all_note_ids)
+        # Fetch cards info to map notes to decks
+        all_card_ids = []
+        for n in anki_notes.values():
+            all_card_ids.extend(n.card_ids)
+        anki_cards = anki_port.fetch_cards_info(all_card_ids)
 
-    # Fetch cards info to map notes to decks
-    all_card_ids = []
-    for n in anki_notes.values():
-        all_card_ids.extend(n.card_ids)
-    anki_cards = anki_port.fetch_cards_info(all_card_ids)
+        notes_by_deck = {}
+        for note_id, anki_note in anki_notes.items():
+            if not anki_note.card_ids:
+                continue
+            c = anki_cards.get(anki_note.card_ids[0])
+            if not c:
+                continue
+            dname = c.get("deckName")
+            notes_by_deck.setdefault(dname, []).append(anki_note)
 
-    notes_by_deck = {}
-    for note_id, anki_note in anki_notes.items():
-        if not anki_note.card_ids:
-            continue
-        c = anki_cards.get(anki_note.card_ids[0])
-        if not c:
-            continue
-        dname = c.get("deckName")
-        notes_by_deck.setdefault(dname, []).append(anki_note)
+        md_files = fs_port.find_markdown_files(collection_dir)
+        file_map_by_name = {}
+        for md_file in md_files:
+            file_map_by_name[md_file.stem] = md_file
 
-    md_files = fs_port.find_markdown_files(collection_dir)
-    file_map_by_name = {}
-    for md_file in md_files:
-        file_map_by_name[md_file.stem] = md_file
+        results = []
 
-    results = []
+        for deck_name, notes in notes_by_deck.items():
+            if deck_name == "Default":
+                continue
 
-    for deck_name, notes in notes_by_deck.items():
-        if deck_name == "Default":
-            continue
+            deck_id = deck_ids_by_name[deck_name]
 
-        deck_id = deck_ids_by_name[deck_name]
+            # Rename detection: does this deck_id exist under a different name?
+            old_name = db_port.get_deck_name(deck_id)
+            safe_name = deck_name.replace("::", "__")
+            if old_name and old_name != deck_name:
+                old_safe = old_name.replace("::", "__")
+                if old_safe in file_map_by_name:
+                    old_path = file_map_by_name[old_safe]
+                    new_path = old_path.parent / f"{safe_name}.md"
+                    old_path.rename(new_path)
+                    file_map_by_name[safe_name] = new_path
+                    del file_map_by_name[old_safe]
+                    logger.info(f"Deck renamed: '{old_name}' → '{deck_name}'")
 
-        # Rename detection: does this deck_id exist under a different name?
-        old_name = db_port.get_deck_name(deck_id)
-        safe_name = deck_name.replace("::", "__")
-        if old_name and old_name != deck_name:
-            old_safe = old_name.replace("::", "__")
-            if old_safe in file_map_by_name:
-                old_path = file_map_by_name[old_safe]
-                new_path = old_path.parent / f"{safe_name}.md"
-                old_path.rename(new_path)
-                file_map_by_name[safe_name] = new_path
-                del file_map_by_name[old_safe]
-                logger.info(f"Deck renamed: '{old_name}' → '{deck_name}'")
+            target_file = file_map_by_name.get(safe_name)
 
-        target_file = file_map_by_name.get(safe_name)
+            res = _sync_deck(
+                deck_name,
+                deck_id,
+                notes,
+                config_by_name,
+                target_file,
+                collection_dir,
+                fs_port,
+                db_port,
+                note_keys_by_id,
+                pending_note_mappings,
+                note_fingerprints_by_key,
+                pending_fingerprints,
+            )
+            db_port.set_deck(deck_name, deck_id)
+            results.append(res)
+            summary = res.summary
+            if summary.format() != "no changes":
+                logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
-        res = _sync_deck(
-            deck_name,
-            deck_id,
-            notes,
-            configs,
-            target_file,
-            collection_dir,
-            fs_port,
-            db_port,
-        )
-        db_port.set_deck(deck_name, deck_id)
-        results.append(res)
-        summary = res.summary
-        if summary.format() != "no changes":
-            logger.debug(f"Deck '{deck_name}': {summary.format()}")
+        if pending_note_mappings:
+            db_port.set_notes_bulk(pending_note_mappings)
+        if pending_fingerprints:
+            db_port.set_note_fingerprints_bulk(pending_fingerprints)
 
-    extra_changes = []
-    active_files = {res.file_path for res in results if res.file_path}
-    for md_file in md_files:
-        # A prior deck-rename step can move this file already.
-        if not md_file.exists():
-            continue
-        if md_file not in active_files:
-            db_port.remove_deck(md_file.stem.replace("__", "::"))
-            md_file.unlink()
-            extra_changes.append(Change(ChangeType.DELETE, None, f"file: {md_file.name}"))
+        extra_changes = []
+        active_files = {res.file_path for res in results if res.file_path}
+        for md_file in md_files:
+            # A prior deck-rename step can move this file already.
+            if not md_file.exists():
+                continue
+            if md_file not in active_files:
+                db_port.remove_deck(md_file.stem.replace("__", "::"))
+                md_file.unlink()
+                extra_changes.append(
+                    Change(ChangeType.DELETE, None, f"file: {md_file.name}")
+                )
 
-    db_port.save()
-    return CollectionExportResult(results, extra_changes)
+        db_port.save()
+        return CollectionExportResult(results, extra_changes)

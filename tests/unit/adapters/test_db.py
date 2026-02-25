@@ -150,3 +150,101 @@ def test_same_id_reassignment_replaces_old_key(tmp_path):
         assert adapter.get_note_key(500) == "new-key"
     finally:
         adapter.close()
+
+
+def test_bulk_note_mapping_roundtrip(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_notes_bulk([("k1", 101), ("k2", 102), ("k3", 103)])
+
+        assert adapter.get_note_ids_bulk(["k1", "k3", "missing"]) == {
+            "k1": 101,
+            "k3": 103,
+        }
+        assert adapter.get_note_keys_bulk([101, 103, 999]) == {
+            101: "k1",
+            103: "k3",
+        }
+    finally:
+        adapter.close()
+
+
+def test_bulk_note_mapping_last_write_wins(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_notes_bulk(
+            [
+                ("k1", 1),
+                ("k2", 2),
+                ("k1", 3),  # key remapped to new id
+                ("k3", 2),  # id remapped to new key
+            ]
+        )
+
+        assert adapter.get_note_id("k1") == 3
+        assert adapter.get_note_id("k2") is None
+        assert adapter.get_note_id("k3") == 2
+        assert adapter.get_note_key(1) is None
+        assert adapter.get_note_key(2) == "k3"
+        assert adapter.get_note_key(3) == "k1"
+    finally:
+        adapter.close()
+
+
+def test_transaction_rolls_back_on_error(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        with pytest.raises(RuntimeError):
+            with adapter.transaction():
+                adapter.set_note("k1", 101)
+                raise RuntimeError("boom")
+
+        assert adapter.get_note_id("k1") is None
+    finally:
+        adapter.close()
+
+
+def test_bulk_note_fingerprints_roundtrip(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_note_fingerprints_bulk(
+            [
+                ("k1", "md1", "a1"),
+                ("k2", "md2", "a2"),
+            ]
+        )
+        assert adapter.get_note_fingerprints_bulk(["k1", "k2", "missing"]) == {
+            "k1": ("md1", "a1"),
+            "k2": ("md2", "a2"),
+        }
+    finally:
+        adapter.close()
+
+
+def test_bulk_note_fingerprints_last_write_wins(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_note_fingerprints_bulk(
+            [
+                ("k1", "old-md", "old-a"),
+                ("k1", "new-md", "new-a"),
+            ]
+        )
+        assert adapter.get_note_fingerprints_bulk(["k1"]) == {
+            "k1": ("new-md", "new-a")
+        }
+    finally:
+        adapter.close()
+
+
+def test_remove_note_by_key_removes_fingerprint(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_note("k1", 101)
+        adapter.set_note_fingerprints_bulk([("k1", "md", "a")])
+        adapter.remove_note_by_key("k1")
+
+        assert adapter.get_note_id("k1") is None
+        assert adapter.get_note_fingerprints_bulk(["k1"]) == {}
+    finally:
+        adapter.close()
