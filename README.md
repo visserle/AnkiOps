@@ -145,12 +145,10 @@ uv run python -m main ma
 
 **`anki-to-markdown` / `am`:**
 - `--deck`, `-d` - Export single deck by name
-- `--keep-orphans` - Keep deck files/notes that no longer exist in Anki
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
 **`markdown-to-anki` / `ma`:**
 - `--file`, `-f` - Import single file
-- `--only-add-new` - Only add new notes, skip existing
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
 **`serialize`:**

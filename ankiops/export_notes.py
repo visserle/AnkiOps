@@ -86,10 +86,15 @@ def _sync_deck(
 
         domain_note = _from_html(anki_note, cfg, fs_port)
         key = db_port.get_note_key(anki_note.note_id)
+        embedded = anki_note.fields.get("AnkiOps Key", "").strip()
+
+        # Stale id->key mapping: prefer embedded key from Anki note.
+        if key and embedded and key != embedded:
+            db_port.set_note(embedded, anki_note.note_id)
+            key = embedded
 
         if not key:
             # Maybe it has an embedded key
-            embedded = anki_note.fields.get("AnkiOps Key", "").strip()
             if embedded:
                 db_port.set_note(embedded, anki_note.note_id)
                 key = embedded
@@ -168,7 +173,6 @@ def export_collection(
     db_port: SQLiteDbAdapter,
     collection_dir: Path,
     note_types_dir: Path,
-    keep_orphans: bool = False,
 ) -> CollectionExportResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
 
@@ -239,15 +243,15 @@ def export_collection(
             logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
     extra_changes = []
-    if not keep_orphans:
-        active_files = {res.file_path for res in results if res.file_path}
-        for md_file in md_files:
-            if md_file not in active_files:
-                db_port.remove_deck(md_file.stem.replace("__", "::"))
-                md_file.unlink()
-                extra_changes.append(
-                    Change(ChangeType.DELETE, None, f"file: {md_file.name}")
-                )
+    active_files = {res.file_path for res in results if res.file_path}
+    for md_file in md_files:
+        # A prior deck-rename step can move this file already.
+        if not md_file.exists():
+            continue
+        if md_file not in active_files:
+            db_port.remove_deck(md_file.stem.replace("__", "::"))
+            md_file.unlink()
+            extra_changes.append(Change(ChangeType.DELETE, None, f"file: {md_file.name}"))
 
     db_port.save()
     return CollectionExportResult(results, extra_changes)

@@ -75,7 +75,6 @@ def run_am(args):
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
-        keep_orphans=args.keep_orphans,
     )
     note_summary = export_summary.summary
     deck_count = len(export_summary.results)
@@ -141,7 +140,6 @@ def run_ma(args):
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
-        only_add_new=args.only_add_new,
     )
     note_summary = import_summary.summary
     deck_count = len(import_summary.results)
@@ -243,11 +241,6 @@ def main():
         help="Anki -> Markdown (export)",
     )
     am_parser.add_argument(
-        "--keep-orphans",
-        action="store_true",
-        help="Keep deck files and notes whose IDs no longer exist in Anki",
-    )
-    am_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
@@ -260,11 +253,6 @@ def main():
         "markdown-to-anki",
         aliases=["ma"],
         help="Markdown -> Anki (import)",
-    )
-    ma_parser.add_argument(
-        "--only-add-new",
-        action="store_true",
-        help="Only add new notes (skip existing notes with note IDs)",
     )
     ma_parser.add_argument(
         "--no-auto-commit",

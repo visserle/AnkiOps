@@ -122,7 +122,6 @@ def _sync_file(
     deck_ids_by_name: dict[str, int],
     anki_notes: dict[int, AnkiNote],
     anki_cards: dict[int, dict],
-    only_add_new: bool,
     global_keys: set[str],
     all_anki_note_ids: set[int],
 ) -> tuple[NoteSyncResult, _PendingWrite]:
@@ -153,10 +152,6 @@ def _sync_file(
                     note_id = found[0]
                     db_port.set_note(parsed_note.note_key, note_id)
 
-            if note_id and only_add_new:
-                skips.append(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
-                continue
-
             anki_note = anki_notes.get(note_id) if note_id else None
 
             # If recovery worked but wasn't in original batch fetch
@@ -165,6 +160,16 @@ def _sync_file(
                 if info:
                     anki_note = info[note_id]
                     anki_notes[note_id] = anki_note
+                else:
+                    # Stale key->id mapping: recover via embedded AnkiOps Key.
+                    found = anki_port.find_notes_by_ankiops_key(parsed_note.note_key)
+                    if found:
+                        note_id = found[0]
+                        db_port.set_note(parsed_note.note_key, note_id)
+                        info = anki_port.fetch_notes_info([note_id])
+                        if info:
+                            anki_note = info[note_id]
+                            anki_notes[note_id] = anki_note
 
             if not anki_note:
                 creates.append(
@@ -297,7 +302,6 @@ def import_collection(
     db_port: SQLiteDbAdapter,
     collection_dir: Path,
     note_types_dir: Path,
-    only_add_new: bool = False,
 ) -> CollectionImportResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
     md_files = fs_port.find_markdown_files(collection_dir)
@@ -361,7 +365,6 @@ def import_collection(
             deck_ids_by_name,
             anki_notes,
             anki_cards,
-            only_add_new,
             global_keys,
             file_anki_note_ids,
         )
