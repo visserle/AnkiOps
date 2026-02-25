@@ -1,0 +1,95 @@
+"""Collection serialization round-trip tests."""
+
+from __future__ import annotations
+
+import pytest
+
+from ankiops.collection_serializer import (
+    deserialize_collection_from_json,
+    serialize_collection_to_json,
+)
+from ankiops.db import SQLiteDbAdapter
+from ankiops.fs import FileSystemAdapter
+
+
+def _set_collection_paths(monkeypatch, collection_dir):
+    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr(
+        "ankiops.collection_serializer.get_collection_dir",
+        lambda: collection_dir,
+    )
+
+
+def _set_note_type_paths(monkeypatch, note_types_dir):
+    monkeypatch.setattr("ankiops.config.get_note_types_dir", lambda: note_types_dir)
+    monkeypatch.setattr(
+        "ankiops.collection_serializer.get_note_types_dir",
+        lambda: note_types_dir,
+    )
+
+
+@pytest.fixture
+def collection(tmp_path, fs, monkeypatch):
+    """Create a minimal collection with DB, note types, and one deck file."""
+    _set_collection_paths(monkeypatch, tmp_path)
+
+    db = SQLiteDbAdapter.load(tmp_path)
+    try:
+        db.set_config("profile", "test")
+        db.save()
+    finally:
+        db.close()
+
+    note_types_dir = tmp_path / "note_types"
+    fs.eject_builtin_note_types(note_types_dir)
+    _set_note_type_paths(monkeypatch, note_types_dir)
+
+    (tmp_path / "TestDeck.md").write_text(
+        (
+            "<!-- note_key: nk-1 -->\n"
+            "Q: What is 2+2?\n"
+            "A: 4\n\n"
+            "---\n\n"
+            "<!-- note_key: nk-2 -->\n"
+            "Q: What is 3+3?\n"
+            "A: 6"
+        ),
+        encoding="utf-8",
+    )
+    return tmp_path
+
+
+def test_basic_serialize(collection, tmp_path, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    output = tmp_path / "out.json"
+    result = serialize_collection_to_json(collection, output)
+
+    assert len(result["decks"]) == 1
+    assert len(result["decks"][0]["notes"]) == 2
+    assert result["decks"][0]["notes"][0]["note_key"] == "nk-1"
+
+
+def test_roundtrip(collection, tmp_path, monkeypatch):
+    """Serialize then deserialize should preserve deck note content."""
+    _set_collection_paths(monkeypatch, collection)
+    _set_note_type_paths(monkeypatch, collection / "note_types")
+
+    json_file = tmp_path / "export.json"
+    serialize_collection_to_json(collection, json_file)
+
+    fresh_dir = tmp_path / "fresh"
+    fresh_dir.mkdir()
+    _set_collection_paths(monkeypatch, fresh_dir)
+
+    fs = FileSystemAdapter()
+    note_types_dst = fresh_dir / "note_types"
+    fs.eject_builtin_note_types(note_types_dst)
+    _set_note_type_paths(monkeypatch, note_types_dst)
+
+    deserialize_collection_from_json(json_file, overwrite=True)
+
+    md_files = list(fresh_dir.glob("*.md"))
+    assert len(md_files) == 1
+    content = md_files[0].read_text(encoding="utf-8")
+    assert "What is 2+2?" in content
+    assert "What is 3+3?" in content

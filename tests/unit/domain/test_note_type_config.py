@@ -1,3 +1,7 @@
+"""Validation and inference tests for note-type configuration rules."""
+
+from __future__ import annotations
+
 import tempfile
 from pathlib import Path
 

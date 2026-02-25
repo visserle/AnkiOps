@@ -2,8 +2,7 @@
 
 import pytest
 
-from ankiops.config import NOTE_SEPARATOR
-from ankiops.models import Field, Note, NoteTypeConfig
+from ankiops.models import Note
 
 
 class TestParseChoiceBlock:
