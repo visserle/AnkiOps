@@ -18,7 +18,9 @@ def sanitize_filename(deck_name: str) -> str:
 
     Raises ValueError for invalid characters or Windows reserved names.
     """
-    invalid = [c for c in r'/\\?*|"<>' if c in deck_name and c != ":"]
+    invalid = [
+        char for char in r'/\\?*|"<>' if char in deck_name and char != ":"
+    ]
     if invalid:
         raise ValueError(
             f"Deck name '{deck_name}' contains invalid filename characters: "
@@ -31,8 +33,8 @@ def sanitize_filename(deck_name: str) -> str:
         "PRN",
         "AUX",
         "NUL",
-        *(f"COM{i}" for i in range(1, 10)),
-        *(f"LPT{i}" for i in range(1, 10)),
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
     }
     if base in windows_reserved:
         raise ValueError(

@@ -35,9 +35,9 @@ def anki_render_cloze(raw: str, active_idx: int, side: str) -> str:
         The HTML that Anki would produce for {{cloze:Field}}.
     """
 
-    def replace_cloze(m: re.Match) -> str:
-        idx = int(m.group(1))
-        inner = m.group(2)
+    def replace_cloze(match: re.Match) -> str:
+        idx = int(match.group(1))
+        inner = match.group(2)
         # inner may contain a hint after "::"
         parts = inner.split("::", 1)
         content = parts[0]
@@ -64,8 +64,8 @@ def anki_render_cloze(raw: str, active_idx: int, side: str) -> str:
 def _normalize_signature(html: str) -> str:
     """Create a structural signature that preserves cloze span boundaries."""
 
-    def text_part(s: str) -> str:
-        return re.sub(r"\s+", " ", s)
+    def text_part(text: str) -> str:
+        return re.sub(r"\s+", " ", text)
 
     # Normalize line breaks and represent cloze boundaries explicitly.
     normalized = re.sub(r"(?i)<br\s*/?>", "\n", html)
@@ -79,9 +79,9 @@ def _normalize_signature(html: str) -> str:
 
 
 def _simulate_front(raw: str, test_idx: str) -> str:
-    def replace_fn(m: re.Match) -> str:
-        idx = m.group(1)
-        inner = m.group(2)
+    def replace_fn(match: re.Match) -> str:
+        idx = match.group(1)
+        inner = match.group(2)
         parts = inner.split("::", 1)
         content = parts[0]
         hint = parts[1] if len(parts) > 1 else ""
@@ -94,9 +94,9 @@ def _simulate_front(raw: str, test_idx: str) -> str:
 
 
 def _simulate_back(raw: str, test_idx: str) -> str:
-    def replace_fn(m: re.Match) -> str:
-        idx = m.group(1)
-        inner = m.group(2)
+    def replace_fn(match: re.Match) -> str:
+        idx = match.group(1)
+        inner = match.group(2)
         content = inner.split("::", 1)[0]
         if idx == test_idx:
             return f'<span class="cloze">{content}</span>'

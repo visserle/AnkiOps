@@ -23,7 +23,9 @@ def fs():
 @pytest.fixture(scope="session")
 def choice_config(fs):
     """AnkiOpsChoice config for validation tests."""
-    return next(c for c in fs._note_type_configs if c.name == "AnkiOpsChoice")
+    return next(
+        config for config in fs._note_type_configs if config.name == "AnkiOpsChoice"
+    )
 
 
 @pytest.fixture

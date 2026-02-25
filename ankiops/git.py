@@ -55,8 +55,8 @@ def git_snapshot(collection_dir: Path, label: str) -> bool:
         logger.info(f"Auto-committed snapshot before {label}")
         return True
 
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"Auto-commit failed: {e}")
+    except subprocess.CalledProcessError as error:
+        logger.warning(f"Auto-commit failed: {error}")
         return False
     except FileNotFoundError:
         logger.debug("Git not found, skipping auto-commit")

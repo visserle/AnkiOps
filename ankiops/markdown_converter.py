@@ -31,15 +31,17 @@ def _math_plugin(md):
     """Preserve LaTeX math delimiters \\(...\\) and \\[...\\] through parsing."""
 
     def _parse_token(token_type, group_name):
-        def parser(_, m, state):
-            state.append_token({"type": token_type, "raw": m.group(group_name)})
-            return m.end()
+        def parser(_, regex_match, state):
+            state.append_token(
+                {"type": token_type, "raw": regex_match.group(group_name)}
+            )
+            return regex_match.end()
 
         return parser
 
-    def _parse_block(_, m, state):
-        state.append_token({"type": "block_math", "raw": m.group("bm_text")})
-        return m.end() + 1
+    def _parse_block(_, regex_match, state):
+        state.append_token({"type": "block_math", "raw": regex_match.group("bm_text")})
+        return regex_match.end() + 1
 
     md.inline.register(
         "inline_math_paren",
@@ -55,9 +57,15 @@ def _math_plugin(md):
     )
     md.block.register("block_math", _BLOCK_MATH_PATTERN, _parse_block, before="list")
     if md.renderer and md.renderer.NAME == "html":
-        md.renderer.register("inline_math_paren", lambda _, t: "\\(" + t + "\\)")
-        md.renderer.register("inline_math_bracket", lambda _, t: "\\[" + t + "\\]")
-        md.renderer.register("block_math", lambda _, t: "\\[" + t + "\\]")
+        md.renderer.register(
+            "inline_math_paren",
+            lambda _, token_text: "\\(" + token_text + "\\)",
+        )
+        md.renderer.register(
+            "inline_math_bracket",
+            lambda _, token_text: "\\[" + token_text + "\\]",
+        )
+        md.renderer.register("block_math", lambda _, token_text: "\\[" + token_text + "\\]")
 
 
 class AnkiRenderer(mistune.HTMLRenderer):

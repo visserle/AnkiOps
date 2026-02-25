@@ -89,9 +89,17 @@ def test_load_custom_from_dir():
 
         # 6 built-in types + 1 custom type = 7
         assert len(configs) == 7
-        config = next(c for c in configs if c.name == "MyCustomType")
+        config = next(
+            config_item for config_item in configs if config_item.name == "MyCustomType"
+        )
 
-        assert sorted([f.name for f in config.fields if f.identifying]) == [
+        assert sorted(
+            [
+                field_config.name
+                for field_config in config.fields
+                if field_config.identifying
+            ]
+        ) == [
             "Definition",
             "Term",
         ]

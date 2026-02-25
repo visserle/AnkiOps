@@ -50,31 +50,33 @@ class AnkiAdapter:
     def fetch_all_note_ids(self, required_types: list[str]) -> list[int]:
         if not required_types:
             return []
-        query = " OR ".join(f"note:{m}" for m in required_types)
+        query = " OR ".join(f"note:{model_name}" for model_name in required_types)
         return invoke("findNotes", query=query)
 
     def fetch_cards_info(self, card_ids: list[int]) -> dict[int, dict]:
         if not card_ids:
             return {}
         cards = invoke("cardsInfo", cards=card_ids)
-        return {c["cardId"]: c for c in cards if c}
+        return {card["cardId"]: card for card in cards if card}
 
     def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]:
         if not note_ids:
             return {}
         notes = invoke("notesInfo", notes=note_ids)
-        res = {}
-        for n in notes:
-            if not n:
+        notes_by_id = {}
+        for note_data in notes:
+            if not note_data:
                 continue
-            fields = {name: data["value"] for name, data in n["fields"].items()}
-            res[n["noteId"]] = AnkiNote(
-                note_id=n["noteId"],
-                note_type=n.get("modelName", ""),
+            fields = {
+                name: data["value"] for name, data in note_data["fields"].items()
+            }
+            notes_by_id[note_data["noteId"]] = AnkiNote(
+                note_id=note_data["noteId"],
+                note_type=note_data.get("modelName", ""),
                 fields=fields,
-                card_ids=n.get("cards", []),
+                card_ids=note_data.get("cards", []),
             )
-        return res
+        return notes_by_id
 
     def fetch_model_names(self) -> list[str]:
         return invoke("modelNames")
@@ -92,8 +94,8 @@ class AnkiAdapter:
 
         read_results = invoke("multi", actions=read_actions)
         states = {}
-        for i, name in enumerate(model_names):
-            base = i * 5
+        for model_index, name in enumerate(model_names):
+            base = model_index * 5
             field_names = read_results[base]
             raw_desc = read_results[base + 3]
             descriptions = dict(zip(field_names, raw_desc))
@@ -110,16 +112,16 @@ class AnkiAdapter:
         if not models:
             return
         actions = []
-        for m in models:
-            fields = [f.name for f in m.fields]
+        for model_config in models:
+            fields = [field.name for field in model_config.fields]
             actions.append(
                 _action(
                     "createModel",
-                    modelName=m.name,
+                    modelName=model_config.name,
                     inOrderFields=fields,
-                    css=m.css,
-                    isCloze=m.is_cloze,
-                    cardTemplates=m.templates,
+                    css=model_config.css,
+                    isCloze=model_config.is_cloze,
+                    cardTemplates=model_config.templates,
                 )
             )
             # Apply descriptions / fonts
@@ -128,7 +130,7 @@ class AnkiAdapter:
                     actions.append(
                         _action(
                             "modelFieldSetDescription",
-                            modelName=m.name,
+                            modelName=model_config.name,
                             fieldName=field_name,
                             description=desc,
                         )
@@ -138,14 +140,16 @@ class AnkiAdapter:
                     actions.append(
                         _action(
                             "modelFieldSetFontSize",
-                            modelName=m.name,
+                            modelName=model_config.name,
                             fieldName=field_name,
                             fontSize=size,
                         )
                     )
 
         results = invoke("multi", actions=actions)
-        errors = [r for r in results if r is not None and isinstance(r, str)]
+        errors = [
+            result for result in results if result is not None and isinstance(result, str)
+        ]
         if errors:
             raise AnkiConnectError(f"Failed to create models: {errors}")
 
@@ -155,55 +159,69 @@ class AnkiAdapter:
         if not models:
             return
         actions = []
-        for m in models:
-            state = states[m.name]
-            expected_fields = [f.name for f in m.fields]
+        for model_config in models:
+            state = states[model_config.name]
+            expected_fields = [field.name for field in model_config.fields]
             current_fields = state["fields"]
 
-            for f_name in expected_fields:
-                if f_name not in current_fields:
+            for field_name in expected_fields:
+                if field_name not in current_fields:
                     actions.append(
-                        _action("modelFieldAdd", modelName=m.name, fieldName=f_name)
+                        _action(
+                            "modelFieldAdd",
+                            modelName=model_config.name,
+                            fieldName=field_name,
+                        )
                     )
 
-            for f_name in current_fields:
-                if f_name not in expected_fields:
+            for field_name in current_fields:
+                if field_name not in expected_fields:
                     actions.append(
-                        _action("modelFieldRemove", modelName=m.name, fieldName=f_name)
+                        _action(
+                            "modelFieldRemove",
+                            modelName=model_config.name,
+                            fieldName=field_name,
+                        )
                     )
 
-            for i, f_name in enumerate(expected_fields):
+            for field_index, field_name in enumerate(expected_fields):
                 actions.append(
                     _action(
                         "modelFieldReposition",
-                        modelName=m.name,
-                        fieldName=f_name,
-                        index=i,
+                        modelName=model_config.name,
+                        fieldName=field_name,
+                        index=field_index,
                     )
                 )
 
             actions.append(
-                _action("updateModelStyling", model={"name": m.name, "css": m.css})
+                _action(
+                    "updateModelStyling",
+                    model={"name": model_config.name, "css": model_config.css},
+                )
             )
 
             # Templates
             current_names = list(state["templates"].keys())
-            for i, expected in enumerate(m.templates):
-                if i < len(current_names) and current_names[i] != expected["Name"]:
+            for template_index, expected in enumerate(model_config.templates):
+                if (
+                    template_index < len(current_names)
+                    and current_names[template_index] != expected["Name"]
+                ):
                     actions.append(
                         _action(
                             "modelTemplateRename",
-                            modelName=m.name,
-                            oldTemplateName=current_names[i],
+                            modelName=model_config.name,
+                            oldTemplateName=current_names[template_index],
                             newTemplateName=expected["Name"],
                         )
                     )
-                    current_names[i] = expected["Name"]
+                    current_names[template_index] = expected["Name"]
 
             templates_dict = {}
-            for i, expected in enumerate(m.templates):
-                if i < len(current_names):
-                    templates_dict[current_names[i]] = {
+            for template_index, expected in enumerate(model_config.templates):
+                if template_index < len(current_names):
+                    templates_dict[current_names[template_index]] = {
                         "Front": expected["Front"],
                         "Back": expected["Back"],
                     }
@@ -211,7 +229,7 @@ class AnkiAdapter:
                     actions.append(
                         _action(
                             "modelTemplateAdd",
-                            modelName=m.name,
+                            modelName=model_config.name,
                             template=expected,
                         )
                     )
@@ -220,7 +238,7 @@ class AnkiAdapter:
                 actions.append(
                     _action(
                         "updateModelTemplates",
-                        model={"name": m.name, "templates": templates_dict},
+                        model={"name": model_config.name, "templates": templates_dict},
                     )
                 )
 
@@ -228,34 +246,38 @@ class AnkiAdapter:
             current_desc = state["descriptions"]
             current_fonts = state["fonts"]
 
-            for f_name, desc in FIELD_DESCRIPTIONS.items():
-                if current_desc.get(f_name) != desc and f_name in expected_fields:
+            for field_name, desc in FIELD_DESCRIPTIONS.items():
+                if current_desc.get(field_name) != desc and field_name in expected_fields:
                     actions.append(
                         _action(
                             "modelFieldSetDescription",
-                            modelName=m.name,
-                            fieldName=f_name,
+                            modelName=model_config.name,
+                            fieldName=field_name,
                             description=desc,
                         )
                     )
 
-            for f_name, size in FIELD_FONT_SIZES.items():
+            for field_name, size in FIELD_FONT_SIZES.items():
                 if (
-                    current_fonts.get(f_name, {}).get("size") != size
-                    and f_name in expected_fields
+                    current_fonts.get(field_name, {}).get("size") != size
+                    and field_name in expected_fields
                 ):
                     actions.append(
                         _action(
                             "modelFieldSetFontSize",
-                            modelName=m.name,
-                            fieldName=f_name,
+                            modelName=model_config.name,
+                            fieldName=field_name,
                             fontSize=size,
                         )
                     )
 
         if actions:
             results = invoke("multi", actions=actions)
-            errors = [r for r in results if r is not None and isinstance(r, str)]
+            errors = [
+                result
+                for result in results
+                if result is not None and isinstance(result, str)
+            ]
             if errors:
                 raise AnkiConnectError(f"Failed to update models: {errors}")
 
@@ -284,46 +306,51 @@ class AnkiAdapter:
             )
             tags.append("change_deck")
 
-        for c in updates:
-            note_id = c.entity_id
-            fields = c.context.get("html_fields", {})
+        for update_change in updates:
+            note_id = update_change.entity_id
+            fields = update_change.context.get("html_fields", {})
             actions.append(
                 _action("updateNoteFields", note={"id": note_id, "fields": fields})
             )
             tags.append("update")
 
         if deletes:
-            ids = [c.entity_id for c in deletes if c.entity_id]
-            actions.append(_action("deleteNotes", notes=ids))
+            note_ids = [
+                delete_change.entity_id
+                for delete_change in deletes
+                if delete_change.entity_id
+            ]
+            actions.append(_action("deleteNotes", notes=note_ids))
             tags.append("delete")
 
         if actions:
             try:
                 results = invoke("multi", actions=actions)
                 update_idx = 0
-                for tag, res in zip(tags, results):
+                for tag, action_result in zip(tags, results):
                     if tag == "update":
-                        if isinstance(res, str):
+                        if isinstance(action_result, str):
                             errors.append(
-                                f"Update failed ({updates[update_idx].entity_repr}): {res}"
+                                "Update failed "
+                                f"({updates[update_idx].entity_repr}): {action_result}"
                             )
                         update_idx += 1
                     elif tag == "create_deck":
-                        if isinstance(res, str):
+                        if isinstance(action_result, str):
                             create_deck_failed = True
-                            errors.append(f"Failed create_deck: {res}")
+                            errors.append(f"Failed create_deck: {action_result}")
                     elif tag in ("change_deck", "delete"):
-                        if isinstance(res, str):
-                            errors.append(f"Failed {tag}: {res}")
+                        if isinstance(action_result, str):
+                            errors.append(f"Failed {tag}: {action_result}")
 
-            except AnkiConnectError as e:
-                errors.append(str(e))
+            except AnkiConnectError as error:
+                errors.append(str(error))
 
         if creates:
             if create_deck_failed:
-                for c in creates:
+                for create_change in creates:
                     errors.append(
-                        f"Create failed ({c.entity_repr}): deck create failed"
+                        f"Create failed ({create_change.entity_repr}): deck create failed"
                     )
             else:
                 create_ids, create_errors = self._create_notes_bulk(deck_name, creates)
@@ -358,23 +385,28 @@ class AnkiAdapter:
         if len(normalized) < len(creates):
             normalized.extend([None] * (len(creates) - len(normalized)))
 
-        for c, res in zip(creates, normalized):
-            if isinstance(res, int):
-                created_ids.append(res)
+        for create_change, create_result in zip(creates, normalized):
+            if isinstance(create_result, int):
+                created_ids.append(create_result)
             else:
-                errors.append(f"Create failed ({c.entity_repr}): {res}")
+                errors.append(
+                    f"Create failed ({create_change.entity_repr}): {create_result}"
+                )
 
         return created_ids, errors
 
     def _create_notes_bulk(
         self, deck_name: str, creates: list[Change]
     ) -> tuple[list[int], list[str]]:
-        notes = [self._build_create_note_payload(deck_name, c) for c in creates]
+        notes = [
+            self._build_create_note_payload(deck_name, create_change)
+            for create_change in creates
+        ]
         try:
             results = invoke("addNotes", notes=notes)
             return self._collect_create_results(creates, results)
-        except AnkiConnectError as e:
-            return [], [str(e)]
+        except AnkiConnectError as error:
+            return [], [str(error)]
 
     def get_media_dir(self) -> Path:
         """Return Anki's collection.media directory, cached after first call."""

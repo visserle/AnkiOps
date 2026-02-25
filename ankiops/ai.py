@@ -258,7 +258,7 @@ def resolve_prompt_path(prompts_dir: Path, prompt_ref: str) -> Path:
         if candidate.exists() and candidate.is_file():
             return candidate
 
-    tried = ", ".join(str(p) for p in candidates)
+    tried = ", ".join(str(candidate_path) for candidate_path in candidates)
     raise ValueError(f"Prompt not found: '{prompt_ref}'. Tried: {tried}")
 
 
@@ -324,7 +324,9 @@ def select_decks_with_subdecks(
 
     If include_decks is empty, all decks are selected.
     """
-    targets = [d.strip() for d in (include_decks or []) if d.strip()]
+    targets = [
+        deck_name.strip() for deck_name in (include_decks or []) if deck_name.strip()
+    ]
     if not targets:
         return decks
 
@@ -509,8 +511,8 @@ def run_inline_prompt_on_serialized_collection(
             result.prompted_notes += 1
             try:
                 edited = editor.edit_note(prompt_config, note_payload)
-            except Exception as e:
-                result.warnings.append(f"{deck_name}/{note_key}: {e}")
+            except Exception as error:
+                result.warnings.append(f"{deck_name}/{note_key}: {error}")
                 continue
 
             if not isinstance(edited, dict):

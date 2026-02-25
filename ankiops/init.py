@@ -121,7 +121,7 @@ def create_tutorial(collection_dir: Path) -> Path:
         img_dst.write_bytes(img_ref.read_bytes())
         logger.info(f"Tutorial image created: {clickable_path(img_dst)}")
 
-    except Exception as e:
-        logger.warning(f"Could not create tutorial file: {e}")
+    except Exception as error:
+        logger.warning(f"Could not create tutorial file: {error}")
 
     return tutorial_dst

@@ -6,7 +6,7 @@
 <script>
 // Parse answer field to determine number of correct answers
 var answerText = "{{Answer}}";
-var correctAnswers = answerText.split(',').map(function(s) { return s.trim(); });
+var correctAnswers = answerText.split(',').map(function(answerToken) { return answerToken.trim(); });
 var numCorrect = correctAnswers.length;
 
 // Display hint about number of correct answers (for alignment with front)
@@ -54,15 +54,15 @@ var reviewCount = parseInt(localStorage.getItem(storageKey) || '0', 10);
 // Create seed from card ID and review count with proper hashing
 var seed = 0;
 var seedStr = cardId + '_' + reviewCount;
-for (var i = 0; i < seedStr.length; i++) {
-    seed = ((seed << 5) - seed) + seedStr.charCodeAt(i);
+for (var seedIndex = 0; seedIndex < seedStr.length; seedIndex++) {
+    seed = ((seed << 5) - seed) + seedStr.charCodeAt(seedIndex);
     seed = seed | 0; // Convert to 32bit integer
 }
 // Ensure positive seed and add choice content for uniqueness
 seed = Math.abs(seed);
-choices.forEach(function(c) {
-    for (var i = 0; i < c.text.length; i++) {
-        seed = ((seed << 5) - seed) + c.text.charCodeAt(i);
+choices.forEach(function(choiceItem) {
+    for (var textIndex = 0; textIndex < choiceItem.text.length; textIndex++) {
+        seed = ((seed << 5) - seed) + choiceItem.text.charCodeAt(textIndex);
         seed = Math.abs(seed | 0); // Keep positive
     }
 });
@@ -73,11 +73,11 @@ function seededRandom() {
 }
 
 // Shuffle array using Fisher-Yates algorithm with seeded random
-for (var i = choices.length - 1; i > 0; i--) {
-    var j = Math.floor(seededRandom() * (i + 1));
-    var temp = choices[i];
-    choices[i] = choices[j];
-    choices[j] = temp;
+for (var choiceIndex = choices.length - 1; choiceIndex > 0; choiceIndex--) {
+    var swapIndex = Math.floor(seededRandom() * (choiceIndex + 1));
+    var temp = choices[choiceIndex];
+    choices[choiceIndex] = choices[swapIndex];
+    choices[swapIndex] = temp;
 }
 
 // Create and append choice elements with styling

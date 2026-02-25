@@ -42,7 +42,9 @@ class NoteTypeConfig:
     def identifying_prefixes(self) -> set[str]:
         """Return prefixes of identifying fields."""
         return {
-            str(f.prefix) for f in self.fields if f.prefix is not None and f.identifying
+            str(field_config.prefix)
+            for field_config in self.fields
+            if field_config.prefix is not None and field_config.identifying
         }
 
     @classmethod
@@ -156,17 +158,26 @@ class Note:
         choice_count: int = 0
         choice_fields = []
 
-        has_choices = any("Choice" in f.name for f in config.fields)
+        has_choices = any(
+            "Choice" in field_config.name for field_config in config.fields
+        )
 
-        for f in config.fields:
-            if "Choice" in f.name:
-                choice_fields.append(f.name)
-                if self.fields.get(f.name):
+        for field_config in config.fields:
+            if "Choice" in field_config.name:
+                choice_fields.append(field_config.name)
+                if self.fields.get(field_config.name):
                     choice_count += 1
                 continue
 
-            if f.prefix is not None and f.identifying and not self.fields.get(f.name):
-                errors.append(f"Missing mandatory field '{f.name}' ({f.prefix})")
+            if (
+                field_config.prefix is not None
+                and field_config.identifying
+                and not self.fields.get(field_config.name)
+            ):
+                errors.append(
+                    f"Missing mandatory field '{field_config.name}' "
+                    f"({field_config.prefix})"
+                )
 
         if config.is_cloze:
             has_cloze = any(
@@ -191,9 +202,9 @@ class Note:
         if not answer:
             return []
 
-        parts = [p.strip() for p in answer.split(",")]
+        parts = [answer_part.strip() for answer_part in answer.split(",")]
         try:
-            answer_ints = [int(p) for p in parts]
+            answer_ints = [int(answer_part) for answer_part in parts]
         except ValueError:
             return [
                 "AnkiOpsChoice answer (A:) must contain integers "
@@ -201,13 +212,17 @@ class Note:
             ]
 
         max_choice = max(
-            (int(f.split()[-1]) for f in choice_fields if self.fields.get(f)),
+            (
+                int(choice_field_name.split()[-1])
+                for choice_field_name in choice_fields
+                if self.fields.get(choice_field_name)
+            ),
             default=0,
         )
-        for n in answer_ints:
-            if n < 1 or n > max_choice:
+        for answer_index in answer_ints:
+            if answer_index < 1 or answer_index > max_choice:
                 return [
-                    f"AnkiOpsChoice answer contains '{n}' but only "
+                    f"AnkiOpsChoice answer contains '{answer_index}' but only "
                     f"{max_choice} choice(s) are provided"
                 ]
         return []
@@ -298,7 +313,10 @@ class SyncSummary:
         if not isinstance(other, SyncSummary):
             return NotImplemented
         return SyncSummary(
-            **{f: getattr(self, f) + getattr(other, f) for f in self.__annotations__}
+            **{
+                field_name: getattr(self, field_name) + getattr(other, field_name)
+                for field_name in self.__annotations__
+            }
         )
 
     @classmethod
@@ -350,7 +368,10 @@ class SyncSummary:
             self.total += 1
 
     def to_dict(self) -> dict[str, int]:
-        return {f: getattr(self, f) for f in self.__annotations__}
+        return {
+            field_name: getattr(self, field_name)
+            for field_name in self.__annotations__
+        }
 
     def format(self) -> str:
         parts = []
@@ -365,8 +386,8 @@ class SyncSummary:
 
 # Priority order for deduplicating overlapping changes on the same entity.
 _CHANGE_PRIORITY = {
-    ct: i
-    for i, ct in enumerate(
+    change_type: priority
+    for priority, change_type in enumerate(
         [
             ChangeType.SKIP,
             ChangeType.HASH,
@@ -471,7 +492,10 @@ class CollectionResult:
 
     @property
     def summary(self) -> SyncSummary:
-        base = sum((r.summary for r in self.results), SyncSummary())
+        base = sum(
+            (sync_result.summary for sync_result in self.results),
+            SyncSummary(),
+        )
         if self.extra_changes:
             base.add_changes(
                 self.extra_changes,

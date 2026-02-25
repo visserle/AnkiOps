@@ -17,7 +17,7 @@ _SYNC_NAMES_CONFIG_KEY = "note_types.sync_names_v1"
 
 def _note_types_sync_hash(configs) -> str:
     payload = []
-    for config in sorted(configs, key=lambda c: c.name):
+    for config in sorted(configs, key=lambda config_item: config_item.name):
         payload.append(
             {
                 "name": config.name,
@@ -48,7 +48,7 @@ def _note_types_sync_hash(configs) -> str:
 
 
 def _note_types_names_signature(configs) -> str:
-    return ",".join(sorted(c.name for c in configs))
+    return ",".join(sorted(config.name for config in configs))
 
 
 def sync_note_types(
@@ -67,8 +67,8 @@ def sync_note_types(
         return None
 
     existing = set(anki_port.fetch_model_names())
-    to_create = [c for c in configs if c.name not in existing]
-    to_update = [c for c in configs if c.name in existing]
+    to_create = [config for config in configs if config.name not in existing]
+    to_update = [config for config in configs if config.name in existing]
 
     local_hash = _note_types_sync_hash(configs)
     names_signature = _note_types_names_signature(configs)
@@ -86,16 +86,16 @@ def sync_note_types(
     parts = []
 
     if to_create:
-        names = ", ".join(c.name for c in to_create)
+        names = ", ".join(config.name for config in to_create)
         logger.info(f"Note types: {len(to_create)} created ({names})")
         anki_port.create_models(to_create)
         parts.append(f"{len(to_create)} created")
 
     if to_update:
         logger.debug(f"Checking {len(to_update)} existing note types for updates...")
-        states = anki_port.fetch_model_states([c.name for c in to_update])
+        states = anki_port.fetch_model_states([config.name for config in to_update])
         anki_port.update_models(to_update, states)
-        names = ", ".join(c.name for c in to_update)
+        names = ", ".join(config.name for config in to_update)
         logger.debug(f"Note types: {len(to_update)} synced ({names})")
         parts.append(f"{len(to_update)} synced")
 

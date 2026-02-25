@@ -109,8 +109,8 @@ class SQLiteDbAdapter:
             if db_path.exists():
                 try:
                     db_path.rename(str(db_path) + ".corrupt")
-                except OSError as e:
-                    logger.error(f"Failed to rename corrupt database: {e}")
+                except OSError as error:
+                    logger.error(f"Failed to rename corrupt database: {error}")
 
             return cls.load(collection_dir)
 
@@ -170,8 +170,8 @@ class SQLiteDbAdapter:
 
     @staticmethod
     def _chunked(items: list, chunk_size: int = 500) -> Iterator[list]:
-        for i in range(0, len(items), chunk_size):
-            yield items[i : i + chunk_size]
+        for start_index in range(0, len(items), chunk_size):
+            yield items[start_index : start_index + chunk_size]
 
     def get_note_ids_bulk(self, note_keys: Iterable[str]) -> dict[str, int]:
         note_key_list = list(note_keys)

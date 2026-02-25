@@ -40,9 +40,9 @@ _OPS = st.lists(
 
 def _replace_answer(content: str, new_answer: str) -> str:
     lines = content.splitlines()
-    for i, line in enumerate(lines):
+    for line_index, line in enumerate(lines):
         if line.startswith("A: "):
-            lines[i] = f"A: {new_answer}"
+            lines[line_index] = f"A: {new_answer}"
             break
     suffix = "\n" if content.endswith("\n") else ""
     return "\n".join(lines) + suffix
@@ -55,8 +55,8 @@ def _assert_db_bijection(db_path: Path) -> None:
     finally:
         conn.close()
 
-    note_keys = [r[0] for r in rows]
-    ids = [r[1] for r in rows]
+    note_keys = [row[0] for row in rows]
+    ids = [row[1] for row in rows]
     assert len(note_keys) == len(set(note_keys))
     assert len(ids) == len(set(ids))
 
@@ -121,9 +121,12 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
                 for step, op in enumerate(ops):
                     if op == "md_create":
                         question_idx += 1
-                        q = f"Q{question_idx}"
-                        a = f"A{question_idx}"
-                        deck_file.write_text(f"Q: {q}\nA: {a}\n", encoding="utf-8")
+                        question_text = f"Q{question_idx}"
+                        answer_text = f"A{question_idx}"
+                        deck_file.write_text(
+                            f"Q: {question_text}\nA: {answer_text}\n",
+                            encoding="utf-8",
+                        )
 
                     elif op == "md_update":
                         if (

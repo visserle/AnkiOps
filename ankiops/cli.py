@@ -56,8 +56,8 @@ def connect_or_exit() -> AnkiAdapter:
     try:
         version = anki.get_version()
         logger.debug(f"Connected to AnkiConnect (version {version})")
-    except Exception as e:
-        logger.error(f"Error connecting to AnkiConnect: {e}")
+    except Exception as error:
+        logger.error(f"Error connecting to AnkiConnect: {error}")
         logger.error("Make sure Anki is running and AnkiConnect is installed.")
         raise SystemExit(1)
     return anki
@@ -126,8 +126,8 @@ def run_am(args):
 
     logger.info(f"Export: {deck_count} decks with {note_count} notes — {changes}")
     for res in export_summary.results:
-        s = res.summary
-        deck_fmt = s.format()
+        deck_summary = res.summary
+        deck_fmt = deck_summary.format()
         if deck_fmt != "no changes" and res.file_path:
             logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
 
@@ -136,8 +136,8 @@ def run_am(args):
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, fs, collection_dir, db)
         logger.info(_format_media_status(media_result, from_anki=True))
-    except Exception as e:
-        logger.warning(f"Media sync failed: {e}")
+    except Exception as error:
+        logger.warning(f"Media sync failed: {error}")
 
 
 def run_ma(args):
@@ -162,8 +162,8 @@ def run_ma(args):
         logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, fs, collection_dir, db)
         logger.info(_format_media_status(media_result, from_anki=False))
-    except Exception as e:
-        logger.warning(f"Media sync failed: {e}")
+    except Exception as error:
+        logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
     nt_summary = sync_note_types(anki, fs, note_types_dir, db)
@@ -186,8 +186,8 @@ def run_ma(args):
 
     logger.info(f"Import: {deck_count} decks with {note_count} notes — {changes}")
     for res in import_summary.results:
-        s = res.summary
-        deck_fmt = s.format()
+        deck_summary = res.summary
+        deck_fmt = deck_summary.format()
         if deck_fmt != "no changes" and res.file_path:
             logger.info(f"  {res.name}  {deck_fmt}")
 
@@ -251,8 +251,8 @@ def run_ai_config(args):
     db = SQLiteDbAdapter.load(collection_dir)
     try:
         has_updates = any(
-            v is not None
-            for v in [
+            setting_value is not None
+            for setting_value in [
                 args.provider,
                 args.model,
                 args.base_url,
@@ -293,8 +293,8 @@ def run_ai_prompt(args):
         raise SystemExit(2)
     try:
         prompt_config = load_prompt_config(prompts_dir, args.prompt)
-    except ValueError as e:
-        logger.error(f"Invalid prompt configuration: {e}")
+    except ValueError as error:
+        logger.error(f"Invalid prompt configuration: {error}")
         raise SystemExit(1)
 
     db = SQLiteDbAdapter.load(collection_dir)
@@ -313,8 +313,8 @@ def run_ai_prompt(args):
             timeout_seconds=args.timeout,
             api_key=args.api_key,
         )
-    except ValueError as e:
-        logger.error(f"Invalid AI configuration: {e}")
+    except ValueError as error:
+        logger.error(f"Invalid AI configuration: {error}")
         raise SystemExit(1)
 
     if runtime.provider == "remote" and not runtime.api_key:

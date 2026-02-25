@@ -31,40 +31,44 @@ class MockAnki:
                 found_cards = []
                 or_groups = query.split(" OR ")
 
-                for cid, card in self.cards.items():
-                    card_matches_any_group = False
+                for card_id, card in self.cards.items():
+                    matches_any_group = False
 
                     for group in or_groups:
                         terms = group.strip().split()
                         if not terms:
                             continue
 
-                        group_matches_all_terms = True
+                        matches_all_terms = True
                         for term in terms:
                             if term.startswith("note:"):
                                 model = term.split(":", 1)[1]
                                 note = self.notes.get(card["note"])
                                 if not note or note["modelName"] != model:
-                                    group_matches_all_terms = False
+                                    matches_all_terms = False
                                     break
                             elif term.startswith("deck:"):
                                 deck_name = term.split(":", 1)[1]
                                 if card["deckName"] != deck_name:
-                                    group_matches_all_terms = False
+                                    matches_all_terms = False
                                     break
 
-                        if group_matches_all_terms:
-                            card_matches_any_group = True
+                        if matches_all_terms:
+                            matches_any_group = True
                             break
 
-                    if card_matches_any_group:
-                        found_cards.append(cid)
+                    if matches_any_group:
+                        found_cards.append(card_id)
 
                 return found_cards
 
             case "cardsInfo":
                 card_ids = params.get("cards", [])
-                return [self.cards[cid] for cid in card_ids if cid in self.cards]
+                return [
+                    self.cards[card_id]
+                    for card_id in card_ids
+                    if card_id in self.cards
+                ]
 
             case "notesInfo":
                 note_ids = params.get("notes", [])
@@ -171,7 +175,10 @@ class MockAnki:
                 self.notes[new_id] = {
                     "noteId": new_id,
                     "modelName": note_data["modelName"],
-                    "fields": {k: {"value": v} for k, v in note_data["fields"].items()},
+                    "fields": {
+                        field_name: {"value": field_value}
+                        for field_name, field_value in note_data["fields"].items()
+                    },
                     "cards": [card_id],
                 }
                 self.cards[card_id] = {
@@ -193,8 +200,10 @@ class MockAnki:
                 note_info = params["note"]
                 note_id = note_info["id"]
                 if note_id in self.notes:
-                    for k, v in note_info["fields"].items():
-                        self.notes[note_id]["fields"][k] = {"value": v}
+                    for field_name, field_value in note_info["fields"].items():
+                        self.notes[note_id]["fields"][field_name] = {
+                            "value": field_value
+                        }
                 return None
 
             case "deleteNotes":
@@ -202,18 +211,18 @@ class MockAnki:
                 for note_id in note_ids:
                     if note_id in self.notes:
                         card_ids = self.notes[note_id]["cards"]
-                        for cid in card_ids:
-                            if cid in self.cards:
-                                del self.cards[cid]
+                        for card_id in card_ids:
+                            if card_id in self.cards:
+                                del self.cards[card_id]
                         del self.notes[note_id]
                 return None
 
             case "changeDeck":
                 cards = params["cards"]
                 deck = params["deck"]
-                for cid in cards:
-                    if cid in self.cards:
-                        self.cards[cid]["deckName"] = deck
+                for card_id in cards:
+                    if card_id in self.cards:
+                        self.cards[card_id]["deckName"] = deck
                 return None
 
             case "findNotes":

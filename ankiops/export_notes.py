@@ -32,13 +32,13 @@ def _from_html(
 ) -> Note:
     """Convert an AnkiNote into a Domain Note using the FS Port."""
     fields = {}
-    for f in config.fields:
-        if f.name == "AnkiOps Key":
+    for field_config in config.fields:
+        if field_config.name == "AnkiOps Key":
             continue
-        if f.name in anki_note.fields:
-            md_val = fs_port.convert_to_markdown(anki_note.fields[f.name])
+        if field_config.name in anki_note.fields:
+            md_val = fs_port.convert_to_markdown(anki_note.fields[field_config.name])
             if md_val:
-                fields[f.name] = md_val
+                fields[field_config.name] = md_val
 
     note_key = anki_note.fields.get("AnkiOps Key", "").strip()
     return Note(
@@ -75,11 +75,15 @@ def _sync_deck(
         fs = fs_port.read_markdown_file(file_path)
 
         # Sort by note_id (creation timestamp) for first-time exports
-        anki_notes = sorted(anki_notes, key=lambda n: n.note_id)
+        anki_notes = sorted(anki_notes, key=lambda anki_note: anki_note.note_id)
 
-    local_notes_by_note_key = {n.note_key: n for n in fs.notes if n.note_key}
+    local_notes_by_note_key = {
+        local_note.note_key: local_note for local_note in fs.notes if local_note.note_key
+    }
     local_notes_by_content = {
-        n.first_field_line(): n for n in fs.notes if not n.note_key
+        local_note.first_field_line(): local_note
+        for local_note in fs.notes
+        if not local_note.note_key
     }
 
     creates, updates, skips = [], [], []
@@ -178,10 +182,14 @@ def _sync_deck(
             parts.append(f"<!-- note_key: {note.note_key} -->")
 
         cfg = config_by_name[note.note_type]
-        for f in cfg.fields:
-            if f.prefix and f.name in note.fields and note.fields[f.name]:
-                lines = note.fields[f.name].split("\n")
-                parts.append(f"{f.prefix} {lines[0]}")
+        for field_config in cfg.fields:
+            if (
+                field_config.prefix
+                and field_config.name in note.fields
+                and note.fields[field_config.name]
+            ):
+                lines = note.fields[field_config.name].split("\n")
+                parts.append(f"{field_config.prefix} {lines[0]}")
                 if len(lines) > 1:
                     parts.extend(lines[1:])
 
@@ -193,7 +201,9 @@ def _sync_deck(
         fs_port.write_markdown_file(result.file_path, final_text)
 
     # Detect deleted notes
-    final_note_keys = {n.note_key for n in final_notes if n.note_key}
+    final_note_keys = {
+        final_note.note_key for final_note in final_notes if final_note.note_key
+    }
     for old_note in fs.notes:
         if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
@@ -213,11 +223,11 @@ def export_collection(
     note_types_dir: Path,
 ) -> CollectionResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
-    config_by_name = {c.name: c for c in configs}
+    config_by_name = {config.name: config for config in configs}
     with db_port.transaction():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
 
-        all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
+        all_note_ids = anki_port.fetch_all_note_ids([config.name for config in configs])
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
         note_keys_by_id = db_port.get_note_keys_bulk(all_note_ids)
         pending_note_mappings: list[tuple[str, int]] = []
@@ -233,19 +243,19 @@ def export_collection(
 
         # Fetch cards info to map notes to decks
         all_card_ids = []
-        for n in anki_notes.values():
-            all_card_ids.extend(n.card_ids)
+        for anki_note in anki_notes.values():
+            all_card_ids.extend(anki_note.card_ids)
         anki_cards = anki_port.fetch_cards_info(all_card_ids)
 
         notes_by_deck = {}
         for note_id, anki_note in anki_notes.items():
             if not anki_note.card_ids:
                 continue
-            c = anki_cards.get(anki_note.card_ids[0])
-            if not c:
+            primary_card_info = anki_cards.get(anki_note.card_ids[0])
+            if not primary_card_info:
                 continue
-            dname = c.get("deckName")
-            notes_by_deck.setdefault(dname, []).append(anki_note)
+            deck_name = primary_card_info.get("deckName")
+            notes_by_deck.setdefault(deck_name, []).append(anki_note)
 
         md_files = fs_port.find_markdown_files(collection_dir)
         file_map_by_name = {}
@@ -275,7 +285,7 @@ def export_collection(
 
             target_file = file_map_by_name.get(safe_name)
 
-            res = _sync_deck(
+            sync_result = _sync_deck(
                 deck_name,
                 deck_id,
                 notes,
@@ -290,8 +300,8 @@ def export_collection(
                 pending_fingerprints,
             )
             db_port.set_deck(deck_name, deck_id)
-            results.append(res)
-            summary = res.summary
+            results.append(sync_result)
+            summary = sync_result.summary
             if summary.format() != "no changes":
                 logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
@@ -302,7 +312,9 @@ def export_collection(
         db_port.prune_orphan_note_fingerprints()
 
         extra_changes = []
-        active_files = {res.file_path for res in results if res.file_path}
+        active_files = {
+            sync_result.file_path for sync_result in results if sync_result.file_path
+        }
         for md_file in md_files:
             # A prior deck-rename step can move this file already.
             if not md_file.exists():

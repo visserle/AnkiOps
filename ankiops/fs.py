@@ -49,9 +49,9 @@ class FileSystemAdapter:
         # Build prefix map
         prefix_to_type_field = {}
         for config in self._note_type_configs:
-            for f in config.fields:
-                if f.prefix:
-                    prefix_to_type_field[f.prefix] = f.name
+            for field_config in config.fields:
+                if field_config.prefix:
+                    prefix_to_type_field[field_config.prefix] = field_config.name
 
         for block in blocks:
             if not block.strip() or set(block.strip()) <= {"-"}:
@@ -124,8 +124,10 @@ class FileSystemAdapter:
             note = Note(note_key=note_key, note_type=note_type, fields=fields)
 
             # Validate
-            cfg = next(c for c in self._note_type_configs if c.name == note_type)
-            errors = note.validate(cfg)
+            note_type_config = next(
+                config for config in self._note_type_configs if config.name == note_type
+            )
+            errors = note.validate(note_type_config)
             if errors:
                 raise ValueError("Invalid note in block:\n  " + "\n  ".join(errors))
 
@@ -143,15 +145,23 @@ class FileSystemAdapter:
 
         candidates = []
         for config in self._note_type_configs:
-            type_all_fields = {f.name for f in config.fields}
+            type_all_fields = {field.name for field in config.fields}
             if not note_fields.issubset(type_all_fields):
                 continue
 
-            type_ident_fields = {f.name for f in config.fields if f.identifying}
+            type_ident_fields = {
+                field.name for field in config.fields if field.identifying
+            }
 
             if config.is_choice:
-                base_ident = {f for f in type_ident_fields if "Choice" not in f}
-                choice_fields = {f for f in type_all_fields if "Choice" in f}
+                base_ident = {
+                    field_name
+                    for field_name in type_ident_fields
+                    if "Choice" not in field_name
+                }
+                choice_fields = {
+                    field_name for field_name in type_all_fields if "Choice" in field_name
+                }
                 if base_ident.issubset(note_fields) and (note_fields & choice_fields):
                     candidates.append(config.name)
             else:
@@ -195,13 +205,17 @@ class FileSystemAdapter:
         signature_parts: list[tuple[str, str, int, int]] = []
         for target_dir in self._resolve_note_type_dirs(note_types_dir):
             signature_parts.append(("dir", str(target_dir.resolve()), 0, 0))
-            for subdir in sorted(target_dir.iterdir(), key=lambda p: p.name):
+            for subdir in sorted(
+                target_dir.iterdir(), key=lambda path_entry: path_entry.name
+            ):
                 if not subdir.is_dir():
                     continue
                 signature_parts.append(
                     ("subdir", str(subdir.relative_to(target_dir)), 0, 0)
                 )
-                for file_path in sorted(subdir.rglob("*"), key=lambda p: str(p)):
+                for file_path in sorted(
+                    subdir.rglob("*"), key=lambda path_entry: str(path_entry)
+                ):
                     if not file_path.is_file():
                         continue
                     stat = file_path.stat()
@@ -246,12 +260,18 @@ class FileSystemAdapter:
                     )
 
                 fields = []
-                for f in info.get("fields", []):
+                for field_data in info.get("fields", []):
                     fields.append(
-                        Field(f["name"], f["prefix"], identifying=f["identifying"])
+                        Field(
+                            field_data["name"],
+                            field_data["prefix"],
+                            identifying=field_data["identifying"],
+                        )
                     )
 
-                if ANKIOPS_KEY_FIELD.name not in [f.name for f in fields]:
+                if ANKIOPS_KEY_FIELD.name not in [
+                    field_config.name for field_config in fields
+                ]:
                     fields.append(ANKIOPS_KEY_FIELD)
 
                 # CSS
@@ -260,10 +280,10 @@ class FileSystemAdapter:
                     styling_input = [styling_input]
 
                 css_parts = []
-                for p in styling_input:
-                    p_path = subdir / p
-                    if p_path.exists():
-                        css_parts.append(p_path.read_text(encoding="utf-8"))
+                for css_file in styling_input:
+                    css_path = subdir / css_file
+                    if css_path.exists():
+                        css_parts.append(css_path.read_text(encoding="utf-8"))
                 css = "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
 
                 # Templates
@@ -284,28 +304,28 @@ class FileSystemAdapter:
                             }
                         )
 
-                        i = 2
+                        template_index = 2
                         while True:
-                            front_n = subdir / f"Front{i}.template.anki"
-                            back_n = subdir / f"Back{i}.template.anki"
+                            front_n = subdir / f"Front{template_index}.template.anki"
+                            back_n = subdir / f"Back{template_index}.template.anki"
                             if front_n.exists() and back_n.exists():
                                 templates.append(
                                     {
-                                        "Name": f"Card {i}",
+                                        "Name": f"Card {template_index}",
                                         "Front": front_n.read_text(encoding="utf-8"),
                                         "Back": back_n.read_text(encoding="utf-8"),
                                     }
                                 )
-                                i += 1
+                                template_index += 1
                             else:
                                 break
                 else:
-                    for t in raw_templates:
-                        front = subdir / t["front"]
-                        back = subdir / t["back"]
+                    for template_data in raw_templates:
+                        front = subdir / template_data["front"]
+                        back = subdir / template_data["back"]
                         templates.append(
                             {
-                                "Name": str(t.get("name", "Card")),
+                                "Name": str(template_data.get("name", "Card")),
                                 "Front": front.read_text(encoding="utf-8")
                                 if front.exists()
                                 else "",
@@ -331,11 +351,11 @@ class FileSystemAdapter:
         return configs
 
     def calculate_blake3(self, file_path: Path) -> str:
-        h = blake3()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest(length=4)
+        hash_state = blake3()
+        with open(file_path, "rb") as file_handle:
+            for chunk in iter(lambda: file_handle.read(65536), b""):
+                hash_state.update(chunk)
+        return hash_state.hexdigest(length=4)
 
     def update_media_references(
         self, directory: Path, rename_map: dict[str, str]

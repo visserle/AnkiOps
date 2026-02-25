@@ -87,7 +87,7 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
             deck_name="UnknownDeck",
             deck_id=10,
             anki_notes=[unknown],
-            config_by_name={c.name: c for c in configs},
+            config_by_name={config.name: config for config in configs},
             existing_file_path=None,
             collection_dir=tmp_path,
             fs_port=fs_port,

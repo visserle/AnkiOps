@@ -46,7 +46,7 @@ DRIFT_CASES = mk_state_cases(
 )
 
 
-@pytest.mark.parametrize("case", CREATE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", CREATE_CASES, ids=lambda state_case: state_case.id)
 def test_export_create_is_full_sync_across_states(case, world):
     world.add_qa_note(
         deck_name="ExportCreateDeck",
@@ -62,7 +62,7 @@ def test_export_create_is_full_sync_across_states(case, world):
     assert world.deck_path("ExportCreateDeck").exists()
 
 
-@pytest.mark.parametrize("case", UPDATE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", UPDATE_CASES, ids=lambda state_case: state_case.id)
 def test_export_update_is_full_sync_across_states(case, world):
     note_key = f"exp-state-update-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -81,7 +81,7 @@ def test_export_update_is_full_sync_across_states(case, world):
     assert "A: Anki Answer" in world.read_deck("ExportUpdateDeck")
 
 
-@pytest.mark.parametrize("case", DELETE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", DELETE_CASES, ids=lambda state_case: state_case.id)
 def test_export_delete_removes_orphan_file_across_states(case, world):
     orphan_file = world.write_qa_deck(
         "ExportDeleteDeck",
@@ -95,7 +95,7 @@ def test_export_delete_removes_orphan_file_across_states(case, world):
     assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
 
 
-@pytest.mark.parametrize("case", RENAME_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", RENAME_CASES, ids=lambda state_case: state_case.id)
 def test_export_deck_rename_converges_to_new_file_across_states(case, world):
     note_key = f"exp-state-rename-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -123,7 +123,7 @@ def test_export_deck_rename_converges_to_new_file_across_states(case, world):
     assert not old_file.exists()
 
 
-@pytest.mark.parametrize("case", CONFLICT_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", CONFLICT_CASES, ids=lambda state_case: state_case.id)
 def test_export_conflict_prefers_anki_content_across_states(case, world):
     note_key = f"exp-state-conflict-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -143,7 +143,7 @@ def test_export_conflict_prefers_anki_content_across_states(case, world):
     assert "A: Anki Winner" in world.read_deck("ConflictExportDeck")
 
 
-@pytest.mark.parametrize("case", DRIFT_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", DRIFT_CASES, ids=lambda state_case: state_case.id)
 def test_export_sets_missing_deck_mapping_across_states(case, world):
     world.add_qa_note(
         deck_name="DeckMappingDeck",

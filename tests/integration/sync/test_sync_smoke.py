@@ -55,7 +55,10 @@ def _insert_mock_note(
     mock_anki.notes[note_id] = {
         "noteId": note_id,
         "modelName": "AnkiOpsQA",
-        "fields": {k: {"value": v} for k, v in fields.items()},
+        "fields": {
+            field_name: {"value": field_value}
+            for field_name, field_value in fields.items()
+        },
         "cards": [card_id],
     }
     mock_anki.cards[card_id] = {
@@ -121,7 +124,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
 
     notes = list(mock_anki.notes.values())
     assert len(notes) == 5
-    assert {n["modelName"] for n in notes} == {
+    assert {note_data["modelName"] for note_data in notes} == {
         "AnkiOpsQA",
         "AnkiOpsReversed",
         "AnkiOpsCloze",
@@ -249,7 +252,9 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
 
     lines = content.splitlines()
     key_line_idx = next(
-        i for i, line in enumerate(lines) if line.startswith("<!-- note_key:")
+        line_index
+        for line_index, line in enumerate(lines)
+        if line.startswith("<!-- note_key:")
     )
     assert key_line_idx + 1 < len(lines)
     assert lines[key_line_idx + 1].startswith("Q: Trailing Space Question ")

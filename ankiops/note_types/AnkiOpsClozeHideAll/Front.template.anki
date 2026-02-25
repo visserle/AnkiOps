@@ -18,10 +18,10 @@
         function uniqueIndices(text) {
             var seen = {};
             var indices = [];
-            var m;
+            var match;
             var idxRegex = /\{\{c(\d+)::/g;
-            while ((m = idxRegex.exec(text)) !== null) {
-                var idx = m[1];
+            while ((match = idxRegex.exec(text)) !== null) {
+                var idx = match[1];
                 if (!seen[idx]) {
                     seen[idx] = true;
                     indices.push(idx);
@@ -60,8 +60,8 @@
                 var nextInCloze =
                     inCloze || /\bcloze\b/.test(node.className || "");
                 var out = "";
-                for (var i = 0; i < node.childNodes.length; i++) {
-                    out += walk(node.childNodes[i], nextInCloze);
+                for (var childIdx = 0; childIdx < node.childNodes.length; childIdx++) {
+                    out += walk(node.childNodes[childIdx], nextInCloze);
                 }
 
                 if (!inCloze && /\bcloze\b/.test(node.className || "")) {
@@ -71,8 +71,8 @@
             }
 
             var txt = "";
-            for (var j = 0; j < root.childNodes.length; j++) {
-                txt += walk(root.childNodes[j], false);
+            for (var rootIdx = 0; rootIdx < root.childNodes.length; rootIdx++) {
+                txt += walk(root.childNodes[rootIdx], false);
             }
             return txt.replace(/\s+/g, " ").trim();
         }
@@ -101,8 +101,8 @@
 
             // Fallback for preview contexts: compare structural signatures.
             var renderedSig = normalizeSignature(rendered);
-            for (var i = 0; i < indices.length; i++) {
-                var idx = indices[i];
+            for (var idxPos = 0; idxPos < indices.length; idxPos++) {
+                var idx = indices[idxPos];
                 var simulatedSig = normalizeSignature(simulateFront(raw, idx));
                 if (simulatedSig === renderedSig) {
                     return idx;

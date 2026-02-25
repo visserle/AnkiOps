@@ -131,7 +131,7 @@ def hash_and_update_references(
     hash_cache_hits = 0
     hash_cache_misses = 0
 
-    media_files = sorted(media_root.glob("*"), key=lambda p: p.name)
+    media_files = sorted(media_root.glob("*"), key=lambda file_path: file_path.name)
     cache_candidates = [
         file_path.name
         for file_path in media_files
@@ -199,11 +199,11 @@ def hash_and_update_references(
                 )
             )
 
-        except Exception as e:
+        except Exception as error:
             logger.warning(
-                f"Failed to hash media file {clickable_path(file_path)}: {e}"
+                f"Failed to hash media file {clickable_path(file_path)}: {error}"
             )
-            result.errors.append(str(e))
+            result.errors.append(str(error))
 
     if fingerprint_updates:
         db_port.set_media_fingerprints_bulk(fingerprint_updates)
@@ -250,7 +250,7 @@ def sync_media_to_anki(
     if not media_root.exists():
         return result
 
-    media_files = sorted(media_root.glob("*"), key=lambda p: p.name)
+    media_files = sorted(media_root.glob("*"), key=lambda file_path: file_path.name)
     push_candidates = [
         file_path.name
         for file_path in media_files
@@ -312,13 +312,13 @@ def sync_media_to_anki(
         elif not name.startswith("_"):
             try:
                 # Store the path before unlinking it so clickable_path can see it exists
-                p = file_path
+                removed_file_path = file_path
                 file_path.unlink()
                 removed_names.append(name)
                 result.changes.append(Change(ChangeType.DELETE, name, name))
-                logger.debug(f"  Deleted orphan {clickable_path(p)}")
-            except Exception as e:
-                result.errors.append(str(e))
+                logger.debug(f"  Deleted orphan {clickable_path(removed_file_path)}")
+            except Exception as error:
+                result.errors.append(str(error))
 
     if push_state_updates:
         db_port.set_media_push_state_bulk(push_state_updates)

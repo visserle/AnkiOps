@@ -62,7 +62,7 @@ def test_select_decks_with_subdecks_recursive_include():
 
     selected = select_decks_with_subdecks(decks, ["Biology"])
 
-    assert [d["name"] for d in selected] == ["Biology", "Biology::Cells"]
+    assert [deck["name"] for deck in selected] == ["Biology", "Biology::Cells"]
 
 
 def test_load_prompt_config_from_yaml(tmp_path):

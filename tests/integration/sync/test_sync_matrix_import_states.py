@@ -44,7 +44,7 @@ RENAME_CASES = mk_state_cases(
 )
 
 
-@pytest.mark.parametrize("case", CREATE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", CREATE_CASES, ids=lambda state_case: state_case.id)
 def test_import_create_is_full_sync_across_states(case, world):
     world.write_qa_deck(
         f"CreateDeck{case.state}",
@@ -58,7 +58,7 @@ def test_import_create_is_full_sync_across_states(case, world):
     assert len(world.mock_anki.notes) == 1
 
 
-@pytest.mark.parametrize("case", UPDATE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", UPDATE_CASES, ids=lambda state_case: state_case.id)
 def test_import_update_is_full_sync_across_states(case, world):
     note_key = f"imp-state-update-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -77,7 +77,7 @@ def test_import_update_is_full_sync_across_states(case, world):
     assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "New A"
 
 
-@pytest.mark.parametrize("case", DELETE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", DELETE_CASES, ids=lambda state_case: state_case.id)
 def test_import_delete_is_full_sync_across_states(case, world):
     note_key = f"imp-state-delete-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -96,7 +96,7 @@ def test_import_delete_is_full_sync_across_states(case, world):
     assert note_id not in world.mock_anki.notes
 
 
-@pytest.mark.parametrize("case", MOVE_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", MOVE_CASES, ids=lambda state_case: state_case.id)
 def test_import_move_is_full_sync_across_states(case, world):
     note_key = f"imp-state-move-{case.state.lower()}"
     note_id = world.add_qa_note(
@@ -119,7 +119,7 @@ def test_import_move_is_full_sync_across_states(case, world):
     assert len(world.mock_anki.notes) == 1
 
 
-@pytest.mark.parametrize("case", CONFLICT_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", CONFLICT_CASES, ids=lambda state_case: state_case.id)
 def test_import_duplicate_key_conflict_fails_across_states(case, world):
     duplicate_note_key = f"dup-{case.state.lower()}"
 
@@ -131,7 +131,7 @@ def test_import_duplicate_key_conflict_fails_across_states(case, world):
             world.sync_import(db)
 
 
-@pytest.mark.parametrize("case", RENAME_CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", RENAME_CASES, ids=lambda state_case: state_case.id)
 def test_import_rename_subdeck_is_full_sync_across_states(case, world):
     note_key = f"imp-state-rename-{case.state.lower()}"
     note_id = world.add_qa_note(

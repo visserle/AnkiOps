@@ -54,8 +54,8 @@ def serialize_collection_to_json(
 
         try:
             parsed = fs.read_markdown_file(md_file)
-        except Exception as e:
-            errors.append(f"Error parsing {md_file.name}: {e}")
+        except Exception as error:
+            errors.append(f"Error parsing {md_file.name}: {error}")
             continue
 
         deck_data = {}
@@ -75,8 +75,8 @@ def serialize_collection_to_json(
     total_notes = sum(len(deck["notes"]) for deck in serialized_data["decks"])
     total_decks = len(serialized_data["decks"])
 
-    with output_file.open("w", encoding="utf-8") as f:
-        json.dump(serialized_data, f, indent=2, ensure_ascii=False)
+    with output_file.open("w", encoding="utf-8") as output_handle:
+        json.dump(serialized_data, output_handle, indent=2, ensure_ascii=False)
 
     logger.info(
         f"Serialized {total_decks} deck(s), {total_notes} note(s) to {output_file}"
@@ -117,12 +117,12 @@ def deserialize_collection_from_json(
                 f"in {root_dir}. Use --overwrite to replace them."
             )
 
-    with json_file.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+    with json_file.open("r", encoding="utf-8") as input_handle:
+        data = json.load(input_handle)
 
     fs = FileSystemAdapter()
     configs = fs.load_note_type_configs(get_note_types_dir())
-    config_by_name = {c.name: c for c in configs}
+    config_by_name = {config.name: config for config in configs}
 
     total_decks = 0
     total_notes = 0
@@ -150,9 +150,9 @@ def deserialize_collection_from_json(
             if config is None:
                 try:
                     note_type = fs._infer_note_type(fields)
-                except ValueError as e:
+                except ValueError as error:
                     logger.warning(
-                        f"Cannot infer note type in deck '{deck_name}': {e}, "
+                        f"Cannot infer note type in deck '{deck_name}': {error}, "
                         "skipping note"
                     )
                     skipped_notes += 1

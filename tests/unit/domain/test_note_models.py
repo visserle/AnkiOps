@@ -44,7 +44,9 @@ class TestParseChoiceBlock:
         result = fs.read_markdown_file(md)
         note = result.notes[0]
         assert note.note_type == "AnkiOpsChoice"
-        assert len([k for k in note.fields if k.startswith("Choice")]) == 7
+        assert len(
+            [field_name for field_name in note.fields if field_name.startswith("Choice")]
+        ) == 7
 
 
 class TestValidateChoiceNote:
@@ -79,8 +81,8 @@ class TestValidateChoiceNote:
         )
         errors = note.validate(choice_config)
         assert any(
-            "missing mandatory field" in e.lower() or "Missing mandatory" in e
-            for e in errors
+            "missing mandatory field" in error.lower() or "Missing mandatory" in error
+            for error in errors
         )
 
     def test_missing_mandatory_choice(self, choice_config):
@@ -90,7 +92,7 @@ class TestValidateChoiceNote:
             fields={"Question": "Q", "Answer": "1"},
         )
         errors = note.validate(choice_config)
-        assert any("at least 2 choices" in e for e in errors)
+        assert any("at least 2 choices" in error for error in errors)
 
     def test_only_one_choice(self, choice_config):
         note = Note(
@@ -99,7 +101,7 @@ class TestValidateChoiceNote:
             fields={"Question": "Q", "Choice 1": "A", "Answer": "1"},
         )
         errors = note.validate(choice_config)
-        assert any("at least 2 choices" in e for e in errors)
+        assert any("at least 2 choices" in error for error in errors)
 
     def test_missing_mandatory_answer(self, choice_config):
         note = Note(
@@ -109,8 +111,9 @@ class TestValidateChoiceNote:
         )
         errors = note.validate(choice_config)
         assert any(
-            "missing mandatory field" in e.lower() or "Missing mandatory" in e
-            for e in errors
+            "missing mandatory field" in error.lower()
+            or "Missing mandatory" in error
+            for error in errors
         )
 
     def test_answer_out_of_range_too_high(self, choice_config):
@@ -121,7 +124,7 @@ class TestValidateChoiceNote:
             fields={"Question": "Q", "Choice 1": "A", "Choice 2": "B", "Answer": "3"},
         )
         errors = note.validate(choice_config)
-        assert any("3" in e and "2 choice" in e for e in errors)
+        assert any("3" in error and "2 choice" in error for error in errors)
 
     def test_answer_out_of_range_zero(self, choice_config):
         """Answer with 0 is invalid (choices start at 1)."""
@@ -131,7 +134,7 @@ class TestValidateChoiceNote:
             fields={"Question": "Q", "Choice 1": "A", "Choice 2": "B", "Answer": "0"},
         )
         errors = note.validate(choice_config)
-        assert any("0" in e for e in errors)
+        assert any("0" in error for error in errors)
 
     # -- Restored edge cases (dropped during Hexagonal Architecture refactor) --
 
@@ -143,7 +146,7 @@ class TestValidateChoiceNote:
             fields={"Question": "Q", "Choice 1": "A", "Choice 2": "B", "Answer": "abc"},
         )
         errors = note.validate(choice_config)
-        assert any("integer" in e.lower() for e in errors)
+        assert any("integer" in error.lower() for error in errors)
 
     def test_invalid_answer_mixed_content(self, choice_config):
         """Mixed content in multi-answer should produce validation error."""
@@ -158,7 +161,7 @@ class TestValidateChoiceNote:
             },
         )
         errors = note.validate(choice_config)
-        assert any("integer" in e.lower() for e in errors)
+        assert any("integer" in error.lower() for error in errors)
 
     def test_answer_out_of_range_negative(self, choice_config):
         """Negative answer is invalid."""
@@ -229,7 +232,7 @@ class TestValidateChoiceNote:
             },
         )
         errors = note.validate(choice_config)
-        assert any("3 choice" in e for e in errors)
+        assert any("3 choice" in error for error in errors)
 
     def test_valid_multiple_choice_three_answers(self, choice_config):
         """Three valid answers in multi-choice."""
