@@ -31,7 +31,7 @@ from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.log import clickable_path, configure_logging
-from ankiops.models import CollectionExportResult, CollectionImportResult
+from ankiops.models import CollectionResult
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
 from ankiops.sync_note_types import sync_note_types
 
@@ -63,6 +63,22 @@ def connect_or_exit() -> AnkiAdapter:
     return anki
 
 
+def _format_media_status(media_result, *, from_anki: bool) -> str:
+    checked = media_result.checked
+    summary = media_result.summary
+
+    if checked == 0:
+        return "Media: no referenced files"
+
+    if from_anki and media_result.missing:
+        return (
+            f"Media: {checked} files checked — "
+            f"{summary.synced} pulled, {media_result.missing} missing in Anki"
+        )
+
+    return f"Media: {checked} files checked — {summary.format()}"
+
+
 def run_init(args):
     """Initialize the current directory as an AnkiOps collection."""
     anki = connect_or_exit()
@@ -87,12 +103,16 @@ def run_am(args):
     logger.debug(f"Collection directory: {collection_dir}")
 
     if not args.no_auto_commit:
+        logger.debug("Creating pre-export git snapshot")
         git_snapshot(collection_dir, "export")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
     fs = FileSystemAdapter()
     db = SQLiteDbAdapter.load(collection_dir)
     note_types_dir = get_note_types_dir()
 
-    export_summary: CollectionExportResult = export_collection(
+    logger.debug("Starting note export (Anki -> Markdown)")
+    export_summary: CollectionResult = export_collection(
         anki_port=anki,
         fs_port=fs,
         db_port=db,
@@ -113,14 +133,9 @@ def run_am(args):
 
     # Sync referenced media from Anki to local
     try:
+        logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, fs, collection_dir, db)
-        media_summary = media_result.summary
-        if media_summary.format() != "no changes":
-            logger.info(
-                f"Media: {media_summary.total} files — {media_summary.format()}"
-            )
-        else:
-            logger.debug("Media: no changes")
+        logger.info(_format_media_status(media_result, from_anki=True))
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
@@ -132,30 +147,31 @@ def run_ma(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+
+    if not args.no_auto_commit:
+        logger.debug("Creating pre-import git snapshot")
+        git_snapshot(collection_dir, "import")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
     fs = FileSystemAdapter()
     db = SQLiteDbAdapter.load(collection_dir)
     note_types_dir = get_note_types_dir()
 
     try:
+        logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, fs, collection_dir, db)
-        media_summary = media_result.summary
-        if media_summary.format() != "no changes":
-            logger.info(
-                f"Media: {media_summary.total} files — {media_summary.format()}"
-            )
-        else:
-            logger.debug("Media: no changes")
+        logger.info(_format_media_status(media_result, from_anki=False))
     except Exception as e:
         logger.warning(f"Media sync failed: {e}")
 
+    logger.debug("Starting note type sync")
     nt_summary = sync_note_types(anki, fs, note_types_dir)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
-    if not args.no_auto_commit:
-        git_snapshot(collection_dir, "import")
-
-    import_summary: CollectionImportResult = import_collection(
+    logger.debug("Starting note import (Markdown -> Anki)")
+    import_summary: CollectionResult = import_collection(
         anki_port=anki,
         fs_port=fs,
         db_port=db,
@@ -173,7 +189,7 @@ def run_ma(args):
         s = res.summary
         deck_fmt = s.format()
         if deck_fmt != "no changes" and res.file_path:
-            logger.info(f"  {res.deck_name}  {deck_fmt}")
+            logger.info(f"  {res.name}  {deck_fmt}")
 
     if untracked:
         logger.warning(

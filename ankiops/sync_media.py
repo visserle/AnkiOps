@@ -10,7 +10,7 @@ from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
-from ankiops.models import Change, ChangeType, MediaSyncResult
+from ankiops.models import Change, ChangeType, SyncResult
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def hash_and_update_references(
     fs_port: FileSystemAdapter,
     db_port: SQLiteDbAdapter,
     collection_dir: Path,
-    result: MediaSyncResult,
+    result: SyncResult,
 ) -> tuple[set[str], dict[str, str]]:
     """Hash files, rename them locally, and update markdown."""
     media_root = collection_dir / LOCAL_MEDIA_DIR
@@ -231,9 +231,9 @@ def sync_media_to_anki(
     fs_port: FileSystemAdapter,
     collection_dir: Path,
     db_port: SQLiteDbAdapter,
-) -> MediaSyncResult:
+) -> SyncResult:
     """Push local media to Anki."""
-    result = MediaSyncResult()
+    result = SyncResult.for_media()
     media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
 
     anki_media_dir = anki_port.get_media_dir().resolve()
@@ -257,6 +257,7 @@ def sync_media_to_anki(
         and not file_path.name.startswith(".")
         and (file_path.name in active_refs or file_path.name.startswith("_"))
     ]
+    result.checked = len(push_candidates)
     cached_push_state = db_port.get_media_push_state_bulk(push_candidates)
     cached_fingerprints = db_port.get_media_fingerprints_bulk(push_candidates)
 
@@ -299,6 +300,7 @@ def sync_media_to_anki(
                 and (anki_media_dir / name).exists()
             ):
                 skipped_pushes += 1
+                result.unchanged += 1
                 continue
 
             # Push safely via Port
@@ -334,13 +336,14 @@ def sync_media_from_anki(
     fs_port: FileSystemAdapter,
     collection_dir: Path,
     db_port: SQLiteDbAdapter,
-) -> MediaSyncResult:
+) -> SyncResult:
     """Pull missing media from Anki."""
-    result = MediaSyncResult()
+    result = SyncResult.for_media()
     media_root = collection_dir / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
 
     referenced = _collect_referenced_media(fs_port, db_port, collection_dir)
+    result.checked = len(referenced)
 
     for name in referenced:
         target = media_root / name
@@ -350,9 +353,11 @@ def sync_media_from_anki(
                 result.changes.append(Change(ChangeType.SYNC, name, name))
                 logger.debug(f"  Pulled {clickable_path(target)} from Anki")
             else:
+                result.missing += 1
                 logger.warning(f"Media {name} missing in Anki")
                 result.changes.append(Change(ChangeType.SKIP, name, name))
         else:
+            result.unchanged += 1
             result.changes.append(Change(ChangeType.SKIP, name, name))
 
     return result

@@ -12,10 +12,10 @@ from ankiops.models import (
     AnkiNote,
     Change,
     ChangeType,
-    CollectionExportResult,
+    CollectionResult,
     Note,
-    NoteSyncResult,
     NoteTypeConfig,
+    SyncResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,8 +57,8 @@ def _sync_deck(
     pending_note_mappings: list[tuple[str, int]],
     note_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_fingerprints: list[tuple[str, str, str]],
-) -> NoteSyncResult:
-    result = NoteSyncResult(deck_name=deck_name, file_path=existing_file_path)
+) -> SyncResult:
+    result = SyncResult.for_notes(name=deck_name, file_path=existing_file_path)
 
     if existing_file_path and existing_file_path.exists():
         fs = fs_port.read_markdown_file(existing_file_path)
@@ -207,7 +207,7 @@ def export_collection(
     db_port: SQLiteDbAdapter,
     collection_dir: Path,
     note_types_dir: Path,
-) -> CollectionExportResult:
+) -> CollectionResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
     config_by_name = {c.name: c for c in configs}
     with db_port.transaction():
@@ -311,4 +311,4 @@ def export_collection(
                 )
 
         db_port.save()
-        return CollectionExportResult(results, extra_changes)
+        return CollectionResult.for_export(results=results, extra_changes=extra_changes)

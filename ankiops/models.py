@@ -242,6 +242,36 @@ class Change:
     context: dict[str, Any] = field(default_factory=dict)
 
 
+# Shared mapping for projecting change types into summary counters.
+_SUMMARY_FIELD_BY_CHANGE: dict[ChangeType, str] = {
+    ChangeType.CREATE: "created",
+    ChangeType.UPDATE: "updated",
+    ChangeType.DELETE: "deleted",
+    ChangeType.MOVE: "moved",
+    ChangeType.SKIP: "skipped",
+    ChangeType.HASH: "hashed",
+    ChangeType.SYNC: "synced",
+}
+
+_NOTE_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
+    {
+        ChangeType.CREATE,
+        ChangeType.UPDATE,
+        ChangeType.DELETE,
+        ChangeType.MOVE,
+        ChangeType.SKIP,
+    }
+)
+
+_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = (
+    _NOTE_REPORTED_CHANGE_TYPES | {ChangeType.HASH, ChangeType.SYNC}
+)
+
+_TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
+    {ChangeType.DELETE, ChangeType.CONFLICT}
+)
+
+
 @dataclass
 class SyncSummary:
     total: int = 0
@@ -253,6 +283,15 @@ class SyncSummary:
     errors: int = 0
     hashed: int = 0
     synced: int = 0
+    _FORMAT_ORDER = (
+        "created",
+        "updated",
+        "deleted",
+        "moved",
+        "errors",
+        "hashed",
+        "synced",
+    )
 
     def __add__(self, other: "SyncSummary") -> "SyncSummary":
         if not isinstance(other, SyncSummary):
@@ -261,20 +300,60 @@ class SyncSummary:
             **{f: getattr(self, f) + getattr(other, f) for f in self.__annotations__}
         )
 
+    @classmethod
+    def from_changes(
+        cls,
+        changes: list["Change"],
+        errors: list[str],
+        *,
+        reported_change_types: frozenset[ChangeType],
+    ) -> "SyncSummary":
+        summary = cls(errors=len(errors))
+        summary.add_changes(changes, reported_change_types=reported_change_types)
+        return summary
+
+    def add_changes(
+        self,
+        changes: list["Change"],
+        *,
+        reported_change_types: frozenset[ChangeType],
+        dedupe_by_entity: bool = True,
+        include_total: bool = True,
+    ) -> None:
+        change_types: list[ChangeType]
+        if dedupe_by_entity:
+            change_types = _effective_change_types(changes)
+        else:
+            change_types = [change.change_type for change in changes]
+
+        for change_type in change_types:
+            self.add_change_type(
+                change_type,
+                reported_change_types=reported_change_types,
+                include_total=include_total,
+            )
+
+    def add_change_type(
+        self,
+        change_type: ChangeType,
+        *,
+        reported_change_types: frozenset[ChangeType],
+        include_total: bool = True,
+    ) -> None:
+        if change_type in reported_change_types:
+            field_name = _SUMMARY_FIELD_BY_CHANGE.get(change_type)
+            if field_name:
+                setattr(self, field_name, getattr(self, field_name) + 1)
+
+        if include_total and change_type not in _TOTAL_EXCLUDED_CHANGE_TYPES:
+            self.total += 1
+
     def to_dict(self) -> dict[str, int]:
         return {f: getattr(self, f) for f in self.__annotations__}
 
     def format(self) -> str:
         parts = []
-        for key in [
-            "created",
-            "updated",
-            "deleted",
-            "moved",
-            "errors",
-            "hashed",
-            "synced",
-        ]:
+        for key in self._FORMAT_ORDER:
             val = getattr(self, key)
             if val > 0:
                 parts.append(f"{val} {key}")
@@ -301,63 +380,53 @@ _CHANGE_PRIORITY = {
 }
 
 
-def _compute_summary(
-    changes: list[Change],
-    errors: list[str],
-    mapping: dict[ChangeType, str],
-) -> SyncSummary:
-    """Compute a SyncSummary from a list of changes, deduplicating by entity."""
+def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
+    """Return the highest-priority change per entity."""
     effective: dict[int | str, ChangeType] = {}
-    for c in changes:
-        eid = c.entity_id or c.entity_repr
-        prev = effective.get(eid)
-        if prev is None or _CHANGE_PRIORITY[c.change_type] > _CHANGE_PRIORITY[prev]:
-            effective[eid] = c.change_type
-
-    res = {"total": 0, "errors": len(errors)}
-    for ct in effective.values():
-        if field_name := mapping.get(ct):
-            res[field_name] = res.get(field_name, 0) + 1
-        if ct not in (ChangeType.DELETE, ChangeType.CONFLICT):
-            res["total"] += 1
-    return SyncSummary(**res)
-
-
-_NOTE_MAPPING = {
-    ChangeType.CREATE: "created",
-    ChangeType.UPDATE: "updated",
-    ChangeType.DELETE: "deleted",
-    ChangeType.MOVE: "moved",
-    ChangeType.SKIP: "skipped",
-}
-
-_MEDIA_MAPPING = {
-    **_NOTE_MAPPING,
-    ChangeType.HASH: "hashed",
-    ChangeType.SYNC: "synced",
-}
+    for change in changes:
+        entity_id = change.entity_id or change.entity_repr
+        previous = effective.get(entity_id)
+        if previous is None or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[
+            previous
+        ]:
+            effective[entity_id] = change.change_type
+    return list(effective.values())
 
 
 @dataclass
-class NoteSyncResult:
-    deck_name: str
-    file_path: Path | None
+class SyncResult:
+    name: str | None = None
+    file_path: Path | None = None
     changes: list[Change] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    reported_change_types: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES
+    checked: int = 0
+    unchanged: int = 0
+    missing: int = 0
+
+    @classmethod
+    def for_notes(cls, *, name: str, file_path: Path | None) -> "SyncResult":
+        return cls(
+            name=name,
+            file_path=file_path,
+            reported_change_types=_NOTE_REPORTED_CHANGE_TYPES,
+        )
+
+    @classmethod
+    def for_media(cls) -> "SyncResult":
+        return cls(
+            name="media",
+            file_path=None,
+            reported_change_types=_MEDIA_REPORTED_CHANGE_TYPES,
+        )
 
     @property
     def summary(self) -> SyncSummary:
-        return _compute_summary(self.changes, self.errors, _NOTE_MAPPING)
-
-
-@dataclass
-class MediaSyncResult:
-    changes: list[Change] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-
-    @property
-    def summary(self) -> SyncSummary:
-        return _compute_summary(self.changes, self.errors, _MEDIA_MAPPING)
+        return SyncSummary.from_changes(
+            self.changes,
+            self.errors,
+            reported_change_types=self.reported_change_types,
+        )
 
 
 @dataclass
@@ -368,42 +437,47 @@ class UntrackedDeck:
 
 
 @dataclass
-class CollectionImportResult:
-    results: list[NoteSyncResult] = field(default_factory=list)
+class CollectionResult:
+    results: list[SyncResult] = field(default_factory=list)
     untracked_decks: list[UntrackedDeck] = field(default_factory=list)
-
-    @property
-    def summary(self) -> SyncSummary:
-        return sum((r.summary for r in self.results), SyncSummary())
-
-
-@dataclass
-class CollectionExportResult:
-    results: list[NoteSyncResult] = field(default_factory=list)
     extra_changes: list[Change] = field(default_factory=list)
+    extra_change_types: frozenset[ChangeType] = _MEDIA_REPORTED_CHANGE_TYPES
+    include_extra_in_total: bool = False
+
+    @classmethod
+    def for_import(
+        cls,
+        *,
+        results: list[SyncResult],
+        untracked_decks: list[UntrackedDeck],
+    ) -> "CollectionResult":
+        return cls(results=results, untracked_decks=untracked_decks)
+
+    @classmethod
+    def for_export(
+        cls,
+        *,
+        results: list[SyncResult],
+        extra_changes: list[Change],
+    ) -> "CollectionResult":
+        return cls(
+            results=results,
+            extra_changes=extra_changes,
+            extra_change_types=_MEDIA_REPORTED_CHANGE_TYPES,
+            include_extra_in_total=False,
+        )
 
     @property
     def summary(self) -> SyncSummary:
         base = sum((r.summary for r in self.results), SyncSummary())
-        mapping = {
-            ChangeType.CREATE: "created",
-            ChangeType.UPDATE: "updated",
-            ChangeType.DELETE: "deleted",
-            ChangeType.MOVE: "moved",
-            ChangeType.SKIP: "skipped",
-            ChangeType.HASH: "hashed",
-            ChangeType.SYNC: "synced",
-        }
-        for c in self.extra_changes:
-            if field_name := mapping.get(c.change_type):
-                setattr(base, field_name, getattr(base, field_name) + 1)
+        if self.extra_changes:
+            base.add_changes(
+                self.extra_changes,
+                reported_change_types=self.extra_change_types,
+                dedupe_by_entity=False,
+                include_total=self.include_extra_in_total,
+            )
         return base
-
-
-@dataclass
-class Deck:
-    deck_id: int
-    name: str
 
 
 @dataclass

@@ -14,11 +14,11 @@ from ankiops.models import (
     AnkiNote,
     Change,
     ChangeType,
-    CollectionImportResult,
+    CollectionResult,
     MarkdownFile,
     Note,
-    NoteSyncResult,
     NoteTypeConfig,
+    SyncResult,
     UntrackedDeck,
 )
 
@@ -156,7 +156,7 @@ def _sync_file(
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
-) -> tuple[NoteSyncResult, _PendingWrite]:
+) -> tuple[SyncResult, _PendingWrite]:
     needs_create_deck = False
 
     deck_name = fs.file_path.stem.replace("__", "::")
@@ -167,7 +167,7 @@ def _sync_file(
     else:
         db_port.set_deck(deck_name, resolved_id)
 
-    result = NoteSyncResult(deck_name=deck_name, file_path=fs.file_path)
+    result = SyncResult.for_notes(name=deck_name, file_path=fs.file_path)
     creates, updates, deletes, skips, moves = [], [], [], [], []
     cards_to_move = []
 
@@ -404,7 +404,7 @@ def import_collection(
     db_port: SQLiteDbAdapter,
     collection_dir: Path,
     note_types_dir: Path,
-) -> CollectionImportResult:
+) -> CollectionResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
     config_by_name = {c.name: c for c in configs}
     md_files = fs_port.find_markdown_files(collection_dir)
@@ -498,8 +498,8 @@ def import_collection(
                 global_mapped_note_ids,
                 file_anki_note_ids,
             )
-            if res.deck_name in deck_ids_by_name:
-                md_deck_ids.add(deck_ids_by_name[res.deck_name])
+            if res.name and res.name in deck_ids_by_name:
+                md_deck_ids.add(deck_ids_by_name[res.name])
 
             results.append(res)
             pending.append(p)
@@ -523,4 +523,4 @@ def import_collection(
                 continue
             untracked.append(UntrackedDeck(dname, did, list(note_ids)))
 
-    return CollectionImportResult(results, untracked)
+    return CollectionResult.for_import(results=results, untracked_decks=untracked)
