@@ -61,72 +61,86 @@ def anki_render_cloze(raw: str, active_idx: int, side: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def detect_active_idx_front(raw: str, rendered: str) -> str:
-    """Port of the front-template detection algorithm.
+def _normalize_signature(html: str) -> str:
+    """Create a structural signature that preserves cloze span boundaries."""
 
-    Strategy: for each candidate index, simulate Anki's front-side rendering.
-    The one whose text-only output matches the actual rendered text is active.
-    """
+    def text_part(s: str) -> str:
+        return re.sub(r"\s+", " ", s)
+
+    # Normalize line breaks and represent cloze boundaries explicitly.
+    normalized = re.sub(r"(?i)<br\s*/?>", "\n", html)
+    normalized = re.sub(
+        r'(?is)<span[^>]*class=["\'][^"\']*\bcloze\b[^"\']*["\'][^>]*>(.*?)</span>',
+        r"[[CLOZE]]\1[[/CLOZE]]",
+        normalized,
+    )
+    normalized = re.sub(r"(?is)<[^>]*>", "", normalized)
+    return text_part(normalized).strip()
+
+
+def _simulate_front(raw: str, test_idx: str) -> str:
+    def replace_fn(m: re.Match) -> str:
+        idx = m.group(1)
+        inner = m.group(2)
+        parts = inner.split("::", 1)
+        content = parts[0]
+        hint = parts[1] if len(parts) > 1 else ""
+        if idx == test_idx:
+            display = f"[{hint}]" if hint else "[...]"
+            return f'<span class="cloze">{display}</span>'
+        return content
+
+    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
+
+
+def _simulate_back(raw: str, test_idx: str) -> str:
+    def replace_fn(m: re.Match) -> str:
+        idx = m.group(1)
+        inner = m.group(2)
+        content = inner.split("::", 1)[0]
+        if idx == test_idx:
+            return f'<span class="cloze">{content}</span>'
+        return content
+
+    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
+
+
+def detect_active_idx_front(raw: str, rendered: str, body_class: str = "") -> str:
+    """Port of the front-template detection algorithm."""
     indices = list(dict.fromkeys(re.findall(r"\{\{c(\d+)::", raw)))
-    active_idx = indices[0] if indices else "1"
+    if not indices:
+        return "1"
 
-    def text_only(html: str) -> str:
-        return re.sub(r"\s+", " ", re.sub(r"<[^>]*>", "", html)).strip()
+    class_match = re.search(r"\bcard(\d+)\b", body_class)
+    if class_match and class_match.group(1) in indices:
+        return class_match.group(1)
 
-    rendered_text = text_only(rendered)
-
+    rendered_sig = _normalize_signature(rendered)
     for test_idx in indices:
+        simulated = _simulate_front(raw, test_idx)
+        if _normalize_signature(simulated) == rendered_sig:
+            return test_idx
 
-        def replace_fn(m: re.Match, _idx=test_idx) -> str:
-            idx = m.group(1)
-            inner = m.group(2)
-            parts = inner.split("::", 1)
-            content = parts[0]
-            hint = parts[1] if len(parts) > 1 else ""
-            if idx == _idx:
-                return f"[{hint}]" if hint else "[...]"
-            else:
-                return content
-
-        simulated = re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
-        if text_only(simulated) == rendered_text:
-            active_idx = test_idx
-            break
-
-    return active_idx
+    return indices[0]
 
 
-def detect_active_idx_back(raw: str, rendered: str) -> str:
-    """Port of the back-template detection algorithm.
-
-    Strategy: for each candidate index, simulate Anki's back-side rendering
-    (active cloze wrapped in <span class="cloze">, inactive as plain text).
-    Compare normalized HTML structure to find the match.
-    """
+def detect_active_idx_back(raw: str, rendered: str, body_class: str = "") -> str:
+    """Port of the back-template detection algorithm."""
     indices = list(dict.fromkeys(re.findall(r"\{\{c(\d+)::", raw)))
-    active_idx = indices[0] if indices else "1"
+    if not indices:
+        return "1"
 
-    def normalize_html(html: str) -> str:
-        return re.sub(r"\s+", " ", html).replace("'", '"').strip()
+    class_match = re.search(r"\bcard(\d+)\b", body_class)
+    if class_match and class_match.group(1) in indices:
+        return class_match.group(1)
 
-    rendered_norm = normalize_html(rendered)
-
+    rendered_sig = _normalize_signature(rendered)
     for test_idx in indices:
+        simulated = _simulate_back(raw, test_idx)
+        if _normalize_signature(simulated) == rendered_sig:
+            return test_idx
 
-        def replace_fn(m: re.Match, _idx=test_idx) -> str:
-            idx = m.group(1)
-            inner = m.group(2)
-            content = inner.split("::", 1)[0]
-            if idx == _idx:
-                return f'<span class="cloze">{content}</span>'
-            return content
-
-        simulated = re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
-        if normalize_html(simulated) == rendered_norm:
-            active_idx = test_idx
-            break
-
-    return active_idx
+    return indices[0]
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +234,12 @@ class TestFrontDetection:
             f"  rendered: {rendered}"
         )
 
+    def test_body_class_priority(self):
+        raw = "{{c1::dog}} chases {{c2::cat}}"
+        rendered = anki_render_cloze(raw, 1, "front")
+        detected = detect_active_idx_front(raw, rendered, body_class="card card2")
+        assert detected == "2"
+
 
 class TestBackDetection:
     """Test that the back-side detection algorithm correctly identifies the active cloze."""
@@ -233,6 +253,12 @@ class TestBackDetection:
             f"  raw:      {raw}\n"
             f"  rendered: {rendered}"
         )
+
+    def test_body_class_priority(self):
+        raw = "{{c1::dog}} chases {{c2::cat}}"
+        rendered = anki_render_cloze(raw, 1, "back")
+        detected = detect_active_idx_back(raw, rendered, body_class="card card2")
+        assert detected == "2"
 
 
 class TestAnkiRenderer:

@@ -4,18 +4,26 @@
     }
     .inactive-cloze {
         display: inline-block;
+        width: 4.6em;
+        min-width: 4.6em;
+        height: 1em;
+        line-height: 1em;
         border: 1px solid #999;
-        border-radius: 3px;
-        min-width: 40px;
-        min-height: 1.2em;
-        background-color: #eee;
-        color: transparent;
-        vertical-align: middle;
-        margin: 0 2px;
+        border-radius: 4px;
+        background-color: #e5e5e5;
+        box-sizing: border-box;
+        overflow: hidden;
+        vertical-align: -0.12em;
+        margin: 0 0.1em;
+    }
+    .night-mode .inactive-cloze,
+    .mobile .night_mode .inactive-cloze {
+        border-color: #777;
+        background-color: #4a4a4a;
     }
 </style>
 
-<!-- Anki renders the active cloze here; we parse it to detect which index is active -->
+<!-- Anki renders the active cloze here; we use this as a fallback if needed -->
 <div id="cloze_rendered" style="display:none;">{{cloze:Hidden Text}}</div>
 <div id="hidden_raw" style="display:none;">{{Hidden Text}}</div>
 <div id="content_display"></div>
@@ -24,63 +32,116 @@
     (function(){
         var raw = document.getElementById("hidden_raw").innerHTML;
         var rendered = document.getElementById("cloze_rendered").innerHTML;
+        var clozePattern = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
 
-        // Detect the active cloze index.
-        // Anki's {{cloze:}} on the front side strips inactive cloze markers
-        // (showing just content) and replaces the active one with
-        // <span class="cloze">[...]</span> or <span class="cloze">[hint]</span>.
-        //
-        // Strategy: collect unique cloze indices from raw text, then for each
-        // index, simulate what Anki would render if that index were active.
-        // The one that matches the actual rendered output is the active index.
-
-        var clozeIndices = [];
-        var idxRegex = /\{\{c(\d+)::/g;
-        var m;
-        while ((m = idxRegex.exec(raw)) !== null) {
-            if (clozeIndices.indexOf(m[1]) === -1) clozeIndices.push(m[1]);
-        }
-
-        var activeIdx = clozeIndices.length > 0 ? clozeIndices[0] : "1";
-
-        // Normalize HTML for comparison: strip tags + collapse whitespace
-        function textOnly(html) {
-            return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
-        }
-
-        var renderedText = textOnly(rendered);
-
-        for (var i = 0; i < clozeIndices.length; i++) {
-            var testIdx = clozeIndices[i];
-            // Simulate Anki's rendering for this index being active
-            var simulated = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
-                var parts = inner.split("::");
-                var content = parts.shift();
-                var hint = parts.length > 0 ? parts.join("::") : "";
-                if (idx === testIdx) {
-                    return hint ? "[" + hint + "]" : "[...]";
-                } else {
-                    return content;
+        function uniqueIndices(text) {
+            var seen = {};
+            var indices = [];
+            var m;
+            var idxRegex = /\{\{c(\d+)::/g;
+            while ((m = idxRegex.exec(text)) !== null) {
+                var idx = m[1];
+                if (!seen[idx]) {
+                    seen[idx] = true;
+                    indices.push(idx);
                 }
-            });
-            if (textOnly(simulated) === renderedText) {
-                activeIdx = testIdx;
-                break;
             }
+            return indices;
         }
+
+        function parseInner(inner) {
+            var hintPos = inner.indexOf("::");
+            if (hintPos === -1) {
+                return { content: inner, hint: "" };
+            }
+            return {
+                content: inner.slice(0, hintPos),
+                hint: inner.slice(hintPos + 2)
+            };
+        }
+
+        function normalizeSignature(html) {
+            var root = document.createElement("div");
+            root.innerHTML = html;
+
+            function walk(node, inCloze) {
+                if (node.nodeType === 3) {
+                    return node.nodeValue;
+                }
+                if (node.nodeType !== 1) {
+                    return "";
+                }
+
+                if (node.tagName === "BR") {
+                    return "\n";
+                }
+
+                var nextInCloze =
+                    inCloze || /\bcloze\b/.test(node.className || "");
+                var out = "";
+                for (var i = 0; i < node.childNodes.length; i++) {
+                    out += walk(node.childNodes[i], nextInCloze);
+                }
+
+                if (!inCloze && /\bcloze\b/.test(node.className || "")) {
+                    return "[[CLOZE]]" + out + "[[/CLOZE]]";
+                }
+                return out;
+            }
+
+            var txt = "";
+            for (var j = 0; j < root.childNodes.length; j++) {
+                txt += walk(root.childNodes[j], false);
+            }
+            return txt.replace(/\s+/g, " ").trim();
+        }
+
+        function simulateFront(text, activeIdx) {
+            return text.replace(clozePattern, function(match, idx, inner) {
+                var parsed = parseInner(inner);
+                if (idx === activeIdx) {
+                    var display = parsed.hint ? "[" + parsed.hint + "]" : "[...]";
+                    return "<span class='cloze'>" + display + "</span>";
+                }
+                return parsed.content;
+            });
+        }
+
+        function detectActiveIndex(indices) {
+            if (!indices.length) {
+                return "1";
+            }
+
+            // Primary strategy: use Anki's per-card CSS class (card1, card2, ...).
+            var classMatch = (document.body.className || "").match(/\bcard(\d+)\b/);
+            if (classMatch && indices.indexOf(classMatch[1]) !== -1) {
+                return classMatch[1];
+            }
+
+            // Fallback for preview contexts: compare structural signatures.
+            var renderedSig = normalizeSignature(rendered);
+            for (var i = 0; i < indices.length; i++) {
+                var idx = indices[i];
+                var simulatedSig = normalizeSignature(simulateFront(raw, idx));
+                if (simulatedSig === renderedSig) {
+                    return idx;
+                }
+            }
+
+            return indices[0];
+        }
+
+        var clozeIndices = uniqueIndices(raw);
+        var activeIdx = detectActiveIndex(clozeIndices);
 
         // Render with detected active index
-        var result = raw.replace(/\{\{c(\d+)::([\s\S]*?)\}\}/g, function(match, idx, inner) {
-            var parts = inner.split("::");
-            var content = parts.shift();
-            var hint = parts.length > 0 ? parts.join("::") : "";
-
+        var result = raw.replace(clozePattern, function(match, idx, inner) {
+            var parsed = parseInner(inner);
             if (idx === activeIdx) {
-                var displayTxt = hint ? "[" + hint + "]" : "[...]";
+                var displayTxt = parsed.hint ? "[" + parsed.hint + "]" : "[...]";
                 return "<span class='cloze'>" + displayTxt + "</span>";
-            } else {
-                return "<span class='inactive-cloze'>" + content + "</span>";
             }
+            return "<span class='inactive-cloze' aria-label='hidden cloze'></span>";
         });
 
         document.getElementById("content_display").innerHTML = result;
