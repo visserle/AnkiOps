@@ -8,7 +8,22 @@ import pytest
 from blake3 import blake3
 
 from ankiops.config import LOCAL_MEDIA_DIR
-from ankiops.sync_media import _extract_media_references
+from ankiops.db import SQLiteDbAdapter
+from ankiops.sync_media import _extract_media_references, sync_media_to_anki
+
+
+class _FakeMediaAnki:
+    def __init__(self, media_dir: Path):
+        self._media_dir = media_dir
+        self.push_count = 0
+
+    def get_media_dir(self) -> Path:
+        return self._media_dir
+
+    def push_media(self, local_path: Path, remote_filename: str) -> None:
+        self.push_count += 1
+        target = self._media_dir / remote_filename
+        target.write_bytes(local_path.read_bytes())
 
 
 def _blake3(path: Path) -> str:
@@ -125,3 +140,56 @@ class TestMediaDirectory:
         media_dir.mkdir()
         files = list(media_dir.iterdir())
         assert len(files) == 0
+
+
+class TestMediaSyncIncremental:
+    def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(self, fs, tmp_path):
+        media_dir = tmp_path / LOCAL_MEDIA_DIR
+        media_dir.mkdir()
+        (media_dir / "img.png").write_bytes(b"image-content")
+        (tmp_path / "deck.md").write_text(
+            "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
+        )
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            first = sync_media_to_anki(anki, fs, tmp_path, db)
+            second = sync_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        assert first.summary.synced == 1
+        assert second.summary.synced == 0
+        assert anki.push_count == 1
+
+    def test_sync_media_to_anki_cache_persists_across_db_connections(self, fs, tmp_path):
+        media_dir = tmp_path / LOCAL_MEDIA_DIR
+        media_dir.mkdir()
+        (media_dir / "img.png").write_bytes(b"image-content")
+        (tmp_path / "deck.md").write_text(
+            "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
+        )
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            first = sync_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            second = sync_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        assert first.summary.synced == 1
+        assert second.summary.synced == 0
+        assert anki.push_count == 1

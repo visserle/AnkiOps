@@ -3,6 +3,7 @@
 import logging
 import secrets
 import sqlite3
+from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -54,8 +55,41 @@ class SQLiteDbAdapter:
                         anki_hash TEXT NOT NULL
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS markdown_media_state (
+                        md_path TEXT PRIMARY KEY,
+                        md_mtime_ns INTEGER NOT NULL,
+                        md_size INTEGER NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS markdown_media_refs (
+                        md_path TEXT NOT NULL,
+                        media_name TEXT NOT NULL,
+                        PRIMARY KEY (md_path, media_name)
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS media_fingerprints (
+                        name TEXT PRIMARY KEY,
+                        mtime_ns INTEGER NOT NULL,
+                        size INTEGER NOT NULL,
+                        digest TEXT NOT NULL,
+                        hashed_name TEXT NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS media_push_state (
+                        name TEXT PRIMARY KEY,
+                        digest TEXT NOT NULL
+                    )
+                """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(note_id)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(deck_id)")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_markdown_media_refs_media "
+                    "ON markdown_media_refs(media_name)"
+                )
 
                 # Schema validation: ensure 'note_id' exists in 'notes' table.
                 # If not, it will raise OperationalError and trigger recovery.
@@ -263,6 +297,224 @@ class SQLiteDbAdapter:
             statements.append(
                 (
                     f"DELETE FROM note_fingerprints WHERE key IN ({placeholders})",
+                    tuple(chunk),
+                )
+            )
+        self._write_many(statements)
+
+    def get_markdown_media_cache_bulk(
+        self, md_paths: Iterable[str]
+    ) -> dict[str, tuple[int, int, set[str]]]:
+        path_list = list(md_paths)
+        if not path_list:
+            return {}
+
+        state_by_path: dict[str, tuple[int, int]] = {}
+        for chunk in self._chunked(path_list):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT md_path, md_mtime_ns, md_size "
+                f"FROM markdown_media_state WHERE md_path IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            state_by_path.update(
+                {md_path: (md_mtime_ns, md_size) for md_path, md_mtime_ns, md_size in rows}
+            )
+
+        refs_by_path: dict[str, set[str]] = defaultdict(set)
+        for chunk in self._chunked(path_list):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT md_path, media_name "
+                f"FROM markdown_media_refs WHERE md_path IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            for md_path, media_name in rows:
+                refs_by_path[md_path].add(media_name)
+
+        out: dict[str, tuple[int, int, set[str]]] = {}
+        for md_path, (md_mtime_ns, md_size) in state_by_path.items():
+            out[md_path] = (md_mtime_ns, md_size, refs_by_path.get(md_path, set()))
+        return out
+
+    def set_markdown_media_cache_bulk(
+        self, rows: Iterable[tuple[str, int, int, set[str]]]
+    ) -> None:
+        entries = [
+            (md_path, md_mtime_ns, md_size, set(media_names))
+            for md_path, md_mtime_ns, md_size, media_names in rows
+        ]
+        if not entries:
+            return
+
+        seen_paths: set[str] = set()
+        deduped: list[tuple[str, int, int, set[str]]] = []
+        for md_path, md_mtime_ns, md_size, media_names in reversed(entries):
+            if md_path in seen_paths:
+                continue
+            seen_paths.add(md_path)
+            deduped.append((md_path, md_mtime_ns, md_size, media_names))
+        deduped.reverse()
+
+        state_rows = [
+            (md_path, md_mtime_ns, md_size)
+            for md_path, md_mtime_ns, md_size, _ in deduped
+        ]
+        md_paths = [md_path for md_path, _, _, _ in deduped]
+        ref_rows = [
+            (md_path, media_name)
+            for md_path, _, _, media_names in deduped
+            for media_name in media_names
+        ]
+
+        with self.transaction():
+            self._executemany(
+                "INSERT OR REPLACE INTO markdown_media_state "
+                "(md_path, md_mtime_ns, md_size) VALUES (?, ?, ?)",
+                state_rows,
+            )
+            statements: list[tuple[str, tuple]] = []
+            for chunk in self._chunked(md_paths):
+                placeholders = ",".join("?" * len(chunk))
+                statements.append(
+                    (
+                        f"DELETE FROM markdown_media_refs WHERE md_path IN ({placeholders})",
+                        tuple(chunk),
+                    )
+                )
+            self._write_many(statements)
+            self._executemany(
+                "INSERT OR REPLACE INTO markdown_media_refs "
+                "(md_path, media_name) VALUES (?, ?)",
+                ref_rows,
+            )
+
+    def remove_markdown_media_cache_by_paths(self, md_paths: Iterable[str]) -> None:
+        path_list = list(md_paths)
+        if not path_list:
+            return
+        statements: list[tuple[str, tuple]] = []
+        for chunk in self._chunked(path_list):
+            placeholders = ",".join("?" * len(chunk))
+            statements.append(
+                (
+                    f"DELETE FROM markdown_media_state WHERE md_path IN ({placeholders})",
+                    tuple(chunk),
+                )
+            )
+            statements.append(
+                (
+                    f"DELETE FROM markdown_media_refs WHERE md_path IN ({placeholders})",
+                    tuple(chunk),
+                )
+            )
+        self._write_many(statements)
+
+    def get_media_fingerprints_bulk(
+        self, names: Iterable[str]
+    ) -> dict[str, tuple[int, int, str, str]]:
+        name_list = list(names)
+        if not name_list:
+            return {}
+
+        out: dict[str, tuple[int, int, str, str]] = {}
+        for chunk in self._chunked(name_list):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT name, mtime_ns, size, digest, hashed_name "
+                f"FROM media_fingerprints WHERE name IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            out.update(
+                {
+                    name: (mtime_ns, size, digest, hashed_name)
+                    for name, mtime_ns, size, digest, hashed_name in rows
+                }
+            )
+        return out
+
+    def set_media_fingerprints_bulk(
+        self, rows: Iterable[tuple[str, int, int, str, str]]
+    ) -> None:
+        entries = list(rows)
+        if not entries:
+            return
+
+        seen_names: set[str] = set()
+        deduped: list[tuple[str, int, int, str, str]] = []
+        for name, mtime_ns, size, digest, hashed_name in reversed(entries):
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            deduped.append((name, mtime_ns, size, digest, hashed_name))
+        deduped.reverse()
+
+        self._executemany(
+            "INSERT OR REPLACE INTO media_fingerprints "
+            "(name, mtime_ns, size, digest, hashed_name) VALUES (?, ?, ?, ?, ?)",
+            deduped,
+        )
+
+    def remove_media_fingerprints_by_names(self, names: Iterable[str]) -> None:
+        name_list = list(names)
+        if not name_list:
+            return
+        statements: list[tuple[str, tuple]] = []
+        for chunk in self._chunked(name_list):
+            placeholders = ",".join("?" * len(chunk))
+            statements.append(
+                (
+                    f"DELETE FROM media_fingerprints WHERE name IN ({placeholders})",
+                    tuple(chunk),
+                )
+            )
+        self._write_many(statements)
+
+    def get_media_push_state_bulk(self, names: Iterable[str]) -> dict[str, str]:
+        name_list = list(names)
+        if not name_list:
+            return {}
+
+        out: dict[str, str] = {}
+        for chunk in self._chunked(name_list):
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                "SELECT name, digest "
+                f"FROM media_push_state WHERE name IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            out.update({name: digest for name, digest in rows})
+        return out
+
+    def set_media_push_state_bulk(self, rows: Iterable[tuple[str, str]]) -> None:
+        entries = list(rows)
+        if not entries:
+            return
+
+        seen_names: set[str] = set()
+        deduped: list[tuple[str, str]] = []
+        for name, digest in reversed(entries):
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            deduped.append((name, digest))
+        deduped.reverse()
+
+        self._executemany(
+            "INSERT OR REPLACE INTO media_push_state (name, digest) VALUES (?, ?)",
+            deduped,
+        )
+
+    def remove_media_push_state_by_names(self, names: Iterable[str]) -> None:
+        name_list = list(names)
+        if not name_list:
+            return
+        statements: list[tuple[str, tuple]] = []
+        for chunk in self._chunked(name_list):
+            placeholders = ",".join("?" * len(chunk))
+            statements.append(
+                (
+                    f"DELETE FROM media_push_state WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )
             )

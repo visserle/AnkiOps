@@ -248,3 +248,68 @@ def test_remove_note_by_key_removes_fingerprint(tmp_path):
         assert adapter.get_note_fingerprints_bulk(["k1"]) == {}
     finally:
         adapter.close()
+
+
+def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_markdown_media_cache_bulk(
+            [("Deck.md", 10, 200, {"a.png", "b.png"})]
+        )
+        assert adapter.get_markdown_media_cache_bulk(["Deck.md"]) == {
+            "Deck.md": (10, 200, {"a.png", "b.png"})
+        }
+
+        adapter.set_markdown_media_cache_bulk([("Deck.md", 11, 210, {"c.png"})])
+        assert adapter.get_markdown_media_cache_bulk(["Deck.md"]) == {
+            "Deck.md": (11, 210, {"c.png"})
+        }
+
+        adapter.remove_markdown_media_cache_by_paths(["Deck.md"])
+        assert adapter.get_markdown_media_cache_bulk(["Deck.md"]) == {}
+    finally:
+        adapter.close()
+
+
+def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_media_fingerprints_bulk(
+            [
+                ("a.png", 100, 1000, "d1", "a_d1.png"),
+                ("a.png", 200, 1001, "d2", "a_d2.png"),
+                ("b.png", 300, 1002, "d3", "b_d3.png"),
+            ]
+        )
+
+        assert adapter.get_media_fingerprints_bulk(["a.png", "b.png"]) == {
+            "a.png": (200, 1001, "d2", "a_d2.png"),
+            "b.png": (300, 1002, "d3", "b_d3.png"),
+        }
+
+        adapter.remove_media_fingerprints_by_names(["a.png"])
+        assert adapter.get_media_fingerprints_bulk(["a.png", "b.png"]) == {
+            "b.png": (300, 1002, "d3", "b_d3.png")
+        }
+    finally:
+        adapter.close()
+
+
+def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_media_push_state_bulk(
+            [("a.png", "d1"), ("a.png", "d2"), ("b.png", "d3")]
+        )
+
+        assert adapter.get_media_push_state_bulk(["a.png", "b.png"]) == {
+            "a.png": "d2",
+            "b.png": "d3",
+        }
+
+        adapter.remove_media_push_state_by_names(["a.png"])
+        assert adapter.get_media_push_state_bulk(["a.png", "b.png"]) == {
+            "b.png": "d3"
+        }
+    finally:
+        adapter.close()

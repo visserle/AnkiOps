@@ -92,7 +92,7 @@ def run_am(args):
 
     # Sync referenced media from Anki to local
     try:
-        media_result = sync_media_from_anki(anki, fs, collection_dir)
+        media_result = sync_media_from_anki(anki, fs, collection_dir, db)
         media_summary = media_result.summary
         if media_summary.format() != "no changes":
             logger.info(
@@ -116,7 +116,7 @@ def run_ma(args):
     note_types_dir = get_note_types_dir()
 
     try:
-        media_result = sync_media_to_anki(anki, fs, collection_dir)
+        media_result = sync_media_to_anki(anki, fs, collection_dir, db)
         media_summary = media_result.summary
         if media_summary.format() != "no changes":
             logger.info(
