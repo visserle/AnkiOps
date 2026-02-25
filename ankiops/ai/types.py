@@ -1,16 +1,16 @@
-"""Types shared by the AI prompt runtime."""
+"""Shared data types for AI prompt execution."""
 
 from __future__ import annotations
 
 import fnmatch
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 
 @dataclass(frozen=True)
 class ModelProfile:
-    """A named model runtime profile loaded from models.yaml."""
+    """A named model runtime profile loaded from models YAML."""
 
     name: str
     provider: str
@@ -23,7 +23,7 @@ class ModelProfile:
 
 @dataclass(frozen=True)
 class ModelsConfig:
-    """Collection-scoped model profile configuration."""
+    """Collection-scoped set of named model profiles."""
 
     default_profile: str
     profiles: dict[str, ModelProfile]
@@ -32,7 +32,7 @@ class ModelsConfig:
 
 @dataclass(frozen=True)
 class RuntimeAIConfig:
-    """Fully resolved runtime AI configuration."""
+    """Resolved runtime model settings after applying profile + CLI overrides."""
 
     profile: str
     provider: str
@@ -46,7 +46,7 @@ class RuntimeAIConfig:
 
 @dataclass(frozen=True)
 class PromptConfig:
-    """Prompt definition loaded from a YAML file."""
+    """Prompt definition loaded from prompt YAML."""
 
     name: str
     prompt: str
@@ -58,13 +58,25 @@ class PromptConfig:
     source_path: Path | None = None
 
     def matches_note_type(self, note_type: str) -> bool:
+        """Whether this prompt applies to the given note type name."""
         return any(
             fnmatch.fnmatchcase(note_type, pattern) for pattern in self.note_types
         )
 
 
 @dataclass(frozen=True)
+class PromptRunOptions:
+    """Execution controls for prompt runs."""
+
+    include_decks: list[str] | None = None
+    batch_size: int = 1
+    max_in_flight: int = 4
+
+
+@dataclass(frozen=True)
 class PromptChange:
+    """A single field mutation produced by a prompt run."""
+
     prompt_name: str
     deck_name: str
     note_key: str
@@ -76,6 +88,8 @@ class PromptChange:
 
 @dataclass
 class PromptRunResult:
+    """Aggregate prompt run outcome and diagnostics."""
+
     processed_decks: int = 0
     processed_notes: int = 0
     prompted_notes: int = 0
@@ -85,12 +99,55 @@ class PromptRunResult:
     warnings: list[str] = field(default_factory=list)
 
 
-class AsyncInlineBatchEditor(Protocol):
-    """Protocol for a batch-capable async inline note editor."""
+@dataclass(frozen=True)
+class InlineNotePayload:
+    """Canonical payload sent to the AI editor for one note."""
 
-    async def edit_batch(
+    note_key: str
+    note_type: str
+    fields: dict[str, str]
+
+    def to_json(self) -> dict[str, Any]:
+        """Serialize to a JSON-compatible object."""
+        return {
+            "note_key": self.note_key,
+            "note_type": self.note_type,
+            "fields": dict(self.fields),
+        }
+
+
+@dataclass(frozen=True)
+class InlineEditedNote:
+    """Canonical edited-note payload returned by the AI editor."""
+
+    note_key: str
+    fields: dict[str, str]
+    note_type: str | None = None
+
+    @classmethod
+    def from_parts(
+        cls,
+        *,
+        note_key: str,
+        fields: Mapping[str, str],
+        note_type: str | None = None,
+    ) -> InlineEditedNote:
+        """Build an edited note from validated parts."""
+        normalized_note_key = note_key.strip()
+        normalized_note_type = note_type.strip() if isinstance(note_type, str) else None
+        return cls(
+            note_key=normalized_note_key,
+            fields=dict(fields),
+            note_type=normalized_note_type or None,
+        )
+
+
+class AsyncInlineBatchEditor(Protocol):
+    """Batch-capable async inline note editor."""
+
+    async def edit_notes(
         self,
-        prompt_config: PromptConfig,
-        note_payloads: list[dict[str, Any]],
-    ) -> dict[str, dict[str, Any]]:
+        prompt: PromptConfig,
+        notes: list[InlineNotePayload],
+    ) -> dict[str, InlineEditedNote]:
         """Return edited notes keyed by note_key."""

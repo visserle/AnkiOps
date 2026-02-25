@@ -8,10 +8,14 @@ import fnmatch
 from dataclasses import dataclass
 from typing import Any
 
+from .errors import PromptExecutionError
 from .types import (
     AsyncInlineBatchEditor,
+    InlineEditedNote,
+    InlineNotePayload,
     PromptChange,
     PromptConfig,
+    PromptRunOptions,
     PromptRunResult,
 )
 
@@ -23,37 +27,120 @@ class _NoteTask:
     note_type: str
     note_fields: dict[str, Any]
     string_fields: dict[str, str]
-    target_field_names: list[str]
-    send_field_names: list[str]
-    note_payload: dict[str, Any]
+    target_fields: list[str]
+    send_fields: list[str]
+    payload: InlineNotePayload
     deck_ref: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class _ChunkResponse:
+class _ChunkResult:
     index: int
     chunk: list[_NoteTask]
-    edited_by_note_key: dict[str, dict[str, Any]] | None
+    edited_by_note_key: dict[str, InlineEditedNote] | None
     error: str | None
 
 
-def select_decks_with_subdecks(
+class PromptRunner:
+    """Run prompt-driven inline edits over serialized collection JSON."""
+
+    def __init__(self, editor: AsyncInlineBatchEditor):
+        self._editor = editor
+
+    async def run_async(
+        self,
+        serialized_data: dict[str, Any],
+        prompt: PromptConfig,
+        *,
+        options: PromptRunOptions | None = None,
+    ) -> PromptRunResult:
+        resolved_options = options or PromptRunOptions()
+        _validate_options(resolved_options)
+
+        decks = _require_decks(serialized_data)
+        selected_decks = _select_decks_with_subdecks(
+            decks, resolved_options.include_decks
+        )
+        working_decks = copy.deepcopy(selected_decks)
+
+        result = PromptRunResult()
+        tasks = _collect_tasks(working_decks, prompt, result)
+        if not tasks:
+            return result
+
+        chunks = _chunk_tasks(tasks, batch_size=resolved_options.batch_size)
+        chunk_results = await _dispatch_chunks(
+            prompt=prompt,
+            editor=self._editor,
+            chunks=chunks,
+            max_in_flight=resolved_options.max_in_flight,
+        )
+        changed_deck_ids = _apply_chunk_results(
+            chunk_results=chunk_results,
+            prompt=prompt,
+            result=result,
+        )
+
+        for deck in working_decks:
+            if id(deck) in changed_deck_ids:
+                result.changed_decks.append(deck)
+
+        return result
+
+    def run(
+        self,
+        serialized_data: dict[str, Any],
+        prompt: PromptConfig,
+        *,
+        options: PromptRunOptions | None = None,
+    ) -> PromptRunResult:
+        """Sync wrapper for run_async()."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                self.run_async(
+                    serialized_data=serialized_data,
+                    prompt=prompt,
+                    options=options,
+                )
+            )
+        raise PromptExecutionError(
+            "Cannot call sync prompt runner inside an active event loop; "
+            "use PromptRunner.run_async instead."
+        )
+
+
+def _select_decks_with_subdecks(
     decks: list[dict[str, Any]],
     include_decks: list[str] | None,
 ) -> list[dict[str, Any]]:
     """Select decks by recursive include semantics."""
-    targets = [
-        deck_name.strip() for deck_name in (include_decks or []) if deck_name.strip()
-    ]
+    targets = [name.strip() for name in (include_decks or []) if name.strip()]
     if not targets:
         return decks
+    return [
+        deck
+        for deck in decks
+        if any(
+            _matches_deck_or_subdeck(str(deck.get("name", "")), target)
+            for target in targets
+        )
+    ]
 
-    selected: list[dict[str, Any]] = []
-    for deck in decks:
-        deck_name = str(deck.get("name", ""))
-        if any(_matches_deck_or_subdeck(deck_name, target) for target in targets):
-            selected.append(deck)
-    return selected
+
+def _validate_options(options: PromptRunOptions) -> None:
+    if options.batch_size <= 0:
+        raise PromptExecutionError("batch_size must be > 0")
+    if options.max_in_flight <= 0:
+        raise PromptExecutionError("max_in_flight must be > 0")
+
+
+def _require_decks(serialized_data: dict[str, Any]) -> list[dict[str, Any]]:
+    decks = serialized_data.get("decks")
+    if not isinstance(decks, list):
+        raise PromptExecutionError("serialized_data must contain 'decks' list")
+    return decks
 
 
 def _matches_deck_or_subdeck(deck_name: str, target: str) -> bool:
@@ -62,128 +149,15 @@ def _matches_deck_or_subdeck(deck_name: str, target: str) -> bool:
 
 def _matching_field_names(fields: dict[str, str], patterns: list[str]) -> list[str]:
     return [
-        name
-        for name in fields
-        if any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+        field_name
+        for field_name in fields
+        if any(fnmatch.fnmatchcase(field_name, pattern) for pattern in patterns)
     ]
 
 
-async def run_inline_prompt_on_serialized_collection_async(
-    serialized_data: dict[str, Any],
-    include_decks: list[str] | None,
-    prompt_config: PromptConfig,
-    editor: AsyncInlineBatchEditor,
-    *,
-    batch_size: int = 1,
-    max_in_flight: int = 4,
-) -> PromptRunResult:
-    """Run prompt-driven inline JSON edits over selected decks."""
-    if batch_size <= 0:
-        raise ValueError("batch_size must be > 0")
-    if max_in_flight <= 0:
-        raise ValueError("max_in_flight must be > 0")
-
-    decks = serialized_data.get("decks")
-    if not isinstance(decks, list):
-        raise ValueError("serialized_data must contain 'decks' list")
-
-    selected = select_decks_with_subdecks(decks, include_decks)
-    selected_copy = copy.deepcopy(selected)
-    result = PromptRunResult()
-    tasks = _collect_note_tasks(selected_copy, prompt_config, result)
-
-    chunks = _chunk_tasks(tasks, batch_size=batch_size)
-    responses = await _dispatch_chunks(
-        prompt_config=prompt_config,
-        editor=editor,
-        chunks=chunks,
-        max_in_flight=max_in_flight,
-    )
-
-    changed_decks: dict[int, dict[str, Any]] = {}
-    for chunk_response in responses:
-        if chunk_response.error is not None:
-            for task in chunk_response.chunk:
-                result.warnings.append(
-                    f"{task.deck_name}/{task.note_key}: {chunk_response.error}"
-                )
-            continue
-
-        edited_by_note_key = chunk_response.edited_by_note_key or {}
-        for task in chunk_response.chunk:
-            edited = edited_by_note_key.get(task.note_key)
-            if edited is None:
-                result.warnings.append(
-                    f"{task.deck_name}/{task.note_key}: response missing note_key"
-                )
-                continue
-
-            error = _validate_edited_note(task, edited)
-            if error:
-                result.warnings.append(f"{task.deck_name}/{task.note_key}: {error}")
-                continue
-
-            edited_fields = edited["fields"]
-            for field_name in task.target_field_names:
-                edited_text = edited_fields[field_name]
-                original_text = task.string_fields[field_name]
-                if edited_text == original_text:
-                    continue
-
-                task.note_fields[field_name] = edited_text
-                changed_decks[id(task.deck_ref)] = task.deck_ref
-                result.changed_fields += 1
-                result.changes.append(
-                    PromptChange(
-                        prompt_name=prompt_config.name,
-                        deck_name=task.deck_name,
-                        note_key=task.note_key,
-                        note_type=task.note_type,
-                        field_name=field_name,
-                        original_text=original_text,
-                        edited_text=edited_text,
-                    )
-                )
-
-    for deck in selected_copy:
-        if id(deck) in changed_decks:
-            result.changed_decks.append(deck)
-
-    return result
-
-
-def run_inline_prompt_on_serialized_collection(
-    serialized_data: dict[str, Any],
-    include_decks: list[str] | None,
-    prompt_config: PromptConfig,
-    editor: AsyncInlineBatchEditor,
-    *,
-    batch_size: int = 1,
-    max_in_flight: int = 4,
-) -> PromptRunResult:
-    """Sync wrapper for async prompt execution."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(
-            run_inline_prompt_on_serialized_collection_async(
-                serialized_data=serialized_data,
-                include_decks=include_decks,
-                prompt_config=prompt_config,
-                editor=editor,
-                batch_size=batch_size,
-                max_in_flight=max_in_flight,
-            )
-        )
-    raise RuntimeError(
-        "Cannot call sync runner inside an active event loop; "
-        "use run_inline_prompt_on_serialized_collection_async instead."
-    )
-
-
-def _collect_note_tasks(
+def _collect_tasks(
     selected_decks: list[dict[str, Any]],
-    prompt_config: PromptConfig,
+    prompt: PromptConfig,
     result: PromptRunResult,
 ) -> list[_NoteTask]:
     tasks: list[_NoteTask] = []
@@ -206,12 +180,13 @@ def _collect_note_tasks(
                     f"{deck_name}/<missing-note_key>: skipped note without note_key"
                 )
                 continue
+            normalized_note_key = note_key.strip()
 
             note_type = str(note.get("note_type", ""))
-            if not prompt_config.matches_note_type(note_type):
+            if not prompt.matches_note_type(note_type):
                 continue
 
-            fields = note.get("fields", {})
+            fields = note.get("fields")
             if not isinstance(fields, dict):
                 continue
             string_fields = {
@@ -222,88 +197,79 @@ def _collect_note_tasks(
             if not string_fields:
                 continue
 
-            target_field_names = _matching_field_names(
-                string_fields,
-                prompt_config.target_fields,
-            )
-            if not target_field_names:
+            target_fields = _matching_field_names(string_fields, prompt.target_fields)
+            if not target_fields:
                 continue
 
-            send_field_names = _matching_field_names(
-                string_fields,
-                prompt_config.send_fields,
-            )
-            send_seen = set(send_field_names)
-            for field_name in target_field_names:
-                if field_name not in send_seen:
-                    send_field_names.append(field_name)
-                    send_seen.add(field_name)
+            send_fields = _matching_field_names(string_fields, prompt.send_fields)
+            send_set = set(send_fields)
+            for target_field in target_fields:
+                if target_field not in send_set:
+                    send_fields.append(target_field)
+                    send_set.add(target_field)
 
-            note_payload = {
-                "note_key": note_key,
-                "note_type": note_type,
-                "fields": {
-                    field_name: string_fields[field_name]
-                    for field_name in send_field_names
-                },
+            payload = {
+                field_name: string_fields[field_name] for field_name in send_fields
             }
-
-            result.prompted_notes += 1
             tasks.append(
                 _NoteTask(
                     deck_name=deck_name,
-                    note_key=note_key,
+                    note_key=normalized_note_key,
                     note_type=note_type,
                     note_fields=fields,
                     string_fields=string_fields,
-                    target_field_names=target_field_names,
-                    send_field_names=send_field_names,
-                    note_payload=note_payload,
+                    target_fields=target_fields,
+                    send_fields=send_fields,
+                    payload=InlineNotePayload(
+                        note_key=normalized_note_key,
+                        note_type=note_type,
+                        fields=payload,
+                    ),
                     deck_ref=deck,
                 )
             )
+            result.prompted_notes += 1
 
     return tasks
 
 
 def _chunk_tasks(tasks: list[_NoteTask], *, batch_size: int) -> list[list[_NoteTask]]:
     return [
-        tasks[start_index : start_index + batch_size]
-        for start_index in range(0, len(tasks), batch_size)
+        tasks[index : index + batch_size] for index in range(0, len(tasks), batch_size)
     ]
 
 
 async def _dispatch_chunks(
     *,
-    prompt_config: PromptConfig,
+    prompt: PromptConfig,
     editor: AsyncInlineBatchEditor,
     chunks: list[list[_NoteTask]],
     max_in_flight: int,
-) -> list[_ChunkResponse]:
+) -> list[_ChunkResult]:
     semaphore = asyncio.Semaphore(max_in_flight)
 
-    async def run_chunk(index: int, chunk: list[_NoteTask]) -> _ChunkResponse:
+    async def run_chunk(index: int, chunk: list[_NoteTask]) -> _ChunkResult:
         try:
             async with semaphore:
-                edited = await editor.edit_batch(
-                    prompt_config,
-                    [task.note_payload for task in chunk],
+                edited = await editor.edit_notes(
+                    prompt,
+                    [task.payload for task in chunk],
                 )
             if not isinstance(edited, dict):
-                return _ChunkResponse(
+                return _ChunkResult(
                     index=index,
                     chunk=chunk,
                     edited_by_note_key=None,
                     error="response is not a JSON object keyed by note_key",
                 )
-            return _ChunkResponse(
+            return _ChunkResult(
                 index=index,
                 chunk=chunk,
                 edited_by_note_key=edited,
                 error=None,
             )
         except Exception as error:
-            return _ChunkResponse(
+            return _ChunkResult(
                 index=index,
                 chunk=chunk,
                 edited_by_note_key=None,
@@ -314,25 +280,93 @@ async def _dispatch_chunks(
         asyncio.create_task(run_chunk(index, chunk))
         for index, chunk in enumerate(chunks)
     ]
-    responses = await asyncio.gather(*pending)
-    return sorted(responses, key=lambda response: response.index)
+    chunk_results = await asyncio.gather(*pending)
+    return sorted(chunk_results, key=lambda item: item.index)
 
 
-def _validate_edited_note(task: _NoteTask, edited: dict[str, Any]) -> str | None:
-    if not isinstance(edited, dict):
-        return "response is not a JSON object"
-    if edited.get("note_key") != task.note_key:
+def _apply_chunk_results(
+    *,
+    chunk_results: list[_ChunkResult],
+    prompt: PromptConfig,
+    result: PromptRunResult,
+) -> set[int]:
+    changed_deck_ids: set[int] = set()
+
+    for chunk_result in chunk_results:
+        if chunk_result.error is not None:
+            for task in chunk_result.chunk:
+                result.warnings.append(
+                    f"{task.deck_name}/{task.note_key}: {chunk_result.error}"
+                )
+            continue
+
+        edited_by_note_key = chunk_result.edited_by_note_key or {}
+        for task in chunk_result.chunk:
+            edited_note = edited_by_note_key.get(task.note_key)
+            if edited_note is None:
+                result.warnings.append(
+                    f"{task.deck_name}/{task.note_key}: response missing note_key"
+                )
+                continue
+
+            error = _validate_edited_note(task, edited_note)
+            if error:
+                result.warnings.append(f"{task.deck_name}/{task.note_key}: {error}")
+                continue
+
+            if _apply_note_changes(task, edited_note, prompt.name, result):
+                changed_deck_ids.add(id(task.deck_ref))
+
+    return changed_deck_ids
+
+
+def _validate_edited_note(
+    task: _NoteTask,
+    edited_note: InlineEditedNote,
+) -> str | None:
+    if not isinstance(edited_note, InlineEditedNote):
+        return "response is not a valid edited note"
+    if edited_note.note_key != task.note_key:
         return "response note_key mismatch"
 
-    edited_fields = edited.get("fields")
-    if not isinstance(edited_fields, dict):
-        return "response missing fields object"
-
-    missing_or_bad = [
+    invalid_fields = [
         field_name
-        for field_name in task.send_field_names
-        if not isinstance(edited_fields.get(field_name), str)
+        for field_name in task.send_fields
+        if not isinstance(edited_note.fields.get(field_name), str)
     ]
-    if missing_or_bad:
-        return f"response fields invalid: {', '.join(missing_or_bad)}"
+    if invalid_fields:
+        return f"response fields invalid: {', '.join(invalid_fields)}"
     return None
+
+
+def _apply_note_changes(
+    task: _NoteTask,
+    edited_note: InlineEditedNote,
+    prompt_name: str,
+    result: PromptRunResult,
+) -> bool:
+    edited_fields = edited_note.fields
+    changed_any = False
+
+    for field_name in task.target_fields:
+        original_text = task.string_fields[field_name]
+        edited_text = edited_fields[field_name]
+        if edited_text == original_text:
+            continue
+
+        task.note_fields[field_name] = edited_text
+        result.changed_fields += 1
+        result.changes.append(
+            PromptChange(
+                prompt_name=prompt_name,
+                deck_name=task.deck_name,
+                note_key=task.note_key,
+                note_type=task.note_type,
+                field_name=field_name,
+                original_text=original_text,
+                edited_text=edited_text,
+            )
+        )
+        changed_any = True
+
+    return changed_any

@@ -5,11 +5,17 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from ankiops.ai import (
+    AIConfigError,
+    AIRequestError,
+    AIResponseError,
     OpenAICompatibleAsyncEditor,
-    load_models_config,
-    load_prompt_config,
-    resolve_runtime_ai_config,
-    run_inline_prompt_on_serialized_collection,
+    PromptConfigError,
+    PromptExecutionError,
+    PromptRunner,
+    PromptRunOptions,
+    load_model_profiles,
+    load_prompt,
+    resolve_runtime_config,
 )
 from ankiops.anki import AnkiAdapter
 from ankiops.collection_serializer import (
@@ -250,13 +256,13 @@ def run_ai_config(args):
     prompts_dir = get_prompts_dir()
 
     try:
-        models_config = load_models_config(prompts_dir)
-    except ValueError as error:
+        models_config = load_model_profiles(prompts_dir)
+    except AIConfigError as error:
         logger.error(f"Invalid model profile configuration: {error}")
         raise SystemExit(1)
 
     try:
-        runtime = resolve_runtime_ai_config(
+        runtime = resolve_runtime_config(
             models_config,
             profile=args.profile,
             provider=args.provider,
@@ -267,7 +273,7 @@ def run_ai_config(args):
             max_in_flight=args.max_in_flight,
             api_key=args.api_key,
         )
-    except ValueError as error:
+    except AIConfigError as error:
         logger.error(f"Invalid AI configuration: {error}")
         raise SystemExit(1)
 
@@ -296,20 +302,20 @@ def run_ai_prompt(args):
         raise SystemExit(2)
 
     try:
-        prompt_config = load_prompt_config(prompts_dir, args.prompt)
-    except ValueError as error:
+        prompt_config = load_prompt(prompts_dir, args.prompt)
+    except PromptConfigError as error:
         logger.error(f"Invalid prompt configuration: {error}")
         raise SystemExit(1)
 
     try:
-        models_config = load_models_config(prompts_dir)
-    except ValueError as error:
+        models_config = load_model_profiles(prompts_dir)
+    except AIConfigError as error:
         logger.error(f"Invalid model profile configuration: {error}")
         raise SystemExit(1)
 
     profile_name = args.profile or prompt_config.model_profile
     try:
-        runtime = resolve_runtime_ai_config(
+        runtime = resolve_runtime_config(
             models_config,
             profile=profile_name,
             provider=args.provider,
@@ -320,7 +326,7 @@ def run_ai_prompt(args):
             max_in_flight=args.max_in_flight,
             api_key=args.api_key,
         )
-    except ValueError as error:
+    except AIConfigError as error:
         logger.error(f"Invalid AI configuration: {error}")
         raise SystemExit(1)
 
@@ -358,16 +364,18 @@ def run_ai_prompt(args):
             temp_serialized_path.unlink()
 
     client = OpenAICompatibleAsyncEditor(runtime)
+    options = PromptRunOptions(
+        include_decks=args.include_deck,
+        batch_size=args.batch_size,
+        max_in_flight=runtime.max_in_flight,
+    )
     try:
-        result = run_inline_prompt_on_serialized_collection(
+        result = PromptRunner(client).run(
             serialized_data=serialized_data,
-            include_decks=args.include_deck,
-            prompt_config=prompt_config,
-            editor=client,
-            batch_size=args.batch_size,
-            max_in_flight=runtime.max_in_flight,
+            prompt=prompt_config,
+            options=options,
         )
-    except ValueError as error:
+    except (PromptExecutionError, AIRequestError, AIResponseError) as error:
         logger.error(f"AI prompt failed: {error}")
         raise SystemExit(1)
 
