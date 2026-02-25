@@ -9,6 +9,7 @@ from ankiops.config import (
     ANKIOPS_DB,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
+    PROMPTS_DIR,
     get_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -96,6 +97,7 @@ def initialize_collection(profile: str) -> Path:
     # Eject built-in note types
     fs = FileSystemAdapter()
     fs.eject_builtin_note_types(collection_dir / NOTE_TYPES_DIR)
+    fs.eject_builtin_prompts(collection_dir / PROMPTS_DIR)
 
     return collection_dir
 

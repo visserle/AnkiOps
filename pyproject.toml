@@ -44,7 +44,7 @@ where = ["."]
 include = ["ankiops*"]
 
 [tool.setuptools.package-data]
-ankiops = ["tutorial/*.md", "note_types/**/*.anki", "note_types/**/*.css", "note_types/**/*.yaml"]
+ankiops = ["tutorial/*.md", "note_types/**/*.anki", "note_types/**/*.css", "note_types/**/*.yaml", "prompts/**/*.yaml"]
 
 [tool.ruff]
 line-length = 88

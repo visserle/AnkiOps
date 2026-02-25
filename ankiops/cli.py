@@ -1,7 +1,17 @@
 import argparse
+import json
 import logging
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
+from ankiops.ai import (
+    OpenAICompatibleInlineEditor,
+    load_ai_config,
+    load_prompt_config,
+    resolve_runtime_ai_config,
+    run_inline_prompt_on_serialized_collection,
+    save_ai_config,
+)
 from ankiops.anki import AnkiAdapter
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
@@ -11,6 +21,7 @@ from ankiops.config import (
     ANKIOPS_DB,
     get_collection_dir,
     get_note_types_dir,
+    get_prompts_dir,
     require_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -25,6 +36,18 @@ from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
+
+
+def require_initialized_collection_dir() -> Path:
+    """Return collection directory or exit if no local AnkiOps DB exists."""
+    collection_dir = get_collection_dir()
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
+        logger.error(
+            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
+        )
+        raise SystemExit(1)
+    return collection_dir
 
 
 def connect_or_exit() -> AnkiAdapter:
@@ -189,7 +212,6 @@ def run_serialize(args):
     serialize_collection_to_json(
         collection_dir,
         output_file,
-        no_ids=args.no_ids,
     )
 
 
@@ -202,8 +224,175 @@ def run_deserialize(args):
         raise SystemExit(1)
 
     deserialize_collection_from_json(
-        serialized_file, overwrite=args.overwrite, no_ids=args.no_ids
+        serialized_file,
+        overwrite=args.overwrite,
     )
+
+
+def run_ai_config(args):
+    """Show and optionally persist collection-scoped AI configuration."""
+    collection_dir = require_initialized_collection_dir()
+    db = SQLiteDbAdapter.load(collection_dir)
+    try:
+        has_updates = any(
+            v is not None
+            for v in [
+                args.provider,
+                args.model,
+                args.base_url,
+                args.api_key_env,
+                args.timeout,
+            ]
+        )
+        if has_updates:
+            config = save_ai_config(
+                db,
+                provider=args.provider,
+                model=args.model,
+                base_url=args.base_url,
+                api_key_env=args.api_key_env,
+                timeout_seconds=args.timeout,
+            )
+            logger.info("Saved AI configuration defaults in .ankiops.db")
+        else:
+            config = load_ai_config(db)
+    finally:
+        db.close()
+
+    runtime = resolve_runtime_ai_config(config)
+    logger.info(f"AI provider: {runtime.provider}")
+    logger.info(f"AI model: {runtime.model}")
+    logger.info(f"AI base URL: {runtime.base_url}")
+    logger.info(f"AI timeout: {runtime.timeout_seconds}s")
+    logger.info(f"API key env var: {runtime.api_key_env}")
+    logger.info(f"API key available: {'yes' if runtime.api_key else 'no'}")
+
+
+def run_ai_prompt(args):
+    """Run prompt-driven inline JSON edits over serialized collection data."""
+    collection_dir = require_initialized_collection_dir()
+    prompts_dir = get_prompts_dir()
+    if not args.prompt:
+        logger.error("Missing required argument: --prompt")
+        raise SystemExit(2)
+    try:
+        prompt_config = load_prompt_config(prompts_dir, args.prompt)
+    except ValueError as e:
+        logger.error(f"Invalid prompt configuration: {e}")
+        raise SystemExit(1)
+
+    db = SQLiteDbAdapter.load(collection_dir)
+    try:
+        stored = load_ai_config(db)
+    finally:
+        db.close()
+
+    try:
+        runtime = resolve_runtime_ai_config(
+            stored,
+            provider=args.provider,
+            model=args.model or prompt_config.model,
+            base_url=args.base_url,
+            api_key_env=args.api_key_env,
+            timeout_seconds=args.timeout,
+            api_key=args.api_key,
+        )
+    except ValueError as e:
+        logger.error(f"Invalid AI configuration: {e}")
+        raise SystemExit(1)
+
+    if runtime.provider == "remote" and not runtime.api_key:
+        logger.error(
+            f"No API key found in env var '{runtime.api_key_env}'. "
+            "Set it or pass --api-key."
+        )
+        raise SystemExit(1)
+
+    logger.info(
+        "AI prompt run "
+        f"prompt='{prompt_config.name}' "
+        f"provider='{runtime.provider}' model='{runtime.model}'"
+    )
+
+    temp_serialized_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp:
+            temp_serialized_path = Path(tmp.name)
+
+        serialized_data = serialize_collection_to_json(
+            collection_dir=collection_dir,
+            output_file=temp_serialized_path,
+        )
+    finally:
+        if temp_serialized_path and temp_serialized_path.exists():
+            temp_serialized_path.unlink()
+
+    client = OpenAICompatibleInlineEditor(runtime)
+    result = run_inline_prompt_on_serialized_collection(
+        serialized_data=serialized_data,
+        include_decks=args.include_deck,
+        prompt_config=prompt_config,
+        editor=client,
+    )
+
+    if args.include_deck and result.processed_decks == 0:
+        logger.warning("No deck matched --include-deck filters.")
+        return
+
+    logger.info(
+        "AI prompt processed "
+        f"{result.prompted_notes} prompted note(s), "
+        f"{result.processed_notes} scanned note(s), "
+        f"across {result.processed_decks} deck(s)."
+    )
+    logger.info(f"AI prompt changed {result.changed_fields} field(s).")
+
+    for change in result.changes[:20]:
+        logger.info(
+            f"  {change.deck_name} [{change.note_key or 'new'}] {change.field_name}"
+        )
+    if len(result.changes) > 20:
+        logger.info(f"  ... and {len(result.changes) - 20} more change(s)")
+
+    for warning in result.warnings[:20]:
+        logger.warning(warning)
+    if len(result.warnings) > 20:
+        logger.warning(f"... and {len(result.warnings) - 20} more warning(s)")
+
+    if result.changed_fields == 0:
+        logger.info("No changes to write.")
+        return
+
+    apply_payload = {
+        "collection": serialized_data.get("collection", {}),
+        "decks": result.changed_decks,
+    }
+
+    temp_apply_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as tmp:
+            temp_apply_path = Path(tmp.name)
+            json.dump(apply_payload, tmp, indent=2, ensure_ascii=False)
+
+        deserialize_collection_from_json(
+            temp_apply_path,
+            overwrite=True,
+        )
+    finally:
+        if temp_apply_path and temp_apply_path.exists():
+            temp_apply_path.unlink()
+
+    logger.info(f"Applied changes to {len(result.changed_decks)} deck(s).")
 
 
 def main():
@@ -287,6 +476,84 @@ def main():
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
+    # AI parser
+    ai_parser = subparsers.add_parser(
+        "ai",
+        help="Run prompt-driven AI edits on serialized collection data",
+    )
+    ai_parser.set_defaults(handler=run_ai_prompt)
+    ai_parser.add_argument(
+        "--include-deck",
+        "-d",
+        action="append",
+        default=[],
+        help=(
+            "Deck name to include; always includes all subdecks recursively. "
+            "Repeat to include multiple deck trees."
+        ),
+    )
+    ai_parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Prompt file name/path from prompts/ (or absolute path)",
+    )
+    ai_parser.add_argument(
+        "--provider",
+        choices=["local", "remote"],
+        help="AI provider profile",
+    )
+    ai_parser.add_argument(
+        "--model",
+        help="Model name to use",
+    )
+    ai_parser.add_argument(
+        "--base-url",
+        help="Base URL for OpenAI-compatible chat completions API",
+    )
+    ai_parser.add_argument(
+        "--api-key-env",
+        help="Environment variable that holds the API key",
+    )
+    ai_parser.add_argument(
+        "--api-key",
+        help="API key value (runtime only; not persisted)",
+    )
+    ai_parser.add_argument(
+        "--timeout",
+        type=int,
+        help="Request timeout in seconds",
+    )
+
+    ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)
+
+    ai_config_parser = ai_subparsers.add_parser(
+        "config",
+        help="Show or save collection-scoped AI defaults",
+    )
+    ai_config_parser.add_argument(
+        "--provider",
+        choices=["local", "remote"],
+        help="AI provider profile",
+    )
+    ai_config_parser.add_argument(
+        "--model",
+        help="Model name to use",
+    )
+    ai_config_parser.add_argument(
+        "--base-url",
+        help="Base URL for OpenAI-compatible chat completions API",
+    )
+    ai_config_parser.add_argument(
+        "--api-key-env",
+        help="Environment variable that holds the API key",
+    )
+    ai_config_parser.add_argument(
+        "--timeout",
+        type=int,
+        help="Request timeout in seconds",
+    )
+    ai_config_parser.set_defaults(handler=run_ai_config)
+
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
@@ -308,6 +575,7 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
+        print("  ai                Run prompt-driven AI edits (or ai config)")
         print()
         print("Usage examples:")
         print("  ankiops init --tutorial            # Initialize with tutorial")
@@ -317,6 +585,8 @@ def main():
         )
         print("  ankiops serialize -o my-deck.json  # Serialize collection to file")
         print("  ankiops deserialize my-deck.json   # Deserialize file, then run init")
+        print("  ankiops ai --prompt grammar -d Biology   # Prompt-run deck tree")
+        print("  ankiops ai config                       # Show AI defaults")
         print()
         print("For more information:")
         print("  ankiops --help                 # Show general help")

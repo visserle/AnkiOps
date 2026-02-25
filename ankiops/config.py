@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
+PROMPTS_DIR = "prompts"
 LOCAL_MEDIA_DIR = "media"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
@@ -67,6 +68,11 @@ def get_collection_dir() -> Path:
 def get_note_types_dir() -> Path:
     """Get the standard note types directory path."""
     return get_collection_dir() / NOTE_TYPES_DIR
+
+
+def get_prompts_dir() -> Path:
+    """Get the standard prompts directory path."""
+    return get_collection_dir() / PROMPTS_DIR
 
 
 def require_collection_dir(active_profile: str) -> Path:

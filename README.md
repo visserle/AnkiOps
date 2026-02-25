@@ -160,3 +160,32 @@ uv run python -m main ma
 - `FILE` - Serialized file to import: .json or .zip (required)
 - `--directory`, `-d` - Local collection directory to create/update (default: use file name)
 - `--overwrite` - Overwrite existing markdown files (media uses smart conflict resolution)
+
+**`ai config`:**
+- `--provider {local,remote}` - Set provider profile
+- `--model` - Set default model name
+- `--base-url` - Set OpenAI-compatible base URL
+- `--api-key-env` - Set env var name used for API key lookup
+- `--timeout` - Set request timeout in seconds
+
+**`ai`:**
+- `--include-deck`, `-d` - Include a deck and all subdecks recursively (repeatable)
+- `--prompt` - Prompt file name/path from `prompts/` (required)
+- `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout` - Runtime overrides
+
+### Where is AI config stored?
+
+AnkiOps stores non-secret AI defaults in the local `.ankiops.db` (`config` table).  
+Secrets are read from environment variables (e.g. `ANKIOPS_AI_API_KEY`) or passed at runtime via `--api-key`.
+
+### Prompt Infrastructure
+
+AnkiOps initializes a local `prompts/` folder and copies built-in YAML prompts there.
+Prompt YAML files define:
+- Prompt name/text
+- Optional model override
+- `fields_to_edit` (what fields the AI may modify)
+- `fields_to_send` (what fields are sent as inline JSON context)
+- Optional `note_types` filters
+
+Inline editing always includes `note_key`, and the AI must return the same JSON structure.

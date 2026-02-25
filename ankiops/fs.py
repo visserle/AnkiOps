@@ -405,3 +405,15 @@ class FileSystemAdapter:
                 ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
             )
         logger.debug(f"Ejected built-in note types to {dst_dir}")
+
+    def eject_builtin_prompts(self, dst_dir: Path) -> None:
+        """Copy built-in prompt YAML files to the filesystem."""
+        src_root = resources.files("ankiops.prompts")
+        with resources.as_file(src_root) as src_path:
+            shutil.copytree(
+                src_path,
+                dst_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
+            )
+        logger.debug(f"Ejected built-in prompts to {dst_dir}")
