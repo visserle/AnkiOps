@@ -14,7 +14,9 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
     with world.db_session() as db:
         result = world.sync_import(db)
 
-        assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
         assert len(world.mock_anki.notes) == 1
 
         note_keys = world.extract_note_keys("FreshDeck")
@@ -45,8 +47,12 @@ def test_imp_run_update_001_updates_existing_note(world):
 
         result = world.sync_import(db)
 
-        assert_summary(result.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
-        assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Updated A"
+        assert_summary(
+            result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert (
+            world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Updated A"
+        )
 
 
 def test_imp_run_move_001_moves_note_between_decks(world):
@@ -67,7 +73,9 @@ def test_imp_run_move_001_moves_note_between_decks(world):
 
         result = world.sync_import(db)
 
-        assert_summary(result.summary, created=0, updated=0, moved=1, deleted=0, errors=0)
+        assert_summary(
+            result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+        )
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "TargetDeck"
 
@@ -89,7 +97,9 @@ def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
 
         result = world.sync_import(db)
 
-        assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
+        assert_summary(
+            result.summary, created=0, updated=0, moved=0, deleted=1, errors=0
+        )
         assert note_id not in world.mock_anki.notes
 
 

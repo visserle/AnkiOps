@@ -68,7 +68,9 @@ class MockAnki:
 
             case "notesInfo":
                 note_ids = params.get("notes", [])
-                return [self.notes[note_id] for note_id in note_ids if note_id in self.notes]
+                return [
+                    self.notes[note_id] for note_id in note_ids if note_id in self.notes
+                ]
 
             case "multi":
                 actions = params.get("actions", [])
@@ -214,7 +216,10 @@ class MockAnki:
                     note_key = query.split(":")[1].strip('"')
                     found = []
                     for note_id, note in self.notes.items():
-                        if note["fields"].get("AnkiOps Key", {}).get("value") == note_key:
+                        if (
+                            note["fields"].get("AnkiOps Key", {}).get("value")
+                            == note_key
+                        ):
                             found.append(note_id)
                     return found
 

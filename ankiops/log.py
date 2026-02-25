@@ -40,21 +40,20 @@ def clickable_path(file_path: Path | str, display_name: str | None = None) -> st
     Returns:
         String with OSC 8 escape codes for terminal hyperlinks
     """
-    path = Path(file_path)
-    text = display_name if display_name is not None else path.name
+    path = Path(file_path).expanduser()
+    absolute_path = path.resolve(strict=False)
+    text = display_name if display_name is not None else f"FILE {absolute_path}"
 
     # Respect NO_COLOR environment variable
     if os.environ.get("NO_COLOR"):
         return text
 
-    # Only create links for paths that actually exist (to avoid confusion/broken links)
-    if not path.exists():
-        return text
+    # Build an RFC-compliant file URI so spaces/special chars are encoded
+    # (e.g. " " -> %20, "#" -> %23).
+    file_uri = absolute_path.as_uri()
 
-    absolute_path = path.resolve()
-
-    # OSC 8 format: \033]8;;file://ABSOLUTE_PATH\033\\TEXT\033]8;;\033\\
-    return f"\033]8;;file://{absolute_path}\033\\{text}\033]8;;\033\\"
+    # OSC 8 format: \033]8;;FILE_URI\033\\TEXT\033]8;;\033\\
+    return f"\033]8;;{file_uri}\033\\{text}\033]8;;\033\\"
 
 
 def configure_logging(

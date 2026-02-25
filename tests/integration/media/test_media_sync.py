@@ -92,7 +92,9 @@ class TestMediaReferenceDetection:
         assert _extract_media_references('<img src="media/a%20b.jpg">') == {"a b.jpg"}
 
     def test_extract_media_references_ignores_external(self):
-        assert _extract_media_references('<img src="http://example.com/a.jpg">') == set()
+        assert (
+            _extract_media_references('<img src="http://example.com/a.jpg">') == set()
+        )
         assert _extract_media_references("![img](https://example.com/a.jpg)") == set()
 
     def test_update_media_references_parentheses_and_html(self, fs, tmp_path):
@@ -102,7 +104,7 @@ class TestMediaReferenceDetection:
         md_file.write_text(
             (
                 "1. ![img](media/a(b).jpg)\n"
-                "2. <img src=\"a b.jpg\">\n"
+                '2. <img src="a b.jpg">\n'
                 "3. [sound:a%20b.mp3]\n"
             ),
             encoding="utf-8",
@@ -118,7 +120,7 @@ class TestMediaReferenceDetection:
 
         new_content = md_file.read_text(encoding="utf-8")
         assert "![img](<media/hashed1.jpg>)" in new_content
-        assert "<img src=\"media/hashed2.jpg\">" in new_content
+        assert '<img src="media/hashed2.jpg">' in new_content
         assert "[sound:hashed3.mp3]" in new_content
 
 
@@ -166,7 +168,9 @@ class TestMediaSyncIncremental:
         assert second.summary.synced == 0
         assert anki.push_count == 1
 
-    def test_sync_media_to_anki_cache_persists_across_db_connections(self, fs, tmp_path):
+    def test_sync_media_to_anki_cache_persists_across_db_connections(
+        self, fs, tmp_path
+    ):
         media_dir = tmp_path / LOCAL_MEDIA_DIR
         media_dir.mkdir()
         (media_dir / "img.png").write_bytes(b"image-content")
@@ -193,3 +197,27 @@ class TestMediaSyncIncremental:
         assert first.summary.synced == 1
         assert second.summary.synced == 0
         assert anki.push_count == 1
+
+    def test_sync_media_prunes_deleted_markdown_cache_rows(self, fs, tmp_path):
+        media_dir = tmp_path / LOCAL_MEDIA_DIR
+        media_dir.mkdir()
+        (media_dir / "img.png").write_bytes(b"image-content")
+        deck_a = tmp_path / "DeckA.md"
+        deck_b = tmp_path / "DeckB.md"
+        deck_a.write_text("Q: A\nA: ![img](media/img.png)", encoding="utf-8")
+        deck_b.write_text("Q: B\nA: ![img](media/img.png)", encoding="utf-8")
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            sync_media_to_anki(anki, fs, tmp_path, db)
+            assert db.get_markdown_media_cached_paths() == {"DeckA.md", "DeckB.md"}
+
+            deck_a.unlink()
+            sync_media_to_anki(anki, fs, tmp_path, db)
+            assert db.get_markdown_media_cached_paths() == {"DeckB.md"}
+        finally:
+            db.close()

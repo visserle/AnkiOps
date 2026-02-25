@@ -154,6 +154,7 @@ def _sync_file(
     note_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_fingerprints: list[tuple[str, str, str]],
     global_note_keys: set[str],
+    global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
 ) -> tuple[NoteSyncResult, _PendingWrite]:
     needs_create_deck = False
@@ -171,9 +172,14 @@ def _sync_file(
     cards_to_move = []
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
-        if note_ids_by_note_key.get(note_key) == note_id:
+        existing_note_id = note_ids_by_note_key.get(note_key)
+        if existing_note_id == note_id:
             return
         note_ids_by_note_key[note_key] = note_id
+        if note_key in global_note_keys:
+            if existing_note_id is not None:
+                global_mapped_note_ids.discard(existing_note_id)
+            global_mapped_note_ids.add(note_id)
         pending_note_mappings.append((note_key, note_id))
 
     def _queue_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
@@ -327,17 +333,13 @@ def _sync_file(
 
     # Orphans
     orphaned = all_anki_note_ids - md_anki_ids
-    if global_note_keys:
-        global_note_ids = set()
-        for note_key in global_note_keys:
-            mapped = note_ids_by_note_key.get(note_key)
-            if mapped:
-                global_note_ids.add(mapped)
-        orphaned -= global_note_ids
+    if global_mapped_note_ids:
+        orphaned -= global_mapped_note_ids
 
-    for note_id in orphaned:
+    orphan_note_keys = db_port.get_note_keys_bulk(orphaned)
+    for note_id in sorted(orphaned):
         if note_id:
-            note_key = db_port.get_note_key(note_id)
+            note_key = orphan_note_keys.get(note_id)
             deletes.append(
                 Change(
                     ChangeType.DELETE,
@@ -377,7 +379,9 @@ def _sync_file(
             if delete_note_keys:
                 db_port.remove_notes_by_note_keys_bulk(delete_note_keys)
                 for note_key in delete_note_keys:
-                    note_ids_by_note_key.pop(note_key, None)
+                    removed_note_id = note_ids_by_note_key.pop(note_key, None)
+                    if note_key in global_note_keys and removed_note_id is not None:
+                        global_mapped_note_ids.discard(removed_note_id)
                     note_fingerprints_by_note_key.pop(note_key, None)
 
         # Deck recovery logic for needs_create_deck
@@ -423,9 +427,7 @@ def import_collection(
     if duplicates:
         raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
     note_ids_by_note_key = db_port.get_note_ids_bulk(global_note_keys)
-    note_fingerprints_by_note_key = db_port.get_note_fingerprints_bulk(
-        global_note_keys
-    )
+    note_fingerprints_by_note_key = db_port.get_note_fingerprints_bulk(global_note_keys)
     pending_note_mappings: list[tuple[str, int]] = []
     pending_fingerprints: list[tuple[str, str, str]] = []
 
@@ -446,6 +448,12 @@ def import_collection(
                 continue
             note_ids_by_note_key[embedded_note_key] = anki_note.note_id
             pending_note_mappings.append((embedded_note_key, anki_note.note_id))
+
+        global_mapped_note_ids = {
+            note_id
+            for note_key, note_id in note_ids_by_note_key.items()
+            if note_key in global_note_keys and note_id
+        }
 
         # We need to compute anki_cards and group note_ids by deck.
         # A single bulk cardsInfo fetch is faster than many smaller calls.
@@ -487,6 +495,7 @@ def import_collection(
                 note_fingerprints_by_note_key,
                 pending_fingerprints,
                 global_note_keys,
+                global_mapped_note_ids,
                 file_anki_note_ids,
             )
             if res.deck_name in deck_ids_by_name:
@@ -502,6 +511,7 @@ def import_collection(
             db_port.set_notes_bulk(pending_note_mappings)
         if pending_fingerprints:
             db_port.set_note_fingerprints_bulk(pending_fingerprints)
+        db_port.prune_orphan_note_fingerprints()
 
         _flush_writes(fs_port, pending)
         db_port.save()

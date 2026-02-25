@@ -37,7 +37,13 @@ def _make_create_change() -> Change:
 
 def test_apply_note_changes_collects_partial_errors():
     adapter = AnkiAdapter()
-    fake_multi_result = [None, "change deck failed", "update failed", "delete failed", "create failed"]
+    fake_multi_result = [
+        None,
+        "change deck failed",
+        "update failed",
+        "delete failed",
+        "create failed",
+    ]
 
     with patch("ankiops.anki.invoke", return_value=fake_multi_result):
         created_ids, errors = adapter.apply_note_changes(

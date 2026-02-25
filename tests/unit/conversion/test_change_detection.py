@@ -36,7 +36,9 @@ def _has_changes(anki_fields: dict[str, str], complete: dict[str, str]) -> bool:
     return any(complete.get(key, "") != anki_fields.get(key, "") for key in complete)
 
 
-def _roundtrip(fs, md_to_html, html_to_md, anki_fields: dict[str, str], note_type: str) -> dict[str, str]:
+def _roundtrip(
+    fs, md_to_html, html_to_md, anki_fields: dict[str, str], note_type: str
+) -> dict[str, str]:
     md_fields = {name: html_to_md.convert(value) for name, value in anki_fields.items()}
     html_fields = {name: md_to_html.convert(value) for name, value in md_fields.items()}
     return _complete_fields(fs, note_type, html_fields)
@@ -79,7 +81,9 @@ class TestChangeDetection:
         result = _roundtrip(fs, md_to_html, html_to_md, self.ANKI_QA, "AnkiOpsQA")
         assert not _has_changes(self.ANKI_QA, result)
 
-    def test_change_detected_when_optional_field_removed(self, fs, md_to_html, html_to_md):
+    def test_change_detected_when_optional_field_removed(
+        self, fs, md_to_html, html_to_md
+    ):
         modified = dict(self.ANKI_QA)
         modified["Extra"] = ""
         result = _roundtrip(fs, md_to_html, html_to_md, modified, "AnkiOpsQA")

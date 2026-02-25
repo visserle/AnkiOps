@@ -87,7 +87,8 @@ def serialize_collection_to_json(
 
 
 def deserialize_collection_from_json(
-    json_file: Path, overwrite: bool = False,
+    json_file: Path,
+    overwrite: bool = False,
 ) -> None:
     """Deserialize collection from JSON format.
 

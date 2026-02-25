@@ -24,7 +24,9 @@ def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
     with world.db_session() as db:
         result = world.sync_export(db)
 
-        assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
 
         file_path = world.deck_path("FreshExportDeck")
         assert file_path.exists()
@@ -53,7 +55,9 @@ def test_exp_run_update_001_updates_existing_markdown_note(world):
 
         result = world.sync_export(db)
 
-        assert_summary(result.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
+        assert_summary(
+            result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
         _assert_deck_contains(world, "UpdateDeck", "A: New Anki A")
 
 
@@ -91,7 +95,9 @@ def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world
 
         result = world.sync_export(db)
 
-        assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
+        assert_summary(
+            result.summary, created=0, updated=0, moved=0, deleted=1, errors=0
+        )
         content = world.read_deck("DeleteDeck")
         assert "Keep Q" in content
         assert "Drop Q" not in content
@@ -137,7 +143,9 @@ def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
     with world.db_session() as db:
         result = world.sync_export(db)
 
-        assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
         _assert_deck_contains(world, "DriftDeck", f"<!-- note_key: {note_key} -->")
         assert db.get_note_key(note_id) == note_key
 

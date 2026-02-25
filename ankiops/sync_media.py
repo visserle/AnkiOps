@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 HASH_SUFFIX_PATTERN = re.compile(r"_([a-f0-9]{8})\.[^.]+$")
 ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
-MARKDOWN_IMAGE_PATTERN = r"!\[.*?\]\((?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))\)(?:\{[^}]*\})?"
+MARKDOWN_IMAGE_PATTERN = (
+    r"!\[.*?\]\((?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))\)(?:\{[^}]*\})?"
+)
 HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
 
 
@@ -71,6 +73,9 @@ def _collect_referenced_media(
 ) -> set[str]:
     md_files = fs_port.find_markdown_files(collection_dir)
     md_keys = [_markdown_cache_key(collection_dir, md_file) for md_file in md_files]
+    pruned = db_port.prune_markdown_media_cache(md_keys)
+    if pruned:
+        logger.debug(f"Pruned media cache for {pruned} stale markdown path(s)")
     cached = db_port.get_markdown_media_cache_bulk(md_keys)
 
     referenced: set[str] = set()
@@ -146,11 +151,7 @@ def hash_and_update_references(
         try:
             stat = file_path.stat()
             cached = cached_fingerprints.get(file_path.name)
-            if (
-                cached
-                and cached[0] == stat.st_mtime_ns
-                and cached[1] == stat.st_size
-            ):
+            if cached and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
                 digest = cached[2]
                 hash_cache_hits += 1
             else:

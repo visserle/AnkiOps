@@ -48,7 +48,9 @@ def _run_export(collection_dir, *, preload_configs: bool = False):
         )
 
 
-def _insert_mock_note(mock_anki, *, deck_name: str, note_id: int, card_id: int, fields: dict[str, str]):
+def _insert_mock_note(
+    mock_anki, *, deck_name: str, note_id: int, card_id: int, fields: dict[str, str]
+):
     mock_anki.invoke("createDeck", deck=deck_name)
     mock_anki.notes[note_id] = {
         "noteId": note_id,
@@ -113,7 +115,9 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
 
     import_result = _run_import(tmp_path)
     assert import_result.results[0].errors == []
-    assert_summary(import_result.summary, created=5, updated=0, moved=0, deleted=0, errors=0)
+    assert_summary(
+        import_result.summary, created=5, updated=0, moved=0, deleted=0, errors=0
+    )
 
     notes = list(mock_anki.notes.values())
     assert len(notes) == 5
@@ -242,6 +246,8 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
     assert "<!-- note_key:" in content
 
     lines = content.splitlines()
-    key_line_idx = next(i for i, line in enumerate(lines) if line.startswith("<!-- note_key:"))
+    key_line_idx = next(
+        i for i, line in enumerate(lines) if line.startswith("<!-- note_key:")
+    )
     assert key_line_idx + 1 < len(lines)
     assert lines[key_line_idx + 1].startswith("Q: Trailing Space Question ")

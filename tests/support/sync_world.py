@@ -90,7 +90,9 @@ class SyncWorld:
         safe = deck_name.replace("::", "__")
         return self.root / f"{safe}.md"
 
-    def write_qa_deck(self, deck_name: str, notes: list[tuple[str, str, str | None]]) -> Path:
+    def write_qa_deck(
+        self, deck_name: str, notes: list[tuple[str, str, str | None]]
+    ) -> Path:
         path = self.deck_path(deck_name)
         if not notes:
             path.write_text("", encoding="utf-8")

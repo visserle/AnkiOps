@@ -347,9 +347,9 @@ class FileSystemAdapter:
         updated_files = 0
         # Markdown image links, HTML src attributes, and Anki sound refs.
         pattern = re.compile(
-            r'(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)'
+            r"(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)"
             r'|(src=["\'])(.+?)(["\'])'
-            r'|(\[sound:)(.+?)(\])'
+            r"|(\[sound:)(.+?)(\])"
         )
 
         def replace_callback(match: re.Match) -> str:

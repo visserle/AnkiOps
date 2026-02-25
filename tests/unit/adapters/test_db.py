@@ -230,9 +230,7 @@ def test_bulk_note_fingerprints_last_write_wins(tmp_path):
                 ("k1", "new-md", "new-a"),
             ]
         )
-        assert adapter.get_note_fingerprints_bulk(["k1"]) == {
-            "k1": ("new-md", "new-a")
-        }
+        assert adapter.get_note_fingerprints_bulk(["k1"]) == {"k1": ("new-md", "new-a")}
     finally:
         adapter.close()
 
@@ -246,6 +244,24 @@ def test_remove_note_by_note_key_removes_fingerprint(tmp_path):
 
         assert adapter.get_note_id("k1") is None
         assert adapter.get_note_fingerprints_bulk(["k1"]) == {}
+    finally:
+        adapter.close()
+
+
+def test_prune_orphan_note_fingerprints(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_note("k1", 101)
+        adapter.set_note_fingerprints_bulk(
+            [("k1", "md1", "a1"), ("stale", "md2", "a2")]
+        )
+
+        removed = adapter.prune_orphan_note_fingerprints()
+
+        assert removed == 1
+        assert adapter.get_note_fingerprints_bulk(["k1", "stale"]) == {
+            "k1": ("md1", "a1")
+        }
     finally:
         adapter.close()
 
@@ -267,6 +283,26 @@ def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
 
         adapter.remove_markdown_media_cache_by_paths(["Deck.md"])
         assert adapter.get_markdown_media_cache_bulk(["Deck.md"]) == {}
+    finally:
+        adapter.close()
+
+
+def test_prune_markdown_media_cache_removes_stale_paths(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        adapter.set_markdown_media_cache_bulk(
+            [
+                ("DeckA.md", 10, 200, {"a.png"}),
+                ("DeckB.md", 20, 300, {"b.png"}),
+            ]
+        )
+
+        removed = adapter.prune_markdown_media_cache({"DeckB.md"})
+
+        assert removed == 1
+        assert adapter.get_markdown_media_cache_bulk(["DeckA.md", "DeckB.md"]) == {
+            "DeckB.md": (20, 300, {"b.png"})
+        }
     finally:
         adapter.close()
 
@@ -308,8 +344,6 @@ def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
         }
 
         adapter.remove_media_push_state_by_names(["a.png"])
-        assert adapter.get_media_push_state_bulk(["a.png", "b.png"]) == {
-            "b.png": "d3"
-        }
+        assert adapter.get_media_push_state_bulk(["a.png", "b.png"]) == {"b.png": "d3"}
     finally:
         adapter.close()

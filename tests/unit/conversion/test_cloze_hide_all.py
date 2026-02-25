@@ -282,9 +282,7 @@ class TestAnkiRenderer:
 
     def test_multiple_same_index_all_active(self):
         """When c1 is active, ALL c1 clozes should be revealed."""
-        result = anki_render_cloze(
-            "{{c1::dog}} and {{c1::cat}} are animals", 1, "back"
-        )
+        result = anki_render_cloze("{{c1::dog}} and {{c1::cat}} are animals", 1, "back")
         assert '<span class="cloze">dog</span>' in result
         assert '<span class="cloze">cat</span>' in result
 
@@ -293,4 +291,4 @@ class TestAnkiRenderer:
         result = anki_render_cloze(
             "{{c1::dog}} and {{c1::cat}} are animals", 1, "front"
         )
-        assert result.count('[...]') == 2
+        assert result.count("[...]") == 2

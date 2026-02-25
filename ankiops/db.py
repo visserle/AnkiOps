@@ -316,6 +316,22 @@ class SQLiteDbAdapter:
             )
         self._write_many(statements)
 
+    def prune_orphan_note_fingerprints(self) -> int:
+        """Delete fingerprint rows that no longer have a mapped note_key.
+
+        Returns the number of rows removed.
+        """
+        sql = (
+            "DELETE FROM note_fingerprints "
+            "WHERE note_key NOT IN (SELECT note_key FROM notes)"
+        )
+        if self._tx_depth > 0:
+            cursor = self._conn.execute(sql)
+        else:
+            with self._conn:
+                cursor = self._conn.execute(sql)
+        return max(cursor.rowcount, 0)
+
     def get_markdown_media_cache_bulk(
         self, md_paths: Iterable[str]
     ) -> dict[str, tuple[int, int, set[str]]]:
@@ -426,6 +442,21 @@ class SQLiteDbAdapter:
                 )
             )
         self._write_many(statements)
+
+    def get_markdown_media_cached_paths(self) -> set[str]:
+        rows = self._conn.execute(
+            "SELECT md_path FROM markdown_media_state "
+            "UNION SELECT md_path FROM markdown_media_refs"
+        ).fetchall()
+        return {md_path for (md_path,) in rows}
+
+    def prune_markdown_media_cache(self, valid_md_paths: Iterable[str]) -> int:
+        valid = set(valid_md_paths)
+        stale = sorted(self.get_markdown_media_cached_paths() - valid)
+        if not stale:
+            return 0
+        self.remove_markdown_media_cache_by_paths(stale)
+        return len(stale)
 
     def get_media_fingerprints_bulk(
         self, names: Iterable[str]

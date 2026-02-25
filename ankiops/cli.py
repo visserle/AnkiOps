@@ -81,9 +81,7 @@ def run_am(args):
     note_count = note_summary.total
     changes = note_summary.format()
 
-    logger.info(
-        f"Export: {deck_count} decks with {note_count} notes — {changes}"
-    )
+    logger.info(f"Export: {deck_count} decks with {note_count} notes — {changes}")
     for res in export_summary.results:
         s = res.summary
         deck_fmt = s.format()
@@ -147,9 +145,7 @@ def run_ma(args):
     untracked = import_summary.untracked_decks
     changes = note_summary.format()
 
-    logger.info(
-        f"Import: {deck_count} decks with {note_count} notes — {changes}"
-    )
+    logger.info(f"Import: {deck_count} decks with {note_count} notes — {changes}")
     for res in import_summary.results:
         s = res.summary
         deck_fmt = s.format()

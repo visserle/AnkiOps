@@ -81,7 +81,9 @@ def _sync_export(anki, fs, db, collection_dir: Path):
     )
 
 
-def _assert_mapping_invariants(deck_file: Path, mock_anki: MockAnki, collection_dir: Path) -> None:
+def _assert_mapping_invariants(
+    deck_file: Path, mock_anki: MockAnki, collection_dir: Path
+) -> None:
     if deck_file.exists():
         keys = _NOTE_KEY_RE.findall(deck_file.read_text(encoding="utf-8"))
         assert_unique(keys)
@@ -124,7 +126,10 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
                         deck_file.write_text(f"Q: {q}\nA: {a}\n", encoding="utf-8")
 
                     elif op == "md_update":
-                        if deck_file.exists() and deck_file.read_text(encoding="utf-8").strip():
+                        if (
+                            deck_file.exists()
+                            and deck_file.read_text(encoding="utf-8").strip()
+                        ):
                             content = deck_file.read_text(encoding="utf-8")
                             updated = _replace_answer(content, f"A{step}-md")
                             deck_file.write_text(updated, encoding="utf-8")

@@ -295,6 +295,7 @@ def export_collection(
             db_port.set_notes_bulk(pending_note_mappings)
         if pending_fingerprints:
             db_port.set_note_fingerprints_bulk(pending_fingerprints)
+        db_port.prune_orphan_note_fingerprints()
 
         extra_changes = []
         active_files = {res.file_path for res in results if res.file_path}

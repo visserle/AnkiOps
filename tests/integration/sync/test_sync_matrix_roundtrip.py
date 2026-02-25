@@ -14,13 +14,19 @@ def test_rt_fresh_create_001_import_export_import_is_idempotent(world):
 
     with world.db_session() as db:
         first_import = world.sync_import(db)
-        assert_summary(first_import.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            first_import.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
 
         export_result = world.sync_export(db)
-        assert_summary(export_result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            export_result.summary, created=0, updated=0, moved=0, deleted=0, errors=0
+        )
 
         second_import = world.sync_import(db)
-        assert_summary(second_import.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+        assert_summary(
+            second_import.summary, created=0, updated=0, moved=0, deleted=0, errors=0
+        )
 
         keys = world.extract_note_keys("RoundTripFresh")
         assert len(keys) == 1
@@ -38,12 +44,19 @@ def test_rt_run_update_001_anki_change_then_export_then_import_noops(world):
         world.set_note_answer(note_id, "Run A Modified In Anki")
 
         export_result = world.sync_export(db)
-        assert_summary(export_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
+        assert_summary(
+            export_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
         assert "A: Run A Modified In Anki" in world.read_deck("RoundTripRun")
 
         import_again = world.sync_import(db)
-        assert_summary(import_again.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
-        assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Run A Modified In Anki"
+        assert_summary(
+            import_again.summary, created=0, updated=0, moved=0, deleted=0, errors=0
+        )
+        assert (
+            world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
+            == "Run A Modified In Anki"
+        )
 
 
 def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_cleanly(world):
@@ -126,7 +139,9 @@ def test_rt_fresh_update_001_export_import_export_keeps_markdown_winner(world):
         assert_summary(first_export.summary, created=1, errors=0)
 
         md_file = world.deck_path("RoundTripFreshUpdate")
-        content = md_file.read_text(encoding="utf-8").replace("From Anki", "From Markdown")
+        content = md_file.read_text(encoding="utf-8").replace(
+            "From Anki", "From Markdown"
+        )
         md_file.write_text(content, encoding="utf-8")
 
         imp = world.sync_import(db)
@@ -165,9 +180,13 @@ def test_rt_corr_operations_recover_after_db_corruption(operation, world):
         imp = world.sync_import(recovered)
 
         if operation == "update":
-            assert_summary(imp.summary, created=0, updated=1, moved=0, deleted=0, errors=0)
+            assert_summary(
+                imp.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+            )
         else:
-            assert_summary(imp.summary, created=0, updated=0, moved=1, deleted=0, errors=0)
+            assert_summary(
+                imp.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+            )
 
         exp = world.sync_export(recovered)
         assert_summary(exp.summary, errors=0)
@@ -200,4 +219,7 @@ def test_rt_run_conflict_001_last_sync_direction_wins(world):
             encoding="utf-8",
         )
         world.sync_import(db)
-        assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Markdown Final"
+        assert (
+            world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
+            == "Markdown Final"
+        )

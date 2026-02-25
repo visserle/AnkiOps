@@ -13,18 +13,30 @@ from ankiops.models import AnkiNote, MarkdownFile, Note
 from tests.support.assertions import assert_summary
 
 
-def _mk_markdown_state(path: Path, raw: str, notes: list[Note] | None = None) -> MarkdownFile:
+def _mk_markdown_state(
+    path: Path, raw: str, notes: list[Note] | None = None
+) -> MarkdownFile:
     return MarkdownFile(file_path=path, raw_content=raw, notes=notes or [])
 
 
-def test_flush_writes_handles_duplicate_first_lines_with_explicit_note_mapping(tmp_path):
+def test_flush_writes_handles_duplicate_first_lines_with_explicit_note_mapping(
+    tmp_path,
+):
     fs_port = FileSystemAdapter()
     md_path = tmp_path / "DuplicateLines.md"
     raw = "Q: Same\nA: One\n\n---\n\nQ: Same\nA: Two\n"
     md_path.write_text(raw, encoding="utf-8")
 
-    first = Note(note_key=None, note_type="AnkiOpsQA", fields={"Question": "Same", "Answer": "One"})
-    second = Note(note_key=None, note_type="AnkiOpsQA", fields={"Question": "Same", "Answer": "Two"})
+    first = Note(
+        note_key=None,
+        note_type="AnkiOpsQA",
+        fields={"Question": "Same", "Answer": "One"},
+    )
+    second = Note(
+        note_key=None,
+        note_type="AnkiOpsQA",
+        fields={"Question": "Same", "Answer": "Two"},
+    )
     pending = _PendingWrite(
         file_state=_mk_markdown_state(md_path, raw, notes=[first, second]),
         note_key_assignments=[(first, "k1"), (second, "k2")],
@@ -43,7 +55,11 @@ def test_flush_writes_updates_existing_key_comment(tmp_path):
     raw = "<!-- note_key: old-key -->\nQ: Q1\nA: A1\n"
     md_path.write_text(raw, encoding="utf-8")
 
-    note = Note(note_key="old-key", note_type="AnkiOpsQA", fields={"Question": "Q1", "Answer": "A1"})
+    note = Note(
+        note_key="old-key",
+        note_type="AnkiOpsQA",
+        fields={"Question": "Q1", "Answer": "A1"},
+    )
     pending = _PendingWrite(
         file_state=_mk_markdown_state(md_path, raw, notes=[note]),
         note_key_assignments=[(note, "new-key")],
