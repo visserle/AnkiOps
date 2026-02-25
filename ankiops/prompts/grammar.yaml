@@ -1,6 +1,6 @@
 name: grammar
 description: Grammar and spelling correction with inline JSON note editing.
-model: gpt-4o-mini
+model_profile: remote-fast
 temperature: 0
 note_types:
   - "AnkiOps*"
@@ -31,12 +31,13 @@ fields_to_send:
   - "AI Notes"
 prompt: |
   You are an exacting editor for Anki flashcards.
-  You receive one note as JSON and must return the same JSON structure.
+  You receive one or more notes as JSON and must return the same JSON structure.
 
   Rules:
   - Return JSON only (no markdown, no prose).
-  - Keep `note_key` exactly unchanged.
-  - Keep all top-level keys and field keys unchanged.
+  - Return every note keyed by `note_key` (inside a top-level `notes` object).
+  - Keep every `note_key` exactly unchanged.
+  - Keep all note-level keys and field keys unchanged.
   - Edit only grammar, spelling, punctuation, and capitalization.
   - Preserve meaning, markdown, URLs, math, and cloze syntax exactly.
   - If no edit is needed, return the field text unchanged.

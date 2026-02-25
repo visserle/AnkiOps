@@ -155,30 +155,34 @@ uv run python -m main ma
 - `--overwrite` - Overwrite existing markdown files
 
 **`ai config`:**
-- `--provider {local,remote}` - Set provider profile
-- `--model` - Set default model name
-- `--base-url` - Set OpenAI-compatible base URL
-- `--api-key-env` - Set env var name used for API key lookup
-- `--timeout` - Set request timeout in seconds
+- `--profile` - Model profile name from `prompts/models.yaml`
+- `--provider {local,remote}` - Optional runtime provider override
+- `--model` - Optional runtime model override
+- `--base-url` - Optional runtime OpenAI-compatible base URL override
+- `--api-key-env` - Optional runtime API key env var override
+- `--api-key` - Optional runtime API key value
+- `--timeout` - Optional runtime timeout override
+- `--max-in-flight` - Optional runtime max concurrent request override
 
 **`ai`:**
 - `--include-deck`, `-d` - Include a deck and all subdecks recursively (repeatable)
 - `--prompt` - Prompt file name/path from `prompts/` (required)
-- `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout` - Runtime overrides
+- `--batch-size` - Number of notes per AI request (default: 1)
+- `--profile`, `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout`, `--max-in-flight` - Runtime overrides
 
 ### Where is AI config stored?
 
-AnkiOps stores non-secret AI defaults in the local `.ankiops.db` (`config` table).  
+AnkiOps stores model profiles in `prompts/models.yaml`.  
 Secrets are read from environment variables (e.g. `ANKIOPS_AI_API_KEY`) or passed at runtime via `--api-key`.
 
 ### Prompt Infrastructure
 
-AnkiOps initializes a local `prompts/` folder and copies built-in YAML prompts there.
+AnkiOps initializes a local `prompts/` folder and copies built-in YAML prompts plus `prompts/models.yaml`.
 Prompt YAML files define:
 - Prompt name/text
-- Optional model override
+- Optional `model_profile`
 - `fields_to_edit` (what fields the AI may modify)
 - `fields_to_send` (what fields are sent as inline JSON context)
 - Optional `note_types` filters
 
-Inline editing always includes `note_key`, and the AI must return the same JSON structure.
+Inline editing always includes `note_key`, and batch responses are keyed by `note_key`.

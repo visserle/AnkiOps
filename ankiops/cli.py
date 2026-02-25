@@ -5,12 +5,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from ankiops.ai import (
-    OpenAICompatibleInlineEditor,
-    load_ai_config,
+    OpenAICompatibleAsyncEditor,
+    load_models_config,
     load_prompt_config,
     resolve_runtime_ai_config,
     run_inline_prompt_on_serialized_collection,
-    save_ai_config,
 )
 from ankiops.anki import AnkiAdapter
 from ankiops.collection_serializer import (
@@ -246,40 +245,40 @@ def run_deserialize(args):
 
 
 def run_ai_config(args):
-    """Show and optionally persist collection-scoped AI configuration."""
-    collection_dir = require_initialized_collection_dir()
-    db = SQLiteDbAdapter.load(collection_dir)
-    try:
-        has_updates = any(
-            setting_value is not None
-            for setting_value in [
-                args.provider,
-                args.model,
-                args.base_url,
-                args.api_key_env,
-                args.timeout,
-            ]
-        )
-        if has_updates:
-            config = save_ai_config(
-                db,
-                provider=args.provider,
-                model=args.model,
-                base_url=args.base_url,
-                api_key_env=args.api_key_env,
-                timeout_seconds=args.timeout,
-            )
-            logger.info("Saved AI configuration defaults in .ankiops.db")
-        else:
-            config = load_ai_config(db)
-    finally:
-        db.close()
+    """Show the resolved AI runtime configuration from prompts/models.yaml."""
+    _ = require_initialized_collection_dir()
+    prompts_dir = get_prompts_dir()
 
-    runtime = resolve_runtime_ai_config(config)
+    try:
+        models_config = load_models_config(prompts_dir)
+    except ValueError as error:
+        logger.error(f"Invalid model profile configuration: {error}")
+        raise SystemExit(1)
+
+    try:
+        runtime = resolve_runtime_ai_config(
+            models_config,
+            profile=args.profile,
+            provider=args.provider,
+            model=args.model,
+            base_url=args.base_url,
+            api_key_env=args.api_key_env,
+            timeout_seconds=args.timeout,
+            max_in_flight=args.max_in_flight,
+            api_key=args.api_key,
+        )
+    except ValueError as error:
+        logger.error(f"Invalid AI configuration: {error}")
+        raise SystemExit(1)
+
+    logger.info(f"Models config: {models_config.source_path}")
+    logger.info(f"Default profile: {models_config.default_profile}")
+    logger.info(f"Selected profile: {runtime.profile}")
     logger.info(f"AI provider: {runtime.provider}")
     logger.info(f"AI model: {runtime.model}")
     logger.info(f"AI base URL: {runtime.base_url}")
     logger.info(f"AI timeout: {runtime.timeout_seconds}s")
+    logger.info(f"AI max in flight: {runtime.max_in_flight}")
     logger.info(f"API key env var: {runtime.api_key_env}")
     logger.info(f"API key available: {'yes' if runtime.api_key else 'no'}")
 
@@ -288,29 +287,37 @@ def run_ai_prompt(args):
     """Run prompt-driven inline JSON edits over serialized collection data."""
     collection_dir = require_initialized_collection_dir()
     prompts_dir = get_prompts_dir()
+
     if not args.prompt:
         logger.error("Missing required argument: --prompt")
         raise SystemExit(2)
+    if args.batch_size <= 0:
+        logger.error("--batch-size must be > 0")
+        raise SystemExit(2)
+
     try:
         prompt_config = load_prompt_config(prompts_dir, args.prompt)
     except ValueError as error:
         logger.error(f"Invalid prompt configuration: {error}")
         raise SystemExit(1)
 
-    db = SQLiteDbAdapter.load(collection_dir)
     try:
-        stored = load_ai_config(db)
-    finally:
-        db.close()
+        models_config = load_models_config(prompts_dir)
+    except ValueError as error:
+        logger.error(f"Invalid model profile configuration: {error}")
+        raise SystemExit(1)
 
+    profile_name = args.profile or prompt_config.model_profile
     try:
         runtime = resolve_runtime_ai_config(
-            stored,
+            models_config,
+            profile=profile_name,
             provider=args.provider,
-            model=args.model or prompt_config.model,
+            model=args.model,
             base_url=args.base_url,
             api_key_env=args.api_key_env,
             timeout_seconds=args.timeout,
+            max_in_flight=args.max_in_flight,
             api_key=args.api_key,
         )
     except ValueError as error:
@@ -327,7 +334,9 @@ def run_ai_prompt(args):
     logger.info(
         "AI prompt run "
         f"prompt='{prompt_config.name}' "
-        f"provider='{runtime.provider}' model='{runtime.model}'"
+        f"profile='{runtime.profile}' "
+        f"provider='{runtime.provider}' model='{runtime.model}' "
+        f"batch_size={args.batch_size} max_in_flight={runtime.max_in_flight}"
     )
 
     temp_serialized_path: Path | None = None
@@ -348,13 +357,19 @@ def run_ai_prompt(args):
         if temp_serialized_path and temp_serialized_path.exists():
             temp_serialized_path.unlink()
 
-    client = OpenAICompatibleInlineEditor(runtime)
-    result = run_inline_prompt_on_serialized_collection(
-        serialized_data=serialized_data,
-        include_decks=args.include_deck,
-        prompt_config=prompt_config,
-        editor=client,
-    )
+    client = OpenAICompatibleAsyncEditor(runtime)
+    try:
+        result = run_inline_prompt_on_serialized_collection(
+            serialized_data=serialized_data,
+            include_decks=args.include_deck,
+            prompt_config=prompt_config,
+            editor=client,
+            batch_size=args.batch_size,
+            max_in_flight=runtime.max_in_flight,
+        )
+    except ValueError as error:
+        logger.error(f"AI prompt failed: {error}")
+        raise SystemExit(1)
 
     if args.include_deck and result.processed_decks == 0:
         logger.warning("No deck matched --include-deck filters.")
@@ -409,6 +424,44 @@ def run_ai_prompt(args):
             temp_apply_path.unlink()
 
     logger.info(f"Applied changes to {len(result.changed_decks)} deck(s).")
+
+
+def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        help="Model profile name from prompts/models.yaml",
+    )
+    parser.add_argument(
+        "--provider",
+        choices=["local", "remote"],
+        help="Override provider for selected profile",
+    )
+    parser.add_argument(
+        "--model",
+        help="Override model name",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Override OpenAI-compatible chat completions base URL",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        help="Override environment variable name used for API key lookup",
+    )
+    parser.add_argument(
+        "--api-key",
+        help="API key value (runtime only; never persisted)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        help="Override request timeout in seconds",
+    )
+    parser.add_argument(
+        "--max-in-flight",
+        type=int,
+        help="Override maximum concurrent AI requests",
+    )
 
 
 def main():
@@ -514,60 +567,20 @@ def main():
         help="Prompt file name/path from prompts/ (or absolute path)",
     )
     ai_parser.add_argument(
-        "--provider",
-        choices=["local", "remote"],
-        help="AI provider profile",
-    )
-    ai_parser.add_argument(
-        "--model",
-        help="Model name to use",
-    )
-    ai_parser.add_argument(
-        "--base-url",
-        help="Base URL for OpenAI-compatible chat completions API",
-    )
-    ai_parser.add_argument(
-        "--api-key-env",
-        help="Environment variable that holds the API key",
-    )
-    ai_parser.add_argument(
-        "--api-key",
-        help="API key value (runtime only; not persisted)",
-    )
-    ai_parser.add_argument(
-        "--timeout",
+        "--batch-size",
         type=int,
-        help="Request timeout in seconds",
+        default=1,
+        help="Number of notes to send per model request (default: 1)",
     )
+    add_ai_runtime_args(ai_parser)
 
     ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)
 
     ai_config_parser = ai_subparsers.add_parser(
         "config",
-        help="Show or save collection-scoped AI defaults",
+        help="Show resolved runtime config from prompts/models.yaml",
     )
-    ai_config_parser.add_argument(
-        "--provider",
-        choices=["local", "remote"],
-        help="AI provider profile",
-    )
-    ai_config_parser.add_argument(
-        "--model",
-        help="Model name to use",
-    )
-    ai_config_parser.add_argument(
-        "--base-url",
-        help="Base URL for OpenAI-compatible chat completions API",
-    )
-    ai_config_parser.add_argument(
-        "--api-key-env",
-        help="Environment variable that holds the API key",
-    )
-    ai_config_parser.add_argument(
-        "--timeout",
-        type=int,
-        help="Request timeout in seconds",
-    )
+    add_ai_runtime_args(ai_config_parser)
     ai_config_parser.set_defaults(handler=run_ai_config)
 
     args = parser.parse_args()
@@ -594,15 +607,32 @@ def main():
         print("  ai                Run prompt-driven AI edits (or ai config)")
         print()
         print("Usage examples:")
-        print("  ankiops init --tutorial            # Initialize with tutorial")
-        print("  ankiops am                         # Export all decks to Markdown")
         print(
-            "  ankiops ma                         # Import all Markdown files to Anki"
+            "  ankiops init --tutorial                      # Initialize with tutorial"
         )
-        print("  ankiops serialize -o my-deck.json  # Serialize collection to file")
-        print("  ankiops deserialize my-deck.json   # Deserialize file, then run init")
-        print("  ankiops ai --prompt grammar -d Biology   # Prompt-run deck tree")
-        print("  ankiops ai config                       # Show AI defaults")
+        print(
+            "  ankiops am                                   "
+            "# Export all decks to Markdown"
+        )
+        print(
+            "  ankiops ma                                   "
+            "# Import all Markdown files to Anki"
+        )
+        print(
+            "  ankiops serialize -o my-deck.json            "
+            "# Serialize collection to file"
+        )
+        print(
+            "  ankiops deserialize my-deck.json             "
+            "# Deserialize file, then run init"
+        )
+        print(
+            "  ankiops ai --prompt grammar --profile local-fast -d Biology"
+            "  # Prompt-run a deck tree"
+        )
+        print(
+            "  ankiops ai config --profile remote-fast      # Show runtime model config"
+        )
         print()
         print("For more information:")
         print("  ankiops --help                 # Show general help")
