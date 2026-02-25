@@ -182,6 +182,13 @@ class MockAnki:
                 }
                 return new_id
 
+            case "addNotes":
+                notes = params.get("notes", [])
+                results = []
+                for note_data in notes:
+                    results.append(self.invoke("addNote", note=note_data))
+                return results
+
             case "updateNoteFields":
                 note_info = params["note"]
                 note_id = note_info["id"]

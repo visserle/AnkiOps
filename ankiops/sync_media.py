@@ -220,10 +220,11 @@ def hash_and_update_references(
     if rename_map:
         count = fs_port.update_media_references(collection_dir, rename_map)
         logger.debug(f"Updated {count} markdown files with {len(rename_map)} renames")
+        # 4. Re-collect now-correctly-hashed active references
+        final_referenced = _collect_referenced_media(fs_port, db_port, collection_dir)
+        return final_referenced, digest_by_name
 
-    # 4. Re-collect now-correctly-hashed active references
-    final_referenced = _collect_referenced_media(fs_port, db_port, collection_dir)
-    return final_referenced, digest_by_name
+    return referenced, digest_by_name
 
 
 def sync_media_to_anki(

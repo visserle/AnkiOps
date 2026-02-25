@@ -166,7 +166,7 @@ def run_ma(args):
         logger.warning(f"Media sync failed: {e}")
 
     logger.debug("Starting note type sync")
-    nt_summary = sync_note_types(anki, fs, note_types_dir)
+    nt_summary = sync_note_types(anki, fs, note_types_dir, db)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 

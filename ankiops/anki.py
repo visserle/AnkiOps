@@ -272,6 +272,7 @@ class AnkiAdapter:
         tags = []
         errors = []
         created_ids = []
+        create_deck_failed = False
 
         if needs_create_deck:
             actions.append(_action("createDeck", deck=deck_name))
@@ -279,7 +280,7 @@ class AnkiAdapter:
 
         if cards_to_move:
             actions.append(
-                _action("changeDeck", cards=list(set(cards_to_move)), deck=deck_name)
+                _action("changeDeck", cards=sorted(set(cards_to_move)), deck=deck_name)
             )
             tags.append("change_deck")
 
@@ -296,54 +297,82 @@ class AnkiAdapter:
             actions.append(_action("deleteNotes", notes=ids))
             tags.append("delete")
 
-        for c in creates:
-            note = c.context.get("note")
-            fields = c.context.get("html_fields", {})
-            note_type = note.note_type if note else ""
-            if "note_key" in c.context:
-                fields["AnkiOps Key"] = c.context["note_key"]
-
-            actions.append(
-                _action(
-                    "addNote",
-                    note={
-                        "deckName": deck_name,
-                        "modelName": note_type,
-                        "fields": fields,
-                        "options": {"allowDuplicate": False},
-                    },
-                )
-            )
-            tags.append("create")
-
         if actions:
             try:
                 results = invoke("multi", actions=actions)
                 update_idx = 0
-                create_idx = 0
                 for tag, res in zip(tags, results):
                     if tag == "update":
-                        if res is not None:
+                        if isinstance(res, str):
                             errors.append(
                                 f"Update failed ({updates[update_idx].entity_repr}): {res}"
                             )
                         update_idx += 1
-                    elif tag == "create":
-                        if isinstance(res, int):
-                            created_ids.append(res)
-                        else:
-                            errors.append(
-                                f"Create failed ({creates[create_idx].entity_repr}): {res}"
-                            )
-                        create_idx += 1
+                    elif tag == "create_deck":
+                        if isinstance(res, str):
+                            create_deck_failed = True
+                            errors.append(f"Failed create_deck: {res}")
                     elif tag in ("change_deck", "delete"):
-                        if res is not None:
+                        if isinstance(res, str):
                             errors.append(f"Failed {tag}: {res}")
 
             except AnkiConnectError as e:
                 errors.append(str(e))
 
+        if creates:
+            if create_deck_failed:
+                for c in creates:
+                    errors.append(f"Create failed ({c.entity_repr}): deck create failed")
+            else:
+                create_ids, create_errors = self._create_notes_bulk(deck_name, creates)
+                created_ids.extend(create_ids)
+                errors.extend(create_errors)
+
         return created_ids, errors
+
+    def _build_create_note_payload(self, deck_name: str, change: Change) -> dict:
+        note = change.context.get("note")
+        fields = dict(change.context.get("html_fields", {}))
+        note_type = note.note_type if note else ""
+        if "note_key" in change.context:
+            fields["AnkiOps Key"] = change.context["note_key"]
+        return {
+            "deckName": deck_name,
+            "modelName": note_type,
+            "fields": fields,
+            "options": {"allowDuplicate": False},
+        }
+
+    def _collect_create_results(
+        self, creates: list[Change], results: object
+    ) -> tuple[list[int], list[str]]:
+        created_ids: list[int] = []
+        errors: list[str] = []
+
+        if not isinstance(results, list):
+            return [], [f"Create failed: unexpected addNotes result: {results!r}"]
+
+        normalized = list(results)
+        if len(normalized) < len(creates):
+            normalized.extend([None] * (len(creates) - len(normalized)))
+
+        for c, res in zip(creates, normalized):
+            if isinstance(res, int):
+                created_ids.append(res)
+            else:
+                errors.append(f"Create failed ({c.entity_repr}): {res}")
+
+        return created_ids, errors
+
+    def _create_notes_bulk(
+        self, deck_name: str, creates: list[Change]
+    ) -> tuple[list[int], list[str]]:
+        notes = [self._build_create_note_payload(deck_name, c) for c in creates]
+        try:
+            results = invoke("addNotes", notes=notes)
+            return self._collect_create_results(creates, results)
+        except AnkiConnectError as e:
+            return [], [str(e)]
 
     def get_media_dir(self) -> Path:
         """Return Anki's collection.media directory, cached after first call."""
@@ -354,13 +383,13 @@ class AnkiAdapter:
         return cached
 
     def push_media(self, local_path: Path, remote_filename: str) -> None:
-        shutil.copy2(local_path, self.get_media_dir() / remote_filename)
+        shutil.copyfile(local_path, self.get_media_dir() / remote_filename)
 
     def pull_media(self, remote_filename: str, local_path: Path) -> bool:
         source = self.get_media_dir() / remote_filename
         if not source.exists():
             return False
-        shutil.copy2(source, local_path)
+        shutil.copyfile(source, local_path)
         return True
 
     def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
