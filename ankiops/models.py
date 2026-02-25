@@ -263,9 +263,10 @@ _NOTE_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
     }
 )
 
-_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = (
-    _NOTE_REPORTED_CHANGE_TYPES | {ChangeType.HASH, ChangeType.SYNC}
-)
+_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES | {
+    ChangeType.HASH,
+    ChangeType.SYNC,
+}
 
 _TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
     {ChangeType.DELETE, ChangeType.CONFLICT}
@@ -386,9 +387,10 @@ def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
     for change in changes:
         entity_id = change.entity_id or change.entity_repr
         previous = effective.get(entity_id)
-        if previous is None or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[
-            previous
-        ]:
+        if (
+            previous is None
+            or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[previous]
+        ):
             effective[entity_id] = change.change_type
     return list(effective.values())
 

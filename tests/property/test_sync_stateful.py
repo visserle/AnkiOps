@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import ANKIOPS_DB, get_note_types_dir
+from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem, get_note_types_dir
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -103,7 +103,7 @@ def _assert_mapping_invariants(
 def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
     with tempfile.TemporaryDirectory() as tdir:
         collection_dir = Path(tdir)
-        deck_file = collection_dir / "StatefulDeck.md"
+        deck_file = collection_dir / f"{deck_name_to_file_stem('StatefulDeck')}.md"
 
         mock_anki = MockAnki()
         anki = AnkiAdapter()

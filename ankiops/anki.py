@@ -322,7 +322,9 @@ class AnkiAdapter:
         if creates:
             if create_deck_failed:
                 for c in creates:
-                    errors.append(f"Create failed ({c.entity_repr}): deck create failed")
+                    errors.append(
+                        f"Create failed ({c.entity_repr}): deck create failed"
+                    )
             else:
                 create_ids, create_errors = self._create_notes_bulk(deck_name, creates)
                 created_ids.extend(create_ids)

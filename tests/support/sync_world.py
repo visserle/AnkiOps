@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import ANKIOPS_DB, NOTE_SEPARATOR, get_note_types_dir
+from ankiops.config import (
+    ANKIOPS_DB,
+    NOTE_SEPARATOR,
+    deck_name_to_file_stem,
+    get_note_types_dir,
+)
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -87,7 +92,7 @@ class SyncWorld:
         )
 
     def deck_path(self, deck_name: str) -> Path:
-        safe = deck_name.replace("::", "__")
+        safe = deck_name_to_file_stem(deck_name)
         return self.root / f"{safe}.md"
 
     def write_qa_deck(

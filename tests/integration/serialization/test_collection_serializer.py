@@ -8,6 +8,7 @@ from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
 )
+from ankiops.config import deck_name_to_file_stem
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 
@@ -44,7 +45,7 @@ def collection(tmp_path, fs, monkeypatch):
     fs.eject_builtin_note_types(note_types_dir)
     _set_note_type_paths(monkeypatch, note_types_dir)
 
-    (tmp_path / "TestDeck.md").write_text(
+    (tmp_path / f"{deck_name_to_file_stem('TestDeck')}.md").write_text(
         (
             "<!-- note_key: nk-1 -->\n"
             "Q: What is 2+2?\n"
@@ -93,3 +94,84 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
     content = md_files[0].read_text(encoding="utf-8")
     assert "What is 2+2?" in content
     assert "What is 3+3?" in content
+
+
+def test_deserialize_unknown_note_type_skips_note_without_orphan_key(
+    tmp_path, fs, monkeypatch
+):
+    _set_collection_paths(monkeypatch, tmp_path)
+
+    note_types_dir = tmp_path / "note_types"
+    fs.eject_builtin_note_types(note_types_dir)
+    _set_note_type_paths(monkeypatch, note_types_dir)
+
+    json_file = tmp_path / "in.json"
+    json_file.write_text(
+        """
+{
+  "collection": {"serialized_at": "2025-01-01T00:00:00Z"},
+  "decks": [
+        {
+          "name": "UnknownDeck",
+          "notes": [
+            {
+              "note_key": "nk-unknown",
+              "note_type": "MissingType",
+              "fields": {"UnknownField": "Only"}
+            }
+          ]
+        }
+      ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    deserialize_collection_from_json(json_file, overwrite=True)
+
+    content = (tmp_path / f"{deck_name_to_file_stem('UnknownDeck')}.md").read_text(
+        encoding="utf-8"
+    )
+    assert "note_key: nk-unknown" not in content
+    assert content == ""
+
+
+def test_deserialize_unknown_note_type_falls_back_to_inference(
+    tmp_path, fs, monkeypatch
+):
+    _set_collection_paths(monkeypatch, tmp_path)
+
+    note_types_dir = tmp_path / "note_types"
+    fs.eject_builtin_note_types(note_types_dir)
+    _set_note_type_paths(monkeypatch, note_types_dir)
+
+    json_file = tmp_path / "in.json"
+    json_file.write_text(
+        """
+{
+  "collection": {"serialized_at": "2025-01-01T00:00:00Z"},
+  "decks": [
+    {
+      "name": "InferDeck",
+      "notes": [
+        {
+          "note_key": "nk-infer",
+          "note_type": "MissingType",
+          "fields": {"Question": "Q infer", "Answer": "A infer"}
+        }
+      ]
+    }
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    deserialize_collection_from_json(json_file, overwrite=True)
+
+    content = (tmp_path / f"{deck_name_to_file_stem('InferDeck')}.md").read_text(
+        encoding="utf-8"
+    )
+    assert "<!-- note_key: nk-infer -->" in content
+    assert "Q: Q infer" in content
+    assert "A: A infer" in content

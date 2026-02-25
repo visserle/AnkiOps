@@ -4,7 +4,11 @@ import logging
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import NOTE_SEPARATOR
+from ankiops.config import (
+    NOTE_SEPARATOR,
+    deck_name_to_file_stem,
+    file_stem_to_deck_name,
+)
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
@@ -63,7 +67,7 @@ def _sync_deck(
     if existing_file_path and existing_file_path.exists():
         fs = fs_port.read_markdown_file(existing_file_path)
     else:
-        file_path = collection_dir / f"{deck_name.replace('::', '__')}.md"
+        file_path = collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
         result.file_path = file_path
 
         content = ""
@@ -258,9 +262,9 @@ def export_collection(
 
             # Rename detection: does this deck_id exist under a different name?
             old_name = db_port.get_deck_name(deck_id)
-            safe_name = deck_name.replace("::", "__")
+            safe_name = deck_name_to_file_stem(deck_name)
             if old_name and old_name != deck_name:
-                old_safe = old_name.replace("::", "__")
+                old_safe = deck_name_to_file_stem(old_name)
                 if old_safe in file_map_by_name:
                     old_path = file_map_by_name[old_safe]
                     new_path = old_path.parent / f"{safe_name}.md"
@@ -304,7 +308,7 @@ def export_collection(
             if not md_file.exists():
                 continue
             if md_file not in active_files:
-                db_port.remove_deck(md_file.stem.replace("__", "::"))
+                db_port.remove_deck(file_stem_to_deck_name(md_file.stem))
                 md_file.unlink()
                 extra_changes.append(
                     Change(ChangeType.DELETE, None, f"file: {md_file.name}")

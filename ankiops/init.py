@@ -10,6 +10,7 @@ from ankiops.config import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     PROMPTS_DIR,
+    deck_name_to_file_stem,
     get_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -106,7 +107,7 @@ def create_tutorial(collection_dir: Path) -> Path:
     """Copy the tutorial markdown file to the collection directory."""
     from importlib import resources
 
-    tutorial_dst = collection_dir / "AnkiOps Tutorial.md"
+    tutorial_dst = collection_dir / f"{deck_name_to_file_stem('AnkiOps Tutorial')}.md"
 
     try:
         # Python 3.9+ style

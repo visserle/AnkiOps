@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import get_note_types_dir
+from ankiops.config import deck_name_to_file_stem, get_note_types_dir
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -74,8 +74,8 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiop
     summary = _run_export(tmp_path)
     assert len(summary.results) == 2
 
-    file_a = tmp_path / "Deck A.md"
-    file_b = tmp_path / "Deck B.md"
+    file_a = tmp_path / f"{deck_name_to_file_stem('Deck A')}.md"
+    file_b = tmp_path / f"{deck_name_to_file_stem('Deck B')}.md"
     assert file_a.exists()
     assert file_b.exists()
 
@@ -91,7 +91,7 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiop
 def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     """Import + export should preserve all supported note-type content."""
     deck_name = "AllTypes"
-    md_file = tmp_path / f"{deck_name}.md"
+    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
     md_file.write_text(
         (
             "Q: QA Question\n"
@@ -157,7 +157,9 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
 
 def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):
     """Import create should always write a non-empty AnkiOps Key."""
-    (tmp_path / "ReproDeck.md").write_text("Q: Question\nA: Answer", encoding="utf-8")
+    (tmp_path / f"{deck_name_to_file_stem('ReproDeck')}.md").write_text(
+        "Q: Question\nA: Answer", encoding="utf-8"
+    )
 
     _run_import(tmp_path)
 
@@ -186,7 +188,7 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     finally:
         db_setup.close()
 
-    (tmp_path / "ReproDeck.md").write_text(
+    (tmp_path / f"{deck_name_to_file_stem('ReproDeck')}.md").write_text(
         f"<!-- note_key: {note_key} -->\nQ: OldQ\nA: UpdatedA",
         encoding="utf-8",
     )
@@ -220,7 +222,7 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
 
     _run_export(tmp_path)
 
-    md_file = tmp_path / f"{deck_name}.md"
+    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
     assert md_file.exists()
     content = md_file.read_text(encoding="utf-8")
     assert f"<!-- note_key: {existing_note_key} -->" in content
@@ -233,8 +235,8 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
 
 
 def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankiops):
-    """Generated note_key comment should be inserted immediately above the note prefix."""
-    deck_file = tmp_path / "TrailingSpaceDeck.md"
+    """Generated note_key comment should sit immediately above the note prefix."""
+    deck_file = tmp_path / f"{deck_name_to_file_stem('TrailingSpaceDeck')}.md"
     deck_file.write_text(
         "Q: Trailing Space Question \nA: Normal Answer\n",
         encoding="utf-8",

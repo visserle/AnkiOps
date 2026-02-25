@@ -5,7 +5,13 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ankiops.config import ANKIOPS_DB, get_collection_dir, get_note_types_dir
+from ankiops.config import (
+    ANKIOPS_DB,
+    deck_name_to_file_stem,
+    file_stem_to_deck_name,
+    get_collection_dir,
+    get_note_types_dir,
+)
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
 
@@ -53,8 +59,7 @@ def serialize_collection_to_json(
             continue
 
         deck_data = {}
-
-        deck_data["name"] = md_file.stem.replace("__", "::")
+        deck_data["name"] = file_stem_to_deck_name(md_file.stem)
         deck_data["notes"] = []
 
         for note in parsed.notes:
@@ -121,39 +126,55 @@ def deserialize_collection_from_json(
 
     total_decks = 0
     total_notes = 0
+    skipped_notes = 0
 
     for deck in data["decks"]:
         deck_name = deck["name"]
         notes = deck["notes"]
 
-        filename = deck_name.replace("::", "__") + ".md"
+        filename = deck_name_to_file_stem(deck_name) + ".md"
         output_path = root_dir / filename
 
         lines = []
+        written_notes = 0
 
         for note in notes:
             note_key = note.get("note_key")
             fields = note["fields"]
 
             note_type = note.get("note_type")
-            if not note_type:
+            config = (
+                config_by_name.get(note_type) if isinstance(note_type, str) else None
+            )
+
+            if config is None:
                 try:
                     note_type = fs._infer_note_type(fields)
                 except ValueError as e:
                     logger.warning(
-                        f"Cannot infer note type in deck '{deck_name}': {e}, skipping"
+                        f"Cannot infer note type in deck '{deck_name}': {e}, "
+                        "skipping note"
                     )
+                    skipped_notes += 1
                     continue
+                config = config_by_name.get(note_type)
+
+            if config is None:
+                logger.warning(
+                    f"Unknown note type '{note_type}' in deck '{deck_name}', "
+                    "skipping note"
+                )
+                skipped_notes += 1
+                continue
 
             if note_key:
                 lines.append(f"<!-- note_key: {note_key} -->")
 
-            config = config_by_name.get(note_type)
-            if config:
-                for field in config.fields:
-                    field_content = fields.get(field.name)
-                    if field_content and field.prefix:
-                        lines.append(f"{field.prefix} {field_content}")
+            for field in config.fields:
+                field_content = fields.get(field.name)
+                if field_content and field.prefix:
+                    lines.append(f"{field.prefix} {field_content}")
+            written_notes += 1
 
             lines.append("")
             lines.append("---")
@@ -166,7 +187,9 @@ def deserialize_collection_from_json(
         content = "\n".join(lines)
         if overwrite or not output_path.exists():
             output_path.write_text(content, encoding="utf-8")
-            logger.info(f"  Created {clickable_path(output_path)} ({len(notes)} notes)")
+            logger.info(
+                f"  Created {clickable_path(output_path)} ({written_notes} notes)"
+            )
         else:
             logger.debug(
                 f"Skipped {clickable_path(output_path)} "
@@ -174,11 +197,15 @@ def deserialize_collection_from_json(
             )
 
         total_decks += 1
-        total_notes += len(notes)
+        total_notes += written_notes
 
     logger.info(
         f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {root_dir}"
     )
+    if skipped_notes:
+        logger.warning(
+            f"Skipped {skipped_notes} note(s) due to missing/invalid note type metadata"
+        )
 
     db_path = root_dir / ANKIOPS_DB
     if not db_path.exists():

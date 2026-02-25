@@ -221,3 +221,29 @@ class TestMediaSyncIncremental:
             assert db.get_markdown_media_cached_paths() == {"DeckB.md"}
         finally:
             db.close()
+
+    def test_sync_media_to_anki_keeps_sound_references_filename_only(
+        self, fs, tmp_path
+    ):
+        media_dir = tmp_path / LOCAL_MEDIA_DIR
+        media_dir.mkdir()
+        (media_dir / "clip.mp3").write_bytes(b"audio-content")
+        (tmp_path / "deck.md").write_text(
+            "Q: Prompt\nA: [sound:clip.mp3]", encoding="utf-8"
+        )
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            result = sync_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        content = (tmp_path / "deck.md").read_text(encoding="utf-8")
+        assert "[sound:media/" not in content
+        assert "[sound:clip_" in content
+        assert ".mp3]" in content
+        assert result.summary.synced == 1

@@ -197,3 +197,46 @@ def test_imp_run_drift_003_reports_untracked_anki_decks(world):
         untracked = result.untracked_decks[0]
         assert untracked.deck_name == "AnkiOnlyDeck"
         assert note_id in untracked.note_ids
+
+
+def test_imp_fresh_create_002_literal_double_underscore_deck_name(world):
+    """IMP-FRESH-CREATE-002."""
+    world.write_qa_deck("Literal__Deck", [("Q", "A", None)])
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+        note_id = next(iter(world.mock_anki.notes.keys()))
+        card_id = world.mock_anki.notes[note_id]["cards"][0]
+        assert world.mock_anki.cards[card_id]["deckName"] == "Literal__Deck"
+        assert "Literal::Deck" not in world.mock_anki.decks
+
+
+def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
+    """IMP-RUN-RENAME-001."""
+    note_key = "imp-run-rename-001"
+    note_id = world.add_qa_note(
+        deck_name="OldDeck",
+        question="Rename Q",
+        answer="Rename A",
+        note_key=note_key,
+    )
+    world.write_qa_deck("NewDeck", [("Rename Q", "Rename A", note_key)])
+
+    with world.db_session() as db:
+        db.set_note(note_key, note_id)
+        db.set_deck("OldDeck", world.mock_anki.decks["OldDeck"])
+
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+        )
+        assert all(d.deck_name != "OldDeck" for d in result.untracked_decks)
+        assert db.get_deck_id("OldDeck") is None
+        assert db.get_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
+        card_id = world.mock_anki.notes[note_id]["cards"][0]
+        assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"

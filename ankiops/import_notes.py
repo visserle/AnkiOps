@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import NOTE_SEPARATOR
+from ankiops.config import NOTE_SEPARATOR, file_stem_to_deck_name
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
@@ -156,10 +156,10 @@ def _sync_file(
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
-) -> tuple[SyncResult, _PendingWrite]:
+) -> tuple[SyncResult, _PendingWrite, set[str]]:
     needs_create_deck = False
 
-    deck_name = fs.file_path.stem.replace("__", "::")
+    deck_name = file_stem_to_deck_name(fs.file_path.stem)
     resolved_id = deck_ids_by_name.get(deck_name)
 
     if not resolved_id:
@@ -170,6 +170,7 @@ def _sync_file(
     result = SyncResult.for_notes(name=deck_name, file_path=fs.file_path)
     creates, updates, deletes, skips, moves = [], [], [], [], []
     cards_to_move = []
+    moved_from_decks: set[str] = set()
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
         existing_note_id = note_ids_by_note_key.get(note_key)
@@ -247,6 +248,9 @@ def _sync_file(
                     c = anki_cards.get(cid)
                     if c and c.get("deckName") != deck_name:
                         c_to_move.append(cid)
+                        source_deck = c.get("deckName")
+                        if source_deck:
+                            moved_from_decks.add(source_deck)
                 if c_to_move:
                     moves.append(
                         Change(
@@ -340,17 +344,16 @@ def _sync_file(
     for note_id in sorted(orphaned):
         if note_id:
             note_key = orphan_note_keys.get(note_id)
+            delete_repr = f"note_key: {note_key}" if note_key else f"note_id: {note_id}"
             deletes.append(
                 Change(
                     ChangeType.DELETE,
                     note_id,
-                    f"note_key: {note_key}" if note_key else f"note_id: {note_id}",
+                    delete_repr,
                     {"note_key": note_key} if note_key else {},
                 )
             )
-            logger.debug(
-                f"  Delete {f'note_key: {note_key}' if note_key else f'note_id: {note_id}'}"
-            )
+            logger.debug(f"  Delete {delete_repr}")
 
     note_key_assignments = []
     if deck_name:
@@ -395,7 +398,7 @@ def _sync_file(
 
     result.changes = creates + updates + deletes + skips + moves
     pending = _PendingWrite(fs, note_key_assignments)
-    return result, pending
+    return result, pending, moved_from_decks
 
 
 def import_collection(
@@ -408,7 +411,6 @@ def import_collection(
     configs = fs_port.load_note_type_configs(note_types_dir)
     config_by_name = {c.name: c for c in configs}
     md_files = fs_port.find_markdown_files(collection_dir)
-
     fs_docs = [fs_port.read_markdown_file(f) for f in md_files]
 
     global_note_keys = set()
@@ -433,12 +435,14 @@ def import_collection(
 
     with db_port.transaction():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
+        initial_deck_names = set(deck_ids_by_name)
         deck_names_by_id = {v: k for k, v in deck_ids_by_name.items()}
 
         all_note_ids = anki_port.fetch_all_note_ids([c.name for c in configs])
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
 
-        # Collaboration mode: rebuild note_key->note_id mappings from embedded AnkiOps Key
+        # Collaboration mode: rebuild note_key->note_id mappings from embedded
+        # AnkiOps Key.
         # so move/delete decisions do not depend on a pre-existing local DB.
         for anki_note in anki_notes.values():
             embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
@@ -472,15 +476,19 @@ def import_collection(
         results = []
         pending = []
         md_deck_ids = set()
+        markdown_deck_names = {
+            file_stem_to_deck_name(fs.file_path.stem) for fs in fs_docs
+        }
+        renamed_from_decks: set[str] = set()
 
         for fs in fs_docs:
             # Determine actual anki_deck_note_ids for this specific file
             # We find what the deck name maps to...
-            dn = fs.file_path.stem.replace("__", "::")
+            dn = file_stem_to_deck_name(fs.file_path.stem)
 
             file_anki_note_ids = note_ids_by_deck_name.get(dn, set())
 
-            res, p = _sync_file(
+            res, p, moved_from_decks = _sync_file(
                 fs,
                 config_by_name,
                 anki_port,
@@ -498,6 +506,23 @@ def import_collection(
                 global_mapped_note_ids,
                 file_anki_note_ids,
             )
+
+            # Track filename-based deck renames to avoid stale DB deck mappings
+            # and false-positive "untracked" warnings for the old deck.
+            if (
+                res.name
+                and res.name not in initial_deck_names
+                and len(moved_from_decks) == 1
+            ):
+                source_deck = next(iter(moved_from_decks))
+                if source_deck != res.name and source_deck not in markdown_deck_names:
+                    renamed_from_decks.add(source_deck)
+                    db_port.remove_deck(source_deck)
+                    logger.info(
+                        "Deck renamed from markdown file: "
+                        f"'{source_deck}' -> '{res.name}'"
+                    )
+
             if res.name and res.name in deck_ids_by_name:
                 md_deck_ids.add(deck_ids_by_name[res.name])
 
@@ -518,6 +543,8 @@ def import_collection(
 
         untracked = []
         for dname, note_ids in note_ids_by_deck_name.items():
+            if dname in renamed_from_decks:
+                continue
             did = deck_ids_by_name.get(dname)
             if did is None or did in md_deck_ids:
                 continue

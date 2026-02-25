@@ -10,7 +10,7 @@ from urllib.parse import unquote
 import yaml
 from blake3 import blake3
 
-from ankiops.config import NOTE_SEPARATOR
+from ankiops.config import LOCAL_MEDIA_DIR, NOTE_SEPARATOR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.models import (
@@ -354,24 +354,33 @@ class FileSystemAdapter:
 
         def replace_callback(match: re.Match) -> str:
             # Determine which pattern matched
+            media_context = "other"
             if match.group(1) is not None:
                 prefix = match.group(1)
                 # Path can be in group 2 (angle brackets) or group 3 (plain).
                 path = match.group(2) or match.group(3)
                 suffix = match.group(4)
                 is_markdown = True
+                media_context = "markdown"
             elif match.group(5) is not None:
                 prefix, path, suffix = match.group(5), match.group(6), match.group(7)
                 is_markdown = False
+                media_context = "html"
             else:
                 prefix, path, suffix = match.group(8), match.group(9), match.group(10)
                 is_markdown = False
+                media_context = "sound"
 
             decoded_path = unquote(path)
             lookup_path = decoded_path.strip("<>").replace("\\", "/")
 
             if lookup_path in rename_map:
                 new_path = rename_map[lookup_path]
+                # Anki [sound:...] references always use bare file names.
+                if media_context == "sound" and new_path.startswith(
+                    f"{LOCAL_MEDIA_DIR}/"
+                ):
+                    new_path = new_path[len(LOCAL_MEDIA_DIR) + 1 :]
                 if is_markdown:
                     # Wrap markdown links in angle brackets for safer parsing.
                     if not new_path.startswith("<"):

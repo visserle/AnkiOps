@@ -19,7 +19,7 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
 > [!NOTE]
-> AnkiOps only syncs `AnkiOpsQA`, `AnkiOpsReversed`, `AnkiOpsCloze`, `AnkiOpsInput`, and `AnkiOpsChoice` note types.
+> AnkiOps syncs notes using built-in AnkiOps note types (`AnkiOpsQA`, `AnkiOpsReversed`, `AnkiOpsCloze`, `AnkiOpsClozeHideAll`, `AnkiOpsInput`, and `AnkiOpsChoice`) plus local custom note types defined under `note_types/`.
 
 ## Getting Started
 
@@ -49,15 +49,14 @@ Most available tools are one-way importers: you write in Markdown or Obsidian an
 
 ### Is it safe to use?
 
-Yes, AnkiOps will never modify notes with non-AnkiOps note types. Your existing collection won't be affected and you can safely mix managed and unmanaged notes. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. When orphaned AnkiOps notes are detected, you will be prompted to confirm their deletion. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
+Yes, AnkiOps will never modify notes with non-AnkiOps note types. Your existing collection won't be affected and you can safely mix managed and unmanaged notes. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name will act as the deck name. Subdecks are supported via two underscores `__` (Anki's `::` is not supported in the file system). Start by writing your notes in Markdown. For each note, you can decide whether to use the QA or cloze format. Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Biology::Cell` -> `Biology__Cell.md`). If a deck name contains a literal `__`, AnkiOps escapes it in the filename so mapping stays reversible. Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
 
 ```markdown
-<!-- deck_id: 123456789 -->
-<!-- note_id: 123487556 -->
+<!-- note_key: 123487556abc -->
 Q: Question text here
 A: Answer text here
 E: Extra information (optional)
@@ -65,7 +64,7 @@ M: Content behind a "more" button (optional)
 
 ---
 
-<!-- note_id: 123474567 -->
+<!-- note_key: 123474567def -->
 T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
 E: ![image with set width](im.png){width=700}
 
@@ -79,7 +78,7 @@ A: 1,3
 
 ```
 
-In this example, the last note is a new note which will get a `note_id` assigned with the next import.
+In this example, the last note is a new note which will get a `note_key` comment assigned on the next import.
 
 ### How are the different note types identified?
 
@@ -99,7 +98,7 @@ Since notes are separated by horizontal lines (`---`), they cannot be used withi
 
 ### How does it work?
 
-On first import, AnkiOps assigns IDs from Anki to each deck and note for tracking. They are represented by a single-line HTML tag (e.g., `<!-- note_id: 1770487991522 -->`) above a note in the Markdown. With the IDs in place, we can track what is new, changed, moved between decks, or deleted, and AnkiOps will sync accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. Note that one AnkiOps folder represents an entire Anki profile.
+On first import, AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. With note keys in place, we can track what is new, changed, moved between decks, or deleted, and AnkiOps syncs accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. One AnkiOps folder represents one Anki profile.
 
 ### What is the recommended workflow?
 
@@ -107,9 +106,9 @@ We recommend using VS Code. It has excellent AI integration, a great [add-on](ht
 
 ### How can I share my AnkiOps collection?
 
-Use `ankiops serialize --no-ids` to export your local AnkiOps collection to a clean JSON file without profile-specific IDs. Add `--include-media` to bundle media files from the Anki media folder into a ZIP archive. Recipients can import either format with `ankiops deserialize <file>`, which creates a new local AnkiOps directory on their machine, and imports media to their Anki folder with smart conflict resolution. 
+Use `ankiops serialize` to export your local AnkiOps collection to JSON. Recipients can import it with `ankiops deserialize <file>` into an initialized collection folder.
 
-Alternatively, you could share your collection using the native Anki export (`.apkg`), or by sharing your plain Markdown files along with the `media/AnkiOpsMedia` folder. Make sure to remove all ID tags from your Markdown files first, as they are profile-specific.
+Alternatively, share your collection via native Anki export (`.apkg`) or by sharing Markdown files with your local `media/` folder.
 
 ### How can I migrate my existing notes into AnkiOps?
 
@@ -140,26 +139,20 @@ uv run python -m main ma
 - `--help` - Show help message
 
 **`init`:**
-- `--no-auto-commit` - Disable automatic git commits
 - `--tutorial` - Create tutorial markdown file
 
 **`anki-to-markdown` / `am`:**
-- `--deck`, `-d` - Export single deck by name
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
 **`markdown-to-anki` / `ma`:**
-- `--file`, `-f` - Import single file
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
 **`serialize`:**
 - `--output`, `-o` - Output file path (default: `<collection-name>.json`)
-- `--no-ids` - Exclude note_id and deck_id from serialized output (useful for templates/sharing)
-- `--include-media` - Bundle media files into a ZIP archive (creates .zip instead of .json)
 
 **`deserialize`:**
-- `FILE` - Serialized file to import: .json or .zip (required)
-- `--directory`, `-d` - Local collection directory to create/update (default: use file name)
-- `--overwrite` - Overwrite existing markdown files (media uses smart conflict resolution)
+- `FILE` - Serialized JSON file to import (required)
+- `--overwrite` - Overwrite existing markdown files
 
 **`ai config`:**
 - `--provider {local,remote}` - Set provider profile

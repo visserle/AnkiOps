@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,6 @@ PROMPTS_DIR = "prompts"
 LOCAL_MEDIA_DIR = "media"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
-
 
 def sanitize_filename(deck_name: str) -> str:
     """Convert deck name to a safe filename (``::`` → ``__``).
@@ -41,6 +41,21 @@ def sanitize_filename(deck_name: str) -> str:
         )
 
     return deck_name.replace("::", "__")
+
+
+def deck_name_to_file_stem(deck_name: str) -> str:
+    """Encode an Anki deck name to a reversible markdown filename stem.
+
+    - ``::`` (subdeck separator) becomes ``__`` for readability.
+    - Literal ``__`` is escaped as ``%5F%5F`` to avoid ambiguity.
+    - Literal ``%`` is escaped first so decoding is lossless.
+    """
+    return deck_name.replace("%", "%25").replace("__", "%5F%5F").replace("::", "__")
+
+
+def file_stem_to_deck_name(file_stem: str) -> str:
+    """Decode a markdown filename stem back to its deck name."""
+    return unquote(file_stem.replace("__", "::"))
 
 
 def _is_development_mode() -> bool:
