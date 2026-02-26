@@ -18,6 +18,8 @@ from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
 
+_MAX_SERIALIZATION_ERRORS_TO_LOG = 20
+
 
 def serialize_collection(collection_dir: Path) -> dict[str, Any]:
     """Serialize the collection into an in-memory JSON-compatible mapping."""
@@ -73,6 +75,11 @@ def serialize_collection(collection_dir: Path) -> dict[str, Any]:
     logger.debug(f"Serialized {total_decks} deck(s), {total_notes} note(s) in memory")
 
     if errors:
+        for error_message in errors[:_MAX_SERIALIZATION_ERRORS_TO_LOG]:
+            logger.warning(error_message)
+        remaining_errors = len(errors) - _MAX_SERIALIZATION_ERRORS_TO_LOG
+        if remaining_errors > 0:
+            logger.warning(f"... and {remaining_errors} more parse error(s).")
         logger.warning(
             f"Serialization completed with {len(errors)} error(s). "
             "Some notes were skipped. Review errors above."

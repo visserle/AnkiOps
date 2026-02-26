@@ -100,3 +100,29 @@ def test_ai_rejects_non_positive_runtime_timeout_for_config():
 
     assert exc.value.code == 2
     run_ai_config.assert_not_called()
+
+
+def test_ai_command_suppresses_http_client_logs_in_info_mode():
+    with (
+        patch("ankiops.cli.run_ai_task"),
+        patch("ankiops.cli.configure_logging") as configure_logging,
+        patch("sys.argv", ["ankiops", "ai", "--task", "grammar"]),
+    ):
+        main()
+
+    ignore_libs = configure_logging.call_args.kwargs["ignore_libs"]
+    assert "urllib3.connectionpool" in ignore_libs
+    assert "httpx" in ignore_libs
+    assert "httpcore" in ignore_libs
+
+
+def test_ai_command_keeps_http_client_logs_in_debug_mode():
+    with (
+        patch("ankiops.cli.run_ai_task"),
+        patch("ankiops.cli.configure_logging") as configure_logging,
+        patch("sys.argv", ["ankiops", "--debug", "ai", "--task", "grammar"]),
+    ):
+        main()
+
+    ignore_libs = configure_logging.call_args.kwargs["ignore_libs"]
+    assert ignore_libs == ["urllib3.connectionpool"]

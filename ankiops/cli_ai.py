@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
 import time
 from dataclasses import replace
@@ -37,33 +38,53 @@ from ankiops.git import git_snapshot
 
 logger = logging.getLogger(__name__)
 
+_WARNING_MAX_CHARS = 180
+
 
 class _TaskProgressLogger:
     """Throttled logger callback for long-running AI task progress."""
 
-    def __init__(self, *, interval_seconds: float = 2.0):
+    def __init__(self, *, interval_seconds: float = 5.0):
         self._interval_seconds = interval_seconds
         self._last_emitted_at = 0.0
+        self._last_warning_count = 0
 
     def __call__(self, update: TaskProgressUpdate) -> None:
-        if update.elapsed_seconds - self._last_emitted_at < self._interval_seconds:
+        warning_count_increased = update.warning_count > self._last_warning_count
+        is_final_chunk = (
+            update.queued_chunks > 0
+            and update.completed_chunks == update.queued_chunks
+        )
+        elapsed_since_emit = update.elapsed_seconds - self._last_emitted_at
+        if (
+            not warning_count_increased
+            and not is_final_chunk
+            and elapsed_since_emit < self._interval_seconds
+        ):
             return
+        self._last_warning_count = update.warning_count
         self._last_emitted_at = update.elapsed_seconds
+        percent = (
+            (update.completed_chunks / update.queued_chunks) * 100.0
+            if update.queued_chunks > 0
+            else 0.0
+        )
         notes_per_second = (
             update.matched_notes / update.elapsed_seconds
             if update.elapsed_seconds > 0
             else 0.0
         )
         logger.info(
-            "AI progress "
-            f"scanned={update.processed_notes} "
-            f"matched={update.matched_notes} "
-            f"changed={update.changed_fields} "
-            f"warnings={update.warning_count} "
-            f"chunks={update.completed_chunks}/{update.queued_chunks} "
-            f"in_flight={update.in_flight} "
-            f"notes/s={notes_per_second:.1f} "
-            f"elapsed={update.elapsed_seconds:.1f}s"
+            "AI progress: "
+            f"{update.completed_chunks}/{update.queued_chunks} chunk(s) "
+            f"({percent:.0f}%), "
+            f"in flight {update.in_flight}, "
+            f"elapsed {update.elapsed_seconds:.1f}s — "
+            f"{update.processed_notes} scanned, "
+            f"{update.matched_notes} matched, "
+            f"{update.changed_fields} changed, "
+            f"{update.warning_count} warning(s), "
+            f"{notes_per_second:.1f} notes/s"
         )
 
 
@@ -75,25 +96,61 @@ def _progress_enabled(mode: str) -> bool:
     return sys.stderr.isatty()
 
 
+def _format_warning_for_cli(
+    warning: str,
+    *,
+    max_chars: int = _WARNING_MAX_CHARS,
+) -> str:
+    normalized = re.sub(r"\s+", " ", warning.replace("\t", " ").strip())
+    if not normalized:
+        return normalized
+
+    hint = _warning_hint(normalized)
+    if hint and "hint:" not in normalized.lower():
+        normalized = f"{normalized}; {hint}"
+
+    if ": " not in normalized:
+        return _truncate_text(normalized, max_chars)
+
+    prefix, detail = normalized.split(": ", 1)
+    if "/" not in prefix:
+        return _truncate_text(normalized, max_chars)
+
+    prefix_with_sep = f"{prefix}: "
+    detail_max_chars = max_chars - len(prefix_with_sep)
+    if detail_max_chars <= 0:
+        return _truncate_text(normalized, max_chars)
+    return prefix_with_sep + _truncate_text(detail, detail_max_chars)
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    if max_chars <= 3:
+        return value[:max_chars]
+    return value[: max_chars - 3].rstrip() + "..."
+
+
+def _warning_hint(value: str) -> str | None:
+    lowered = value.lower()
+    if "unexpected field key" in lowered:
+        return "hint: check task write_fields and returned patch keys."
+    if "non-string value" in lowered:
+        return "hint: all patched field values must be JSON strings."
+    return None
+
+
 def _log_performance_summary(started_at: float, result, client) -> None:
     elapsed_seconds = max(0.0, time.perf_counter() - started_at)
-    scanned_per_second = (
-        result.processed_notes / elapsed_seconds if elapsed_seconds > 0 else 0.0
-    )
-    matched_per_second = (
-        result.matched_notes / elapsed_seconds if elapsed_seconds > 0 else 0.0
-    )
-    changed_per_second = (
-        result.changed_fields / elapsed_seconds if elapsed_seconds > 0 else 0.0
-    )
     warning_count = len(result.warnings) + result.dropped_warnings
     logger.info(
-        "AI performance "
-        f"elapsed={elapsed_seconds:.2f}s "
-        f"scanned/s={scanned_per_second:.1f} "
-        f"matched/s={matched_per_second:.1f} "
-        f"changed/s={changed_per_second:.1f} "
-        f"warnings={warning_count}"
+        "AI: completed in "
+        f"{elapsed_seconds:.2f}s — "
+        f"{result.processed_notes} scanned, "
+        f"{result.matched_notes} matched, "
+        f"{result.changed_fields} field(s) changed, "
+        f"{warning_count} warning(s), "
+        f"{result.processed_decks} deck(s)"
     )
 
     metrics = client.metrics()
@@ -103,12 +160,13 @@ def _log_performance_summary(started_at: float, result, client) -> None:
         if attempts > 0
         else 0.0
     )
+    retries_label = "retry" if metrics.retries == 1 else "retries"
     logger.info(
-        "AI transport "
-        f"logical_requests={metrics.logical_requests} "
-        f"http_attempts={attempts} "
-        f"retries={metrics.retries} "
-        f"avg_attempt_latency={average_attempt_latency_ms:.1f}ms"
+        "AI transport: "
+        f"{metrics.logical_requests} logical request(s), "
+        f"{attempts} HTTP attempt(s), "
+        f"{metrics.retries} {retries_label}, "
+        f"{average_attempt_latency_ms:.1f}ms avg attempt latency"
     )
 
 
@@ -229,16 +287,22 @@ def run_ai_task(args):
         logger.error(f"No API key found{env_hint}. Set it or pass --api-key.")
         raise SystemExit(1)
 
+    resolved_batch_size = args.batch_size or task_config.batch_size
+    scope = ", ".join(args.include_deck) if args.include_deck else "all decks"
     logger.info(
-        "AI task run "
-        f"task='{task_config.id}' "
-        f"profile='{runtime.profile}' "
-        f"provider='{runtime.provider}' model='{runtime.model}' "
-        f"batch='{task_config.batch}' "
-        f"batch_size={args.batch_size or task_config.batch_size} "
-        f"max_in_flight={runtime.max_in_flight} "
-        f"temperature={task_config.temperature}"
+        "AI: running task "
+        f"'{task_config.id}' "
+        f"with profile '{runtime.profile}' "
+        f"({runtime.provider}/{runtime.model})"
     )
+    logger.info(
+        "AI: batch "
+        f"'{task_config.batch}' "
+        f"(size {resolved_batch_size}), "
+        f"max in flight {runtime.max_in_flight}, "
+        f"temperature {task_config.temperature}"
+    )
+    logger.info(f"AI: scope {scope}")
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-ai git snapshot")
@@ -275,13 +339,7 @@ def run_ai_task(args):
         logger.warning("No deck matched --include-deck filters.")
         return
 
-    logger.info(
-        "AI task processed "
-        f"{result.matched_notes} matched note(s), "
-        f"{result.processed_notes} scanned note(s), "
-        f"across {result.processed_decks} deck(s)."
-    )
-    logger.info(f"AI task changed {result.changed_fields} field(s).")
+    logger.info(f"AI changes ({result.changed_fields} field(s)):")
 
     for change in result.changes[:20]:
         logger.info(
@@ -290,8 +348,12 @@ def run_ai_task(args):
     if len(result.changes) > 20:
         logger.info(f"  ... and {len(result.changes) - 20} more change(s)")
 
+    warning_count = len(result.warnings) + result.dropped_warnings
+    if warning_count:
+        logger.warning(f"AI warnings ({warning_count}):")
+
     for warning in result.warnings[:20]:
-        logger.warning(warning)
+        logger.warning(_format_warning_for_cli(warning))
     remaining_warnings = max(0, len(result.warnings) - 20) + result.dropped_warnings
     if remaining_warnings:
         logger.warning(f"... and {remaining_warnings} more warning(s)")

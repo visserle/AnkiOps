@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from ankiops.collection_serializer import (
@@ -79,6 +81,34 @@ def test_in_memory_serialize(collection, monkeypatch):
     assert len(result["decks"]) == 1
     assert len(result["decks"][0]["notes"]) == 2
     assert result["decks"][0]["notes"][1]["note_key"] == "nk-2"
+
+
+def test_serialize_logs_parsing_errors_before_summary(collection, monkeypatch, caplog):
+    _set_collection_paths(monkeypatch, collection)
+    _set_note_type_paths(monkeypatch, collection / "note_types")
+
+    broken_name = f"{deck_name_to_file_stem('BrokenDeck')}.md"
+    broken_file = collection / broken_name
+    broken_file.write_text("Q: Broken", encoding="utf-8")
+
+    original_read = FileSystemAdapter.read_markdown_file
+
+    def _fake_read_markdown_file(self, md_file):
+        if md_file.name == broken_name:
+            raise ValueError("synthetic parse failure")
+        return original_read(self, md_file)
+
+    monkeypatch.setattr(
+        FileSystemAdapter,
+        "read_markdown_file",
+        _fake_read_markdown_file,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        serialize_collection(collection)
+
+    assert f"Error parsing {broken_name}: synthetic parse failure" in caplog.text
+    assert "Serialization completed with 1 error(s)." in caplog.text
 
 
 def test_roundtrip(collection, tmp_path, monkeypatch):

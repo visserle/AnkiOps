@@ -341,7 +341,10 @@ def main():
         parser.error("the following arguments are required: --task")
 
     log_level = logging.DEBUG if args.debug else logging.INFO
-    configure_logging(stream_level=log_level, ignore_libs=["urllib3.connectionpool"])
+    ignored_libraries = ["urllib3.connectionpool"]
+    if args.command == "ai" and not args.debug:
+        ignored_libraries.extend(["httpx", "httpcore"])
+    configure_logging(stream_level=log_level, ignore_libs=ignored_libraries)
 
     if hasattr(args, "handler"):
         args.handler(args)

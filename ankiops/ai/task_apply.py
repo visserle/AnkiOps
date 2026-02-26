@@ -9,6 +9,9 @@ from ankiops.ai.types import InlineEditedNote, TaskChange, TaskRunResult
 if TYPE_CHECKING:
     from ankiops.ai.task_selection import NoteTask
 
+_FIELD_SAMPLE_LIMIT = 2
+_FIELD_PREVIEW_MAX_CHARS = 40
+
 
 def validate_edited_note(
     note_task: NoteTask,
@@ -24,7 +27,15 @@ def validate_edited_note(
         if field_name not in note_task.write_fields
     ]
     if invalid_field_names:
-        return f"response fields invalid: {', '.join(invalid_field_names)}"
+        invalid_fields = _format_field_samples(invalid_field_names)
+        expected_fields = ", ".join(
+            _field_preview(field_name) for field_name in note_task.write_fields
+        )
+        return (
+            f"response returned {len(invalid_field_names)} unexpected field key(s): "
+            f"{invalid_fields}; expected write_fields: {expected_fields}; "
+            "hint: ensure patch keys exactly match write_fields"
+        )
 
     non_string_fields = [
         field_name
@@ -32,8 +43,31 @@ def validate_edited_note(
         if not isinstance(value, str)
     ]
     if non_string_fields:
-        return f"response fields invalid: {', '.join(non_string_fields)}"
+        invalid_fields = _format_field_samples(non_string_fields)
+        return (
+            "response returned non-string value(s) for "
+            f"{invalid_fields}; hint: all patched field values must be JSON strings"
+        )
     return None
+
+
+def _format_field_samples(field_names: list[str]) -> str:
+    sampled = [
+        _field_preview(field_name)
+        for field_name in field_names[:_FIELD_SAMPLE_LIMIT]
+    ]
+    joined = ", ".join(sampled)
+    remaining = len(field_names) - _FIELD_SAMPLE_LIMIT
+    if remaining > 0:
+        return f"{joined} (+{remaining} more)"
+    return joined
+
+
+def _field_preview(field_name: str) -> str:
+    normalized = " ".join(field_name.split())
+    if len(normalized) > _FIELD_PREVIEW_MAX_CHARS:
+        normalized = normalized[: _FIELD_PREVIEW_MAX_CHARS - 3].rstrip() + "..."
+    return f"'{normalized}'"
 
 
 def apply_note_changes(

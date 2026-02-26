@@ -82,6 +82,49 @@ class _WrongKeyBatchEditor:
 
 
 @dataclass
+class _UnexpectedFieldBatchEditor:
+    """Editor that returns extra field keys not listed in write_fields."""
+
+    async def edit_notes(
+        self,
+        task: TaskConfig,
+        notes: list[InlineNotePayload],
+    ) -> dict[str, InlineEditedNote]:
+        _ = task
+        _ = notes
+        return {
+            "n1": InlineEditedNote.from_parts(
+                note_key="n1",
+                fields={
+                    "Question": "I have two lungs.",
+                    "Bad Field": "x",
+                    "Another Invalid Field": "y",
+                    "Third Invalid Field": "z",
+                },
+            )
+        }
+
+
+@dataclass
+class _NonStringFieldBatchEditor:
+    """Editor that returns non-string field values to trigger validation."""
+
+    async def edit_notes(
+        self,
+        task: TaskConfig,
+        notes: list[InlineNotePayload],
+    ) -> dict[str, InlineEditedNote]:
+        _ = task
+        _ = notes
+        return {
+            "n1": InlineEditedNote(
+                note_key="n1",
+                fields={"Question": 123},  # type: ignore[dict-item]
+            )
+        }
+
+
+@dataclass
 class _TargetOnlyBatchEditor:
     """Editor that returns only target fields while preserving note_key."""
 
@@ -818,6 +861,58 @@ def test_inline_task_rejects_mismatched_note_key():
     assert "note_key mismatch" in result.warnings[0]
 
 
+def test_inline_task_uses_compact_warning_for_unexpected_response_fields():
+    task = _task(write_fields=["Question"])
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {"Question": "I has two lungs."},
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_UnexpectedFieldBatchEditor()).run(data, task)
+
+    assert result.warnings
+    warning = result.warnings[0]
+    assert "response returned 3 unexpected field key(s)" in warning
+    assert "(+1 more)" in warning
+    assert "expected write_fields: 'Question'" in warning
+    assert "hint: ensure patch keys exactly match write_fields" in warning
+
+
+def test_inline_task_uses_compact_warning_for_non_string_values():
+    task = _task(write_fields=["Question"])
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {"Question": "I has two lungs."},
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_NonStringFieldBatchEditor()).run(data, task)
+
+    assert result.warnings
+    warning = result.warnings[0]
+    assert "response returned non-string value(s) for 'Question'" in warning
+    assert "hint: all patched field values must be JSON strings" in warning
+
+
 def test_inline_task_skips_notes_without_note_key():
     task = _task()
     data = {
@@ -1337,7 +1432,9 @@ def test_client_rejects_response_with_missing_ref_patch():
                 "choices": [
                     {
                         "message": {
-                            "content": '{"patches":[{"ref":"r2","fields":{"Question":"x"}}]}'
+                            "content": (
+                                '{"patches":[{"ref":"r2","fields":{"Question":"x"}}]}'
+                            )
                         }
                     }
                 ]
