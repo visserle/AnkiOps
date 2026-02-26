@@ -113,15 +113,15 @@ class InlineNotePayload:
     """Canonical payload sent to the AI editor for one note."""
 
     note_key: str
-    note_type: str
-    fields: dict[str, str]
+    editable: dict[str, str]
+    context: dict[str, str]
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self, *, ref: str) -> dict[str, Any]:
         """Serialize to a JSON-compatible object."""
         return {
-            "note_key": self.note_key,
-            "note_type": self.note_type,
-            "fields": dict(self.fields),
+            "ref": ref,
+            "editable": dict(self.editable),
+            "context": dict(self.context),
         }
 
 

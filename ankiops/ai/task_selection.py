@@ -111,11 +111,14 @@ def iter_note_tasks(
                 read_fields=matchers.read_fields.select_names(string_fields.keys()),
                 write_fields=write_fields,
             )
-            payload_fields = {
-                field_name: string_fields[field_name] for field_name in read_fields
-            }
             write_snapshot = {
                 field_name: string_fields[field_name] for field_name in write_fields
+            }
+            context_fields = [
+                field_name for field_name in read_fields if field_name not in write_snapshot
+            ]
+            context_snapshot = {
+                field_name: string_fields[field_name] for field_name in context_fields
             }
             result.matched_notes += 1
             yield NoteTask(
@@ -127,8 +130,8 @@ def iter_note_tasks(
                 write_fields=tuple(write_fields),
                 payload=InlineNotePayload(
                     note_key=note_key,
-                    note_type=note_type,
-                    fields=payload_fields,
+                    editable=write_snapshot,
+                    context=context_snapshot,
                 ),
                 deck_index=deck_index,
             )

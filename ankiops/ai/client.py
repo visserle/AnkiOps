@@ -19,7 +19,7 @@ from ankiops.ai.types import (
     RuntimeAIConfig,
     TaskConfig,
 )
-from ankiops.ai.validators import normalize_batch_response
+from ankiops.ai.validators import normalize_patch_response
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_MIN_SECONDS = 0.25
@@ -84,7 +84,7 @@ class OpenAICompatibleAsyncEditor:
         if not notes:
             return {}
 
-        payload = _build_chat_payload(
+        payload, ref_to_note_key = _build_chat_payload(
             model=self._config.model,
             task_config=task_config,
             notes=notes,
@@ -101,7 +101,11 @@ class OpenAICompatibleAsyncEditor:
         if not content:
             raise AIResponseError("AI response did not include assistant text content")
 
-        return normalize_batch_response(content)
+        patches_by_ref = normalize_patch_response(content)
+        return _map_response_patches_to_note_keys(
+            patches_by_ref=patches_by_ref,
+            ref_to_note_key=ref_to_note_key,
+        )
 
     def _get_or_create_client(self) -> httpx.AsyncClient:
         client = self._client
@@ -179,18 +183,20 @@ def _build_chat_payload(
     model: str,
     task_config: TaskConfig,
     notes: list[InlineNotePayload],
-) -> dict[str, Any]:
-    allowed_fields = ", ".join(task_config.write_fields)
-    context_fields = ", ".join(task_config.read_fields)
+) -> tuple[dict[str, Any], dict[str, str]]:
+    serialized_notes: list[dict[str, Any]] = []
+    ref_to_note_key: dict[str, str] = {}
+    for note_index, note in enumerate(notes, start=1):
+        ref = f"r{note_index}"
+        serialized_notes.append(note.to_json(ref=ref))
+        ref_to_note_key[ref] = note.note_key
+
     requirements = [
-        "Return JSON only.",
-        "Return every edited note keyed by note_key.",
-        "Do not change note_key values.",
-        "Return the same fields structure per note.",
-        f"Edit only these fields: {allowed_fields}.",
-        f"You may use these fields for context: {context_fields}.",
+        "Return one strict JSON object: {\"patches\": [...]} with no extra text.",
+        "Emit exactly one patch per note ref as {\"ref\": \"rN\", \"fields\": {...}}.",
+        "In each fields object, include only changed keys from note.editable.",
     ]
-    return {
+    payload = {
         "model": model,
         "temperature": task_config.temperature,
         "response_format": {"type": "json_object"},
@@ -202,13 +208,42 @@ def _build_chat_payload(
                     {
                         "task": "inline_json_edit",
                         "requirements": requirements,
-                        "notes": [note.to_json() for note in notes],
+                        "notes": serialized_notes,
                     },
                     ensure_ascii=False,
                 ),
             },
         ],
     }
+    return payload, ref_to_note_key
+
+
+def _map_response_patches_to_note_keys(
+    *,
+    patches_by_ref: dict[str, dict[str, str]],
+    ref_to_note_key: dict[str, str],
+) -> dict[str, InlineEditedNote]:
+    expected_refs = set(ref_to_note_key)
+    returned_refs = set(patches_by_ref)
+
+    missing_refs = sorted(expected_refs - returned_refs)
+    if missing_refs:
+        joined = ", ".join(missing_refs[:10])
+        raise AIResponseError(f"Patch response missing refs: {joined}")
+
+    unknown_refs = sorted(returned_refs - expected_refs)
+    if unknown_refs:
+        joined = ", ".join(unknown_refs[:10])
+        raise AIResponseError(f"Patch response includes unknown refs: {joined}")
+
+    normalized: dict[str, InlineEditedNote] = {}
+    for ref, note_key in ref_to_note_key.items():
+        fields = patches_by_ref[ref]
+        normalized[note_key] = InlineEditedNote.from_parts(
+            note_key=note_key,
+            fields=fields,
+        )
+    return normalized
 
 
 def _extract_assistant_content(response: dict[str, Any]) -> str | None:

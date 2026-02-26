@@ -18,13 +18,21 @@ def validate_edited_note(
     if edited_note.note_key != note_task.note_key:
         return "response note_key mismatch"
 
-    invalid_fields = [
+    invalid_field_names = [
         field_name
-        for field_name in note_task.write_fields
-        if not isinstance(edited_note.fields.get(field_name), str)
+        for field_name in edited_note.fields
+        if field_name not in note_task.write_fields
     ]
-    if invalid_fields:
-        return f"response fields invalid: {', '.join(invalid_fields)}"
+    if invalid_field_names:
+        return f"response fields invalid: {', '.join(invalid_field_names)}"
+
+    non_string_fields = [
+        field_name
+        for field_name, value in edited_note.fields.items()
+        if not isinstance(value, str)
+    ]
+    if non_string_fields:
+        return f"response fields invalid: {', '.join(non_string_fields)}"
     return None
 
 
@@ -34,11 +42,10 @@ def apply_note_changes(
     task_id: str,
     result: TaskRunResult,
 ) -> bool:
-    """Apply changed write-fields to one note and collect change metadata."""
+    """Apply patch-style field edits to one note and collect change metadata."""
     changed_any = False
-    for field_name in note_task.write_fields:
+    for field_name, edited_text in edited_note.fields.items():
         original_text = note_task.original_write_fields[field_name]
-        edited_text = edited_note.fields[field_name]
         if edited_text == original_text:
             continue
 

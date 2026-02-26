@@ -35,7 +35,7 @@ from ankiops.ai.types import (
     TaskConfig,
     TaskRunOptions,
 )
-from ankiops.ai.validators import normalize_batch_response, parse_json_object
+from ankiops.ai.validators import normalize_patch_response, parse_json_object
 
 
 @dataclass
@@ -50,12 +50,11 @@ class _InlineBatchEditor:
         _ = task
         edited: dict[str, InlineEditedNote] = {}
         for note in notes:
-            fields = dict(note.fields)
+            fields = dict(note.editable)
             if "Question" in fields and isinstance(fields["Question"], str):
                 fields["Question"] = fields["Question"].replace("I has", "I have")
             edited[note.note_key] = InlineEditedNote.from_parts(
                 note_key=note.note_key,
-                note_type=note.note_type,
                 fields=fields,
             )
         return edited
@@ -94,9 +93,8 @@ class _TargetOnlyBatchEditor:
         return {
             note.note_key: InlineEditedNote.from_parts(
                 note_key=note.note_key,
-                note_type=note.note_type,
                 fields={
-                    "Question": note.fields["Question"].replace("I has", "I have"),
+                    "Question": note.editable["Question"].replace("I has", "I have"),
                 },
             )
             for note in notes
@@ -118,8 +116,7 @@ class _ClosableBatchEditor:
         return {
             note.note_key: InlineEditedNote.from_parts(
                 note_key=note.note_key,
-                note_type=note.note_type,
-                fields=dict(note.fields),
+                fields=dict(note.editable),
             )
             for note in notes
         }
@@ -191,8 +188,8 @@ def _notes_payload() -> list[InlineNotePayload]:
     return [
         InlineNotePayload(
             note_key="n1",
-            note_type="AnkiOpsQA",
-            fields={"Question": "I has two lungs."},
+            editable={"Question": "I has two lungs."},
+            context={},
         )
     ]
 
@@ -947,41 +944,37 @@ def test_task_runner_closes_editor_after_run():
     assert editor.closed
 
 
-def test_normalize_batch_response_accepts_markdown_fenced_json():
-    content = (
-        "```json\n"
-        '{"notes":{"n1":{"note_key":"n1","fields":{"Question":"I have two lungs."}}}}\n'
-        "```"
-    )
+def test_normalize_patch_response_accepts_strict_json_object():
+    content = '{"patches":[{"ref":"r1","fields":{"Question":"I have two lungs."}}]}'
 
-    normalized = normalize_batch_response(content)
-    assert normalized["n1"].fields["Question"] == "I have two lungs."
+    normalized = normalize_patch_response(content)
+    assert normalized["r1"]["Question"] == "I have two lungs."
 
 
-def test_parse_json_object_extracts_prefix_and_suffix_noise():
+def test_parse_json_object_rejects_prefix_suffix_noise():
     content = (
         "Sure, here you go:\n"
-        '{"notes":[{"note_key":"n1","fields":{"Question":"I have two lungs."}}]}\n'
+        '{"patches":[{"ref":"r1","fields":{"Question":"I have two lungs."}}]}\n'
         "Thanks!"
     )
 
-    parsed = parse_json_object(content)
-    assert parsed["notes"][0]["note_key"] == "n1"
+    with pytest.raises(AIResponseError, match="strict JSON object"):
+        parse_json_object(content)
 
 
-def test_parse_json_object_skips_malformed_candidate_and_finds_valid_object():
+def test_parse_json_object_rejects_malformed_or_embedded_json():
     content = (
         'Noise {"broken": } still noise '
-        '{"notes":[{"note_key":"n1","fields":{"Question":"I have two lungs."}}]}'
+        '{"patches":[{"ref":"r1","fields":{"Question":"I have two lungs."}}]}'
     )
 
-    parsed = parse_json_object(content)
-    assert parsed["notes"][0]["note_key"] == "n1"
+    with pytest.raises(AIResponseError, match="strict JSON object"):
+        parse_json_object(content)
 
 
-def test_normalize_batch_response_rejects_empty_mapping():
-    with pytest.raises(AIResponseError, match="cannot be empty"):
-        normalize_batch_response("{}")
+def test_normalize_patch_response_rejects_missing_patches_list():
+    with pytest.raises(AIResponseError, match="top-level 'patches' list"):
+        normalize_patch_response("{}")
 
 
 @respx.mock
@@ -995,9 +988,8 @@ def test_client_reuses_http_client_within_run():
                         {
                             "message": {
                                 "content": (
-                                    '{"notes":{"n1":{"note_key":"n1",'
-                                    '"note_type":"AnkiOpsQA",'
-                                    '"fields":{"Question":"I have two lungs."}}}}'
+                                    '{"patches":[{"ref":"r1","fields":'
+                                    '{"Question":"I have two lungs."}}]}'
                                 )
                             }
                         }
@@ -1011,9 +1003,8 @@ def test_client_reuses_http_client_within_run():
                         {
                             "message": {
                                 "content": (
-                                    '{"notes":{"n1":{"note_key":"n1",'
-                                    '"note_type":"AnkiOpsQA",'
-                                    '"fields":{"Question":"I have two lungs."}}}}'
+                                    '{"patches":[{"ref":"r1","fields":'
+                                    '{"Question":"I have two lungs."}}]}'
                                 )
                             }
                         }
@@ -1053,9 +1044,8 @@ def test_client_retries_transient_429_then_succeeds(monkeypatch):
                         {
                             "message": {
                                 "content": (
-                                    '{"notes":{"n1":{"note_key":"n1",'
-                                    '"note_type":"AnkiOpsQA",'
-                                    '"fields":{"Question":"I have two lungs."}}}}'
+                                    '{"patches":[{"ref":"r1","fields":'
+                                    '{"Question":"I have two lungs."}}]}'
                                 )
                             }
                         }
@@ -1080,9 +1070,8 @@ def test_client_sends_task_temperature_in_payload():
                     {
                         "message": {
                             "content": (
-                                '{"notes":{"n1":{"note_key":"n1",'
-                                '"note_type":"AnkiOpsQA",'
-                                '"fields":{"Question":"I have two lungs."}}}}'
+                                '{"patches":[{"ref":"r1","fields":'
+                                '{"Question":"I have two lungs."}}]}'
                             )
                         }
                     }
@@ -1095,6 +1084,15 @@ def test_client_sends_task_temperature_in_payload():
 
     request_payload = json.loads(route.calls[0].request.content.decode("utf-8"))
     assert request_payload["temperature"] == pytest.approx(0.7)
+    request_body = json.loads(request_payload["messages"][1]["content"])
+    assert request_body["task"] == "inline_json_edit"
+    assert request_body["notes"][0]["ref"] == "r1"
+    assert request_body["notes"][0]["editable"] == {"Question": "I has two lungs."}
+    assert request_body["notes"][0]["context"] == {}
+    assert "field_policy" not in request_body
+    assert "output_schema" not in request_body
+    assert "note_key" not in request_body["notes"][0]
+    assert "note_type" not in request_body["notes"][0]
 
 
 @respx.mock
@@ -1123,9 +1121,8 @@ def test_client_respects_retry_after_header(monkeypatch):
                         {
                             "message": {
                                 "content": (
-                                    '{"notes":{"n1":{"note_key":"n1",'
-                                    '"note_type":"AnkiOpsQA",'
-                                    '"fields":{"Question":"I have two lungs."}}}}'
+                                    '{"patches":[{"ref":"r1","fields":'
+                                    '{"Question":"I have two lungs."}}]}'
                                 )
                             }
                         }
@@ -1196,5 +1193,53 @@ def test_client_raises_response_error_on_missing_assistant_text():
     )
 
     with pytest.raises(AIResponseError, match="assistant text content"):
+        asyncio.run(_run_editor_once())
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_client_rejects_response_with_missing_ref_patch():
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"patches":[{"ref":"r2","fields":{"Question":"x"}}]}'
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    with pytest.raises(AIResponseError, match="missing refs"):
+        asyncio.run(_run_editor_once())
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_client_rejects_response_with_unknown_ref_patch():
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"patches":['
+                                '{"ref":"r1","fields":{"Question":"x"}},'
+                                '{"ref":"r9","fields":{"Question":"y"}}]}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    with pytest.raises(AIResponseError, match="unknown refs"):
         asyncio.run(_run_editor_once())
     assert route.call_count == 1
