@@ -33,6 +33,7 @@ from ankiops.collection_serializer import (
     serialize_collection,
 )
 from ankiops.config import ANKIOPS_DB, get_collection_dir
+from ankiops.git import git_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,12 @@ def run_ai_task(args):
         f"temperature={task_config.temperature}"
     )
 
+    if not args.no_auto_commit:
+        logger.debug("Creating pre-ai git snapshot")
+        git_snapshot(collection_dir, "ai")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
     serialized_data = serialize_collection(collection_dir)
     started_at = time.perf_counter()
     progress_callback = (
@@ -347,6 +354,12 @@ def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
 
 def add_ai_task_args(parser: argparse.ArgumentParser) -> None:
     """Attach task execution flags to the ai task-run command."""
+    parser.add_argument(
+        "--no-auto-commit",
+        "-n",
+        action="store_true",
+        help="Skip the automatic git commit for this operation",
+    )
     parser.add_argument(
         "--include-deck",
         "-d",

@@ -30,6 +30,7 @@ def test_ai_parses_task_runtime_and_repeatable_include_decks():
                 "ai",
                 "--task",
                 "grammar",
+                "--no-auto-commit",
                 "-d",
                 "Biology",
                 "--include-deck",
@@ -49,6 +50,7 @@ def test_ai_parses_task_runtime_and_repeatable_include_decks():
 
     args = captured["args"]
     assert args.task == "grammar"
+    assert args.no_auto_commit is True
     assert args.include_deck == ["Biology", "Biology::Cells"]
     assert args.profile == "openai-fast"
     assert args.max_in_flight == 6

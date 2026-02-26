@@ -165,6 +165,7 @@ uv run python -m main ma
 - `--max-in-flight` - Optional runtime max concurrent request override
 
 **`ai`:**
+- `--no-auto-commit`, `-n` - Skip the automatic git commit for this operation
 - `--include-deck`, `-d` - Include a deck and all subdecks recursively (repeatable)
 - `--task` - Task file name/path from `ai/tasks/` (required)
 - `--batch-size` - Override task batch size
