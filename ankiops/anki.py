@@ -8,7 +8,6 @@ from ankiops.anki_client import AnkiConnectError, invoke
 from ankiops.models import (
     AnkiNote,
     Change,
-    ChangeType,
     NoteTypeConfig,
 )
 

@@ -1,0 +1,46 @@
+schema: ai.task.v1
+id: grammar
+description: Grammar and spelling corrections for tutorial notes.
+model: local-fast
+instructions: |
+  You are an exacting editor for Anki flashcards.
+  Improve grammar, spelling, punctuation, and capitalization while preserving meaning.
+batch: batch
+batch_size: 8
+scope_decks:
+  - AnkiOps Tutorial
+scope_subdecks: true
+scope_note_types:
+  - "AnkiOps*"
+read_fields:
+  - Question
+  - Answer
+  - Front
+  - Back
+  - Text
+  - Hidden Text
+  - Input
+  - "Choice *"
+  - Extra
+  - More
+  - Source
+  - AI Notes
+write_fields:
+  - Question
+  - Answer
+  - Front
+  - Back
+  - Text
+  - Hidden Text
+  - Input
+  - "Choice *"
+  - Extra
+  - More
+  - Source
+constraints:
+  - preserve_meaning
+  - preserve_markdown
+  - preserve_urls
+  - preserve_math
+  - preserve_cloze
+temperature: 0

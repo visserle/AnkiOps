@@ -1,0 +1,36 @@
+schema: ai.task.v1
+id: semantic-check
+description: Add semantic quality findings to AI Notes for tutorial notes.
+model: local-fast
+instructions: |
+  Review each note for ambiguity, factual inconsistency, missing context, and weak
+  question-answer alignment. Write concise findings into AI Notes as bullet points.
+batch: collection
+batch_size: 16
+scope_decks:
+  - AnkiOps Tutorial
+scope_subdecks: true
+scope_note_types:
+  - "AnkiOps*"
+read_fields:
+  - Question
+  - Answer
+  - Front
+  - Back
+  - Text
+  - Hidden Text
+  - Input
+  - "Choice *"
+  - Extra
+  - More
+  - Source
+  - AI Notes
+write_fields:
+  - AI Notes
+constraints:
+  - preserve_meaning
+  - preserve_markdown
+  - preserve_urls
+  - preserve_math
+  - preserve_cloze
+temperature: 0

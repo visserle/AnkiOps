@@ -104,9 +104,7 @@ class SQLiteDbAdapter:
                 # Schema validation: ensure note mapping columns exist in 'notes' table.
                 # If not, it will raise OperationalError and trigger recovery.
                 conn.execute("SELECT note_key, note_id FROM notes LIMIT 0")
-                conn.execute(
-                    "SELECT id, profile_name FROM collection_profile LIMIT 0"
-                )
+                conn.execute("SELECT id, profile_name FROM collection_profile LIMIT 0")
                 conn.execute(
                     "SELECT id, sync_hash, names_signature "
                     "FROM note_type_sync_state LIMIT 0"
@@ -591,8 +589,7 @@ class SQLiteDbAdapter:
 
     def get_note_type_sync_state(self) -> tuple[str, str] | None:
         cursor = self._conn.execute(
-            "SELECT sync_hash, names_signature "
-            "FROM note_type_sync_state WHERE id = 1"
+            "SELECT sync_hash, names_signature FROM note_type_sync_state WHERE id = 1"
         )
         row = cursor.fetchone()
         if row is None:

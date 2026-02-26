@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .model_profiles import load_model_profiles, resolve_runtime_config
+from .model_config import load_model_configs, resolve_runtime_config
 from .paths import AIPaths
-from .prompt_loader import load_prompt
-from .types import PromptConfig, RuntimeAIConfig
+from .task_config import load_task_config
+from .types import RuntimeAIConfig, TaskConfig
 
 
 @dataclass(frozen=True)
@@ -27,19 +27,19 @@ class AIRuntimeOverrides:
 
 def prepare_ai_run(
     collection_dir: Path,
-    prompt_ref: str,
+    task_ref: str,
     *,
     overrides: AIRuntimeOverrides | None = None,
-) -> tuple[PromptConfig, RuntimeAIConfig]:
-    """Resolve prompt config and runtime config for one AI prompt run."""
+) -> tuple[TaskConfig, RuntimeAIConfig]:
+    """Resolve task config and runtime config for one AI task run."""
     runtime_overrides = overrides or AIRuntimeOverrides()
     ai_paths = AIPaths.from_collection_dir(collection_dir)
-    prompt_config = load_prompt(ai_paths, prompt_ref)
-    models_config = load_model_profiles(ai_paths)
+    task_config = load_task_config(ai_paths, task_ref)
+    models_config = load_model_configs(ai_paths)
 
     runtime_config = resolve_runtime_config(
         models_config,
-        profile=runtime_overrides.profile or prompt_config.model_profile,
+        profile=runtime_overrides.profile or task_config.model,
         provider=runtime_overrides.provider,
         model=runtime_overrides.model,
         base_url=runtime_overrides.base_url,
@@ -48,4 +48,4 @@ def prepare_ai_run(
         max_in_flight=runtime_overrides.max_in_flight,
         api_key=runtime_overrides.api_key,
     )
-    return prompt_config, runtime_config
+    return task_config, runtime_config

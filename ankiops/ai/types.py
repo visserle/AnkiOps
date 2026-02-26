@@ -1,4 +1,4 @@
-"""Shared data types for AI prompt execution."""
+"""Shared data types for AI task execution."""
 
 from __future__ import annotations
 
@@ -45,40 +45,46 @@ class RuntimeAIConfig:
 
 
 @dataclass(frozen=True)
-class PromptConfig:
-    """Prompt definition loaded from prompt YAML."""
+class TaskConfig:
+    """Task definition loaded from task YAML."""
 
-    name: str
-    prompt: str
-    target_fields: list[str]
-    send_fields: list[str]
-    note_types: list[str]
-    model_profile: str | None = None
+    id: str
+    instructions: str
+    read_fields: list[str]
+    write_fields: list[str]
+    scope_note_types: list[str]
+    scope_decks: list[str]
+    scope_subdecks: bool
+    batch: str
+    batch_size: int
+    model: str | None = None
+    constraints: list[str] = field(default_factory=list)
+    description: str = ""
     temperature: float = 0.0
     source_path: Path | None = None
 
     def matches_note_type(self, note_type: str) -> bool:
-        """Whether this prompt applies to the given note type name."""
+        """Whether this task applies to the given note type name."""
         return any(
-            fnmatch.fnmatchcase(note_type, pattern) for pattern in self.note_types
+            fnmatch.fnmatchcase(note_type, pattern) for pattern in self.scope_note_types
         )
 
 
 @dataclass(frozen=True)
-class PromptRunOptions:
-    """Execution controls for prompt runs."""
+class TaskRunOptions:
+    """Execution controls for task runs."""
 
     include_decks: list[str] | None = None
-    batch_size: int = 1
+    batch_size: int | None = None
     max_in_flight: int = 4
     max_warnings: int = 200
 
 
 @dataclass(frozen=True)
-class PromptChange:
-    """A single field mutation produced by a prompt run."""
+class TaskChange:
+    """A single field mutation produced by a task run."""
 
-    prompt_name: str
+    task_id: str
     deck_name: str
     note_key: str
     note_type: str
@@ -88,14 +94,14 @@ class PromptChange:
 
 
 @dataclass
-class PromptRunResult:
-    """Aggregate prompt run outcome and diagnostics."""
+class TaskRunResult:
+    """Aggregate task run outcome and diagnostics."""
 
     processed_decks: int = 0
     processed_notes: int = 0
-    prompted_notes: int = 0
+    matched_notes: int = 0
     changed_fields: int = 0
-    changes: list[PromptChange] = field(default_factory=list)
+    changes: list[TaskChange] = field(default_factory=list)
     changed_decks: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     dropped_warnings: int = 0
@@ -149,7 +155,7 @@ class AsyncInlineBatchEditor(Protocol):
 
     async def edit_notes(
         self,
-        prompt: PromptConfig,
+        task: TaskConfig,
         notes: list[InlineNotePayload],
     ) -> dict[str, InlineEditedNote]:
         """Return edited notes keyed by note_key."""

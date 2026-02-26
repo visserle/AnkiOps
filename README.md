@@ -155,7 +155,7 @@ uv run python -m main ma
 - `--overwrite` - Overwrite existing markdown files
 
 **`ai config`:**
-- `--profile` - Model profile name from `ai/models.yaml`
+- `--profile` - Model profile id from `ai/models/*.yaml`
 - `--provider {local,remote}` - Optional runtime provider override
 - `--model` - Optional runtime model override
 - `--base-url` - Optional runtime OpenAI-compatible base URL override
@@ -166,23 +166,27 @@ uv run python -m main ma
 
 **`ai`:**
 - `--include-deck`, `-d` - Include a deck and all subdecks recursively (repeatable)
-- `--prompt` - Prompt file name/path from `ai/prompts/` (required)
-- `--batch-size` - Number of notes per AI request (default: 1)
+- `--task` - Task file name/path from `ai/tasks/` (required)
+- `--batch-size` - Override task batch size
 - `--profile`, `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout`, `--max-in-flight` - Runtime overrides
 
 ### Where is AI config stored?
 
-AnkiOps stores model profiles in `ai/models.yaml`.  
+AnkiOps stores model profiles in `ai/models/*.yaml`.  
 Secrets are read from environment variables (e.g. `ANKIOPS_AI_API_KEY`) or passed at runtime via `--api-key`.
 
-### Prompt Infrastructure
+### Task Infrastructure
 
-AnkiOps initializes a local `ai/` folder and copies built-in YAML prompts to `ai/prompts/` plus `ai/models.yaml`.
-Prompt YAML files define:
-- Prompt name/text
-- Optional `model_profile`
-- `target_fields` (what fields the AI may modify)
-- `send_fields` (what fields are sent as inline JSON context)
-- Optional `note_types` filters
+AnkiOps initializes a local `ai/` folder and copies built-in model and task YAML files to:
+- `ai/models/*.yaml`
+- `ai/tasks/*.yaml`
+
+Task YAML files define:
+- Task instructions
+- Model profile (`model`)
+- Batch mode/size
+- Deck and note-type scope
+- `read_fields` (inline JSON context)
+- `write_fields` (fields the AI may modify)
 
 Inline editing always includes `note_key`, and batch responses are keyed by `note_key`.

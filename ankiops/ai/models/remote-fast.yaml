@@ -1,0 +1,9 @@
+schema: ai.model.v1
+id: remote-fast
+default: false
+provider: remote
+model: gpt-4o-mini
+base_url: https://api.openai.com/v1
+api_key_env: ANKIOPS_AI_API_KEY
+timeout_seconds: 60
+max_in_flight: 8

@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from .errors import AIRequestError, AIResponseError
-from .types import InlineEditedNote, InlineNotePayload, PromptConfig, RuntimeAIConfig
+from .types import InlineEditedNote, InlineNotePayload, RuntimeAIConfig, TaskConfig
 from .validators import normalize_batch_response
 
 DEFAULT_MAX_ATTEMPTS = 3
@@ -72,7 +72,7 @@ class OpenAICompatibleAsyncEditor:
 
     async def edit_notes(
         self,
-        prompt: PromptConfig,
+        task_config: TaskConfig,
         notes: list[InlineNotePayload],
     ) -> dict[str, InlineEditedNote]:
         """Edit notes in batch and return edited payloads keyed by note_key."""
@@ -81,8 +81,7 @@ class OpenAICompatibleAsyncEditor:
 
         payload = _build_chat_payload(
             model=self._config.model,
-            temperature=prompt.temperature,
-            system_prompt=prompt.prompt,
+            task_config=task_config,
             notes=notes,
         )
 
@@ -173,27 +172,35 @@ class OpenAICompatibleAsyncEditor:
 def _build_chat_payload(
     *,
     model: str,
-    temperature: float,
-    system_prompt: str,
+    task_config: TaskConfig,
     notes: list[InlineNotePayload],
 ) -> dict[str, Any]:
+    allowed_fields = ", ".join(task_config.write_fields)
+    context_fields = ", ".join(task_config.read_fields)
+    requirements = [
+        "Return JSON only.",
+        "Return every edited note keyed by note_key.",
+        "Do not change note_key values.",
+        "Return the same fields structure per note.",
+        f"Edit only these fields: {allowed_fields}.",
+        f"You may use these fields for context: {context_fields}.",
+    ]
+    if task_config.constraints:
+        constraints = ", ".join(task_config.constraints)
+        requirements.append(f"Follow these constraints: {constraints}.")
+
     return {
         "model": model,
-        "temperature": temperature,
+        "temperature": task_config.temperature,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": task_config.instructions},
             {
                 "role": "user",
                 "content": json.dumps(
                     {
-                        "task": "inline_json_edit_batch",
-                        "requirements": [
-                            "Return JSON only.",
-                            "Return every edited note keyed by note_key.",
-                            "Do not change note_key values.",
-                            "Return the same fields structure per note.",
-                        ],
+                        "task": "inline_json_edit",
+                        "requirements": requirements,
                         "notes": [note.to_json() for note in notes],
                     },
                     ensure_ascii=False,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ankiops.config import AI_DIR, AI_PROMPTS_DIR
+from ankiops.config import AI_DIR, AI_MODELS_DIR, AI_TASKS_DIR
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,7 @@ class AIPaths:
 
     root: Path
     models: Path
-    prompts: Path
+    tasks: Path
 
     @classmethod
     def from_collection_dir(cls, collection_dir: Path) -> AIPaths:
@@ -22,6 +22,6 @@ class AIPaths:
         root = collection_dir / AI_DIR
         return cls(
             root=root,
-            models=root / "models.yaml",
-            prompts=root / AI_PROMPTS_DIR,
+            models=root / AI_MODELS_DIR,
+            tasks=root / AI_TASKS_DIR,
         )

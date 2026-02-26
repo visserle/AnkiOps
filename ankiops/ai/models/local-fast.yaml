@@ -1,0 +1,9 @@
+schema: ai.model.v1
+id: local-fast
+default: true
+provider: local
+model: llama3.1:8b
+base_url: http://localhost:11434/v1
+api_key_env: ANKIOPS_AI_API_KEY
+timeout_seconds: 60
+max_in_flight: 4

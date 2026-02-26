@@ -11,8 +11,8 @@ class AIConfigError(AIError):
     """Invalid AI model/runtime configuration."""
 
 
-class PromptConfigError(AIError):
-    """Invalid prompt configuration or prompt reference."""
+class TaskConfigError(AIError):
+    """Invalid task configuration or task reference."""
 
 
 class AIRequestError(AIError):
@@ -23,5 +23,5 @@ class AIResponseError(AIError):
     """AI returned an invalid or unsupported response payload."""
 
 
-class PromptExecutionError(AIError):
-    """Prompt execution could not proceed due to invalid run input/state."""
+class TaskExecutionError(AIError):
+    """Task execution could not proceed due to invalid run input/state."""

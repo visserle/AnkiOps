@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -13,16 +13,19 @@ from .errors import AIConfigError
 from .paths import AIPaths
 from .types import ModelProfile, ModelsConfig, RuntimeAIConfig
 
-MODELS_FILE_NAME = "models.yaml"
 DEFAULT_API_KEY_ENV = "ANKIOPS_AI_API_KEY"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_MAX_IN_FLIGHT = 4
 _VALID_PROVIDERS = frozenset({"local", "remote"})
+_VALID_MODEL_SUFFIXES = frozenset({".yaml", ".yml"})
 
 
-class _RawModelProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _RawModelProfileFile(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    schema_name: str = Field(default="ai.model.v1", alias="schema")
+    id: str | None = None
+    default: bool = False
     provider: Literal["local", "remote"]
     model: str
     base_url: str
@@ -30,50 +33,17 @@ class _RawModelProfile(BaseModel):
     timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0)
     max_in_flight: int = Field(default=DEFAULT_MAX_IN_FLIGHT, gt=0)
 
-    @field_validator("model", "base_url", "api_key_env")
+    @field_validator("schema_name")
     @classmethod
-    def _normalize_non_empty(cls, value: str) -> str:
+    def _validate_schema(cls, value: str) -> str:
         normalized = value.strip()
-        if not normalized:
-            raise ValueError("must be a non-empty string")
+        if normalized != "ai.model.v1":
+            raise ValueError("must equal 'ai.model.v1'")
         return normalized
 
-
-class _RawModelsConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    version: int | None = None
-    default_profile: str | None = None
-    profiles: dict[str, _RawModelProfile]
-
-    @field_validator("version")
+    @field_validator("id", "model", "base_url", "api_key_env")
     @classmethod
-    def _validate_version(cls, value: int | None) -> int | None:
-        if value is None:
-            return None
-        if value <= 0:
-            raise ValueError("must be > 0")
-        return value
-
-    @field_validator("profiles", mode="before")
-    @classmethod
-    def _normalize_profiles(cls, value: Any) -> dict[str, Any]:
-        if not isinstance(value, dict) or not value:
-            raise ValueError("must be a non-empty mapping")
-
-        normalized: dict[str, Any] = {}
-        for raw_name, raw_profile in value.items():
-            if not isinstance(raw_name, str) or not raw_name.strip():
-                raise ValueError("profile names must be non-empty strings")
-            profile_name = raw_name.strip()
-            if profile_name in normalized:
-                raise ValueError(f"duplicate profile '{profile_name}'")
-            normalized[profile_name] = raw_profile
-        return normalized
-
-    @field_validator("default_profile")
-    @classmethod
-    def _normalize_default_profile(cls, value: str | None) -> str | None:
+    def _normalize_non_empty(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
@@ -83,52 +53,75 @@ class _RawModelsConfig(BaseModel):
 
 
 def models_config_path(ai_paths: AIPaths) -> Path:
-    """Return path to the collection-scoped model profile config."""
+    """Return path to the collection-scoped model profile directory."""
     return ai_paths.models
 
 
-def load_model_profiles(ai_paths: AIPaths) -> ModelsConfig:
-    """Load model profiles from ai/models.yaml."""
-    path = models_config_path(ai_paths)
-    raw = load_yaml_mapping(
-        path,
-        error_type=AIConfigError,
-        mapping_label="Model profile config",
-        missing_message=(
-            f"Model profile config not found: {path}. "
-            "Run 'ankiops init' to eject built-in AI assets."
-        ),
-    )
-    parsed = validate_config_model(
-        raw,
-        model_type=_RawModelsConfig,
-        path=path,
-        error_type=AIConfigError,
-        config_label="models config",
-    )
-
-    default_profile = parsed.default_profile or next(iter(parsed.profiles))
-    if default_profile not in parsed.profiles:
+def load_model_configs(ai_paths: AIPaths) -> ModelsConfig:
+    """Load model profiles from ai/models/*.yaml."""
+    models_dir = models_config_path(ai_paths)
+    if not models_dir.exists() or not models_dir.is_dir():
         raise AIConfigError(
-            f"default_profile '{default_profile}' was not found in profiles in '{path}'"
+            f"Model profile directory not found: {models_dir}. "
+            "Run 'ankiops init' to eject built-in AI assets."
         )
 
-    profiles = {
-        profile_name: ModelProfile(
-            name=profile_name,
-            provider=profile.provider,
-            model=profile.model,
-            base_url=profile.base_url,
-            api_key_env=profile.api_key_env,
-            timeout_seconds=profile.timeout_seconds,
-            max_in_flight=profile.max_in_flight,
+    model_files = sorted(
+        path
+        for path in models_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in _VALID_MODEL_SUFFIXES
+    )
+    if not model_files:
+        raise AIConfigError(f"No model profile YAML files found in: {models_dir}")
+
+    profiles: dict[str, ModelProfile] = {}
+    default_profiles: list[str] = []
+    for path in model_files:
+        raw = load_yaml_mapping(
+            path,
+            error_type=AIConfigError,
+            mapping_label="Model profile file",
         )
-        for profile_name, profile in parsed.profiles.items()
-    }
+        parsed = validate_config_model(
+            raw,
+            model_type=_RawModelProfileFile,
+            path=path,
+            error_type=AIConfigError,
+            config_label="model profile",
+        )
+
+        profile_name = parsed.id or path.stem
+        if parsed.id is not None and parsed.id != path.stem:
+            raise AIConfigError(
+                f"Model profile id must match file name stem in '{path}' "
+                f"(expected '{path.stem}', got '{parsed.id}')"
+            )
+        if profile_name in profiles:
+            raise AIConfigError(f"Duplicate model profile id '{profile_name}'")
+
+        profiles[profile_name] = ModelProfile(
+            name=profile_name,
+            provider=parsed.provider,
+            model=parsed.model,
+            base_url=parsed.base_url,
+            api_key_env=parsed.api_key_env,
+            timeout_seconds=parsed.timeout_seconds,
+            max_in_flight=parsed.max_in_flight,
+        )
+        if parsed.default:
+            default_profiles.append(profile_name)
+
+    if len(default_profiles) > 1:
+        all_defaults = ", ".join(default_profiles)
+        raise AIConfigError(
+            f"Multiple model profiles marked as default: {all_defaults}"
+        )
+    default_profile = default_profiles[0] if default_profiles else next(iter(profiles))
+
     return ModelsConfig(
         default_profile=default_profile,
         profiles=profiles,
-        source_path=path,
+        source_path=models_dir,
     )
 
 

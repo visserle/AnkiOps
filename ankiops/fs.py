@@ -362,7 +362,6 @@ class FileSystemAdapter:
     def update_media_references(
         self, directory: Path, rename_map: dict[str, str]
     ) -> int:
-
         if not rename_map:
             return 0
 
@@ -438,23 +437,30 @@ class FileSystemAdapter:
         logger.debug(f"Ejected built-in note types to {dst_dir}")
 
     def eject_builtin_ai_assets(self, dst_dir: Path) -> None:
-        """Copy built-in AI config and prompt YAML files to the filesystem."""
+        """Copy built-in AI model/task YAML files to the filesystem."""
         src_root = resources.files("ankiops.ai")
-        models_ref = src_root.joinpath("models.yaml")
-        prompts_ref = src_root.joinpath("prompts")
+        models_ref = src_root.joinpath("models")
+        tasks_ref = src_root.joinpath("tasks")
 
         dst_dir.mkdir(parents=True, exist_ok=True)
-        prompts_dst_dir = dst_dir / "prompts"
-        prompts_dst_dir.mkdir(parents=True, exist_ok=True)
+        models_dst_dir = dst_dir / "models"
+        tasks_dst_dir = dst_dir / "tasks"
+        models_dst_dir.mkdir(parents=True, exist_ok=True)
+        tasks_dst_dir.mkdir(parents=True, exist_ok=True)
 
         with (
             resources.as_file(models_ref) as models_path,
-            resources.as_file(prompts_ref) as prompts_path,
+            resources.as_file(tasks_ref) as tasks_path,
         ):
-            shutil.copy2(models_path, dst_dir / "models.yaml")
             shutil.copytree(
-                prompts_path,
-                prompts_dst_dir,
+                models_path,
+                models_dst_dir,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
+            )
+            shutil.copytree(
+                tasks_path,
+                tasks_dst_dir,
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
             )
