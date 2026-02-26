@@ -6,8 +6,8 @@ import fnmatch
 from dataclasses import dataclass
 from typing import Any, Iterable, Iterator
 
-from .task_apply import add_warning
-from .types import InlineNotePayload, TaskConfig, TaskRunResult
+from ankiops.ai.task_apply import add_warning
+from ankiops.ai.types import InlineNotePayload, TaskConfig, TaskRunResult
 
 
 @dataclass(frozen=True)

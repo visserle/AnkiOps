@@ -1,13 +1,11 @@
 """Validation utilities for AI JSON responses."""
 
-from __future__ import annotations
-
 import json
 import re
 from typing import Any
 
-from .errors import AIResponseError
-from .types import InlineEditedNote
+from ankiops.ai.errors import AIResponseError
+from ankiops.ai.types import InlineEditedNote
 
 _JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _JSON_DECODER = json.JSONDecoder()

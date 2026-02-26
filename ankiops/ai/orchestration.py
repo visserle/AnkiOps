@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .model_config import load_model_configs, resolve_runtime_config
-from .paths import AIPaths
-from .task_config import load_task_config
-from .types import RuntimeAIConfig, TaskConfig
+from ankiops.ai.model_config import load_model_configs, resolve_runtime_config
+from ankiops.ai.paths import AIPaths
+from ankiops.ai.task_config import load_task_config
+from ankiops.ai.types import RuntimeAIConfig, TaskConfig
 
 
 @dataclass(frozen=True)

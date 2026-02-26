@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Protocol, runtime_checkable
 
-from .errors import TaskExecutionError
-from .task_execution import process_task_stream
-from .task_selection import TaskMatchers, require_decks, select_decks
-from .types import AsyncInlineBatchEditor, TaskConfig, TaskRunOptions, TaskRunResult
+from ankiops.ai.errors import TaskExecutionError
+from ankiops.ai.task_execution import process_task_stream
+from ankiops.ai.task_selection import TaskMatchers, require_decks, select_decks
+from ankiops.ai.types import (
+    AsyncInlineBatchEditor,
+    TaskConfig,
+    TaskRunOptions,
+    TaskRunResult,
+)
 
 
 @runtime_checkable

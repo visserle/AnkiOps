@@ -1,13 +1,11 @@
 """Task result validation and mutation helpers."""
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
-from .types import InlineEditedNote, TaskChange, TaskRunResult
+from ankiops.ai.types import InlineEditedNote, TaskChange, TaskRunResult
 
 if TYPE_CHECKING:
-    from .task_selection import NoteTask
+    from ankiops.ai.task_selection import NoteTask
 
 
 def validate_edited_note(

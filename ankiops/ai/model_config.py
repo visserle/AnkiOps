@@ -7,11 +7,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .config_utils import load_yaml_mapping, validate_config_model
-from .errors import AIConfigError
-from .paths import AIPaths
-from .providers import get_provider_spec, provider_ids
-from .types import ModelProfile, ModelsConfig, RuntimeAIConfig
+from ankiops.ai.config_utils import load_yaml_mapping, validate_config_model
+from ankiops.ai.errors import AIConfigError
+from ankiops.ai.paths import AIPaths
+from ankiops.ai.providers import get_provider_spec, provider_ids
+from ankiops.ai.types import ModelProfile, ModelsConfig, RuntimeAIConfig
 
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_MAX_IN_FLIGHT = 4

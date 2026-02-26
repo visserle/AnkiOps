@@ -1,7 +1,5 @@
 """Runtime transport selection for AI editors."""
 
-from __future__ import annotations
-
 from ankiops.ai.client import OpenAICompatibleAsyncEditor
 from ankiops.ai.errors import AIConfigError
 from ankiops.ai.types import AsyncInlineBatchEditor, RuntimeAIConfig

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .errors import AIConfigError
+from ankiops.ai.errors import AIConfigError
 
 
 @dataclass(frozen=True)

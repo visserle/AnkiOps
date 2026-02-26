@@ -1,7 +1,7 @@
 """Public AI API for task-driven inline JSON editing."""
 
-from .client import OpenAICompatibleAsyncEditor
-from .errors import (
+from ankiops.ai.client import OpenAICompatibleAsyncEditor
+from ankiops.ai.errors import (
     AIConfigError,
     AIError,
     AIRequestError,
@@ -9,11 +9,11 @@ from .errors import (
     TaskConfigError,
     TaskExecutionError,
 )
-from .orchestration import AIRuntimeOverrides, prepare_ai_run
-from .paths import AIPaths
-from .runner import TaskRunner
-from .transports import build_async_editor
-from .types import TaskRunOptions
+from ankiops.ai.orchestration import AIRuntimeOverrides, prepare_ai_run
+from ankiops.ai.paths import AIPaths
+from ankiops.ai.runner import TaskRunner
+from ankiops.ai.transports import build_async_editor
+from ankiops.ai.types import TaskRunOptions
 
 __all__ = [
     "AIConfigError",
