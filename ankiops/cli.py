@@ -211,7 +211,11 @@ def run_serialize(args):
 
 def run_deserialize(args):
     """Deserialize collection from JSON/ZIP format to target directory."""
-    serialized_file = Path(args.serialized_file)
+    if args.input:
+        serialized_file = Path(args.input)
+    else:
+        collection_dir = get_collection_dir()
+        serialized_file = Path(f"{collection_dir.name}.json")
 
     if not serialized_file.exists():
         logger.error(f"Serialized file not found: {serialized_file}")
@@ -293,9 +297,9 @@ def main():
         help="Import markdown from JSON (run 'init' after to set up)",
     )
     deserialize_parser.add_argument(
-        "serialized_file",
-        metavar="FILE",
-        help="Serialized file to import (.json)",
+        "--input",
+        "-i",
+        help="Input file path (default: <collection-name>.json)",
     )
     deserialize_parser.add_argument(
         "--overwrite",
@@ -388,7 +392,7 @@ def main():
             "# Serialize collection to file"
         )
         print(
-            "  ankiops deserialize my-deck.json             "
+            "  ankiops deserialize -i my-deck.json          "
             "# Deserialize file, then run init"
         )
         print(

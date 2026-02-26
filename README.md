@@ -106,7 +106,7 @@ We recommend using VS Code. It has excellent AI integration, a great [add-on](ht
 
 ### How can I share my AnkiOps collection?
 
-Use `ankiops serialize` to export your local AnkiOps collection to JSON. Recipients can import it with `ankiops deserialize <file>` into an initialized collection folder.
+Use `ankiops serialize` to export your local AnkiOps collection to JSON. Recipients can import it with `ankiops deserialize --input <path>` into an initialized collection folder.
 
 Alternatively, share your collection via native Anki export (`.apkg`) or by sharing Markdown files with your local `media/` folder.
 
@@ -151,7 +151,7 @@ uv run python -m main ma
 - `--output`, `-o` - Output file path (default: `<collection-name>.json`)
 
 **`deserialize`:**
-- `FILE` - Serialized JSON file to import (required)
+- `--input`, `-i` - Input file path (default: `<collection-name>.json`)
 - `--overwrite` - Overwrite existing markdown files
 
 **`ai config`:**
