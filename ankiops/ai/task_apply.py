@@ -1,5 +1,7 @@
 """Task result validation and mutation helpers."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from ankiops.ai.types import InlineEditedNote, TaskChange, TaskRunResult
