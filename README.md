@@ -156,7 +156,7 @@ uv run python -m main ma
 
 **`ai config`:**
 - `--profile` - Model profile id from `ai/models/*.yaml`
-- `--provider {local,remote}` - Optional runtime provider override
+- `--provider {groq,ollama,openai}` - Optional runtime provider override
 - `--model` - Optional runtime model override
 - `--base-url` - Optional runtime OpenAI-compatible base URL override
 - `--api-key-env` - Optional runtime API key env var override
@@ -174,7 +174,8 @@ uv run python -m main ma
 ### Where is AI config stored?
 
 AnkiOps stores model profiles in `ai/models/*.yaml`.  
-Secrets are read from environment variables (e.g. `ANKIOPS_AI_API_KEY`) or passed at runtime via `--api-key`.
+Built-in profiles are `ollama-fast`, `openai-fast`, and `groq-fast`.
+API credentials are provider-level defaults (for example `OPENAI_API_KEY` for `openai`, `GROQ_API_KEY` for `groq`) and can be overridden at runtime via `--api-key-env`/`--api-key`.
 
 ### Task Infrastructure
 

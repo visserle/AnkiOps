@@ -392,11 +392,11 @@ def main():
             "# Deserialize file, then run init"
         )
         print(
-            "  ankiops ai --task grammar --profile local-fast -d Biology"
+            "  ankiops ai --task grammar --profile ollama-fast -d Biology"
             "  # Run a task over a deck tree"
         )
         print(
-            "  ankiops ai config --profile remote-fast      # Show runtime model config"
+            "  ankiops ai config --profile openai-fast      # Show runtime model config"
         )
         print()
         print("For more information:")

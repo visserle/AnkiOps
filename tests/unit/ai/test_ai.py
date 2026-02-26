@@ -19,7 +19,11 @@ from ankiops.ai.errors import (
     TaskConfigError,
     TaskExecutionError,
 )
-from ankiops.ai.model_config import load_model_configs, resolve_runtime_config
+from ankiops.ai.model_config import (
+    load_model_configs,
+    provider_choices,
+    resolve_runtime_config,
+)
 from ankiops.ai.orchestration import AIRuntimeOverrides, prepare_ai_run
 from ankiops.ai.paths import AIPaths
 from ankiops.ai.runner import TaskRunner
@@ -140,11 +144,13 @@ class _FailingBatchEditor:
 
 def _runtime() -> RuntimeAIConfig:
     return RuntimeAIConfig(
-        profile="remote-fast",
-        provider="remote",
+        profile="openai-fast",
+        provider="openai",
+        transport="openai_chat_completions",
         model="gpt-4o-mini",
         base_url="https://api.openai.com/v1",
-        api_key_env="ANKIOPS_AI_API_KEY",
+        api_key_env="OPENAI_API_KEY",
+        requires_api_key=True,
         timeout_seconds=10,
         max_in_flight=3,
         api_key="test-key",
@@ -162,7 +168,7 @@ def _task(
     scope_subdecks: bool = True,
     batch: str = "single",
     batch_size: int = 1,
-    model: str | None = "remote-fast",
+    model: str | None = "openai-fast",
     temperature: float = 0.0,
 ) -> TaskConfig:
     return TaskConfig(
@@ -218,7 +224,7 @@ def test_load_task_from_yaml(tmp_path):
         (
             "schema: ai.task.v1\n"
             "id: grammar\n"
-            "model: remote-fast\n"
+            "model: openai-fast\n"
             "instructions: |\n"
             "  Return inline JSON.\n"
             "batch: batch\n"
@@ -241,7 +247,7 @@ def test_load_task_from_yaml(tmp_path):
     task = load_task_config(ai_paths, "grammar")
 
     assert task.id == "grammar"
-    assert task.model == "remote-fast"
+    assert task.model == "openai-fast"
     assert task.read_fields == ["Question", "Answer"]
     assert task.write_fields == ["Question"]
     assert task.batch == "batch"
@@ -321,12 +327,12 @@ def test_load_task_rejects_write_fields_outside_read_fields(tmp_path):
 
 def test_load_models_config_and_resolve_runtime(tmp_path, monkeypatch):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
+            "id: ollama-fast\n"
             "default: true\n"
-            "provider: local\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
             "api_key_env: TEST_KEY\n"
@@ -335,11 +341,11 @@ def test_load_models_config_and_resolve_runtime(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    (ai_paths.models / "remote-fast.yaml").write_text(
+    (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: remote-fast\n"
-            "provider: remote\n"
+            "id: openai-fast\n"
+            "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
             "api_key_env: TEST_KEY\n"
@@ -350,24 +356,74 @@ def test_load_models_config_and_resolve_runtime(tmp_path, monkeypatch):
     )
 
     config = load_model_configs(ai_paths)
-    assert config.default_profile == "local-fast"
-    assert config.profiles["remote-fast"].max_in_flight == 6
+    assert config.default_profile == "ollama-fast"
+    assert config.profiles["openai-fast"].max_in_flight == 6
 
     monkeypatch.setenv("TEST_KEY", "secret")
-    runtime = resolve_runtime_config(config, profile="remote-fast")
-    assert runtime.provider == "remote"
+    runtime = resolve_runtime_config(config, profile="openai-fast")
+    assert runtime.provider == "openai"
     assert runtime.timeout_seconds == 45
     assert runtime.max_in_flight == 6
     assert runtime.api_key == "secret"
 
 
-def test_load_models_config_rejects_unknown_fields(tmp_path):
+def test_load_models_config_defaults_groq_api_key_env(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "groq-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
-            "provider: local\n"
+            "id: groq-fast\n"
+            "provider: groq\n"
+            "model: llama-3.1-8b-instant\n"
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_model_configs(ai_paths)
+    assert config.profiles["groq-fast"].api_key_env_override is None
+
+    runtime = resolve_runtime_config(config, profile="groq-fast")
+    assert runtime.base_url == "https://api.groq.com/openai/v1"
+    assert runtime.api_key_env == "GROQ_API_KEY"
+
+
+def test_resolve_runtime_provider_override_to_groq_uses_groq_defaults(
+    tmp_path,
+    monkeypatch,
+):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.models / "openai-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: openai-fast\n"
+            "default: true\n"
+            "provider: openai\n"
+            "model: gpt-4o-mini\n"
+        ),
+        encoding="utf-8",
+    )
+    config = load_model_configs(ai_paths)
+
+    monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
+    runtime = resolve_runtime_config(config, provider="groq")
+
+    assert runtime.provider == "groq"
+    assert runtime.base_url == "https://api.groq.com/openai/v1"
+    assert runtime.api_key_env == "GROQ_API_KEY"
+    assert runtime.api_key == "groq-secret"
+
+
+def test_provider_choices_include_supported_registry_ids():
+    assert set(provider_choices()) == {"groq", "ollama", "openai"}
+
+
+def test_load_models_config_rejects_unknown_fields(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.models / "ollama-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: ollama-fast\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
             "unexpected_field: true\n"
@@ -381,11 +437,11 @@ def test_load_models_config_rejects_unknown_fields(tmp_path):
 
 def test_resolve_runtime_rejects_non_positive_overrides(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
-            "provider: local\n"
+            "id: ollama-fast\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
         ),
@@ -399,22 +455,22 @@ def test_resolve_runtime_rejects_non_positive_overrides(tmp_path):
 
 def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
+            "id: ollama-fast\n"
             "default: true\n"
-            "provider: local\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
         ),
         encoding="utf-8",
     )
-    (ai_paths.models / "remote-fast.yaml").write_text(
+    (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: remote-fast\n"
-            "provider: remote\n"
+            "id: openai-fast\n"
+            "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
         ),
@@ -424,7 +480,7 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
         (
             "schema: ai.task.v1\n"
             "id: grammar\n"
-            "model: remote-fast\n"
+            "model: openai-fast\n"
             "instructions: Return inline JSON.\n"
             "read_fields:\n"
             "  - Question\n"
@@ -436,34 +492,34 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
 
     collection_dir = ai_paths.root.parent
     _, runtime_from_task = prepare_ai_run(collection_dir, "grammar")
-    assert runtime_from_task.profile == "remote-fast"
+    assert runtime_from_task.profile == "openai-fast"
 
     _, runtime_from_override = prepare_ai_run(
         collection_dir,
         "grammar",
-        overrides=AIRuntimeOverrides(profile="local-fast"),
+        overrides=AIRuntimeOverrides(profile="ollama-fast"),
     )
-    assert runtime_from_override.profile == "local-fast"
+    assert runtime_from_override.profile == "ollama-fast"
 
 
 def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
+            "id: ollama-fast\n"
             "default: true\n"
-            "provider: local\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
         ),
         encoding="utf-8",
     )
-    (ai_paths.models / "remote-fast.yaml").write_text(
+    (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: remote-fast\n"
-            "provider: remote\n"
+            "id: openai-fast\n"
+            "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
         ),
@@ -485,29 +541,29 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
     collection_dir = ai_paths.root.parent
     task_config, runtime = prepare_ai_run(collection_dir, "grammar")
     assert task_config.model is None
-    assert runtime.profile == "local-fast"
+    assert runtime.profile == "ollama-fast"
 
 
 def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
     tmp_path,
 ):
     ai_paths = _mk_ai_paths(tmp_path)
-    (ai_paths.models / "local-fast.yaml").write_text(
+    (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: local-fast\n"
+            "id: ollama-fast\n"
             "default: true\n"
-            "provider: local\n"
+            "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
         ),
         encoding="utf-8",
     )
-    (ai_paths.models / "remote-fast.yaml").write_text(
+    (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: remote-fast\n"
-            "provider: remote\n"
+            "id: openai-fast\n"
+            "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
         ),
@@ -530,7 +586,7 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
     collection_dir = ai_paths.root.parent
     task_config, runtime = prepare_ai_run(collection_dir, "grammar")
     assert task_config.model is None
-    assert runtime.profile == "local-fast"
+    assert runtime.profile == "ollama-fast"
 
 
 def test_inline_task_updates_only_target_fields_batch_mode():

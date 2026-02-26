@@ -13,14 +13,18 @@ from ankiops.ai import (
     AIRequestError,
     AIResponseError,
     AIRuntimeOverrides,
-    OpenAICompatibleAsyncEditor,
     TaskConfigError,
     TaskExecutionError,
     TaskRunner,
     TaskRunOptions,
+    build_async_editor,
     prepare_ai_run,
 )
-from ankiops.ai.model_config import load_model_configs, resolve_runtime_config
+from ankiops.ai.model_config import (
+    load_model_configs,
+    provider_choices,
+    resolve_runtime_config,
+)
 from ankiops.collection_serializer import (
     deserialize_collection_data,
     serialize_collection,
@@ -126,11 +130,9 @@ def run_ai_task(args):
     if args.temperature is not None:
         task_config = replace(task_config, temperature=args.temperature)
 
-    if runtime.provider == "remote" and not runtime.api_key:
-        logger.error(
-            f"No API key found in env var '{runtime.api_key_env}'. "
-            "Set it or pass --api-key."
-        )
+    if runtime.requires_api_key and not runtime.api_key:
+        env_hint = f" in env var '{runtime.api_key_env}'" if runtime.api_key_env else ""
+        logger.error(f"No API key found{env_hint}. Set it or pass --api-key.")
         raise SystemExit(1)
 
     logger.info(
@@ -146,7 +148,7 @@ def run_ai_task(args):
 
     serialized_data = serialize_collection(collection_dir)
 
-    client = OpenAICompatibleAsyncEditor(runtime)
+    client = build_async_editor(runtime)
     options = TaskRunOptions(
         include_decks=args.include_deck,
         batch_size=args.batch_size,
@@ -212,7 +214,7 @@ def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--provider",
-        choices=["local", "remote"],
+        choices=list(provider_choices()),
         help="Override provider for selected profile",
     )
     parser.add_argument(

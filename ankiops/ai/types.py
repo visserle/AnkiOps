@@ -15,8 +15,8 @@ class ModelProfile:
     name: str
     provider: str
     model: str
-    base_url: str
-    api_key_env: str
+    base_url_override: str | None
+    api_key_env_override: str | None
     timeout_seconds: int
     max_in_flight: int
 
@@ -36,9 +36,11 @@ class RuntimeAIConfig:
 
     profile: str
     provider: str
+    transport: str
     model: str
     base_url: str
-    api_key_env: str
+    api_key_env: str | None
+    requires_api_key: bool
     timeout_seconds: int
     max_in_flight: int
     api_key: str | None = None

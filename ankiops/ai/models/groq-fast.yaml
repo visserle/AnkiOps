@@ -1,0 +1,7 @@
+schema: ai.model.v1
+id: groq-fast
+default: false
+provider: groq
+model: llama-3.1-8b-instant
+timeout_seconds: 60
+max_in_flight: 8

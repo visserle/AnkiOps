@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .config_utils import load_yaml_mapping, validate_config_model
 from .errors import AIConfigError
 from .paths import AIPaths
+from .providers import get_provider_spec, provider_ids
 from .types import ModelProfile, ModelsConfig, RuntimeAIConfig
 
-DEFAULT_API_KEY_ENV = "ANKIOPS_AI_API_KEY"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_MAX_IN_FLIGHT = 4
-_VALID_PROVIDERS = frozenset({"local", "remote"})
 _VALID_MODEL_SUFFIXES = frozenset({".yaml", ".yml"})
 
 
@@ -26,10 +24,10 @@ class _RawModelProfileFile(BaseModel):
     schema_name: str = Field(default="ai.model.v1", alias="schema")
     id: str | None = None
     default: bool = False
-    provider: Literal["local", "remote"]
+    provider: str
     model: str
-    base_url: str
-    api_key_env: str = DEFAULT_API_KEY_ENV
+    base_url: str | None = None
+    api_key_env: str | None = None
     timeout_seconds: int = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0)
     max_in_flight: int = Field(default=DEFAULT_MAX_IN_FLIGHT, gt=0)
 
@@ -40,6 +38,11 @@ class _RawModelProfileFile(BaseModel):
         if normalized != "ai.model.v1":
             raise ValueError("must equal 'ai.model.v1'")
         return normalized
+
+    @field_validator("provider")
+    @classmethod
+    def _validate_provider(cls, value: str) -> str:
+        return _coerce_provider(value)
 
     @field_validator("id", "model", "base_url", "api_key_env")
     @classmethod
@@ -103,8 +106,8 @@ def load_model_configs(ai_paths: AIPaths) -> ModelsConfig:
             name=profile_name,
             provider=parsed.provider,
             model=parsed.model,
-            base_url=parsed.base_url,
-            api_key_env=parsed.api_key_env,
+            base_url_override=parsed.base_url,
+            api_key_env_override=parsed.api_key_env,
             timeout_seconds=parsed.timeout_seconds,
             max_in_flight=parsed.max_in_flight,
         )
@@ -144,20 +147,34 @@ def resolve_runtime_config(
         known = ", ".join(sorted(models_config.profiles.keys()))
         raise AIConfigError(f"Unknown model profile '{profile_name}'. Known: {known}")
 
-    runtime_provider = _coerce_provider(provider or selected.provider)
+    selected_provider = _coerce_provider(selected.provider)
+    runtime_provider = _coerce_provider(provider or selected_provider)
+    provider_spec = get_provider_spec(runtime_provider)
+    provider_changed = provider is not None and runtime_provider != selected_provider
+
+    if provider_changed:
+        runtime_base_url_fallback = provider_spec.default_base_url
+        runtime_api_key_env_fallback = provider_spec.default_api_key_env
+    else:
+        runtime_base_url_fallback = (
+            selected.base_url_override or provider_spec.default_base_url
+        )
+        runtime_api_key_env_fallback = (
+            selected.api_key_env_override
+            if selected.api_key_env_override is not None
+            else provider_spec.default_api_key_env
+        )
+
     runtime_model = _require_runtime_string(model, fallback=selected.model, key="model")
     runtime_base_url = _require_runtime_string(
         base_url,
-        fallback=selected.base_url,
+        fallback=runtime_base_url_fallback,
         key="base_url",
     )
-    runtime_api_key_env = (
-        _normalize_runtime_string(
-            api_key_env,
-            fallback=selected.api_key_env,
-            key="api_key_env",
-        )
-        or DEFAULT_API_KEY_ENV
+    runtime_api_key_env = _normalize_runtime_string(
+        api_key_env,
+        fallback=runtime_api_key_env_fallback,
+        key="api_key_env",
     )
     runtime_timeout = _resolve_positive_int(
         timeout_seconds,
@@ -171,16 +188,22 @@ def resolve_runtime_config(
     )
     resolved_api_key = _normalize_runtime_string(
         api_key,
-        fallback=os.environ.get(runtime_api_key_env),
+        fallback=(
+            os.environ.get(runtime_api_key_env)
+            if runtime_api_key_env is not None
+            else None
+        ),
         key="api_key",
     )
 
     return RuntimeAIConfig(
         profile=profile_name,
         provider=runtime_provider,
+        transport=provider_spec.transport,
         model=runtime_model,
         base_url=runtime_base_url,
         api_key_env=runtime_api_key_env,
+        requires_api_key=provider_spec.requires_api_key,
         timeout_seconds=runtime_timeout,
         max_in_flight=runtime_max_in_flight,
         api_key=resolved_api_key,
@@ -188,11 +211,17 @@ def resolve_runtime_config(
 
 
 def _coerce_provider(value: str) -> str:
-    normalized = value.strip()
-    if normalized not in _VALID_PROVIDERS:
-        allowed = ", ".join(sorted(_VALID_PROVIDERS))
+    normalized = value.strip().lower()
+    if not normalized:
+        allowed = ", ".join(provider_ids())
         raise AIConfigError(f"provider must be one of: {allowed}")
+    get_provider_spec(normalized)
     return normalized
+
+
+def provider_choices() -> tuple[str, ...]:
+    """Return supported provider ids for CLI argument choices."""
+    return provider_ids()
 
 
 def _require_runtime_string(raw: str | None, *, fallback: str, key: str) -> str:

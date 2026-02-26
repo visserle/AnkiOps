@@ -12,6 +12,7 @@ from .errors import (
 from .orchestration import AIRuntimeOverrides, prepare_ai_run
 from .paths import AIPaths
 from .runner import TaskRunner
+from .transports import build_async_editor
 from .types import TaskRunOptions
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "TaskExecutionError",
     "TaskRunOptions",
     "TaskRunner",
+    "build_async_editor",
     "prepare_ai_run",
 ]
