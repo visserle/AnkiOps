@@ -1,5 +1,7 @@
 name: AnkiOpsQA
-styling: ../Styling.css
+styling:
+  - ../AnkiOpsStyling.css
+  - ../SyntaxHighlighting.css
 templates:
   - name: Card 1
     front: Front.template.anki

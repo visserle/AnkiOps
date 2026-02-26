@@ -1,6 +1,8 @@
 name: AnkiOpsClozeHideAll
 is_cloze: true
-styling: ../Styling.css
+styling:
+  - ../AnkiOpsStyling.css
+  - ../SyntaxHighlighting.css
 templates:
   - name: Cloze Hide All
     front: Front.template.anki

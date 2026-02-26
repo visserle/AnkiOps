@@ -77,10 +77,10 @@ def test_load_custom_from_dir():
                 {"name": "Term", "prefix": "TM:", "identifying": True},
                 {"name": "Definition", "prefix": "D:", "identifying": True},
             ],
-            "styling": "Styling.css",
+            "styling": "AnkiOpsStyling.css",
         }
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
-        (note_types / "MyCustomType" / "Styling.css").write_text(
+        (note_types / "MyCustomType" / "AnkiOpsStyling.css").write_text(
             ".custom { color: red; }", encoding="utf-8"
         )
 
@@ -131,12 +131,12 @@ def test_note_type_load_uses_cache_when_unchanged(tmp_path, monkeypatch):
                     {"name": "Term", "prefix": "TM:", "identifying": True},
                     {"name": "Definition", "prefix": "D:", "identifying": True},
                 ],
-                "styling": "Styling.css",
+                "styling": "AnkiOpsStyling.css",
             }
         ),
         encoding="utf-8",
     )
-    (note_types / "MyCustomType" / "Styling.css").write_text(
+    (note_types / "MyCustomType" / "AnkiOpsStyling.css").write_text(
         ".custom { color: red; }", encoding="utf-8"
     )
 
@@ -169,12 +169,12 @@ def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
                     {"name": "Term", "prefix": "TM:", "identifying": True},
                     {"name": "Definition", "prefix": "D:", "identifying": True},
                 ],
-                "styling": "Styling.css",
+                "styling": "AnkiOpsStyling.css",
             }
         ),
         encoding="utf-8",
     )
-    css_path = note_types / "MyCustomType" / "Styling.css"
+    css_path = note_types / "MyCustomType" / "AnkiOpsStyling.css"
     css_path.write_text(".custom { color: red; }", encoding="utf-8")
 
     calls = {"count": 0}
