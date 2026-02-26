@@ -86,7 +86,7 @@ def initialize_collection(profile: str) -> Path:
     collection_dir.mkdir(parents=True, exist_ok=True)
 
     db = SQLiteDbAdapter.load(collection_dir)
-    db.set_config("profile", profile)
+    db.set_profile_name(profile)
     db.save()
     db.close()
 

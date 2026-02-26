@@ -113,7 +113,7 @@ def require_collection_dir(active_profile: str) -> Path:
         raise SystemExit(1)
 
     db = SQLiteDbAdapter.load(collection_dir)
-    expected_profile = db.get_config("profile")
+    expected_profile = db.get_profile_name()
     if expected_profile and expected_profile != active_profile:
         logger.error(
             f"Profile mismatch: collection in {collection_dir} is linked to "

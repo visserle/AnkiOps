@@ -30,28 +30,37 @@ class SQLiteDbAdapter:
         conn = None
         try:
             conn = sqlite3.connect(db_path)
+            conn.execute("PRAGMA foreign_keys = ON")
             with conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS notes (
                         note_key TEXT PRIMARY KEY,
-                        note_id INTEGER NOT NULL
+                        note_id INTEGER NOT NULL UNIQUE
                     )
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS decks (
                         name TEXT PRIMARY KEY,
-                        deck_id INTEGER NOT NULL
+                        deck_id INTEGER NOT NULL UNIQUE
                     )
                 """)
                 conn.execute("""
-                    CREATE TABLE IF NOT EXISTS config (
-                        key TEXT PRIMARY KEY,
-                        value TEXT
+                    CREATE TABLE IF NOT EXISTS collection_profile (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        profile_name TEXT NOT NULL CHECK (profile_name <> '')
+                    )
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS note_type_sync_state (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        sync_hash TEXT NOT NULL CHECK (sync_hash <> ''),
+                        names_signature TEXT NOT NULL
                     )
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS note_fingerprints (
-                        note_key TEXT PRIMARY KEY,
+                        note_key TEXT PRIMARY KEY
+                            REFERENCES notes(note_key) ON DELETE CASCADE,
                         md_hash TEXT NOT NULL,
                         anki_hash TEXT NOT NULL
                     )
@@ -59,13 +68,15 @@ class SQLiteDbAdapter:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS markdown_media_state (
                         md_path TEXT PRIMARY KEY,
-                        md_mtime_ns INTEGER NOT NULL,
-                        md_size INTEGER NOT NULL
+                        md_mtime_ns INTEGER NOT NULL CHECK (md_mtime_ns >= 0),
+                        md_size INTEGER NOT NULL CHECK (md_size >= 0)
                     )
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS markdown_media_refs (
-                        md_path TEXT NOT NULL,
+                        md_path TEXT NOT NULL
+                            REFERENCES markdown_media_state(md_path)
+                            ON DELETE CASCADE,
                         media_name TEXT NOT NULL,
                         PRIMARY KEY (md_path, media_name)
                     )
@@ -73,24 +84,18 @@ class SQLiteDbAdapter:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS media_fingerprints (
                         name TEXT PRIMARY KEY,
-                        mtime_ns INTEGER NOT NULL,
-                        size INTEGER NOT NULL,
-                        digest TEXT NOT NULL,
-                        hashed_name TEXT NOT NULL
+                        mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
+                        size INTEGER NOT NULL CHECK (size >= 0),
+                        digest TEXT NOT NULL CHECK (digest <> ''),
+                        hashed_name TEXT NOT NULL CHECK (hashed_name <> '')
                     )
                 """)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS media_push_state (
                         name TEXT PRIMARY KEY,
-                        digest TEXT NOT NULL
+                        digest TEXT NOT NULL CHECK (digest <> '')
                     )
                 """)
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_notes_id ON notes(note_id)"
-                )
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_decks_id ON decks(deck_id)"
-                )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_markdown_media_refs_media "
                     "ON markdown_media_refs(media_name)"
@@ -99,6 +104,13 @@ class SQLiteDbAdapter:
                 # Schema validation: ensure note mapping columns exist in 'notes' table.
                 # If not, it will raise OperationalError and trigger recovery.
                 conn.execute("SELECT note_key, note_id FROM notes LIMIT 0")
+                conn.execute(
+                    "SELECT id, profile_name FROM collection_profile LIMIT 0"
+                )
+                conn.execute(
+                    "SELECT id, sync_hash, names_signature "
+                    "FROM note_type_sync_state LIMIT 0"
+                )
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             if conn:
@@ -229,11 +241,12 @@ class SQLiteDbAdapter:
             statements.append(
                 (f"DELETE FROM notes WHERE note_id IN ({placeholders})", tuple(chunk))
             )
-        self._write_many(statements)
-        self._executemany(
-            "INSERT OR REPLACE INTO notes (note_key, note_id) VALUES (?, ?)",
-            ordered_rows,
-        )
+        with self.transaction():
+            self._write_many(statements)
+            self._executemany(
+                "INSERT OR REPLACE INTO notes (note_key, note_id) VALUES (?, ?)",
+                ordered_rows,
+            )
 
     def remove_notes_by_note_keys_bulk(self, note_keys: Iterable[str]) -> None:
         note_key_list = list(note_keys)
@@ -245,12 +258,6 @@ class SQLiteDbAdapter:
             statements.append(
                 (
                     f"DELETE FROM notes WHERE note_key IN ({placeholders})",
-                    tuple(chunk),
-                )
-            )
-            statements.append(
-                (
-                    f"DELETE FROM note_fingerprints WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
@@ -568,15 +575,35 @@ class SQLiteDbAdapter:
             )
         self._write_many(statements)
 
-    def get_config(self, key: str) -> str | None:
-        cursor = self._conn.execute("SELECT value FROM config WHERE key = ?", (key,))
+    def get_profile_name(self) -> str | None:
+        cursor = self._conn.execute(
+            "SELECT profile_name FROM collection_profile WHERE id = 1"
+        )
         row = cursor.fetchone()
         return row[0] if row else None
 
-    def set_config(self, key: str, value: str) -> None:
+    def set_profile_name(self, profile_name: str) -> None:
         self._write(
-            "INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
-            (key, value),
+            "INSERT OR REPLACE INTO collection_profile (id, profile_name) "
+            "VALUES (1, ?)",
+            (profile_name,),
+        )
+
+    def get_note_type_sync_state(self) -> tuple[str, str] | None:
+        cursor = self._conn.execute(
+            "SELECT sync_hash, names_signature "
+            "FROM note_type_sync_state WHERE id = 1"
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0], row[1]
+
+    def set_note_type_sync_state(self, sync_hash: str, names_signature: str) -> None:
+        self._write(
+            "INSERT OR REPLACE INTO note_type_sync_state "
+            "(id, sync_hash, names_signature) VALUES (1, ?, ?)",
+            (sync_hash, names_signature),
         )
 
     def get_note_id(self, note_key: str) -> int | None:

@@ -38,7 +38,7 @@ def collection(tmp_path, fs, monkeypatch):
 
     db = SQLiteDbAdapter.load(tmp_path)
     try:
-        db.set_config("profile", "test")
+        db.set_profile_name("test")
         db.save()
     finally:
         db.close()

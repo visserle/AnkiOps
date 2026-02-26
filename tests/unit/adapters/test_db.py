@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from ankiops.config import ANKIOPS_DB
@@ -25,7 +27,8 @@ def test_load_creates_tables(db, tmp_path):
 def test_load_empty(db):
     assert db.get_note_id("any-key") is None
     assert db.get_deck_id("any-name") is None
-    assert db.get_config("any-config") is None
+    assert db.get_profile_name() is None
+    assert db.get_note_type_sync_state() is None
 
 
 def test_persistence(tmp_path):
@@ -33,7 +36,8 @@ def test_persistence(tmp_path):
     try:
         db1.set_deck("TestDeck", 100)
         db1.set_note("note-1", 200)
-        db1.set_config("profile", "default")
+        db1.set_profile_name("default")
+        db1.set_note_type_sync_state("hash-1", "AnkiOpsQA")
         db1.save()
     finally:
         db1.close()
@@ -43,17 +47,26 @@ def test_persistence(tmp_path):
         assert db2.get_deck_id("TestDeck") == 100
         assert db2.get_deck_name(100) == "TestDeck"
         assert db2.get_note_id("note-1") == 200
-        assert db2.get_config("profile") == "default"
+        assert db2.get_profile_name() == "default"
+        assert db2.get_note_type_sync_state() == ("hash-1", "AnkiOpsQA")
     finally:
         db2.close()
 
 
-def test_config_mapping(db):
-    db.set_config("test-key", "test-value")
-    assert db.get_config("test-key") == "test-value"
+def test_profile_mapping(db):
+    db.set_profile_name("Default")
+    assert db.get_profile_name() == "Default"
 
-    db.set_config("test-key", "new-value")
-    assert db.get_config("test-key") == "new-value"
+    db.set_profile_name("Work")
+    assert db.get_profile_name() == "Work"
+
+
+def test_note_type_sync_state_mapping(db):
+    db.set_note_type_sync_state("hash-a", "AnkiOpsQA")
+    assert db.get_note_type_sync_state() == ("hash-a", "AnkiOpsQA")
+
+    db.set_note_type_sync_state("hash-b", "AnkiOpsQA,AnkiOpsCloze")
+    assert db.get_note_type_sync_state() == ("hash-b", "AnkiOpsQA,AnkiOpsCloze")
 
 
 def test_note_mapping(db):
@@ -207,6 +220,7 @@ def test_transaction_rolls_back_on_error(tmp_path):
 def test_bulk_note_fingerprints_roundtrip(tmp_path):
     adapter = SQLiteDbAdapter.load(tmp_path)
     try:
+        adapter.set_notes_bulk([("k1", 101), ("k2", 102)])
         adapter.set_note_fingerprints_bulk(
             [
                 ("k1", "md1", "a1"),
@@ -224,6 +238,7 @@ def test_bulk_note_fingerprints_roundtrip(tmp_path):
 def test_bulk_note_fingerprints_last_write_wins(tmp_path):
     adapter = SQLiteDbAdapter.load(tmp_path)
     try:
+        adapter.set_note("k1", 101)
         adapter.set_note_fingerprints_bulk(
             [
                 ("k1", "old-md", "old-a"),
@@ -248,20 +263,26 @@ def test_remove_note_by_note_key_removes_fingerprint(tmp_path):
         adapter.close()
 
 
-def test_prune_orphan_note_fingerprints(tmp_path):
+def test_unknown_note_key_fingerprint_is_rejected(tmp_path):
+    adapter = SQLiteDbAdapter.load(tmp_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            adapter.set_note_fingerprints_bulk([("stale", "md2", "a2")])
+    finally:
+        adapter.close()
+
+
+def test_prune_orphan_note_fingerprints_is_noop_with_foreign_keys(tmp_path):
     adapter = SQLiteDbAdapter.load(tmp_path)
     try:
         adapter.set_note("k1", 101)
-        adapter.set_note_fingerprints_bulk(
-            [("k1", "md1", "a1"), ("stale", "md2", "a2")]
-        )
+        adapter.set_note_fingerprints_bulk([("k1", "md1", "a1")])
+        adapter.remove_note_by_note_key("k1")
 
         removed = adapter.prune_orphan_note_fingerprints()
 
-        assert removed == 1
-        assert adapter.get_note_fingerprints_bulk(["k1", "stale"]) == {
-            "k1": ("md1", "a1")
-        }
+        assert removed == 0
+        assert adapter.get_note_fingerprints_bulk(["k1"]) == {}
     finally:
         adapter.close()
 

@@ -11,9 +11,6 @@ from ankiops.fs import FileSystemAdapter
 
 logger = logging.getLogger(__name__)
 
-_SYNC_HASH_CONFIG_KEY = "note_types.sync_hash_v1"
-_SYNC_NAMES_CONFIG_KEY = "note_types.sync_names_v1"
-
 
 def _note_types_sync_hash(configs) -> str:
     payload = []
@@ -72,11 +69,11 @@ def sync_note_types(
 
     local_hash = _note_types_sync_hash(configs)
     names_signature = _note_types_names_signature(configs)
+    cached_state = db_port.get_note_type_sync_state() if db_port is not None else None
     if (
         db_port is not None
         and not to_create
-        and db_port.get_config(_SYNC_HASH_CONFIG_KEY) == local_hash
-        and db_port.get_config(_SYNC_NAMES_CONFIG_KEY) == names_signature
+        and cached_state == (local_hash, names_signature)
     ):
         logger.debug(
             "Note types unchanged since last successful sync; skipping model diff"
@@ -104,7 +101,6 @@ def sync_note_types(
         return None
 
     if db_port is not None:
-        db_port.set_config(_SYNC_HASH_CONFIG_KEY, local_hash)
-        db_port.set_config(_SYNC_NAMES_CONFIG_KEY, names_signature)
+        db_port.set_note_type_sync_state(local_hash, names_signature)
 
     return ", ".join(parts)
