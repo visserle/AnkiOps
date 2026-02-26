@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -162,7 +163,6 @@ def _task(
     batch: str = "single",
     batch_size: int = 1,
     model: str | None = "remote-fast",
-    constraints: list[str] | None = None,
     temperature: float = 0.0,
 ) -> TaskConfig:
     return TaskConfig(
@@ -177,7 +177,6 @@ def _task(
         scope_note_types=scope_note_types or ["AnkiOps*"],
         read_fields=read_fields or ["Question"],
         write_fields=write_fields or ["Question"],
-        constraints=constraints or [],
         temperature=temperature,
     )
 
@@ -234,8 +233,6 @@ def test_load_task_from_yaml(tmp_path):
             "  - Answer\n"
             "write_fields:\n"
             "  - Question\n"
-            "constraints:\n"
-            "  - preserve_markdown\n"
             "temperature: 0.1\n"
         ),
         encoding="utf-8",
@@ -253,6 +250,26 @@ def test_load_task_from_yaml(tmp_path):
     assert task.scope_subdecks is False
     assert task.temperature == pytest.approx(0.1)
     assert task.matches_note_type("AnkiOpsQA")
+
+
+def test_load_task_accepts_default_model_alias(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "schema: ai.task.v1\n"
+            "id: grammar\n"
+            "model: default\n"
+            "instructions: Return inline JSON.\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    task = load_task_config(ai_paths, "grammar")
+    assert task.model is None
 
 
 def test_load_task_rejects_out_of_range_temperature(tmp_path):
@@ -427,6 +444,93 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
         overrides=AIRuntimeOverrides(profile="local-fast"),
     )
     assert runtime_from_override.profile == "local-fast"
+
+
+def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.models / "local-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: local-fast\n"
+            "default: true\n"
+            "provider: local\n"
+            "model: llama3.1:8b\n"
+            "base_url: http://localhost:11434/v1\n"
+        ),
+        encoding="utf-8",
+    )
+    (ai_paths.models / "remote-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: remote-fast\n"
+            "provider: remote\n"
+            "model: gpt-4o-mini\n"
+            "base_url: https://api.openai.com/v1\n"
+        ),
+        encoding="utf-8",
+    )
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "schema: ai.task.v1\n"
+            "id: grammar\n"
+            "instructions: Return inline JSON.\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    collection_dir = ai_paths.root.parent
+    task_config, runtime = prepare_ai_run(collection_dir, "grammar")
+    assert task_config.model is None
+    assert runtime.profile == "local-fast"
+
+
+def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
+    tmp_path,
+):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.models / "local-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: local-fast\n"
+            "default: true\n"
+            "provider: local\n"
+            "model: llama3.1:8b\n"
+            "base_url: http://localhost:11434/v1\n"
+        ),
+        encoding="utf-8",
+    )
+    (ai_paths.models / "remote-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
+            "id: remote-fast\n"
+            "provider: remote\n"
+            "model: gpt-4o-mini\n"
+            "base_url: https://api.openai.com/v1\n"
+        ),
+        encoding="utf-8",
+    )
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "schema: ai.task.v1\n"
+            "id: grammar\n"
+            "model: default\n"
+            "instructions: Return inline JSON.\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    collection_dir = ai_paths.root.parent
+    task_config, runtime = prepare_ai_run(collection_dir, "grammar")
+    assert task_config.model is None
+    assert runtime.profile == "local-fast"
 
 
 def test_inline_task_updates_only_target_fields_batch_mode():
@@ -800,6 +904,33 @@ def test_client_retries_transient_429_then_succeeds(monkeypatch):
     result = asyncio.run(_run_editor_once())
     assert route.call_count == 2
     assert result["n1"].fields["Question"] == "I have two lungs."
+
+
+@respx.mock
+def test_client_sends_task_temperature_in_payload():
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"notes":{"n1":{"note_key":"n1",'
+                                '"note_type":"AnkiOpsQA",'
+                                '"fields":{"Question":"I have two lungs."}}}}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    asyncio.run(_run_editor_once(task=_task(temperature=0.7)))
+
+    request_payload = json.loads(route.calls[0].request.content.decode("utf-8"))
+    assert request_payload["temperature"] == pytest.approx(0.7)
 
 
 @respx.mock

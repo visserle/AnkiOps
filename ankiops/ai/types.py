@@ -58,7 +58,6 @@ class TaskConfig:
     batch: str
     batch_size: int
     model: str | None = None
-    constraints: list[str] = field(default_factory=list)
     description: str = ""
     temperature: float = 0.0
     source_path: Path | None = None

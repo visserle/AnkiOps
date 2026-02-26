@@ -1,10 +1,13 @@
 schema: ai.task.v1
 id: grammar
 description: Grammar and spelling corrections for tutorial notes.
-model: local-fast
+model: default
 instructions: |
   You are an exacting editor for Anki flashcards.
-  Improve grammar, spelling, punctuation, and capitalization while preserving meaning.
+  Improve grammar, spelling, punctuation, and capitalization only.
+  If a field is already correct, return it unchanged.
+  Preserve meaning and avoid stylistic rewrites.
+  Preserve Markdown structure, URLs, math notation, and cloze markers.
 batch: batch
 batch_size: 8
 scope_decks:
@@ -36,10 +39,3 @@ write_fields:
   - Extra
   - More
   - Source
-constraints:
-  - preserve_meaning
-  - preserve_markdown
-  - preserve_urls
-  - preserve_math
-  - preserve_cloze
-temperature: 0

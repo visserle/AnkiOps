@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from ankiops.ai import (
@@ -104,6 +105,9 @@ def run_ai_task(args):
     if args.batch_size is not None and args.batch_size <= 0:
         logger.error("--batch-size must be > 0")
         raise SystemExit(2)
+    if args.temperature is not None and not 0 <= args.temperature <= 2:
+        logger.error("--temperature must be between 0 and 2")
+        raise SystemExit(2)
 
     overrides = _runtime_overrides_from_args(args)
     try:
@@ -119,6 +123,9 @@ def run_ai_task(args):
         logger.error(f"Invalid AI configuration: {error}")
         raise SystemExit(1)
 
+    if args.temperature is not None:
+        task_config = replace(task_config, temperature=args.temperature)
+
     if runtime.provider == "remote" and not runtime.api_key:
         logger.error(
             f"No API key found in env var '{runtime.api_key_env}'. "
@@ -133,7 +140,8 @@ def run_ai_task(args):
         f"provider='{runtime.provider}' model='{runtime.model}' "
         f"batch='{task_config.batch}' "
         f"batch_size={args.batch_size or task_config.batch_size} "
-        f"max_in_flight={runtime.max_in_flight}"
+        f"max_in_flight={runtime.max_in_flight} "
+        f"temperature={task_config.temperature}"
     )
 
     serialized_data = serialize_collection(collection_dir)

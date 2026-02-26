@@ -185,10 +185,6 @@ def _build_chat_payload(
         f"Edit only these fields: {allowed_fields}.",
         f"You may use these fields for context: {context_fields}.",
     ]
-    if task_config.constraints:
-        constraints = ", ".join(task_config.constraints)
-        requirements.append(f"Follow these constraints: {constraints}.")
-
     return {
         "model": model,
         "temperature": task_config.temperature,

@@ -14,7 +14,7 @@ def validate_edited_note(
     note_task: NoteTask,
     edited_note: InlineEditedNote,
 ) -> str | None:
-    """Validate one edited note against requested task constraints."""
+    """Validate one edited note against expected output shape."""
     if edited_note.note_key != note_task.note_key:
         return "response note_key mismatch"
 

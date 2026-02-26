@@ -331,6 +331,12 @@ def main():
         default=None,
         help="Override task batch size",
     )
+    ai_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Override task temperature (0-2)",
+    )
     add_ai_runtime_args(ai_parser)
 
     ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)

@@ -19,6 +19,7 @@ _DEFAULT_BATCH_SIZE_BY_MODE = {
     "batch": 8,
     "collection": 16,
 }
+_DEFAULT_MODEL_PROFILE_ALIAS = "default"
 
 
 class _RawTaskConfig(BaseModel):
@@ -36,7 +37,6 @@ class _RawTaskConfig(BaseModel):
     scope_note_types: list[str] | str | None = None
     read_fields: list[str] | str
     write_fields: list[str] | str
-    constraints: list[str] | str | None = None
     temperature: float = Field(default=0.0, ge=0, le=2)
 
     @field_validator("schema_name")
@@ -47,7 +47,7 @@ class _RawTaskConfig(BaseModel):
             raise ValueError("must equal 'ai.task.v1'")
         return normalized
 
-    @field_validator("id", "description", "model")
+    @field_validator("id", "description")
     @classmethod
     def _normalize_optional_string(cls, value: str | None) -> str | None:
         if value is None:
@@ -55,6 +55,18 @@ class _RawTaskConfig(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("must be a non-empty string")
+        return normalized
+
+    @field_validator("model")
+    @classmethod
+    def _normalize_model_profile_ref(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must be a non-empty string")
+        if normalized.casefold() == _DEFAULT_MODEL_PROFILE_ALIAS:
+            return None
         return normalized
 
     @field_validator("instructions")
@@ -70,7 +82,6 @@ class _RawTaskConfig(BaseModel):
         "scope_note_types",
         "read_fields",
         "write_fields",
-        "constraints",
         mode="before",
     )
     @classmethod
@@ -161,7 +172,6 @@ def load_task_config(ai_paths: AIPaths, task_ref: str) -> TaskConfig:
         scope_note_types=parsed.scope_note_types or ["*"],
         read_fields=parsed.read_fields or [],
         write_fields=parsed.write_fields or [],
-        constraints=parsed.constraints or [],
         temperature=parsed.temperature,
         source_path=path,
     )

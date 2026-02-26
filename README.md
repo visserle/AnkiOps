@@ -168,6 +168,7 @@ uv run python -m main ma
 - `--include-deck`, `-d` - Include a deck and all subdecks recursively (repeatable)
 - `--task` - Task file name/path from `ai/tasks/` (required)
 - `--batch-size` - Override task batch size
+- `--temperature` - Override task temperature (`0` to `2`)
 - `--profile`, `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout`, `--max-in-flight` - Runtime overrides
 
 ### Where is AI config stored?
@@ -183,10 +184,11 @@ AnkiOps initializes a local `ai/` folder and copies built-in model and task YAML
 
 Task YAML files define:
 - Task instructions
-- Model profile (`model`)
+- Optional model profile (`model`); omit it or set `model: default` to use the default profile
 - Batch mode/size
 - Deck and note-type scope
 - `read_fields` (inline JSON context)
 - `write_fields` (fields the AI may modify)
+- Optional `temperature` (`0` to `2`, default `0.0`)
 
 Inline editing always includes `note_key`, and batch responses are keyed by `note_key`.
