@@ -223,7 +223,6 @@ def test_load_task_from_yaml(tmp_path):
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "model: openai-fast\n"
             "instructions: |\n"
             "  Return inline JSON.\n"
@@ -263,7 +262,6 @@ def test_load_task_accepts_default_model_alias(tmp_path):
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "model: default\n"
             "instructions: Return inline JSON.\n"
             "read_fields:\n"
@@ -283,7 +281,6 @@ def test_load_task_accepts_scalar_scope_and_field_values(tmp_path):
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "instructions: Return inline JSON.\n"
             "scope_decks: Biology\n"
             "scope_note_types: AnkiOps*\n"
@@ -341,6 +338,24 @@ def test_load_task_rejects_unknown_fields(tmp_path):
         load_task_config(ai_paths, "grammar")
 
 
+def test_load_task_rejects_legacy_id_field(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "instructions: Return inline JSON.\n"
+            "id: grammar\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TaskConfigError, match="id"):
+        load_task_config(ai_paths, "grammar")
+
+
 def test_load_task_rejects_write_fields_outside_read_fields(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
     (ai_paths.tasks / "grammar.yaml").write_text(
@@ -358,12 +373,47 @@ def test_load_task_rejects_write_fields_outside_read_fields(tmp_path):
         load_task_config(ai_paths, "grammar")
 
 
+def test_load_task_rejects_absolute_task_path(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "instructions: Return inline JSON.\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    task_path = (ai_paths.tasks / "grammar.yaml").resolve()
+    with pytest.raises(TaskConfigError, match="relative to ai/tasks/"):
+        load_task_config(ai_paths, str(task_path))
+
+
+def test_load_task_rejects_paths_outside_tasks_directory(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    external_task = ai_paths.root / "outside.yaml"
+    external_task.write_text(
+        (
+            "instructions: Return inline JSON.\n"
+            "read_fields:\n"
+            "  - Question\n"
+            "write_fields:\n"
+            "  - Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TaskConfigError, match="stay within ai/tasks/"):
+        load_task_config(ai_paths, "../outside")
+
+
 def test_load_models_config_and_resolve_runtime(tmp_path, monkeypatch):
     ai_paths = _mk_ai_paths(tmp_path)
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: ollama-fast\n"
             "default: true\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
@@ -377,7 +427,6 @@ def test_load_models_config_and_resolve_runtime(tmp_path, monkeypatch):
     (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: openai-fast\n"
             "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
@@ -405,7 +454,6 @@ def test_load_models_config_defaults_groq_api_key_env(tmp_path):
     (ai_paths.models / "groq-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: groq-fast\n"
             "provider: groq\n"
             "model: llama-3.1-8b-instant\n"
         ),
@@ -428,7 +476,6 @@ def test_resolve_runtime_provider_override_to_groq_uses_groq_defaults(
     (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: openai-fast\n"
             "default: true\n"
             "provider: openai\n"
             "model: gpt-4o-mini\n"
@@ -455,7 +502,6 @@ def test_load_models_config_rejects_unknown_fields(tmp_path):
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: ollama-fast\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
@@ -468,12 +514,27 @@ def test_load_models_config_rejects_unknown_fields(tmp_path):
         load_model_configs(ai_paths)
 
 
-def test_resolve_runtime_rejects_non_positive_overrides(tmp_path):
+def test_load_models_config_rejects_legacy_id_field(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
             "id: ollama-fast\n"
+            "provider: ollama\n"
+            "model: llama3.1:8b\n"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AIConfigError, match="id"):
+        load_model_configs(ai_paths)
+
+
+def test_resolve_runtime_rejects_non_positive_overrides(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.models / "ollama-fast.yaml").write_text(
+        (
+            "schema: ai.model.v1\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
             "base_url: http://localhost:11434/v1\n"
@@ -491,7 +552,6 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: ollama-fast\n"
             "default: true\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
@@ -502,7 +562,6 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
     (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: openai-fast\n"
             "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
@@ -512,7 +571,6 @@ def test_prepare_ai_run_uses_task_model_and_overrides(tmp_path):
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "model: openai-fast\n"
             "instructions: Return inline JSON.\n"
             "read_fields:\n"
@@ -540,7 +598,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: ollama-fast\n"
             "default: true\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
@@ -551,7 +608,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
     (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: openai-fast\n"
             "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
@@ -561,7 +617,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_omitted(tmp_path):
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "instructions: Return inline JSON.\n"
             "read_fields:\n"
             "  - Question\n"
@@ -584,7 +639,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
     (ai_paths.models / "ollama-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: ollama-fast\n"
             "default: true\n"
             "provider: ollama\n"
             "model: llama3.1:8b\n"
@@ -595,7 +649,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
     (ai_paths.models / "openai-fast.yaml").write_text(
         (
             "schema: ai.model.v1\n"
-            "id: openai-fast\n"
             "provider: openai\n"
             "model: gpt-4o-mini\n"
             "base_url: https://api.openai.com/v1\n"
@@ -605,7 +658,6 @@ def test_prepare_ai_run_uses_default_profile_when_task_model_is_default(
     (ai_paths.tasks / "grammar.yaml").write_text(
         (
             "schema: ai.task.v1\n"
-            "id: grammar\n"
             "model: default\n"
             "instructions: Return inline JSON.\n"
             "read_fields:\n"

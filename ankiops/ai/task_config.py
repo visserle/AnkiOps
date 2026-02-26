@@ -26,7 +26,6 @@ class _RawTaskConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     schema_name: str = Field(default="ai.task.v1", alias="schema")
-    id: str | None = None
     description: str | None = None
     model: str | None = None
     instructions: str
@@ -47,7 +46,7 @@ class _RawTaskConfig(BaseModel):
             raise ValueError("must equal 'ai.task.v1'")
         return normalized
 
-    @field_validator("id", "description")
+    @field_validator("description")
     @classmethod
     def _normalize_optional_string(cls, value: str | None) -> str | None:
         if value is None:
@@ -153,12 +152,7 @@ def load_task_config(ai_paths: AIPaths, task_ref: str) -> TaskConfig:
         config_label="task",
     )
 
-    task_id = parsed.id or path.stem
-    if parsed.id is not None and parsed.id != path.stem:
-        raise TaskConfigError(
-            f"Task id must match file name stem in '{path}' "
-            f"(expected '{path.stem}', got '{parsed.id}')"
-        )
+    task_id = path.stem
 
     batch_size = parsed.batch_size
     if batch_size is None:
@@ -184,7 +178,10 @@ def load_task_config(ai_paths: AIPaths, task_ref: str) -> TaskConfig:
 def _require_task_ref(task_ref: str) -> str:
     if not isinstance(task_ref, str) or not task_ref.strip():
         raise TaskConfigError("Task name/path cannot be empty.")
-    return task_ref.strip()
+    normalized = task_ref.strip()
+    if Path(normalized).is_absolute():
+        raise TaskConfigError("Task path must be relative to ai/tasks/.")
+    return normalized
 
 
 def _assert_is_task_file(path: Path) -> Path:
@@ -195,15 +192,23 @@ def _assert_is_task_file(path: Path) -> Path:
 
 def _candidate_task_paths(tasks_dir: Path, task_ref: str) -> list[Path]:
     ref_path = Path(task_ref)
-    if ref_path.is_absolute():
-        if ref_path.suffix:
-            return [ref_path]
-        return [ref_path.with_suffix(".yaml"), ref_path.with_suffix(".yml")]
-
     candidate_in_dir = tasks_dir / ref_path
     if ref_path.suffix:
-        return [candidate_in_dir]
-    return [
-        candidate_in_dir.with_suffix(".yaml"),
-        candidate_in_dir.with_suffix(".yml"),
-    ]
+        candidates = [candidate_in_dir]
+    else:
+        candidates = [
+            candidate_in_dir.with_suffix(".yaml"),
+            candidate_in_dir.with_suffix(".yml"),
+        ]
+
+    tasks_root = tasks_dir.resolve()
+    normalized_candidates: list[Path] = []
+    for candidate in candidates:
+        resolved_candidate = candidate.resolve()
+        try:
+            resolved_candidate.relative_to(tasks_root)
+        except ValueError as error:
+            raise TaskConfigError("Task path must stay within ai/tasks/.") from error
+        normalized_candidates.append(resolved_candidate)
+
+    return normalized_candidates

@@ -22,7 +22,6 @@ class _RawModelProfileFile(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     schema_name: str = Field(default="ai.model.v1", alias="schema")
-    id: str | None = None
     default: bool = False
     provider: str
     model: str
@@ -44,7 +43,7 @@ class _RawModelProfileFile(BaseModel):
     def _validate_provider(cls, value: str) -> str:
         return _coerce_provider(value)
 
-    @field_validator("id", "model", "base_url", "api_key_env")
+    @field_validator("model", "base_url", "api_key_env")
     @classmethod
     def _normalize_non_empty(cls, value: str | None) -> str | None:
         if value is None:
@@ -93,14 +92,11 @@ def load_model_configs(ai_paths: AIPaths) -> ModelsConfig:
             config_label="model profile",
         )
 
-        profile_name = parsed.id or path.stem
-        if parsed.id is not None and parsed.id != path.stem:
-            raise AIConfigError(
-                f"Model profile id must match file name stem in '{path}' "
-                f"(expected '{path.stem}', got '{parsed.id}')"
-            )
+        profile_name = path.stem
         if profile_name in profiles:
-            raise AIConfigError(f"Duplicate model profile id '{profile_name}'")
+            raise AIConfigError(
+                f"Duplicate model profile name '{profile_name}' from YAML filenames"
+            )
 
         profiles[profile_name] = ModelProfile(
             name=profile_name,

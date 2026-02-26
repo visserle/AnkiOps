@@ -3,7 +3,12 @@ import logging
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.cli_ai import add_ai_runtime_args, run_ai_config, run_ai_task
+from ankiops.cli_ai import (
+    add_ai_runtime_args,
+    add_ai_task_args,
+    run_ai_config,
+    run_ai_task,
+)
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
@@ -314,33 +319,7 @@ def main():
         help="Run task-driven AI edits on serialized collection data",
     )
     ai_parser.set_defaults(handler=run_ai_task)
-    ai_parser.add_argument(
-        "--include-deck",
-        "-d",
-        action="append",
-        default=[],
-        help=(
-            "Deck name to include; always includes all subdecks recursively. "
-            "Repeat to include multiple deck trees."
-        ),
-    )
-    ai_parser.add_argument(
-        "--task",
-        default=None,
-        help="Task file name/path from ai/tasks/ (or absolute path)",
-    )
-    ai_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Override task batch size",
-    )
-    ai_parser.add_argument(
-        "--temperature",
-        type=float,
-        default=None,
-        help="Override task temperature (0-2)",
-    )
+    add_ai_task_args(ai_parser)
     add_ai_runtime_args(ai_parser)
 
     ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)
@@ -353,6 +332,13 @@ def main():
     ai_config_parser.set_defaults(handler=run_ai_config)
 
     args = parser.parse_args()
+
+    if (
+        args.command == "ai"
+        and getattr(args, "ai_command", None) != "config"
+        and not getattr(args, "task", None)
+    ):
+        parser.error("the following arguments are required: --task")
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     configure_logging(stream_level=log_level, ignore_libs=["urllib3.connectionpool"])

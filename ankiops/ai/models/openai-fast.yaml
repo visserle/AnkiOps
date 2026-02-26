@@ -1,5 +1,4 @@
 schema: ai.model.v1
-id: openai-fast
 default: false
 provider: openai
 model: gpt-4o-mini

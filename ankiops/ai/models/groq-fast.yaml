@@ -1,5 +1,4 @@
 schema: ai.model.v1
-id: groq-fast
 default: false
 provider: groq
 model: llama-3.1-8b-instant

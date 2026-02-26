@@ -34,6 +34,28 @@ from ankiops.config import ANKIOPS_DB, get_collection_dir
 logger = logging.getLogger(__name__)
 
 
+def _positive_int(value: str) -> int:
+    raw = value.strip()
+    try:
+        parsed = int(raw)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return parsed
+
+
+def _temperature_value(value: str) -> float:
+    raw = value.strip()
+    try:
+        parsed = float(raw)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a number between 0 and 2") from error
+    if not 0 <= parsed <= 2:
+        raise argparse.ArgumentTypeError("must be between 0 and 2")
+    return parsed
+
+
 def require_initialized_collection_dir() -> Path:
     """Return collection directory or exit if no local AnkiOps DB exists."""
     collection_dir = get_collection_dir()
@@ -101,17 +123,11 @@ def run_ai_config(args):
 
 def run_ai_task(args):
     """Run task-driven inline JSON edits over serialized collection data."""
-    collection_dir = require_initialized_collection_dir()
-
     if not args.task:
         logger.error("Missing required argument: --task")
         raise SystemExit(2)
-    if args.batch_size is not None and args.batch_size <= 0:
-        logger.error("--batch-size must be > 0")
-        raise SystemExit(2)
-    if args.temperature is not None and not 0 <= args.temperature <= 2:
-        logger.error("--temperature must be between 0 and 2")
-        raise SystemExit(2)
+
+    collection_dir = require_initialized_collection_dir()
 
     overrides = _runtime_overrides_from_args(args)
     try:
@@ -215,31 +231,59 @@ def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--provider",
         choices=list(provider_choices()),
-        help="Override provider for selected profile",
+        help="Optional runtime provider override",
     )
     parser.add_argument(
         "--model",
-        help="Override model name",
+        help="Optional runtime model override",
     )
     parser.add_argument(
         "--base-url",
-        help="Override OpenAI-compatible chat completions base URL",
+        help="Optional runtime OpenAI-compatible base URL override",
     )
     parser.add_argument(
         "--api-key-env",
-        help="Override environment variable name used for API key lookup",
+        help="Optional runtime API key env var override",
     )
     parser.add_argument(
         "--api-key",
-        help="API key value (runtime only; never persisted)",
+        help="Optional runtime API key value",
     )
     parser.add_argument(
         "--timeout",
-        type=int,
-        help="Override request timeout in seconds",
+        type=_positive_int,
+        help="Optional runtime timeout override",
     )
     parser.add_argument(
         "--max-in-flight",
-        type=int,
-        help="Override maximum concurrent AI requests",
+        type=_positive_int,
+        help="Optional runtime max concurrent request override",
+    )
+
+
+def add_ai_task_args(parser: argparse.ArgumentParser) -> None:
+    """Attach task execution flags to the ai task-run command."""
+    parser.add_argument(
+        "--include-deck",
+        "-d",
+        action="append",
+        default=[],
+        help="Include a deck and all subdecks recursively (repeatable)",
+    )
+    parser.add_argument(
+        "--task",
+        default=None,
+        help="Task file name/path from ai/tasks/ (required)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=None,
+        help="Override task batch size",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=_temperature_value,
+        default=None,
+        help="Override task temperature (0 to 2)",
     )

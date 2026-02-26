@@ -1,5 +1,4 @@
 schema: ai.model.v1
-id: ollama-fast
 default: true
 provider: ollama
 # model: llama3.1:8b

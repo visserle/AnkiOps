@@ -1,5 +1,4 @@
 schema: ai.task.v1
-id: grammar
 description: Grammar and spelling corrections for tutorial notes.
 model: default
 instructions: |

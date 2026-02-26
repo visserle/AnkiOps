@@ -1,5 +1,4 @@
 schema: ai.task.v1
-id: semantic-check
 description: Add semantic quality findings to AI Notes for tutorial notes.
 model: default
 instructions: |
