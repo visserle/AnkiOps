@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
+_PREFIX_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9]*:)(?:\s|$)")
 
 
 class FileSystemAdapter:
@@ -106,6 +107,20 @@ class FileSystemAdapter:
 
                 if matched_field is None and current_field:
                     current_content.append(line)
+                elif matched_field is None:
+                    prefix_match = _PREFIX_CANDIDATE_PATTERN.match(stripped)
+                    if prefix_match:
+                        unknown_prefix = prefix_match.group(1)
+                        if unknown_prefix not in self._prefix_to_field:
+                            ctx = (
+                                f"in note_key: {note_key}"
+                                if note_key
+                                else "in this note"
+                            )
+                            raise ValueError(
+                                f"Unknown field prefix '{unknown_prefix}' {ctx}. "
+                                "Check your note type prefixes."
+                            )
 
             if current_field:
                 fields[current_field] = "\n".join(current_content).strip()

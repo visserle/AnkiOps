@@ -317,6 +317,12 @@ class TestParseClozeBlock:
         assert note.fields["Text"] == "{{c1::text}}"
         assert note.fields["Extra"] == "extra info"
 
+    def test_unknown_prefix_before_first_field_fails(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text("RANDOMPREFIX: {{c1::text}}\nE: extra info")
+        with pytest.raises(ValueError, match="Unknown field prefix 'RANDOMPREFIX:'"):
+            fs.read_markdown_file(md)
+
 
 class TestParseQABlock:
     """Test FileSystemAdapter.read_markdown_file with AnkiOpsQA blocks."""
