@@ -1,7 +1,5 @@
 """Domain exceptions for the AI module."""
 
-from __future__ import annotations
-
 
 class AIError(Exception):
     """Base exception for all AI module failures."""

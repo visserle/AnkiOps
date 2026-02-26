@@ -278,6 +278,28 @@ def test_load_task_accepts_default_model_alias(tmp_path):
     assert task.model is None
 
 
+def test_load_task_accepts_scalar_scope_and_field_values(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        (
+            "schema: ai.task.v1\n"
+            "id: grammar\n"
+            "instructions: Return inline JSON.\n"
+            "scope_decks: Biology\n"
+            "scope_note_types: AnkiOps*\n"
+            "read_fields: Question\n"
+            "write_fields: Question\n"
+        ),
+        encoding="utf-8",
+    )
+
+    task = load_task_config(ai_paths, "grammar")
+    assert task.scope_decks == ["Biology"]
+    assert task.scope_note_types == ["AnkiOps*"]
+    assert task.read_fields == ["Question"]
+    assert task.write_fields == ["Question"]
+
+
 def test_load_task_rejects_out_of_range_temperature(tmp_path):
     ai_paths = _mk_ai_paths(tmp_path)
     (ai_paths.tasks / "grammar.yaml").write_text(
@@ -287,6 +309,17 @@ def test_load_task_rejects_out_of_range_temperature(tmp_path):
     )
 
     with pytest.raises(TaskConfigError, match="temperature"):
+        load_task_config(ai_paths, "grammar")
+
+
+def test_load_task_rejects_invalid_yaml(tmp_path):
+    ai_paths = _mk_ai_paths(tmp_path)
+    (ai_paths.tasks / "grammar.yaml").write_text(
+        "instructions: [broken\nread_fields: [Question]\nwrite_fields: [Question]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TaskConfigError, match="Invalid YAML"):
         load_task_config(ai_paths, "grammar")
 
 
@@ -829,6 +862,29 @@ def test_inline_task_caps_warnings():
 
     assert len(result.warnings) == 2
     assert result.dropped_warnings == 3
+
+
+def test_inline_task_warning_includes_exception_type():
+    task = _task()
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {"Question": "I has two lungs."},
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_FailingBatchEditor()).run(data, task)
+
+    assert result.warnings
+    assert "RuntimeError: boom" in result.warnings[0]
 
 
 def test_task_runner_closes_editor_after_run():

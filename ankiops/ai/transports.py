@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .client import OpenAICompatibleAsyncEditor
-from .errors import AIConfigError
-from .types import AsyncInlineBatchEditor, RuntimeAIConfig
+from ankiops.ai.client import OpenAICompatibleAsyncEditor
+from ankiops.ai.errors import AIConfigError
+from ankiops.ai.types import AsyncInlineBatchEditor, RuntimeAIConfig
 
 
 def build_async_editor(config: RuntimeAIConfig) -> AsyncInlineBatchEditor:
@@ -12,5 +12,6 @@ def build_async_editor(config: RuntimeAIConfig) -> AsyncInlineBatchEditor:
     if config.transport == "openai_chat_completions":
         return OpenAICompatibleAsyncEditor(config)
     raise AIConfigError(
-        f"Unsupported AI transport '{config.transport}' for provider '{config.provider}'"
+        "Unsupported AI transport "
+        f"'{config.transport}' for provider '{config.provider}'"
     )

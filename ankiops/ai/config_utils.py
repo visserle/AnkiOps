@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -22,8 +22,18 @@ def load_yaml_mapping(
     if missing_message is not None and (not path.exists() or not path.is_file()):
         raise error_type(missing_message)
 
-    with path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            raw = yaml.safe_load(handle) or {}
+    except FileNotFoundError as error:
+        raise error_type(f"{mapping_label} not found: {path}") from error
+    except OSError as error:
+        message = f"Failed to read {mapping_label.lower()} '{path}': {error}"
+        raise error_type(message) from error
+    except yaml.YAMLError as error:
+        message = f"Invalid YAML in {mapping_label.lower()} '{path}': {error}"
+        raise error_type(message) from error
+
     if not isinstance(raw, dict):
         raise error_type(f"{mapping_label} must be a YAML mapping: {path}")
     return raw
@@ -39,7 +49,8 @@ def validate_config_model(
 ) -> SchemaModel:
     """Validate a raw mapping with consistent first-error formatting."""
     try:
-        return model_type.model_validate(raw)
+        validated = model_type.model_validate(raw)
+        return cast(SchemaModel, validated)
     except ValidationError as error:
         first = error.errors()[0]
         field_path = ".".join(str(part) for part in first.get("loc", ()))

@@ -8,13 +8,18 @@ import random
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
-from .errors import AIRequestError, AIResponseError
-from .types import InlineEditedNote, InlineNotePayload, RuntimeAIConfig, TaskConfig
-from .validators import normalize_batch_response
+from ankiops.ai.errors import AIRequestError, AIResponseError
+from ankiops.ai.types import (
+    InlineEditedNote,
+    InlineNotePayload,
+    RuntimeAIConfig,
+    TaskConfig,
+)
+from ankiops.ai.validators import normalize_batch_response
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_MIN_SECONDS = 0.25
@@ -166,7 +171,7 @@ class OpenAICompatibleAsyncEditor:
             raise AIResponseError("AI response body was not valid JSON") from error
         if not isinstance(raw, dict):
             raise AIResponseError("AI response body must be a JSON object")
-        return raw
+        return cast(dict[str, Any], raw)
 
 
 def _build_chat_payload(
@@ -262,9 +267,11 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
 
+    if not isinstance(parsed_date, datetime):
+        return None
     if parsed_date.tzinfo is None:
         parsed_date = parsed_date.replace(tzinfo=timezone.utc)
-    delay_seconds = (parsed_date - datetime.now(timezone.utc)).total_seconds()
+    delay_seconds = float((parsed_date - datetime.now(timezone.utc)).total_seconds())
     if delay_seconds <= 0:
         return 0.0
     return min(delay_seconds, DEFAULT_RETRY_AFTER_MAX_SECONDS)

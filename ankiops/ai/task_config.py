@@ -7,10 +7,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .config_utils import load_yaml_mapping, validate_config_model
-from .errors import TaskConfigError
-from .paths import AIPaths
-from .types import TaskConfig
+from ankiops.ai.config_utils import load_yaml_mapping, validate_config_model
+from ankiops.ai.errors import TaskConfigError
+from ankiops.ai.paths import AIPaths
+from ankiops.ai.types import TaskConfig
 
 _VALID_TASK_SUFFIXES = frozenset({".yaml", ".yml"})
 _VALID_BATCH_MODES = frozenset({"single", "batch", "collection"})
@@ -32,11 +32,11 @@ class _RawTaskConfig(BaseModel):
     instructions: str
     batch: Literal["single", "batch", "collection"] = "single"
     batch_size: int | None = Field(default=None, gt=0)
-    scope_decks: list[str] | str | None = None
+    scope_decks: list[str] | None = None
     scope_subdecks: bool = True
-    scope_note_types: list[str] | str | None = None
-    read_fields: list[str] | str
-    write_fields: list[str] | str
+    scope_note_types: list[str] | None = None
+    read_fields: list[str]
+    write_fields: list[str]
     temperature: float = Field(default=0.0, ge=0, le=2)
 
     @field_validator("schema_name")
@@ -160,18 +160,22 @@ def load_task_config(ai_paths: AIPaths, task_ref: str) -> TaskConfig:
             f"(expected '{path.stem}', got '{parsed.id}')"
         )
 
+    batch_size = parsed.batch_size
+    if batch_size is None:
+        raise TaskConfigError("Task batch_size could not be resolved")
+
     return TaskConfig(
         id=task_id,
         description=parsed.description or "",
         model=parsed.model,
         instructions=parsed.instructions,
         batch=parsed.batch,
-        batch_size=parsed.batch_size or 1,
+        batch_size=batch_size,
         scope_decks=parsed.scope_decks or ["*"],
         scope_subdecks=parsed.scope_subdecks,
         scope_note_types=parsed.scope_note_types or ["*"],
-        read_fields=parsed.read_fields or [],
-        write_fields=parsed.write_fields or [],
+        read_fields=parsed.read_fields,
+        write_fields=parsed.write_fields,
         temperature=parsed.temperature,
         source_path=path,
     )

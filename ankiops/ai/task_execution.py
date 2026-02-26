@@ -6,9 +6,14 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from .task_apply import add_warning, apply_note_changes, validate_edited_note
-from .task_selection import NoteTask, TaskMatchers, iter_note_tasks
-from .types import AsyncInlineBatchEditor, InlineEditedNote, TaskConfig, TaskRunResult
+from ankiops.ai.task_apply import add_warning, apply_note_changes, validate_edited_note
+from ankiops.ai.task_selection import NoteTask, TaskMatchers, iter_note_tasks
+from ankiops.ai.types import (
+    AsyncInlineBatchEditor,
+    InlineEditedNote,
+    TaskConfig,
+    TaskRunResult,
+)
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,7 @@ async def run_chunk(
         return ChunkResult(
             chunk=chunk,
             edited_by_note_key=None,
-            error=str(error),
+            error=_format_chunk_error(error),
         )
 
 
@@ -177,7 +182,10 @@ def apply_chunk_result(
         if edited_note is None:
             add_warning(
                 result,
-                f"{note_task.deck_name}/{note_task.note_key}: response missing note_key",
+                (
+                    f"{note_task.deck_name}/{note_task.note_key}: "
+                    "response missing note_key"
+                ),
                 max_warnings=max_warnings,
             )
             continue
@@ -193,3 +201,10 @@ def apply_chunk_result(
 
         if apply_note_changes(note_task, edited_note, task_id, result):
             changed_deck_indexes.add(note_task.deck_index)
+
+
+def _format_chunk_error(error: Exception) -> str:
+    error_message = str(error).strip()
+    if not error_message:
+        return error.__class__.__name__
+    return f"{error.__class__.__name__}: {error_message}"
