@@ -360,13 +360,17 @@ class TestMultiNoteFile:
 
 
 class TestNoteInference:
-    """Test note type inference from field names."""
+    """Test note type inference from field names/prefixes."""
 
     def test_infer_qa(self, fs):
         assert fs._infer_note_type({"Question": "q", "Answer": "a"}) == "AnkiOpsQA"
 
     def test_infer_cloze(self, fs):
-        assert fs._infer_note_type({"Text": "t"}) == "AnkiOpsCloze"
+        assert fs._infer_note_type({"Text": "t"}, prefixes={"T:"}) == "AnkiOpsCloze"
+
+    def test_infer_text_without_prefix_is_ambiguous(self, fs):
+        with pytest.raises(ValueError, match="Ambiguous note type"):
+            fs._infer_note_type({"Text": "t"})
 
     def test_infer_choice(self, fs):
         fields = {"Question": "q", "Answer": "a", "Choice 1": "c1", "Choice 2": "c2"}

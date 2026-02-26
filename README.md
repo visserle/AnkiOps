@@ -118,7 +118,7 @@ For standard note types, migration is straightforward:
 2. Export your notes from Anki to Markdown using `ankiops am`.
 3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
 
-If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type in the `config.py` with a unique field name for automatic note type detection, and add your card's templates to `ankiops/card_templates`. 
+If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type with unique field prefixes (and unique field names within that note type) for automatic note type detection, and add your card's templates to `ankiops/card_templates`.
 
 ### How can I develop AnkiOps locally?
 

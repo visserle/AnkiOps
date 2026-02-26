@@ -8,8 +8,8 @@ templates:
     front: Front.template.anki
     back: Back.template.anki
 fields:
-  - name: Hidden Text
-    prefix: "HT:"
+  - name: Text
+    prefix: "TH:"
     identifying: true
   - name: Extra
     prefix: "E:"

@@ -32,10 +32,12 @@ class FileSystemAdapter:
         self._md_to_html = MarkdownToHTML()
         self._html_to_md = HTMLToMarkdown()
         self._note_type_configs: list[NoteTypeConfig] = []
+        self._prefix_to_field: dict[str, str] = {}
         self._note_type_cache_signature: tuple | None = None
 
     def set_configs(self, configs: list[NoteTypeConfig]):
         self._note_type_configs = configs
+        self._prefix_to_field = self._build_prefix_to_field_map(configs)
         # External callers can override configs in-memory; invalidate disk cache.
         self._note_type_cache_signature = None
 
@@ -45,13 +47,6 @@ class FileSystemAdapter:
 
         blocks = remaining.split(NOTE_SEPARATOR)
         parsed_notes = []
-
-        # Build prefix map
-        prefix_to_type_field = {}
-        for config in self._note_type_configs:
-            for field_config in config.fields:
-                if field_config.prefix:
-                    prefix_to_type_field[field_config.prefix] = field_config.name
 
         for block in blocks:
             if not block.strip() or set(block.strip()) <= {"-"}:
@@ -64,6 +59,7 @@ class FileSystemAdapter:
             current_content: list[str] = []
             in_code_block = False
             seen: set[str] = set()
+            seen_prefixes: set[str] = set()
 
             for line in lines:
                 stripped = line.lstrip()
@@ -84,7 +80,7 @@ class FileSystemAdapter:
                     continue
 
                 matched_field = None
-                for prefix, field_name in prefix_to_type_field.items():
+                for prefix, field_name in self._prefix_to_field.items():
                     if line.startswith(prefix + " ") or line == prefix:
                         if field_name in seen:
                             ctx = (
@@ -95,6 +91,7 @@ class FileSystemAdapter:
                             raise ValueError(f"Duplicate field '{prefix}' {ctx}.")
 
                         seen.add(field_name)
+                        seen_prefixes.add(prefix)
                         if current_field:
                             fields[current_field] = "\n".join(current_content).strip()
 
@@ -120,7 +117,7 @@ class FileSystemAdapter:
                 )
 
             # Infer Note Type
-            note_type = self._infer_note_type(fields)
+            note_type = self._infer_note_type(fields, prefixes=seen_prefixes)
             note = Note(note_key=note_key, note_type=note_type, fields=fields)
 
             # Validate
@@ -139,36 +136,81 @@ class FileSystemAdapter:
             notes=parsed_notes,
         )
 
-    def _infer_note_type(self, fields: dict[str, str]) -> str:
+    def _infer_note_type(
+        self,
+        fields: dict[str, str],
+        *,
+        prefixes: set[str] | None = None,
+    ) -> str:
         reserved_names = {ANKIOPS_KEY_FIELD.name}
         note_fields = {key for key in fields.keys() if key not in reserved_names}
+        note_prefixes = set(prefixes) if prefixes is not None else None
+        candidates: list[str] = []
 
-        candidates = []
         for config in self._note_type_configs:
             type_all_fields = {field.name for field in config.fields}
             if not note_fields.issubset(type_all_fields):
                 continue
+
+            if note_prefixes is not None:
+                type_all_prefixes = {
+                    str(field.prefix)
+                    for field in config.fields
+                    if field.prefix is not None
+                }
+                if not note_prefixes.issubset(type_all_prefixes):
+                    continue
 
             type_ident_fields = {
                 field.name for field in config.fields if field.identifying
             }
 
             if config.is_choice:
-                base_ident = {
-                    field_name
-                    for field_name in type_ident_fields
-                    if "Choice" not in field_name
+                base_ident_fields = {
+                    field.name
+                    for field in config.fields
+                    if field.identifying and "Choice" not in field.name
                 }
                 choice_fields = {
-                    field_name
-                    for field_name in type_all_fields
-                    if "Choice" in field_name
+                    field.name for field in config.fields if "Choice" in field.name
                 }
-                if base_ident.issubset(note_fields) and (note_fields & choice_fields):
-                    candidates.append(config.name)
+                if not base_ident_fields.issubset(note_fields):
+                    continue
+                if not (note_fields & choice_fields):
+                    continue
+
+                if note_prefixes is not None:
+                    base_ident_prefixes = {
+                        str(field.prefix)
+                        for field in config.fields
+                        if (
+                            field.identifying
+                            and field.prefix is not None
+                            and "Choice" not in field.name
+                        )
+                    }
+                    choice_prefixes = {
+                        str(field.prefix)
+                        for field in config.fields
+                        if field.prefix is not None and "Choice" in field.name
+                    }
+                    if not base_ident_prefixes.issubset(note_prefixes):
+                        continue
+                    if not (note_prefixes & choice_prefixes):
+                        continue
             else:
-                if type_ident_fields.issubset(note_fields):
-                    candidates.append(config.name)
+                if not type_ident_fields.issubset(note_fields):
+                    continue
+                if note_prefixes is not None:
+                    type_ident_prefixes = {
+                        str(field.prefix)
+                        for field in config.fields
+                        if field.identifying and field.prefix is not None
+                    }
+                    if not type_ident_prefixes.issubset(note_prefixes):
+                        continue
+
+            candidates.append(config.name)
 
         if not candidates:
             raise ValueError(
@@ -349,8 +391,24 @@ class FileSystemAdapter:
         configs = list(configs_dict.values())
         NoteTypeConfig.validate_configs(configs)
         self._note_type_configs = configs
+        self._prefix_to_field = self._build_prefix_to_field_map(configs)
         self._note_type_cache_signature = signature
         return configs
+
+    def _build_prefix_to_field_map(self, configs: list[NoteTypeConfig]) -> dict[str, str]:
+        prefix_to_field: dict[str, str] = {}
+        for config in configs:
+            for field_config in config.fields:
+                if field_config.prefix is None:
+                    continue
+                existing_field = prefix_to_field.get(field_config.prefix)
+                if existing_field is not None and existing_field != field_config.name:
+                    raise ValueError(
+                        f"Prefix '{field_config.prefix}' maps to both '{existing_field}' "
+                        f"and '{field_config.name}'."
+                    )
+                prefix_to_field[field_config.prefix] = field_config.name
+        return prefix_to_field
 
     def calculate_blake3(self, file_path: Path) -> str:
         hash_state = blake3()

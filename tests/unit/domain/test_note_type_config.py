@@ -33,6 +33,20 @@ def test_register_custom_conflict_with_builtin():
         NoteTypeConfig.validate_configs([builtin, custom])
 
 
+def test_register_custom_conflict_with_builtin_optional_prefix():
+    """Ensure custom types cannot use built-in optional prefixes either."""
+    builtin = NoteTypeConfig(
+        name="AnkiOpsQA",
+        fields=[Field("Extra", "E:", identifying=False), ANKIOPS_KEY_FIELD],
+    )
+    custom = NoteTypeConfig(
+        name="BadCustom",
+        fields=[Field("Custom Extra", "E:", identifying=True)],
+    )
+    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
+        NoteTypeConfig.validate_configs([builtin, custom])
+
+
 def test_register_conflict_with_reserved():
     """Ensure we can register a custom type with AnkiOps Key if it's identical."""
     config = NoteTypeConfig(
@@ -46,14 +60,14 @@ def test_register_conflict_with_reserved():
 def test_mandatory_set_collision():
     """Ensure two note types cannot have identical identifying fields."""
     config1 = NoteTypeConfig(
-        name="Type1",
+        name="AnkiOpsType1",
         fields=[
             Field("Prop", "P:", identifying=True),
             Field("Val", "V:", identifying=True),
         ],
     )
     config2 = NoteTypeConfig(
-        name="Type2",
+        name="AnkiOpsType2",
         fields=[
             Field("Prop", "P:", identifying=True),
             Field("Val", "V:", identifying=True),
@@ -196,7 +210,7 @@ def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
 
 
 def test_prefix_collision_different_field():
-    """Ensure a prefix cannot map to two different fields globally."""
+    """Ensure custom note types cannot share the same prefix."""
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("FieldA", "X:", identifying=True)],
@@ -205,16 +219,12 @@ def test_prefix_collision_different_field():
         name="Type2",
         fields=[Field("FieldB", "X:", identifying=True)],
     )
-    with pytest.raises(
-        ValueError, match="matches existing prefix.*but maps to different field"
-    ):
+    with pytest.raises(ValueError, match="reuses custom prefix"):
         NoteTypeConfig.validate_configs([config1, config2])
 
 
-def test_prefix_sharing_custom_field():
-    """Ensure two note types CAN share a prefix if it maps to the SAME *custom*
-    field name.
-    """
+def test_prefix_sharing_custom_field_fails():
+    """Ensure two custom note types cannot share a prefix even with same field name."""
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("Description", "D:", identifying=True)],
@@ -226,8 +236,8 @@ def test_prefix_sharing_custom_field():
             Field("Other", "O:", identifying=True),
         ],
     )
-    # Should Pass
-    NoteTypeConfig.validate_configs([config1, config2])
+    with pytest.raises(ValueError, match="reuses custom prefix"):
+        NoteTypeConfig.validate_configs([config1, config2])
 
 
 def test_subset_inference():
@@ -242,8 +252,8 @@ def test_subset_inference():
     super_domain = NoteTypeConfig(
         name="SupersetType",
         fields=[
-            Field("BaseQ", "BQ:", identifying=True),
-            Field("BaseA", "BA:", identifying=True),
+            Field("BaseQ", "SQ:", identifying=True),
+            Field("BaseA", "SA:", identifying=True),
             Field("Context", "C:", identifying=True),
         ],
     )
@@ -271,6 +281,30 @@ def test_reserved_ankiops_key():
         NoteTypeConfig.validate_configs([config])
 
 
+def test_duplicate_field_names_within_note_type_fail():
+    config = NoteTypeConfig(
+        name="DuplicateNames",
+        fields=[
+            Field("Question", "Q1:", identifying=True),
+            Field("Question", "Q2:", identifying=False),
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate field name"):
+        NoteTypeConfig.validate_configs([config])
+
+
+def test_duplicate_field_prefixes_within_note_type_fail():
+    config = NoteTypeConfig(
+        name="DuplicatePrefixes",
+        fields=[
+            Field("Question", "Q:", identifying=True),
+            Field("Answer", "Q:", identifying=True),
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate field prefix"):
+        NoteTypeConfig.validate_configs([config])
+
+
 # --- Inference Tests ---
 
 
@@ -286,8 +320,8 @@ def test_inference_qa_vs_choice():
     choice = NoteTypeConfig(
         "Choice",
         fields=[
-            Field("Question", "Q:", identifying=True),
-            Field("Answer", "A:", identifying=True),
+            Field("Question", "QQ:", identifying=True),
+            Field("Answer", "AA:", identifying=True),
             Field("Choice 1", "C1:", identifying=True),
         ],
         is_choice=True,

@@ -50,39 +50,43 @@ class NoteTypeConfig:
     @classmethod
     def validate_configs(cls, configs: list[NoteTypeConfig]) -> None:
         """Validate a set of note type configurations to ensure data integrity,
-        global consistency of field mappings, strict built-in reservations,
-        and lack of ambiguity.
+        local field uniqueness, strict built-in reservations, and lack
+        of ambiguity.
         """
         reserved_names = {ANKIOPS_KEY_FIELD.name}
-
-        # Gather global prefix mappings and built-in prefixes first
-        prefix_to_field: dict[str, str] = {}
-        built_in_prefixes: set[str] = set()
-
-        for config in configs:
-            is_builtin = config.name.startswith("AnkiOps")
-            if is_builtin:
-                built_in_prefixes.update(config.identifying_prefixes)
-
-            # Build global prefix mapping / validate global consistency
-            for field in config.fields:
-                if field.prefix is not None:
-                    if field.prefix in prefix_to_field:
-                        existing_name = prefix_to_field[field.prefix]
-                        if existing_name != field.name:
-                            raise ValueError(
-                                f"Prefix '{field.prefix}' matches existing prefix for "
-                                f"'{existing_name}', but maps to different field "
-                                f"'{field.name}' in '{config.name}'"
-                            )
-                    else:
-                        prefix_to_field[field.prefix] = field.name
+        built_in_prefixes = {
+            str(field_config.prefix)
+            for config in configs
+            if config.name.startswith("AnkiOps")
+            for field_config in config.fields
+            if field_config.prefix is not None
+        }
+        custom_prefix_to_type: dict[str, str] = {}
+        identifying_signature_to_type: dict[frozenset[str], str] = {}
 
         for config in configs:
             is_builtin = config.name.startswith("AnkiOps")
+            seen_names: set[str] = set()
+            seen_prefixes: set[str] = set()
 
             # 1. Reservation Checks (Names and Prefixes)
             for field in config.fields:
+                if field.name in seen_names:
+                    raise ValueError(
+                        f"Note type '{config.name}' has duplicate field name "
+                        f"'{field.name}'. Field names must be unique within a note type."
+                    )
+                seen_names.add(field.name)
+
+                if field.prefix is not None:
+                    if field.prefix in seen_prefixes:
+                        raise ValueError(
+                            f"Note type '{config.name}' has duplicate field prefix "
+                            f"'{field.prefix}'. Field prefixes must be unique within a "
+                            "note type."
+                        )
+                    seen_prefixes.add(field.prefix)
+
                 if field.name in reserved_names:
                     if field.prefix != ANKIOPS_KEY_FIELD.prefix:
                         raise ValueError(
@@ -96,27 +100,23 @@ class NoteTypeConfig:
                             f"field name '{field.name}' as identifying, which is not allowed."
                         )
 
-                if field.prefix is not None and field.prefix in built_in_prefixes:
-                    if not is_builtin:
+                if field.prefix is not None and not is_builtin:
+                    if field.prefix in built_in_prefixes:
                         raise ValueError(
                             f"Note type '{config.name}' uses reserved built-in "
                             f"prefix '{field.prefix}'"
                         )
 
-            # 2. Distinctness Checks
-            new_prefixes = config.identifying_prefixes
-            for existing_config in configs:
-                if existing_config.name == config.name:
-                    continue
+                    existing_type = custom_prefix_to_type.get(field.prefix)
+                    if existing_type is not None and existing_type != config.name:
+                        raise ValueError(
+                            f"Note type '{config.name}' reuses custom prefix "
+                            f"'{field.prefix}' already used by '{existing_type}'. "
+                            "Prefixes must be unique across custom note types."
+                        )
+                    custom_prefix_to_type[field.prefix] = config.name
 
-                if new_prefixes == existing_config.identifying_prefixes:
-                    raise ValueError(
-                        f"Note type '{config.name}' has identical identifying fields "
-                        f"to '{existing_config.name}' ({new_prefixes}), "
-                        "which makes inference ambiguous."
-                    )
-
-            # 3. Choice Validation
+            # 2. Choice Validation
             if config.is_choice:
                 has_choice_field = any(
                     "choice" in field.name.lower() for field in config.fields
@@ -127,6 +127,17 @@ class NoteTypeConfig:
                         "containing the word 'choice' were found. Choice note types must "
                         "have at least one field with 'choice' in its name."
                     )
+
+            # 3. Distinctness Checks
+            signature = frozenset(config.identifying_prefixes)
+            existing_type = identifying_signature_to_type.get(signature)
+            if existing_type is not None and existing_type != config.name:
+                raise ValueError(
+                    f"Note type '{config.name}' has identical identifying fields "
+                    f"to '{existing_type}' ({set(signature)}), "
+                    "which makes inference ambiguous."
+                )
+            identifying_signature_to_type[signature] = config.name
 
 
 @dataclass
