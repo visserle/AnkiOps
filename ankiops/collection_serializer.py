@@ -37,11 +37,8 @@ def serialize_collection(collection_dir: Path) -> dict[str, Any]:
 
     errors = []
     md_files = fs.find_markdown_files(collection_dir)
-    logger.debug(f"Found {len(md_files)} deck file(s) to serialize")
 
     for md_file in md_files:
-        logger.debug(f"Processing {md_file.name}...")
-
         try:
             parsed = fs.read_markdown_file(md_file)
         except Exception as error:
@@ -234,7 +231,7 @@ def deserialize_collection_data(
                 f"  Created {clickable_path(output_path)} ({written_notes} notes)"
             )
         else:
-            logger.debug(
+            logger.warning(
                 f"Skipped {clickable_path(output_path)} "
                 "(already exists, use --overwrite to replace)"
             )

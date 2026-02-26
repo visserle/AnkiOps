@@ -169,6 +169,7 @@ uv run python -m main ma
 - `--task` - Task file name/path from `ai/tasks/` (required)
 - `--batch-size` - Override task batch size
 - `--temperature` - Override task temperature (`0` to `2`)
+- `--progress {auto,on,off}` - Show periodic AI task progress logs
 - `--profile`, `--provider`, `--model`, `--base-url`, `--api-key-env`, `--api-key`, `--timeout`, `--max-in-flight` - Runtime overrides
 
 ### Where is AI config stored?

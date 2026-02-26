@@ -33,6 +33,7 @@ from ankiops.ai.types import (
     InlineNotePayload,
     RuntimeAIConfig,
     TaskConfig,
+    TaskProgressUpdate,
     TaskRunOptions,
 )
 from ankiops.ai.validators import normalize_patch_response, parse_json_object
@@ -936,6 +937,59 @@ def test_inline_task_warning_includes_exception_type():
     assert "RuntimeError: boom" in result.warnings[0]
 
 
+def test_inline_task_emits_progress_updates():
+    updates: list[TaskProgressUpdate] = []
+    task = _task(
+        read_fields=["Question", "Answer"],
+        write_fields=["Question"],
+        batch="batch",
+        batch_size=1,
+    )
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {
+                            "Question": "I has two lungs.",
+                            "Answer": "Humans have two lungs.",
+                        },
+                    },
+                    {
+                        "note_key": "n2",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {
+                            "Question": "I has one heart.",
+                            "Answer": "Humans have one heart.",
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_InlineBatchEditor()).run(
+        data,
+        task,
+        options=TaskRunOptions(
+            batch_size=1,
+            max_in_flight=2,
+            progress_callback=updates.append,
+        ),
+    )
+
+    assert result.changed_fields == 2
+    assert updates
+    final_update = updates[-1]
+    assert final_update.completed_chunks == 2
+    assert final_update.in_flight == 0
+    assert final_update.matched_notes == 2
+    assert final_update.changed_fields == 2
+
+
 def test_task_runner_closes_editor_after_run():
     editor = _ClosableBatchEditor()
     result = TaskRunner(editor).run({"decks": []}, _task())
@@ -1030,6 +1084,42 @@ def test_client_reuses_http_client_within_run():
 
 
 @respx.mock
+def test_client_exposes_request_metrics_for_successful_call():
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"patches":[{"ref":"r1","fields":'
+                                '{"Question":"I have two lungs."}}]}'
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    async def _run():
+        editor = OpenAICompatibleAsyncEditor(_runtime())
+        try:
+            await editor.edit_notes(_task(), _notes_payload())
+            return editor.metrics()
+        finally:
+            await editor.aclose()
+
+    metrics = asyncio.run(_run())
+    assert route.call_count == 1
+    assert metrics.logical_requests == 1
+    assert metrics.http_attempts == 1
+    assert metrics.retries == 0
+    assert metrics.total_attempt_seconds >= 0.0
+
+
+@respx.mock
 def test_client_retries_transient_429_then_succeeds(monkeypatch):
     monkeypatch.setattr("ankiops.ai.client.DEFAULT_RETRY_MIN_SECONDS", 0.0)
     monkeypatch.setattr("ankiops.ai.client.DEFAULT_RETRY_MAX_SECONDS", 0.0)
@@ -1058,6 +1148,47 @@ def test_client_retries_transient_429_then_succeeds(monkeypatch):
     result = asyncio.run(_run_editor_once())
     assert route.call_count == 2
     assert result["n1"].fields["Question"] == "I have two lungs."
+
+
+@respx.mock
+def test_client_metrics_count_retries(monkeypatch):
+    monkeypatch.setattr("ankiops.ai.client.DEFAULT_RETRY_MIN_SECONDS", 0.0)
+    monkeypatch.setattr("ankiops.ai.client.DEFAULT_RETRY_MAX_SECONDS", 0.0)
+
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        side_effect=[
+            httpx.Response(429, json={"error": {"message": "rate limited"}}),
+            httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"patches":[{"ref":"r1","fields":'
+                                    '{"Question":"I have two lungs."}}]}'
+                                )
+                            }
+                        }
+                    ]
+                },
+            ),
+        ]
+    )
+
+    async def _run():
+        editor = OpenAICompatibleAsyncEditor(_runtime())
+        try:
+            await editor.edit_notes(_task(), _notes_payload())
+            return editor.metrics()
+        finally:
+            await editor.aclose()
+
+    metrics = asyncio.run(_run())
+    assert route.call_count == 2
+    assert metrics.logical_requests == 1
+    assert metrics.http_attempts == 2
+    assert metrics.retries == 1
 
 
 @respx.mock

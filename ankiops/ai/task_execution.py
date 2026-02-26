@@ -1,8 +1,9 @@
 """Task batch execution and chunk application helpers."""
 
 import asyncio
+import time
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from ankiops.ai.task_apply import add_warning, apply_note_changes, validate_edited_note
 from ankiops.ai.task_selection import NoteTask, TaskMatchers, iter_note_tasks
@@ -10,6 +11,7 @@ from ankiops.ai.types import (
     AsyncInlineBatchEditor,
     InlineEditedNote,
     TaskConfig,
+    TaskProgressUpdate,
     TaskRunResult,
 )
 
@@ -30,6 +32,7 @@ async def process_task_stream(
     batch_size: int,
     max_in_flight: int,
     max_warnings: int,
+    progress_callback: Callable[[TaskProgressUpdate], None] | None,
     result: TaskRunResult,
 ) -> set[int]:
     """Run all matched notes through async chunk dispatch and apply results."""
@@ -46,6 +49,7 @@ async def process_task_stream(
         editor=editor,
         max_in_flight=max_in_flight,
         max_warnings=max_warnings,
+        progress_callback=progress_callback,
         result=result,
     )
 
@@ -73,29 +77,52 @@ async def dispatch_chunks_and_apply(
     editor: AsyncInlineBatchEditor,
     max_in_flight: int,
     max_warnings: int,
+    progress_callback: Callable[[TaskProgressUpdate], None] | None,
     result: TaskRunResult,
 ) -> set[int]:
     """Dispatch chunks concurrently and apply results as they complete."""
     changed_deck_indexes: set[int] = set()
     pending: set[asyncio.Task[ChunkResult]] = set()
+    queued_chunks = 0
+    completed_chunks = 0
+    started_at = time.perf_counter()
 
     for chunk in chunks:
         pending.add(asyncio.create_task(run_chunk(task_config, editor, chunk)))
+        queued_chunks += 1
         if len(pending) >= max_in_flight:
-            pending = await drain_first_completed(
+            pending, completed_count = await drain_first_completed(
                 pending=pending,
                 task_id=task_config.id,
                 changed_deck_indexes=changed_deck_indexes,
                 max_warnings=max_warnings,
                 result=result,
             )
+            completed_chunks += completed_count
+            emit_progress_update(
+                progress_callback=progress_callback,
+                started_at=started_at,
+                queued_chunks=queued_chunks,
+                completed_chunks=completed_chunks,
+                in_flight=len(pending),
+                result=result,
+            )
 
     while pending:
-        pending = await drain_first_completed(
+        pending, completed_count = await drain_first_completed(
             pending=pending,
             task_id=task_config.id,
             changed_deck_indexes=changed_deck_indexes,
             max_warnings=max_warnings,
+            result=result,
+        )
+        completed_chunks += completed_count
+        emit_progress_update(
+            progress_callback=progress_callback,
+            started_at=started_at,
+            queued_chunks=queued_chunks,
+            completed_chunks=completed_chunks,
+            in_flight=len(pending),
             result=result,
         )
 
@@ -139,7 +166,7 @@ async def drain_first_completed(
     changed_deck_indexes: set[int],
     max_warnings: int,
     result: TaskRunResult,
-) -> set[asyncio.Task[ChunkResult]]:
+) -> tuple[set[asyncio.Task[ChunkResult]], int]:
     """Wait for first completed chunk task and apply its changes."""
     done, remaining = await asyncio.wait(
         pending,
@@ -153,7 +180,7 @@ async def drain_first_completed(
             max_warnings=max_warnings,
             result=result,
         )
-    return set(remaining)
+    return set(remaining), len(done)
 
 
 def apply_chunk_result(
@@ -206,3 +233,30 @@ def _format_chunk_error(error: Exception) -> str:
     if not error_message:
         return error.__class__.__name__
     return f"{error.__class__.__name__}: {error_message}"
+
+
+def emit_progress_update(
+    *,
+    progress_callback: Callable[[TaskProgressUpdate], None] | None,
+    started_at: float,
+    queued_chunks: int,
+    completed_chunks: int,
+    in_flight: int,
+    result: TaskRunResult,
+) -> None:
+    if progress_callback is None:
+        return
+    warning_count = len(result.warnings) + result.dropped_warnings
+    progress_callback(
+        TaskProgressUpdate(
+            elapsed_seconds=max(0.0, time.perf_counter() - started_at),
+            queued_chunks=queued_chunks,
+            completed_chunks=completed_chunks,
+            in_flight=in_flight,
+            processed_decks=result.processed_decks,
+            processed_notes=result.processed_notes,
+            matched_notes=result.matched_notes,
+            changed_fields=result.changed_fields,
+            warning_count=warning_count,
+        )
+    )

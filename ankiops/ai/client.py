@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from types import TracebackType
@@ -14,6 +15,7 @@ import httpx
 
 from ankiops.ai.errors import AIRequestError, AIResponseError
 from ankiops.ai.types import (
+    AIRequestMetrics,
     InlineEditedNote,
     InlineNotePayload,
     RuntimeAIConfig,
@@ -52,6 +54,10 @@ class OpenAICompatibleAsyncEditor:
             headers["Authorization"] = f"Bearer {self._config.api_key}"
         self._headers = headers
         self._client: httpx.AsyncClient | None = None
+        self._logical_requests = 0
+        self._http_attempts = 0
+        self._retries = 0
+        self._total_attempt_seconds = 0.0
 
     async def __aenter__(self) -> OpenAICompatibleAsyncEditor:
         self._get_or_create_client()
@@ -83,6 +89,7 @@ class OpenAICompatibleAsyncEditor:
         """Edit notes in batch and return edited payloads keyed by note_key."""
         if not notes:
             return {}
+        self._logical_requests += 1
 
         payload, ref_to_note_key = _build_chat_payload(
             model=self._config.model,
@@ -105,6 +112,15 @@ class OpenAICompatibleAsyncEditor:
         return _map_response_patches_to_note_keys(
             patches_by_ref=patches_by_ref,
             ref_to_note_key=ref_to_note_key,
+        )
+
+    def metrics(self) -> AIRequestMetrics:
+        """Return cumulative request metrics for this editor instance."""
+        return AIRequestMetrics(
+            logical_requests=self._logical_requests,
+            http_attempts=self._http_attempts,
+            retries=self._retries,
+            total_attempt_seconds=self._total_attempt_seconds,
         )
 
     def _get_or_create_client(self) -> httpx.AsyncClient:
@@ -134,6 +150,7 @@ class OpenAICompatibleAsyncEditor:
                 last_error = error
                 if attempt >= DEFAULT_MAX_ATTEMPTS:
                     break
+                self._retries += 1
                 await asyncio.sleep(
                     _retry_delay(
                         attempt,
@@ -152,6 +169,7 @@ class OpenAICompatibleAsyncEditor:
         headers: dict[str, str],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        started_at = time.perf_counter()
         try:
             response = await client.post(endpoint, headers=headers, json=payload)
         except httpx.TimeoutException as error:
@@ -160,6 +178,9 @@ class OpenAICompatibleAsyncEditor:
             ) from error
         except httpx.HTTPError as error:
             raise _RetryableRequestError(f"AI request failed: {error}") from error
+        finally:
+            self._http_attempts += 1
+            self._total_attempt_seconds += max(0.0, time.perf_counter() - started_at)
 
         if response.status_code == 429 or response.status_code >= 500:
             raise _RetryableRequestError(

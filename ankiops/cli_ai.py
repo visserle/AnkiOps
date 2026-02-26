@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,6 +27,7 @@ from ankiops.ai.model_config import (
     provider_choices,
     resolve_runtime_config,
 )
+from ankiops.ai.types import TaskProgressUpdate
 from ankiops.collection_serializer import (
     deserialize_collection_data,
     serialize_collection,
@@ -32,6 +35,80 @@ from ankiops.collection_serializer import (
 from ankiops.config import ANKIOPS_DB, get_collection_dir
 
 logger = logging.getLogger(__name__)
+
+
+class _TaskProgressLogger:
+    """Throttled logger callback for long-running AI task progress."""
+
+    def __init__(self, *, interval_seconds: float = 2.0):
+        self._interval_seconds = interval_seconds
+        self._last_emitted_at = 0.0
+
+    def __call__(self, update: TaskProgressUpdate) -> None:
+        if update.elapsed_seconds - self._last_emitted_at < self._interval_seconds:
+            return
+        self._last_emitted_at = update.elapsed_seconds
+        notes_per_second = (
+            update.matched_notes / update.elapsed_seconds
+            if update.elapsed_seconds > 0
+            else 0.0
+        )
+        logger.info(
+            "AI progress "
+            f"scanned={update.processed_notes} "
+            f"matched={update.matched_notes} "
+            f"changed={update.changed_fields} "
+            f"warnings={update.warning_count} "
+            f"chunks={update.completed_chunks}/{update.queued_chunks} "
+            f"in_flight={update.in_flight} "
+            f"notes/s={notes_per_second:.1f} "
+            f"elapsed={update.elapsed_seconds:.1f}s"
+        )
+
+
+def _progress_enabled(mode: str) -> bool:
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return sys.stderr.isatty()
+
+
+def _log_performance_summary(started_at: float, result, client) -> None:
+    elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+    scanned_per_second = (
+        result.processed_notes / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    )
+    matched_per_second = (
+        result.matched_notes / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    )
+    changed_per_second = (
+        result.changed_fields / elapsed_seconds if elapsed_seconds > 0 else 0.0
+    )
+    warning_count = len(result.warnings) + result.dropped_warnings
+    logger.info(
+        "AI performance "
+        f"elapsed={elapsed_seconds:.2f}s "
+        f"scanned/s={scanned_per_second:.1f} "
+        f"matched/s={matched_per_second:.1f} "
+        f"changed/s={changed_per_second:.1f} "
+        f"warnings={warning_count}"
+    )
+
+    metrics = client.metrics()
+    attempts = metrics.http_attempts
+    average_attempt_latency_ms = (
+        (metrics.total_attempt_seconds / attempts) * 1000.0
+        if attempts > 0
+        else 0.0
+    )
+    logger.info(
+        "AI transport "
+        f"logical_requests={metrics.logical_requests} "
+        f"http_attempts={attempts} "
+        f"retries={metrics.retries} "
+        f"avg_attempt_latency={average_attempt_latency_ms:.1f}ms"
+    )
 
 
 def _positive_int(value: str) -> int:
@@ -163,12 +240,17 @@ def run_ai_task(args):
     )
 
     serialized_data = serialize_collection(collection_dir)
+    started_at = time.perf_counter()
+    progress_callback = (
+        _TaskProgressLogger() if _progress_enabled(args.progress) else None
+    )
 
     client = build_async_editor(runtime)
     options = TaskRunOptions(
         include_decks=args.include_deck,
         batch_size=args.batch_size,
         max_in_flight=runtime.max_in_flight,
+        progress_callback=progress_callback,
     )
     try:
         result = TaskRunner(client).run(
@@ -179,6 +261,8 @@ def run_ai_task(args):
     except (TaskExecutionError, AIRequestError, AIResponseError) as error:
         logger.error(f"AI task failed: {error}")
         raise SystemExit(1)
+
+    _log_performance_summary(started_at, result, client)
 
     if args.include_deck and result.processed_decks == 0:
         logger.warning("No deck matched --include-deck filters.")
@@ -286,4 +370,10 @@ def add_ai_task_args(parser: argparse.ArgumentParser) -> None:
         type=_temperature_value,
         default=None,
         help="Override task temperature (0 to 2)",
+    )
+    parser.add_argument(
+        "--progress",
+        choices=("auto", "on", "off"),
+        default="auto",
+        help="Show periodic AI task progress logs (default: auto)",
     )

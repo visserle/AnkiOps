@@ -61,6 +61,7 @@ class TaskRunner:
                 batch_size=resolved_options.batch_size or 1,
                 max_in_flight=resolved_options.max_in_flight,
                 max_warnings=resolved_options.max_warnings,
+                progress_callback=resolved_options.progress_callback,
                 result=result,
             )
         finally:
@@ -108,6 +109,7 @@ def _resolve_options(
         ),
         max_in_flight=options.max_in_flight,
         max_warnings=options.max_warnings,
+        progress_callback=options.progress_callback,
     )
 
 

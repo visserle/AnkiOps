@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -79,6 +80,32 @@ class TaskRunOptions:
     batch_size: int | None = None
     max_in_flight: int = 4
     max_warnings: int = 200
+    progress_callback: Callable[["TaskProgressUpdate"], None] | None = None
+
+
+@dataclass(frozen=True)
+class TaskProgressUpdate:
+    """Periodic task execution progress snapshot."""
+
+    elapsed_seconds: float
+    queued_chunks: int
+    completed_chunks: int
+    in_flight: int
+    processed_decks: int
+    processed_notes: int
+    matched_notes: int
+    changed_fields: int
+    warning_count: int
+
+
+@dataclass(frozen=True)
+class AIRequestMetrics:
+    """Aggregated HTTP request metrics for one editor instance."""
+
+    logical_requests: int
+    http_attempts: int
+    retries: int
+    total_attempt_seconds: float
 
 
 @dataclass(frozen=True)
@@ -160,3 +187,6 @@ class AsyncInlineBatchEditor(Protocol):
         notes: list[InlineNotePayload],
     ) -> dict[str, InlineEditedNote]:
         """Return edited notes keyed by note_key."""
+
+    def metrics(self) -> AIRequestMetrics:
+        """Return cumulative transport request metrics."""

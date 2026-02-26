@@ -40,6 +40,8 @@ def test_ai_parses_task_runtime_and_repeatable_include_decks():
                 "6",
                 "--temperature",
                 "0.5",
+                "--progress",
+                "on",
             ],
         ),
     ):
@@ -51,6 +53,7 @@ def test_ai_parses_task_runtime_and_repeatable_include_decks():
     assert args.profile == "openai-fast"
     assert args.max_in_flight == 6
     assert args.temperature == pytest.approx(0.5)
+    assert args.progress == "on"
 
 
 def test_ai_config_does_not_require_task():
