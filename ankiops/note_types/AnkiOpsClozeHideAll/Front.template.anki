@@ -5,8 +5,8 @@
 </style>
 
 <!-- Anki renders the active cloze here; we use this as a fallback if needed -->
-<div id="cloze_rendered" style="display:none;">{{cloze:Hidden Text}}</div>
-<div id="hidden_raw" style="display:none;">{{Hidden Text}}</div>
+<div id="cloze_rendered" style="display:none;">{{cloze:Text}}</div>
+<div id="hidden_raw" style="display:none;">{{Text}}</div>
 <div id="content_display"></div>
 
 <script>

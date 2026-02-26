@@ -33,7 +33,6 @@ write_fields:
   - Front
   - Back
   - Text
-  - Hidden Text
   - Input
   - "Choice *"
   - Extra
