@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -181,6 +181,51 @@ class _FailingBatchEditor:
         _ = task
         _ = notes
         raise RuntimeError("boom")
+
+
+@dataclass
+class _InstructionRecordingBatchEditor:
+    """Editor that records instructions passed by TaskRunner chunk execution."""
+
+    instructions_seen: list[str] = field(default_factory=list)
+
+    async def edit_notes(
+        self,
+        task: TaskConfig,
+        notes: list[InlineNotePayload],
+    ) -> dict[str, InlineEditedNote]:
+        self.instructions_seen.append(task.instructions)
+        return {
+            note.note_key: InlineEditedNote.from_parts(
+                note_key=note.note_key,
+                fields=dict(note.editable),
+            )
+            for note in notes
+        }
+
+
+@dataclass
+class _PlainTextBatchEditor:
+    """Editor that removes cloze syntax by returning plain text for Text fields."""
+
+    replacement_text: str = "Edited text without cloze marker."
+
+    async def edit_notes(
+        self,
+        task: TaskConfig,
+        notes: list[InlineNotePayload],
+    ) -> dict[str, InlineEditedNote]:
+        _ = task
+        edited: dict[str, InlineEditedNote] = {}
+        for note in notes:
+            fields = dict(note.editable)
+            if "Text" in fields:
+                fields["Text"] = self.replacement_text
+            edited[note.note_key] = InlineEditedNote.from_parts(
+                note_key=note.note_key,
+                fields=fields,
+            )
+        return edited
 
 
 def _runtime() -> RuntimeAIConfig:
@@ -911,6 +956,128 @@ def test_inline_task_uses_compact_warning_for_non_string_values():
     warning = result.warnings[0]
     assert "response returned non-string value(s) for 'Question'" in warning
     assert "hint: all patched field values must be JSON strings" in warning
+
+
+def test_run_chunk_adds_cloze_requirement_to_system_prompt_for_cloze_notes():
+    task = _task(
+        instructions="Return inline JSON.",
+        read_fields=["Text"],
+        write_fields=["Text"],
+        batch="batch",
+        batch_size=1,
+    )
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsCloze",
+                        "fields": {"Text": "The {{c1::heart}} pumps blood."},
+                    }
+                ],
+            }
+        ]
+    }
+    editor = _InstructionRecordingBatchEditor()
+
+    TaskRunner(editor).run(data, task)
+
+    assert editor.instructions_seen
+    assert (
+        "For cloze note types, preserve valid cloze markers "
+        "(for example {{c1::answer}}). Never remove or break cloze syntax."
+    ) in editor.instructions_seen[0]
+
+
+def test_run_chunk_does_not_add_cloze_requirement_for_non_cloze_notes():
+    task = _task(
+        instructions="Return inline JSON.",
+        read_fields=["Question"],
+        write_fields=["Question"],
+        batch="batch",
+        batch_size=1,
+    )
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsQA",
+                        "fields": {"Question": "I has two lungs."},
+                    }
+                ],
+            }
+        ]
+    }
+    editor = _InstructionRecordingBatchEditor()
+
+    TaskRunner(editor).run(data, task)
+
+    assert editor.instructions_seen
+    assert "Never remove or break cloze syntax." not in editor.instructions_seen[0]
+
+
+def test_inline_task_rejects_cloze_edit_that_removes_cloze_marker():
+    task = _task(
+        read_fields=["Text"],
+        write_fields=["Text"],
+        batch="batch",
+        batch_size=1,
+    )
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsCloze",
+                        "fields": {"Text": "The {{c1::heart}} pumps blood."},
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_PlainTextBatchEditor()).run(data, task)
+
+    assert result.changed_fields == 0
+    assert result.warnings
+    assert "removed or invalidated cloze syntax" in result.warnings[0]
+    assert "{{c1::answer}}" in result.warnings[0]
+
+
+def test_inline_task_strictly_blocks_edits_for_already_broken_cloze_note():
+    task = _task(
+        read_fields=["Text"],
+        write_fields=["Text"],
+        batch="batch",
+        batch_size=1,
+    )
+    data = {
+        "decks": [
+            {
+                "name": "Biology",
+                "notes": [
+                    {
+                        "note_key": "n1",
+                        "note_type": "AnkiOpsClozeHideAll",
+                        "fields": {"Text": "The heart pumps blood."},
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = TaskRunner(_PlainTextBatchEditor()).run(data, task)
+
+    assert result.changed_fields == 0
+    assert result.warnings
+    assert "removed or invalidated cloze syntax" in result.warnings[0]
 
 
 def test_inline_task_skips_notes_without_note_key():

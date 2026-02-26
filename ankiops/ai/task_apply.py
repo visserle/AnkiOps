@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from ankiops.ai.types import InlineEditedNote, TaskChange, TaskRunResult
@@ -11,6 +12,7 @@ if TYPE_CHECKING:
 
 _FIELD_SAMPLE_LIMIT = 2
 _FIELD_PREVIEW_MAX_CHARS = 40
+_CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 
 
 def validate_edited_note(
@@ -48,6 +50,14 @@ def validate_edited_note(
             "response returned non-string value(s) for "
             f"{invalid_fields}; hint: all patched field values must be JSON strings"
         )
+
+    if _is_cloze_note_type(note_task.note_type):
+        if not _projected_fields_keep_cloze_marker(note_task, edited_note):
+            return (
+                "response removed or invalidated cloze syntax; "
+                "cloze notes must contain at least one marker like "
+                "'{{c1::answer}}'; hint: preserve cloze markers exactly"
+            )
     return None
 
 
@@ -68,6 +78,25 @@ def _field_preview(field_name: str) -> str:
     if len(normalized) > _FIELD_PREVIEW_MAX_CHARS:
         normalized = normalized[: _FIELD_PREVIEW_MAX_CHARS - 3].rstrip() + "..."
     return f"'{normalized}'"
+
+
+def _is_cloze_note_type(note_type: str) -> bool:
+    return "cloze" in note_type.casefold()
+
+
+def _projected_fields_keep_cloze_marker(
+    note_task: NoteTask,
+    edited_note: InlineEditedNote,
+) -> bool:
+    projected_fields = {
+        field_name: field_value
+        for field_name, field_value in note_task.note_fields.items()
+        if isinstance(field_name, str) and isinstance(field_value, str)
+    }
+    projected_fields.update(edited_note.fields)
+    return any(
+        _CLOZE_PATTERN.search(field_value) for field_value in projected_fields.values()
+    )
 
 
 def apply_note_changes(

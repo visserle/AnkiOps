@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterator
 
 from ankiops.ai.task_apply import add_warning, apply_note_changes, validate_edited_note
@@ -13,6 +13,11 @@ from ankiops.ai.types import (
     TaskConfig,
     TaskProgressUpdate,
     TaskRunResult,
+)
+
+_CLOZE_REQUIREMENT = (
+    "For cloze note types, preserve valid cloze markers "
+    "(for example {{c1::answer}}). Never remove or break cloze syntax."
 )
 
 
@@ -135,9 +140,10 @@ async def run_chunk(
     chunk: list[NoteTask],
 ) -> ChunkResult:
     """Run one chunk through editor and normalize top-level shape checks."""
+    effective_task_config = _task_config_for_chunk(task_config, chunk)
     try:
         edited = await editor.edit_notes(
-            task_config,
+            effective_task_config,
             [task_item.payload for task_item in chunk],
         )
         if not isinstance(edited, dict):
@@ -233,6 +239,26 @@ def _format_chunk_error(error: Exception) -> str:
     if not error_message:
         return error.__class__.__name__
     return f"{error.__class__.__name__}: {error_message}"
+
+
+def _task_config_for_chunk(
+    task_config: TaskConfig,
+    chunk: list[NoteTask],
+) -> TaskConfig:
+    if not _chunk_has_cloze_note_type(chunk):
+        return task_config
+
+    normalized_instructions = task_config.instructions.rstrip()
+    if _CLOZE_REQUIREMENT in normalized_instructions:
+        return task_config
+    return replace(
+        task_config,
+        instructions=f"{normalized_instructions}\n{_CLOZE_REQUIREMENT}",
+    )
+
+
+def _chunk_has_cloze_note_type(chunk: list[NoteTask]) -> bool:
+    return any("cloze" in note_task.note_type.casefold() for note_task in chunk)
 
 
 def emit_progress_update(
