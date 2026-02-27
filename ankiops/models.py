@@ -70,62 +70,68 @@ class NoteTypeConfig:
             seen_prefixes: set[str] = set()
 
             # 1. Reservation Checks (Names and Prefixes)
-            for field in config.fields:
-                if field.name in seen_names:
+            for field_config in config.fields:
+                if field_config.name in seen_names:
                     raise ValueError(
                         f"Note type '{config.name}' has duplicate field name "
-                        f"'{field.name}'. Field names must be unique within a note type."
+                        f"'{field_config.name}'. "
+                        "Field names must be unique within a note type."
                     )
-                seen_names.add(field.name)
+                seen_names.add(field_config.name)
 
-                if field.prefix is not None:
-                    if field.prefix in seen_prefixes:
+                if field_config.prefix is not None:
+                    if field_config.prefix in seen_prefixes:
                         raise ValueError(
                             f"Note type '{config.name}' has duplicate field prefix "
-                            f"'{field.prefix}'. Field prefixes must be unique within a "
+                            f"'{field_config.prefix}'. "
+                            "Field prefixes must be unique within a "
                             "note type."
                         )
-                    seen_prefixes.add(field.prefix)
+                    seen_prefixes.add(field_config.prefix)
 
-                if field.name in reserved_names:
-                    if field.prefix != ANKIOPS_KEY_FIELD.prefix:
+                if field_config.name in reserved_names:
+                    if field_config.prefix != ANKIOPS_KEY_FIELD.prefix:
                         raise ValueError(
                             f"Note type '{config.name}' uses reserved "
-                            f"field name '{field.name}' with invalid prefix. "
+                            f"field name '{field_config.name}' with invalid prefix. "
                             f"Expected no prefix."
                         )
-                    if field.identifying != ANKIOPS_KEY_FIELD.identifying:
+                    if field_config.identifying != ANKIOPS_KEY_FIELD.identifying:
                         raise ValueError(
                             f"Note type '{config.name}' uses reserved "
-                            f"field name '{field.name}' as identifying, which is not allowed."
+                            f"field name '{field_config.name}' as identifying, "
+                            "which is not allowed."
                         )
 
-                if field.prefix is not None and not is_builtin:
-                    if field.prefix in built_in_prefixes:
+                if field_config.prefix is not None and not is_builtin:
+                    if field_config.prefix in built_in_prefixes:
                         raise ValueError(
                             f"Note type '{config.name}' uses reserved built-in "
-                            f"prefix '{field.prefix}'"
+                            f"prefix '{field_config.prefix}'"
                         )
 
-                    existing_type = custom_prefix_to_type.get(field.prefix)
+                    existing_type = custom_prefix_to_type.get(field_config.prefix)
                     if existing_type is not None and existing_type != config.name:
                         raise ValueError(
                             f"Note type '{config.name}' reuses custom prefix "
-                            f"'{field.prefix}' already used by '{existing_type}'. "
+                            f"'{field_config.prefix}' already used by "
+                            f"'{existing_type}'. "
                             "Prefixes must be unique across custom note types."
                         )
-                    custom_prefix_to_type[field.prefix] = config.name
+                    custom_prefix_to_type[field_config.prefix] = config.name
 
             # 2. Choice Validation
             if config.is_choice:
                 has_choice_field = any(
-                    "choice" in field.name.lower() for field in config.fields
+                    "choice" in field_config.name.lower()
+                    for field_config in config.fields
                 )
                 if not has_choice_field:
                     raise ValueError(
-                        f"Note type '{config.name}' is marked as 'is_choice', but no fields "
-                        "containing the word 'choice' were found. Choice note types must "
-                        "have at least one field with 'choice' in its name."
+                        f"Note type '{config.name}' is marked as 'is_choice', "
+                        "but no fields containing the word 'choice' were found. "
+                        "Choice note types must have at least one field with "
+                        "'choice' in its name."
                     )
 
             # 3. Distinctness Checks
@@ -298,6 +304,14 @@ _TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
     {ChangeType.DELETE, ChangeType.CONFLICT}
 )
 
+_NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
+    ChangeType.CREATE,
+    ChangeType.UPDATE,
+    ChangeType.DELETE,
+    ChangeType.SKIP,
+    ChangeType.MOVE,
+)
+
 
 @dataclass
 class SyncSummary:
@@ -427,10 +441,62 @@ def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
 
 
 @dataclass
+class ChangeBuckets:
+    creates: list[Change] = field(default_factory=list)
+    updates: list[Change] = field(default_factory=list)
+    deletes: list[Change] = field(default_factory=list)
+    skips: list[Change] = field(default_factory=list)
+    moves: list[Change] = field(default_factory=list)
+    others: list[Change] = field(default_factory=list)
+
+    def add(self, change: Change) -> None:
+        if change.change_type == ChangeType.CREATE:
+            self.creates.append(change)
+        elif change.change_type == ChangeType.UPDATE:
+            self.updates.append(change)
+        elif change.change_type == ChangeType.DELETE:
+            self.deletes.append(change)
+        elif change.change_type == ChangeType.SKIP:
+            self.skips.append(change)
+        elif change.change_type == ChangeType.MOVE:
+            self.moves.append(change)
+        else:
+            self.others.append(change)
+
+    def extend(self, changes: list[Change]) -> None:
+        for change in changes:
+            self.add(change)
+
+    def ordered(
+        self,
+        *,
+        order: tuple[ChangeType, ...] = _NOTE_CHANGE_ORDER,
+        include_others: bool = True,
+    ) -> list[Change]:
+        ordered_changes: list[Change] = []
+        for change_type in order:
+            if change_type == ChangeType.CREATE:
+                ordered_changes.extend(self.creates)
+            elif change_type == ChangeType.UPDATE:
+                ordered_changes.extend(self.updates)
+            elif change_type == ChangeType.DELETE:
+                ordered_changes.extend(self.deletes)
+            elif change_type == ChangeType.SKIP:
+                ordered_changes.extend(self.skips)
+            elif change_type == ChangeType.MOVE:
+                ordered_changes.extend(self.moves)
+
+        if include_others:
+            ordered_changes.extend(self.others)
+        return ordered_changes
+
+
+@dataclass
 class SyncResult:
     name: str | None = None
     file_path: Path | None = None
     changes: list[Change] = field(default_factory=list)
+    change_buckets: ChangeBuckets = field(default_factory=ChangeBuckets)
     errors: list[str] = field(default_factory=list)
     reported_change_types: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES
     checked: int = 0
@@ -451,6 +517,23 @@ class SyncResult:
             name="media",
             file_path=None,
             reported_change_types=_MEDIA_REPORTED_CHANGE_TYPES,
+        )
+
+    def add_change(self, change: Change) -> None:
+        self.change_buckets.add(change)
+
+    def extend_changes_bucketed(self, changes: list[Change]) -> None:
+        self.change_buckets.extend(changes)
+
+    def materialize_changes(
+        self,
+        *,
+        order: tuple[ChangeType, ...] = _NOTE_CHANGE_ORDER,
+        include_others: bool = True,
+    ) -> None:
+        self.changes = self.change_buckets.ordered(
+            order=order,
+            include_others=include_others,
         )
 
     @property

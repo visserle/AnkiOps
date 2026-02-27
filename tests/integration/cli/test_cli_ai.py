@@ -75,6 +75,37 @@ def test_ai_config_does_not_require_task():
     assert args.profile is None
 
 
+def test_ai_config_keeps_runtime_args_passed_before_subcommand():
+    captured = {}
+
+    def _fake_handler(args):
+        captured["args"] = args
+
+    with (
+        patch("ankiops.cli.run_ai_config", side_effect=_fake_handler),
+        patch(
+            "sys.argv",
+            [
+                "ankiops",
+                "ai",
+                "--provider",
+                "groq",
+                "--api-key-env",
+                "GROQ_TOKEN",
+                "--api-key",
+                "test-secret",
+                "config",
+            ],
+        ),
+    ):
+        main()
+
+    args = captured["args"]
+    assert args.provider == "groq"
+    assert args.api_key_env == "GROQ_TOKEN"
+    assert args.api_key == "test-secret"
+
+
 def test_ai_rejects_out_of_range_temperature_before_handler():
     with (
         patch("ankiops.cli.run_ai_task") as run_ai_task,

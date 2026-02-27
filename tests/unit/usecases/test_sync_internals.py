@@ -6,9 +6,9 @@ from pathlib import Path
 
 from ankiops.config import get_note_types_dir
 from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import _sync_deck
+from ankiops.export_notes import _order_resolved_notes, _ResolvedDeckNote, _sync_deck
 from ankiops.fs import FileSystemAdapter
-from ankiops.import_notes import _PendingWrite, _flush_writes
+from ankiops.import_notes import _flush_writes, _PendingWrite
 from ankiops.models import AnkiNote, MarkdownFile, Note
 from tests.support.assertions import assert_summary
 
@@ -85,7 +85,6 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
         )
         result = _sync_deck(
             deck_name="UnknownDeck",
-            deck_id=10,
             anki_notes=[unknown],
             config_by_name={config.name: config for config in configs},
             existing_file_path=None,
@@ -103,3 +102,74 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
         assert_summary(result.summary, total=0)
     finally:
         db.close()
+
+
+def test_order_resolved_notes_preserves_existing_and_appends_new():
+    existing_notes = [
+        Note(
+            note_key="k2",
+            note_type="AnkiOpsQA",
+            fields={"Question": "Q2", "Answer": "A2"},
+        ),
+        Note(
+            note_key="k1",
+            note_type="AnkiOpsQA",
+            fields={"Question": "Q1", "Answer": "A1"},
+        ),
+    ]
+    resolved_notes = [
+        _ResolvedDeckNote(
+            note_key="k1",
+            note_id=1001,
+            note=Note(
+                note_key="k1",
+                note_type="AnkiOpsQA",
+                fields={"Question": "Q1", "Answer": "A1"},
+            ),
+            change=None,
+        ),
+        _ResolvedDeckNote(
+            note_key="k2",
+            note_id=1002,
+            note=Note(
+                note_key="k2",
+                note_type="AnkiOpsQA",
+                fields={"Question": "Q2", "Answer": "A2"},
+            ),
+            change=None,
+        ),
+        _ResolvedDeckNote(
+            note_key="k4",
+            note_id=2004,
+            note=Note(
+                note_key="k4",
+                note_type="AnkiOpsQA",
+                fields={"Question": "Q4", "Answer": "A4"},
+            ),
+            change=None,
+        ),
+        _ResolvedDeckNote(
+            note_key="k3",
+            note_id=2003,
+            note=Note(
+                note_key="k3",
+                note_type="AnkiOpsQA",
+                fields={"Question": "Q3", "Answer": "A3"},
+            ),
+            change=None,
+        ),
+    ]
+
+    ordered_existing = _order_resolved_notes(
+        resolved_notes=resolved_notes,
+        existing_notes=existing_notes,
+        is_first_export=False,
+    )
+    assert [note.note_key for note in ordered_existing] == ["k2", "k1", "k3", "k4"]
+
+    ordered_first = _order_resolved_notes(
+        resolved_notes=resolved_notes,
+        existing_notes=existing_notes,
+        is_first_export=True,
+    )
+    assert [note.note_key for note in ordered_first] == ["k1", "k2", "k3", "k4"]

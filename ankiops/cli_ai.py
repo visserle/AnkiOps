@@ -379,37 +379,45 @@ def add_ai_runtime_args(parser: argparse.ArgumentParser) -> None:
     """Attach runtime override flags to an argparse parser."""
     parser.add_argument(
         "--profile",
+        default=argparse.SUPPRESS,
         help="Model profile id from ai/models/*.yaml",
     )
     parser.add_argument(
         "--provider",
         choices=list(provider_choices()),
+        default=argparse.SUPPRESS,
         help="Optional runtime provider override",
     )
     parser.add_argument(
         "--model",
+        default=argparse.SUPPRESS,
         help="Optional runtime model override",
     )
     parser.add_argument(
         "--base-url",
+        default=argparse.SUPPRESS,
         help="Optional runtime OpenAI-compatible base URL override",
     )
     parser.add_argument(
         "--api-key-env",
+        default=argparse.SUPPRESS,
         help="Optional runtime API key env var override",
     )
     parser.add_argument(
         "--api-key",
+        default=argparse.SUPPRESS,
         help="Optional runtime API key value",
     )
     parser.add_argument(
         "--timeout",
         type=_positive_int,
+        default=argparse.SUPPRESS,
         help="Optional runtime timeout override",
     )
     parser.add_argument(
         "--max-in-flight",
         type=_positive_int,
+        default=argparse.SUPPRESS,
         help="Optional runtime max concurrent request override",
     )
 

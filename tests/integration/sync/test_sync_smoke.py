@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 
 from ankiops.anki import AnkiAdapter
@@ -11,6 +12,8 @@ from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
 from ankiops.import_notes import import_collection
 from tests.support.assertions import assert_summary
+
+_NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
 
 @contextmanager
@@ -51,7 +54,8 @@ def _run_export(collection_dir, *, preload_configs: bool = False):
 def _insert_mock_note(
     mock_anki, *, deck_name: str, note_id: int, card_id: int, fields: dict[str, str]
 ):
-    mock_anki.invoke("createDeck", deck=deck_name)
+    if deck_name not in mock_anki.decks:
+        mock_anki.invoke("createDeck", deck=deck_name)
     mock_anki.notes[note_id] = {
         "noteId": note_id,
         "modelName": "AnkiOpsQA",
@@ -67,6 +71,10 @@ def _insert_mock_note(
         "deckName": deck_name,
         "modelName": "AnkiOpsQA",
     }
+
+
+def _extract_note_key_order(content: str) -> list[str]:
+    return _NOTE_KEY_RE.findall(content)
 
 
 def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiops):
@@ -89,6 +97,165 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiop
 
     content_b = file_b.read_text(encoding="utf-8")
     assert "Q: Q2" in content_b
+
+
+def test_export_first_time_orders_by_note_id(tmp_path, mock_anki, run_ankiops):
+    """First export should use note_id ascending as creation-time ordering."""
+    deck_name = "OrderFreshDeck"
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=202,
+        card_id=2002,
+        fields={
+            "Question": "Q newer",
+            "Answer": "A newer",
+            "AnkiOps Key": "fresh-k-202",
+        },
+    )
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=101,
+        card_id=2001,
+        fields={
+            "Question": "Q older",
+            "Answer": "A older",
+            "AnkiOps Key": "fresh-k-101",
+        },
+    )
+
+    _run_export(tmp_path)
+
+    content = (tmp_path / f"{deck_name_to_file_stem(deck_name)}.md").read_text(
+        encoding="utf-8"
+    )
+    assert _extract_note_key_order(content) == ["fresh-k-101", "fresh-k-202"]
+
+
+def test_export_existing_keeps_markdown_order(tmp_path, mock_anki, run_ankiops):
+    """Existing deck export should preserve markdown order for existing notes."""
+    deck_name = "OrderRunDeck"
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=1001,
+        card_id=3001,
+        fields={
+            "Question": "Q first",
+            "Answer": "A first",
+            "AnkiOps Key": "run-k-1",
+        },
+    )
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=1002,
+        card_id=3002,
+        fields={
+            "Question": "Q second",
+            "Answer": "A second",
+            "AnkiOps Key": "run-k-2",
+        },
+    )
+
+    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
+    md_file.write_text(
+        (
+            "<!-- note_key: run-k-2 -->\nQ: Q second\nA: A second\n\n"
+            "---\n\n"
+            "<!-- note_key: run-k-1 -->\nQ: Q first\nA: A first\n"
+        ),
+        encoding="utf-8",
+    )
+
+    db = SQLiteDbAdapter.load(tmp_path)
+    try:
+        db.set_note("run-k-1", 1001)
+        db.set_note("run-k-2", 1002)
+    finally:
+        db.close()
+
+    _run_export(tmp_path)
+
+    content = md_file.read_text(encoding="utf-8")
+    assert _extract_note_key_order(content) == ["run-k-2", "run-k-1"]
+
+
+def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_ankiops):
+    """Existing deck export should append unseen notes in note_id order."""
+    deck_name = "OrderAppendDeck"
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=1001,
+        card_id=4001,
+        fields={
+            "Question": "Q existing 1",
+            "Answer": "A existing 1",
+            "AnkiOps Key": "append-k-1",
+        },
+    )
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=1002,
+        card_id=4002,
+        fields={
+            "Question": "Q existing 2",
+            "Answer": "A existing 2",
+            "AnkiOps Key": "append-k-2",
+        },
+    )
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=2004,
+        card_id=4004,
+        fields={
+            "Question": "Q new later",
+            "Answer": "A new later",
+            "AnkiOps Key": "append-k-2004",
+        },
+    )
+    _insert_mock_note(
+        mock_anki,
+        deck_name=deck_name,
+        note_id=2003,
+        card_id=4003,
+        fields={
+            "Question": "Q new earlier",
+            "Answer": "A new earlier",
+            "AnkiOps Key": "append-k-2003",
+        },
+    )
+
+    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
+    md_file.write_text(
+        (
+            "<!-- note_key: append-k-2 -->\nQ: Q existing 2\nA: A existing 2\n\n"
+            "---\n\n"
+            "<!-- note_key: append-k-1 -->\nQ: Q existing 1\nA: A existing 1\n"
+        ),
+        encoding="utf-8",
+    )
+
+    db = SQLiteDbAdapter.load(tmp_path)
+    try:
+        db.set_note("append-k-1", 1001)
+        db.set_note("append-k-2", 1002)
+    finally:
+        db.close()
+
+    _run_export(tmp_path)
+
+    content = md_file.read_text(encoding="utf-8")
+    assert _extract_note_key_order(content) == [
+        "append-k-2",
+        "append-k-1",
+        "append-k-2003",
+        "append-k-2004",
+    ]
 
 
 def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
@@ -258,3 +425,44 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
     )
     assert key_line_idx + 1 < len(lines)
     assert lines[key_line_idx + 1].startswith("Q: Trailing Space Question ")
+
+
+def test_import_key_insertion_preserves_note_block_order(
+    tmp_path, mock_anki, run_ankiops
+):
+    """Import should insert note_key comments without reordering note blocks."""
+    deck_file = tmp_path / f"{deck_name_to_file_stem('OrderPreserveDeck')}.md"
+    deck_file.write_text(
+        (
+            "Q: Third Question\n"
+            "A: Third Answer\n\n"
+            "---\n\n"
+            "Q: First Question\n"
+            "A: First Answer\n\n"
+            "---\n\n"
+            "Q: Second Question\n"
+            "A: Second Answer\n"
+        ),
+        encoding="utf-8",
+    )
+
+    _run_import(tmp_path)
+
+    content = deck_file.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    questions = [line for line in lines if line.startswith("Q: ")]
+    assert questions == [
+        "Q: Third Question",
+        "Q: First Question",
+        "Q: Second Question",
+    ]
+
+    question_indexes = [
+        line_index for line_index, line in enumerate(lines) if line.startswith("Q: ")
+    ]
+    for question_index in question_indexes:
+        assert question_index > 0
+        assert lines[question_index - 1].startswith("<!-- note_key:")
+
+    assert len(_extract_note_key_order(content)) == 3

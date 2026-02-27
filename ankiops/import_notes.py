@@ -148,6 +148,307 @@ def _html_match(html: dict[str, str], anki: AnkiNote) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class _DeckContext:
+    deck_name: str
+    needs_create_deck: bool
+
+
+def _resolve_deck_context(
+    fs: MarkdownFile,
+    deck_ids_by_name: dict[str, int],
+    db_port: SQLiteDbAdapter,
+) -> _DeckContext:
+    deck_name = file_stem_to_deck_name(fs.file_path.stem)
+    resolved_id = deck_ids_by_name.get(deck_name)
+    if not resolved_id:
+        return _DeckContext(deck_name=deck_name, needs_create_deck=True)
+
+    db_port.set_deck(deck_name, resolved_id)
+    return _DeckContext(deck_name=deck_name, needs_create_deck=False)
+
+
+def _sync_keyed_note(
+    *,
+    parsed_note: Note,
+    cfg: NoteTypeConfig,
+    md_hash: str,
+    deck_name: str,
+    anki_port: AnkiAdapter,
+    fs_port: FileSystemAdapter,
+    anki_notes: dict[int, AnkiNote],
+    anki_cards: dict[int, dict],
+    note_ids_by_note_key: dict[str, int],
+    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    result: SyncResult,
+    cards_to_move: list[int],
+    moved_from_decks: set[str],
+    queue_note_mapping,
+    queue_fingerprint,
+) -> None:
+    note_key = parsed_note.note_key
+    if note_key is None:
+        return
+
+    note_id = note_ids_by_note_key.get(note_key)
+    if note_id is None:
+        # Recovery
+        found = anki_port.find_notes_by_ankiops_note_key(note_key)
+        if found:
+            note_id = found[0]
+            queue_note_mapping(note_key, note_id)
+
+    anki_note = anki_notes.get(note_id) if note_id else None
+
+    # If recovery worked but wasn't in original batch fetch
+    if note_id and not anki_note:
+        info = anki_port.fetch_notes_info([note_id])
+        if info:
+            anki_note = info[note_id]
+            anki_notes[note_id] = anki_note
+        else:
+            # Stale note_key->note_id mapping: recover via embedded AnkiOps Key.
+            found = anki_port.find_notes_by_ankiops_note_key(note_key)
+            if found:
+                note_id = found[0]
+                queue_note_mapping(note_key, note_id)
+                info = anki_port.fetch_notes_info([note_id])
+                if info:
+                    anki_note = info[note_id]
+                    anki_notes[note_id] = anki_note
+
+    if not anki_note:
+        html_fields = _to_html(parsed_note, cfg, fs_port)
+        html_fields["AnkiOps Key"] = note_key
+        result.change_buckets.creates.append(
+            Change(
+                ChangeType.CREATE,
+                None,
+                parsed_note.identifier,
+                {
+                    "note": parsed_note,
+                    "html_fields": html_fields,
+                    "note_key": note_key,
+                    "md_hash": md_hash,
+                    "anki_hash": note_fingerprint(parsed_note.note_type, html_fields),
+                },
+            )
+        )
+        logger.debug(f"  Create {parsed_note.identifier}")
+        return
+
+    cards_to_move_for_note = []
+    for card_id in anki_note.card_ids:
+        card_info = anki_cards.get(card_id)
+        if card_info and card_info.get("deckName") != deck_name:
+            cards_to_move_for_note.append(card_id)
+            source_deck = card_info.get("deckName")
+            if source_deck:
+                moved_from_decks.add(source_deck)
+    if cards_to_move_for_note:
+        result.change_buckets.moves.append(
+            Change(
+                ChangeType.MOVE,
+                note_id,
+                parsed_note.identifier,
+                {"cards": cards_to_move_for_note},
+            )
+        )
+        cards_to_move.extend(cards_to_move_for_note)
+
+    if anki_note.note_type != parsed_note.note_type:
+        result.errors.append(f"Note type mismatch for {parsed_note.identifier}")
+        return
+
+    current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
+    cached = note_fingerprints_by_note_key.get(note_key)
+    if cached == (md_hash, current_anki_hash):
+        result.change_buckets.skips.append(
+            Change(ChangeType.SKIP, note_id, parsed_note.identifier)
+        )
+        queue_fingerprint(note_key, md_hash, current_anki_hash)
+        return
+
+    html_fields = _to_html(parsed_note, cfg, fs_port)
+    if anki_note.fields.get("AnkiOps Key", "") != note_key:
+        html_fields["AnkiOps Key"] = note_key
+
+    if _html_match(html_fields, anki_note):
+        result.change_buckets.skips.append(
+            Change(ChangeType.SKIP, note_id, parsed_note.identifier)
+        )
+        queue_fingerprint(note_key, md_hash, current_anki_hash)
+        return
+
+    target_anki_hash = note_fingerprint(parsed_note.note_type, html_fields)
+    result.change_buckets.updates.append(
+        Change(
+            ChangeType.UPDATE,
+            note_id,
+            parsed_note.identifier,
+            {
+                "html_fields": html_fields,
+                "note_key": note_key,
+                "md_hash": md_hash,
+                "anki_hash": target_anki_hash,
+            },
+        )
+    )
+    logger.debug(f"  Update {parsed_note.identifier}")
+
+
+def _sync_new_note(
+    *,
+    parsed_note: Note,
+    cfg: NoteTypeConfig,
+    md_hash: str,
+    db_port: SQLiteDbAdapter,
+    fs_port: FileSystemAdapter,
+    result: SyncResult,
+) -> None:
+    new_note_key = db_port.generate_note_key()
+    html_fields = _to_html(parsed_note, cfg, fs_port)
+    html_fields["AnkiOps Key"] = new_note_key
+    result.change_buckets.creates.append(
+        Change(
+            ChangeType.CREATE,
+            None,
+            parsed_note.identifier,
+            {
+                "note": parsed_note,
+                "html_fields": html_fields,
+                "note_key": new_note_key,
+                "md_hash": md_hash,
+                "anki_hash": note_fingerprint(parsed_note.note_type, html_fields),
+            },
+        )
+    )
+    logger.debug(f"  Create (new) {parsed_note.identifier}")
+
+
+def _collect_orphan_deletes(
+    *,
+    fs_notes: list[Note],
+    note_ids_by_note_key: dict[str, int],
+    global_mapped_note_ids: set[int],
+    all_anki_note_ids: set[int],
+    db_port: SQLiteDbAdapter,
+    result: SyncResult,
+) -> None:
+    md_anki_ids = set()
+    for parsed_note in fs_notes:
+        if parsed_note.note_key:
+            note_id = note_ids_by_note_key.get(parsed_note.note_key)
+            if note_id:
+                md_anki_ids.add(note_id)
+
+    # Orphans
+    orphaned = all_anki_note_ids - md_anki_ids
+    if global_mapped_note_ids:
+        orphaned -= global_mapped_note_ids
+
+    orphan_note_keys = db_port.get_note_keys_bulk(orphaned)
+    for note_id in sorted(orphaned):
+        if note_id:
+            note_key = orphan_note_keys.get(note_id)
+            delete_repr = f"note_key: {note_key}" if note_key else f"note_id: {note_id}"
+            result.change_buckets.deletes.append(
+                Change(
+                    ChangeType.DELETE,
+                    note_id,
+                    delete_repr,
+                    {"note_key": note_key} if note_key else {},
+                )
+            )
+            logger.debug(f"  Delete {delete_repr}")
+
+
+def _apply_changes_and_update_state(
+    *,
+    deck_context: _DeckContext,
+    anki_port: AnkiAdapter,
+    db_port: SQLiteDbAdapter,
+    result: SyncResult,
+    cards_to_move: list[int],
+    note_ids_by_note_key: dict[str, int],
+    global_note_keys: set[str],
+    global_mapped_note_ids: set[int],
+    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    queue_note_mapping,
+    queue_fingerprint,
+) -> list[tuple[Note, str]]:
+    if not deck_context.deck_name:
+        return []
+
+    created_ids, errors = anki_port.apply_note_changes(
+        deck_context.deck_name,
+        deck_context.needs_create_deck,
+        result.change_buckets.creates,
+        result.change_buckets.updates,
+        result.change_buckets.deletes,
+        cards_to_move,
+    )
+    result.errors.extend(errors)
+    delete_failed = any(err.startswith("Failed delete") for err in errors)
+
+    note_key_assignments: list[tuple[Note, str]] = []
+
+    # Link mapped created IDs
+    for note_id, create_change in zip(created_ids, result.change_buckets.creates):
+        note_key = create_change.context["note_key"]
+        queue_note_mapping(note_key, note_id)
+        queue_fingerprint(
+            note_key,
+            create_change.context["md_hash"],
+            create_change.context["anki_hash"],
+        )
+        create_change.entity_id = note_id
+        note_key_assignments.append((create_change.context["note"], note_key))
+
+    for update_change in result.change_buckets.updates:
+        queue_fingerprint(
+            update_change.context["note_key"],
+            update_change.context["md_hash"],
+            update_change.context["anki_hash"],
+        )
+
+    if result.change_buckets.deletes and not delete_failed:
+        delete_note_keys = [
+            delete_change.context.get("note_key")
+            for delete_change in result.change_buckets.deletes
+            if delete_change.context
+        ]
+        delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
+        if delete_note_keys:
+            db_port.remove_notes_by_note_keys_bulk(delete_note_keys)
+            for note_key in delete_note_keys:
+                removed_note_id = note_ids_by_note_key.pop(note_key, None)
+                if note_key in global_note_keys and removed_note_id is not None:
+                    global_mapped_note_ids.discard(removed_note_id)
+                note_fingerprints_by_note_key.pop(note_key, None)
+
+    return note_key_assignments
+
+
+def _recover_created_deck_mapping(
+    *,
+    deck_context: _DeckContext,
+    anki_port: AnkiAdapter,
+    deck_ids_by_name: dict[str, int],
+    deck_names_by_id: dict[int, str],
+    db_port: SQLiteDbAdapter,
+) -> None:
+    if not deck_context.needs_create_deck or not deck_context.deck_name:
+        return
+
+    new_deck_ids = anki_port.fetch_deck_names_and_ids()
+    if deck_context.deck_name in new_deck_ids:
+        new_id = new_deck_ids[deck_context.deck_name]
+        deck_ids_by_name[deck_context.deck_name] = new_id
+        deck_names_by_id[new_id] = deck_context.deck_name
+        db_port.set_deck(deck_context.deck_name, new_id)
+
+
 def _sync_file(
     fs: MarkdownFile,
     config_by_name: dict[str, NoteTypeConfig],
@@ -166,19 +467,9 @@ def _sync_file(
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
 ) -> tuple[SyncResult, _PendingWrite, set[str]]:
-    needs_create_deck = False
-
-    deck_name = file_stem_to_deck_name(fs.file_path.stem)
-    resolved_id = deck_ids_by_name.get(deck_name)
-
-    if not resolved_id:
-        needs_create_deck = True
-    else:
-        db_port.set_deck(deck_name, resolved_id)
-
-    result = SyncResult.for_notes(name=deck_name, file_path=fs.file_path)
-    creates, updates, deletes, skips, moves = [], [], [], [], []
-    cards_to_move = []
+    deck_context = _resolve_deck_context(fs, deck_ids_by_name, db_port)
+    result = SyncResult.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
+    cards_to_move: list[int] = []
     moved_from_decks: set[str] = set()
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
@@ -203,219 +494,65 @@ def _sync_file(
         md_hash = note_fingerprint(parsed_note.note_type, parsed_note.fields)
 
         if parsed_note.note_key:
-            note_key = parsed_note.note_key
-            note_id = note_ids_by_note_key.get(note_key)
-            if note_id is None:
-                # Recovery
-                found = anki_port.find_notes_by_ankiops_note_key(note_key)
-                if found:
-                    note_id = found[0]
-                    _queue_note_mapping(note_key, note_id)
-
-            anki_note = anki_notes.get(note_id) if note_id else None
-
-            # If recovery worked but wasn't in original batch fetch
-            if note_id and not anki_note:
-                info = anki_port.fetch_notes_info([note_id])
-                if info:
-                    anki_note = info[note_id]
-                    anki_notes[note_id] = anki_note
-                else:
-                    # Stale note_key->note_id mapping: recover via embedded AnkiOps Key.
-                    found = anki_port.find_notes_by_ankiops_note_key(note_key)
-                    if found:
-                        note_id = found[0]
-                        _queue_note_mapping(note_key, note_id)
-                        info = anki_port.fetch_notes_info([note_id])
-                        if info:
-                            anki_note = info[note_id]
-                            anki_notes[note_id] = anki_note
-
-            if not anki_note:
-                html_fields = _to_html(parsed_note, cfg, fs_port)
-                html_fields["AnkiOps Key"] = note_key
-                creates.append(
-                    Change(
-                        ChangeType.CREATE,
-                        None,
-                        parsed_note.identifier,
-                        {
-                            "note": parsed_note,
-                            "html_fields": html_fields,
-                            "note_key": note_key,
-                            "md_hash": md_hash,
-                            "anki_hash": note_fingerprint(
-                                parsed_note.note_type, html_fields
-                            ),
-                        },
-                    )
-                )
-                logger.debug(f"  Create {parsed_note.identifier}")
-            else:
-                cards_to_move_for_note = []
-                for card_id in anki_note.card_ids:
-                    card_info = anki_cards.get(card_id)
-                    if card_info and card_info.get("deckName") != deck_name:
-                        cards_to_move_for_note.append(card_id)
-                        source_deck = card_info.get("deckName")
-                        if source_deck:
-                            moved_from_decks.add(source_deck)
-                if cards_to_move_for_note:
-                    moves.append(
-                        Change(
-                            ChangeType.MOVE,
-                            note_id,
-                            parsed_note.identifier,
-                            {"cards": cards_to_move_for_note},
-                        )
-                    )
-                    cards_to_move.extend(cards_to_move_for_note)
-
-                if anki_note.note_type != parsed_note.note_type:
-                    result.errors.append(
-                        f"Note type mismatch for {parsed_note.identifier}"
-                    )
-                    continue
-
-                current_anki_hash = note_fingerprint(
-                    anki_note.note_type, anki_note.fields
-                )
-                cached = note_fingerprints_by_note_key.get(note_key)
-                if cached == (md_hash, current_anki_hash):
-                    skips.append(
-                        Change(ChangeType.SKIP, note_id, parsed_note.identifier)
-                    )
-                    _queue_fingerprint(note_key, md_hash, current_anki_hash)
-                    continue
-
-                html_fields = _to_html(parsed_note, cfg, fs_port)
-                if anki_note.fields.get("AnkiOps Key", "") != note_key:
-                    html_fields["AnkiOps Key"] = note_key
-
-                if _html_match(html_fields, anki_note):
-                    skips.append(
-                        Change(ChangeType.SKIP, note_id, parsed_note.identifier)
-                    )
-                    _queue_fingerprint(note_key, md_hash, current_anki_hash)
-                else:
-                    target_anki_hash = note_fingerprint(
-                        parsed_note.note_type, html_fields
-                    )
-                    updates.append(
-                        Change(
-                            ChangeType.UPDATE,
-                            note_id,
-                            parsed_note.identifier,
-                            {
-                                "html_fields": html_fields,
-                                "note_key": note_key,
-                                "md_hash": md_hash,
-                                "anki_hash": target_anki_hash,
-                            },
-                        )
-                    )
-                    logger.debug(f"  Update {parsed_note.identifier}")
+            _sync_keyed_note(
+                parsed_note=parsed_note,
+                cfg=cfg,
+                md_hash=md_hash,
+                deck_name=deck_context.deck_name,
+                anki_port=anki_port,
+                fs_port=fs_port,
+                anki_notes=anki_notes,
+                anki_cards=anki_cards,
+                note_ids_by_note_key=note_ids_by_note_key,
+                note_fingerprints_by_note_key=note_fingerprints_by_note_key,
+                result=result,
+                cards_to_move=cards_to_move,
+                moved_from_decks=moved_from_decks,
+                queue_note_mapping=_queue_note_mapping,
+                queue_fingerprint=_queue_fingerprint,
+            )
         else:
-            new_note_key = db_port.generate_note_key()
-            html_fields = _to_html(parsed_note, cfg, fs_port)
-            html_fields["AnkiOps Key"] = new_note_key
-            creates.append(
-                Change(
-                    ChangeType.CREATE,
-                    None,
-                    parsed_note.identifier,
-                    {
-                        "note": parsed_note,
-                        "html_fields": html_fields,
-                        "note_key": new_note_key,
-                        "md_hash": md_hash,
-                        "anki_hash": note_fingerprint(
-                            parsed_note.note_type, html_fields
-                        ),
-                    },
-                )
-            )
-            logger.debug(f"  Create (new) {parsed_note.identifier}")
-
-    md_anki_ids = set()
-    for parsed_note in fs.notes:
-        if parsed_note.note_key:
-            note_id = note_ids_by_note_key.get(parsed_note.note_key)
-            if note_id:
-                md_anki_ids.add(note_id)
-
-    # Orphans
-    orphaned = all_anki_note_ids - md_anki_ids
-    if global_mapped_note_ids:
-        orphaned -= global_mapped_note_ids
-
-    orphan_note_keys = db_port.get_note_keys_bulk(orphaned)
-    for note_id in sorted(orphaned):
-        if note_id:
-            note_key = orphan_note_keys.get(note_id)
-            delete_repr = f"note_key: {note_key}" if note_key else f"note_id: {note_id}"
-            deletes.append(
-                Change(
-                    ChangeType.DELETE,
-                    note_id,
-                    delete_repr,
-                    {"note_key": note_key} if note_key else {},
-                )
-            )
-            logger.debug(f"  Delete {delete_repr}")
-
-    note_key_assignments = []
-    if deck_name:
-        created_ids, errors = anki_port.apply_note_changes(
-            deck_name, needs_create_deck, creates, updates, deletes, cards_to_move
-        )
-        result.errors.extend(errors)
-        delete_failed = any(err.startswith("Failed delete") for err in errors)
-
-        # Link mapped created IDs
-        for note_id, create_change in zip(created_ids, creates):
-            note_key = create_change.context["note_key"]
-            _queue_note_mapping(note_key, note_id)
-            _queue_fingerprint(
-                note_key,
-                create_change.context["md_hash"],
-                create_change.context["anki_hash"],
-            )
-            create_change.entity_id = note_id
-            note_key_assignments.append((create_change.context["note"], note_key))
-
-        for update_change in updates:
-            _queue_fingerprint(
-                update_change.context["note_key"],
-                update_change.context["md_hash"],
-                update_change.context["anki_hash"],
+            _sync_new_note(
+                parsed_note=parsed_note,
+                cfg=cfg,
+                md_hash=md_hash,
+                db_port=db_port,
+                fs_port=fs_port,
+                result=result,
             )
 
-        if deletes and not delete_failed:
-            delete_note_keys = [
-                delete_change.context.get("note_key")
-                for delete_change in deletes
-                if delete_change.context
-            ]
-            delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
-            if delete_note_keys:
-                db_port.remove_notes_by_note_keys_bulk(delete_note_keys)
-                for note_key in delete_note_keys:
-                    removed_note_id = note_ids_by_note_key.pop(note_key, None)
-                    if note_key in global_note_keys and removed_note_id is not None:
-                        global_mapped_note_ids.discard(removed_note_id)
-                    note_fingerprints_by_note_key.pop(note_key, None)
+    _collect_orphan_deletes(
+        fs_notes=fs.notes,
+        note_ids_by_note_key=note_ids_by_note_key,
+        global_mapped_note_ids=global_mapped_note_ids,
+        all_anki_note_ids=all_anki_note_ids,
+        db_port=db_port,
+        result=result,
+    )
 
-        # Deck recovery logic for needs_create_deck
-        if needs_create_deck:
-            new_deck_ids = anki_port.fetch_deck_names_and_ids()
-            if deck_name in new_deck_ids:
-                new_id = new_deck_ids[deck_name]
-                deck_ids_by_name[deck_name] = new_id
-                deck_names_by_id[new_id] = deck_name
-                db_port.set_deck(deck_name, new_id)
+    note_key_assignments = _apply_changes_and_update_state(
+        deck_context=deck_context,
+        anki_port=anki_port,
+        db_port=db_port,
+        result=result,
+        cards_to_move=cards_to_move,
+        note_ids_by_note_key=note_ids_by_note_key,
+        global_note_keys=global_note_keys,
+        global_mapped_note_ids=global_mapped_note_ids,
+        note_fingerprints_by_note_key=note_fingerprints_by_note_key,
+        queue_note_mapping=_queue_note_mapping,
+        queue_fingerprint=_queue_fingerprint,
+    )
 
-    result.changes = creates + updates + deletes + skips + moves
+    _recover_created_deck_mapping(
+        deck_context=deck_context,
+        anki_port=anki_port,
+        deck_ids_by_name=deck_ids_by_name,
+        deck_names_by_id=deck_names_by_id,
+        db_port=db_port,
+    )
+
+    result.materialize_changes()
     pending = _PendingWrite(fs, note_key_assignments)
     return result, pending, moved_from_decks
 

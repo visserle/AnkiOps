@@ -321,6 +321,16 @@ def main():
     ai_parser.set_defaults(handler=run_ai_task)
     add_ai_task_args(ai_parser)
     add_ai_runtime_args(ai_parser)
+    ai_parser.set_defaults(
+        profile=None,
+        provider=None,
+        model=None,
+        base_url=None,
+        api_key_env=None,
+        api_key=None,
+        timeout=None,
+        max_in_flight=None,
+    )
 
     ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)
 
