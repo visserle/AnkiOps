@@ -96,7 +96,8 @@ def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> No
         changed = False
 
         for block in blocks:
-            if not block.strip() or set(block.strip()) <= {"-"}:
+            stripped_block = block.strip()
+            if not stripped_block or not stripped_block.replace("-", ""):
                 out_blocks.append(block)
                 continue
 

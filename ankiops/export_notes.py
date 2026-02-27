@@ -1,7 +1,6 @@
 """Use Case: Export Anki Notes to Markdown."""
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
@@ -26,6 +25,18 @@ from ankiops.models import (
 
 logger = logging.getLogger(__name__)
 
+_RESOLVED_NOTE_KEY = 0
+_RESOLVED_NOTE_ID = 1
+_RESOLVED_NOTE_VALUE = 2
+_ResolvedDeckNote = tuple[str, int, Note]
+_SYNC_ORDER = (
+    ChangeType.DELETE,
+    ChangeType.CREATE,
+    ChangeType.UPDATE,
+    ChangeType.SKIP,
+    ChangeType.MOVE,
+)
+
 
 def _from_html(
     anki_note: AnkiNote,
@@ -48,14 +59,6 @@ def _from_html(
         note_type=anki_note.note_type,
         fields=fields,
     )
-
-
-@dataclass(frozen=True)
-class _ResolvedDeckNote:
-    note_key: str
-    note_id: int
-    note: Note
-    change: Change | None
 
 
 def _load_deck_markdown_state(
@@ -90,6 +93,7 @@ def _resolve_deck_notes(
 ) -> tuple[list[_ResolvedDeckNote], list[str]]:
     errors: list[str] = []
     resolved_notes: list[_ResolvedDeckNote] = []
+    bucketed_changes = result.change_buckets
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
         if note_keys_by_id.get(note_id) == note_key:
@@ -121,17 +125,11 @@ def _resolve_deck_notes(
             local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
             cached = note_fingerprints_by_note_key.get(note_key)
             if cached == (local_md_hash, current_anki_hash):
-                change = Change(
-                    ChangeType.SKIP, anki_note.note_id, local_match.identifier
+                bucketed_changes.skips.append(
+                    Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
                 )
-                result.add_change(change)
                 resolved_notes.append(
-                    _ResolvedDeckNote(
-                        note_key=note_key,
-                        note_id=anki_note.note_id,
-                        note=local_match,
-                        change=change,
-                    )
+                    (note_key, anki_note.note_id, local_match)
                 )
                 _queue_fingerprint(note_key, local_md_hash, current_anki_hash)
                 continue
@@ -159,44 +157,37 @@ def _resolve_deck_notes(
         domain_note.note_key = note_key
         local_match = local_notes_by_note_key.get(note_key)
         if local_match and local_match.fields == domain_note.fields:
-            change = Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
-            result.add_change(change)
+            bucketed_changes.skips.append(
+                Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
+            )
             resolved_notes.append(
-                _ResolvedDeckNote(
-                    note_key=note_key,
-                    note_id=anki_note.note_id,
-                    note=local_match,
-                    change=change,
-                )
+                (note_key, anki_note.note_id, local_match)
             )
             md_hash = note_fingerprint(local_match.note_type, local_match.fields)
             _queue_fingerprint(note_key, md_hash, current_anki_hash)
             continue
 
         if not local_match:
-            change = Change(
-                ChangeType.CREATE,
-                anki_note.note_id,
-                domain_note.identifier,
+            bucketed_changes.creates.append(
+                Change(
+                    ChangeType.CREATE,
+                    anki_note.note_id,
+                    domain_note.identifier,
+                )
             )
-            result.add_change(change)
             logger.debug(f"  Created {domain_note.identifier}")
         else:
-            change = Change(
-                ChangeType.UPDATE,
-                anki_note.note_id,
-                domain_note.identifier,
+            bucketed_changes.updates.append(
+                Change(
+                    ChangeType.UPDATE,
+                    anki_note.note_id,
+                    domain_note.identifier,
+                )
             )
-            result.add_change(change)
             logger.debug(f"  Updated {domain_note.identifier}")
 
         resolved_notes.append(
-            _ResolvedDeckNote(
-                note_key=note_key,
-                note_id=anki_note.note_id,
-                note=domain_note,
-                change=change,
-            )
+            (note_key, anki_note.note_id, domain_note)
         )
         md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
         _queue_fingerprint(note_key, md_hash, current_anki_hash)
@@ -211,15 +202,15 @@ def _order_resolved_notes(
 ) -> list[Note]:
     if is_first_export:
         return [
-            resolved.note
+            resolved[_RESOLVED_NOTE_VALUE]
             for resolved in sorted(
                 resolved_notes,
-                key=lambda resolved_note: resolved_note.note_id,
+                key=lambda resolved_note: resolved_note[_RESOLVED_NOTE_ID],
             )
         ]
 
     resolved_by_note_key = {
-        resolved.note_key: resolved for resolved in resolved_notes if resolved.note_key
+        resolved[_RESOLVED_NOTE_KEY]: resolved for resolved in resolved_notes
     }
     consumed_note_keys: set[str] = set()
     ordered_notes: list[Note] = []
@@ -230,19 +221,43 @@ def _order_resolved_notes(
         resolved = resolved_by_note_key.get(existing_note.note_key)
         if not resolved:
             continue
-        ordered_notes.append(resolved.note)
-        consumed_note_keys.add(resolved.note_key)
+        ordered_notes.append(resolved[_RESOLVED_NOTE_VALUE])
+        consumed_note_keys.add(resolved[_RESOLVED_NOTE_KEY])
 
     remaining = sorted(
         [
             resolved
             for resolved in resolved_notes
-            if resolved.note_key not in consumed_note_keys
+            if resolved[_RESOLVED_NOTE_KEY] not in consumed_note_keys
         ],
-        key=lambda resolved: resolved.note_id,
+        key=lambda resolved: resolved[_RESOLVED_NOTE_ID],
     )
-    ordered_notes.extend(resolved.note for resolved in remaining)
+    ordered_notes.extend(resolved[_RESOLVED_NOTE_VALUE] for resolved in remaining)
     return ordered_notes
+
+
+def _can_skip_markdown_rebuild(
+    *,
+    is_first_export: bool,
+    fs: MarkdownFile,
+    resolved_notes: list[_ResolvedDeckNote],
+    result: SyncResult,
+    resolve_errors: list[str],
+) -> bool:
+    if is_first_export or resolve_errors:
+        return False
+    if result.change_buckets.creates or result.change_buckets.updates:
+        return False
+    if len(resolved_notes) != len(fs.notes):
+        return False
+
+    for existing_note, resolved in zip(fs.notes, resolved_notes):
+        resolved_note_key = resolved[_RESOLVED_NOTE_KEY]
+        if not existing_note.note_key or existing_note.note_key != resolved_note_key:
+            return False
+        if resolved[_RESOLVED_NOTE_VALUE] is not existing_note:
+            return False
+    return True
 
 
 def _render_notes_to_markdown(
@@ -320,6 +335,15 @@ def _sync_deck(
         local_notes_by_content=local_notes_by_content,
     )
     result.errors.extend(resolve_errors)
+    if _can_skip_markdown_rebuild(
+        is_first_export=is_first_export,
+        fs=fs,
+        resolved_notes=resolved_notes,
+        result=result,
+        resolve_errors=resolve_errors,
+    ):
+        result.materialize_changes(order=_SYNC_ORDER)
+        return result
 
     final_notes = _order_resolved_notes(
         resolved_notes=resolved_notes,
@@ -342,18 +366,12 @@ def _sync_deck(
         if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
             db_port.remove_note_by_note_key(old_note.note_key)
-            result.add_change(Change(ChangeType.DELETE, None, old_note.identifier))
+            result.change_buckets.deletes.append(
+                Change(ChangeType.DELETE, None, old_note.identifier)
+            )
             logger.debug(f"  Deleted {old_note.identifier}")
 
-    result.materialize_changes(
-        order=(
-            ChangeType.DELETE,
-            ChangeType.CREATE,
-            ChangeType.UPDATE,
-            ChangeType.SKIP,
-            ChangeType.MOVE,
-        )
-    )
+    result.materialize_changes(order=_SYNC_ORDER)
     return result
 
 

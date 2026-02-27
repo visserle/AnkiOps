@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 _PREFIX_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9]*:)(?:\s|$)")
+_RESERVED_NOTE_FIELD_NAMES = frozenset({ANKIOPS_KEY_FIELD.name})
 
 
 class FileSystemAdapter:
@@ -35,12 +36,16 @@ class FileSystemAdapter:
         self._note_type_configs: list[NoteTypeConfig] = []
         self._prefix_to_field: dict[str, str] = {}
         self._note_type_cache_signature: tuple | None = None
+        self._inferred_note_type_by_signature: dict[
+            tuple[frozenset[str], frozenset[str] | None], str
+        ] = {}
 
     def set_configs(self, configs: list[NoteTypeConfig]):
         self._note_type_configs = configs
         self._prefix_to_field = self._build_prefix_to_field_map(configs)
         # External callers can override configs in-memory; invalidate disk cache.
         self._note_type_cache_signature = None
+        self._inferred_note_type_by_signature = {}
 
     def read_markdown_file(self, file_path: Path) -> MarkdownFile:
         raw_content = file_path.read_text(encoding="utf-8")
@@ -48,12 +53,14 @@ class FileSystemAdapter:
 
         blocks = remaining.split(NOTE_SEPARATOR)
         parsed_notes = []
+        config_by_name = {config.name: config for config in self._note_type_configs}
 
         for block in blocks:
-            if not block.strip() or set(block.strip()) <= {"-"}:
+            stripped_block = block.strip()
+            if not stripped_block or not stripped_block.replace("-", ""):
                 continue
 
-            lines = block.strip().split("\n")
+            lines = stripped_block.split("\n")
             note_key: str | None = None
             fields: dict[str, str] = {}
             current_field: str | None = None
@@ -136,9 +143,7 @@ class FileSystemAdapter:
             note = Note(note_key=note_key, note_type=note_type, fields=fields)
 
             # Validate
-            note_type_config = next(
-                config for config in self._note_type_configs if config.name == note_type
-            )
+            note_type_config = config_by_name[note_type]
             errors = note.validate(note_type_config)
             if errors:
                 raise ValueError("Invalid note in block:\n  " + "\n  ".join(errors))
@@ -157,9 +162,17 @@ class FileSystemAdapter:
         *,
         prefixes: set[str] | None = None,
     ) -> str:
-        reserved_names = {ANKIOPS_KEY_FIELD.name}
-        note_fields = {key for key in fields.keys() if key not in reserved_names}
-        note_prefixes = set(prefixes) if prefixes is not None else None
+        note_fields_frozen = frozenset(
+            key for key in fields.keys() if key not in _RESERVED_NOTE_FIELD_NAMES
+        )
+        note_prefixes_frozen = frozenset(prefixes) if prefixes is not None else None
+        signature = (note_fields_frozen, note_prefixes_frozen)
+        cached = self._inferred_note_type_by_signature.get(signature)
+        if cached is not None:
+            return cached
+
+        note_fields = set(note_fields_frozen)
+        note_prefixes = set(note_prefixes_frozen) if note_prefixes_frozen else None
         candidates: list[str] = []
 
         for config in self._note_type_configs:
@@ -236,7 +249,9 @@ class FileSystemAdapter:
                 f"Ambiguous note type: matches multiple types: {', '.join(candidates)}"
             )
 
-        return candidates[0]
+        resolved = candidates[0]
+        self._inferred_note_type_by_signature[signature] = resolved
+        return resolved
 
     def write_markdown_file(self, file_path: Path, content: str) -> None:
         file_path.write_text(content, encoding="utf-8")
@@ -408,6 +423,7 @@ class FileSystemAdapter:
         self._note_type_configs = configs
         self._prefix_to_field = self._build_prefix_to_field_map(configs)
         self._note_type_cache_signature = signature
+        self._inferred_note_type_by_signature = {}
         return configs
 
     def _build_prefix_to_field_map(self, configs: list[NoteTypeConfig]) -> dict[str, str]:
