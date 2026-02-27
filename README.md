@@ -92,10 +92,6 @@ Each note type is identified by its field prefixes. `E:` (Extra) and `M:` (More,
 | **AnkiOpsInput** | `Q:`, `I:` |
 | **AnkiOpsChoice** | `Q:`, `C1:``C8:`, `A:` |
 
-### Which characters or symbols cannot be used?
-
-Since notes are separated by horizontal lines (`---`), they cannot be used within the content fields of your notes. This includes all special Markdown characters that render these lines (`***`, `___`), and `<hr>`.
-
 ### How does it work?
 
 On first import, AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. With note keys in place, we can track what is new, changed, moved between decks, or deleted, and AnkiOps syncs accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. One AnkiOps folder represents one Anki profile.

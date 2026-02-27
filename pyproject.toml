@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.4.1"
+version = "0.5.0"
 description = "Anki decks ↔ Markdown files, in perfect sync"
 readme = "README.md"
 requires-python = ">=3.10"

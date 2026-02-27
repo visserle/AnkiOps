@@ -4,7 +4,7 @@ requires-python = ">=3.10"
 
 [[package]]
 name = "ankiops"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
