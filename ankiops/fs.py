@@ -47,18 +47,65 @@ class FileSystemAdapter:
         self._note_type_cache_signature = None
         self._inferred_note_type_by_signature = {}
 
-    def read_markdown_file(self, file_path: Path) -> MarkdownFile:
-        raw_content = file_path.read_text(encoding="utf-8")
-        remaining = raw_content
+    def _display_parse_error_path(
+        self,
+        file_path: Path,
+        *,
+        context_root: Path | None,
+    ) -> str:
+        if context_root is None:
+            return file_path.name
 
-        blocks = remaining.split(NOTE_SEPARATOR)
+        try:
+            return str(file_path.resolve().relative_to(context_root.resolve()))
+        except Exception:
+            return file_path.name
+
+    def _with_parse_error_context(
+        self,
+        message: str,
+        *,
+        display_path: str,
+        line_number: int,
+    ) -> str:
+        return f"{message} (file: {display_path}, line: {line_number})"
+
+    def read_markdown_file(
+        self,
+        file_path: Path,
+        *,
+        context_root: Path | None = None,
+    ) -> MarkdownFile:
+        raw_content = file_path.read_text(encoding="utf-8")
         parsed_notes = []
         config_by_name = {config.name: config for config in self._note_type_configs}
+        display_path = self._display_parse_error_path(
+            file_path, context_root=context_root
+        )
+        separator_newlines = NOTE_SEPARATOR.count("\n")
+        block_start = 0
+        block_start_line = 1
 
-        for block in blocks:
+        while True:
+            separator_index = raw_content.find(NOTE_SEPARATOR, block_start)
+            if separator_index == -1:
+                block = raw_content[block_start:]
+                next_block_start = -1
+            else:
+                block = raw_content[block_start:separator_index]
+                next_block_start = separator_index + len(NOTE_SEPARATOR)
+
             stripped_block = block.strip()
             if not stripped_block or not stripped_block.replace("-", ""):
+                if next_block_start == -1:
+                    break
+                block_start_line += block.count("\n") + separator_newlines
+                block_start = next_block_start
                 continue
+
+            leading_trimmed_len = len(block) - len(block.lstrip())
+            leading_line_offset = block[:leading_trimmed_len].count("\n")
+            note_start_line = block_start_line + leading_line_offset
 
             lines = stripped_block.split("\n")
             note_key: str | None = None
@@ -68,8 +115,10 @@ class FileSystemAdapter:
             in_code_block = False
             seen: set[str] = set()
             seen_prefixes: set[str] = set()
+            first_field_line: int | None = None
 
-            for line in lines:
+            for offset, line in enumerate(lines):
+                current_line_number = note_start_line + offset
                 stripped = line.lstrip()
                 if _CODE_FENCE_PATTERN.match(stripped):
                     in_code_block = not in_code_block
@@ -91,12 +140,13 @@ class FileSystemAdapter:
                 for prefix, field_name in self._prefix_to_field.items():
                     if line.startswith(prefix + " ") or line == prefix:
                         if field_name in seen:
-                            ctx = (
-                                f"in note_key: {note_key}"
-                                if note_key
-                                else "in this note"
+                            raise ValueError(
+                                self._with_parse_error_context(
+                                    f"Duplicate field '{prefix}'.",
+                                    display_path=display_path,
+                                    line_number=current_line_number,
+                                )
                             )
-                            raise ValueError(f"Duplicate field '{prefix}' {ctx}.")
 
                         seen.add(field_name)
                         seen_prefixes.add(prefix)
@@ -110,6 +160,8 @@ class FileSystemAdapter:
                             else []
                         )
                         current_field = field_name
+                        if first_field_line is None:
+                            first_field_line = current_line_number
                         break
 
                 if matched_field is None and current_field:
@@ -119,14 +171,15 @@ class FileSystemAdapter:
                     if prefix_match:
                         unknown_prefix = prefix_match.group(1)
                         if unknown_prefix not in self._prefix_to_field:
-                            ctx = (
-                                f"in note_key: {note_key}"
-                                if note_key
-                                else "in this note"
-                            )
                             raise ValueError(
-                                f"Unknown field prefix '{unknown_prefix}' {ctx}. "
-                                "Check your note type prefixes."
+                                self._with_parse_error_context(
+                                    (
+                                        f"Unknown field prefix '{unknown_prefix}'. "
+                                        "Check your note type prefixes."
+                                    ),
+                                    display_path=display_path,
+                                    line_number=current_line_number,
+                                )
                             )
 
             if current_field:
@@ -134,21 +187,47 @@ class FileSystemAdapter:
 
             if not fields:
                 raise ValueError(
-                    "Found content but no valid field prefixes in block starting "
-                    f"with: '{block.strip()[:50]}...'"
+                    self._with_parse_error_context(
+                        (
+                            "Found content but no valid field prefixes in block "
+                            f"starting with: '{block.strip()[:50]}...'"
+                        ),
+                        display_path=display_path,
+                        line_number=note_start_line,
+                    )
                 )
 
             # Infer Note Type
-            note_type = self._infer_note_type(fields, prefixes=seen_prefixes)
+            try:
+                note_type = self._infer_note_type(fields, prefixes=seen_prefixes)
+            except ValueError as error:
+                raise ValueError(
+                    self._with_parse_error_context(
+                        str(error),
+                        display_path=display_path,
+                        line_number=first_field_line or note_start_line,
+                    )
+                ) from error
             note = Note(note_key=note_key, note_type=note_type, fields=fields)
 
             # Validate
             note_type_config = config_by_name[note_type]
             errors = note.validate(note_type_config)
             if errors:
-                raise ValueError("Invalid note in block:\n  " + "\n  ".join(errors))
+                raise ValueError(
+                    self._with_parse_error_context(
+                        "Invalid note in block:\n  " + "\n  ".join(errors),
+                        display_path=display_path,
+                        line_number=first_field_line or note_start_line,
+                    )
+                )
 
             parsed_notes.append(note)
+
+            if next_block_start == -1:
+                break
+            block_start_line += block.count("\n") + separator_newlines
+            block_start = next_block_start
 
         return MarkdownFile(
             file_path=file_path,

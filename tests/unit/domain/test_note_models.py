@@ -320,7 +320,19 @@ class TestParseClozeBlock:
     def test_unknown_prefix_before_first_field_fails(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("RANDOMPREFIX: {{c1::text}}\nE: extra info")
-        with pytest.raises(ValueError, match="Unknown field prefix 'RANDOMPREFIX:'"):
+        with pytest.raises(
+            ValueError,
+            match=r"Unknown field prefix 'RANDOMPREFIX:'.* \(file: deck\.md, line: 1\)",
+        ):
+            fs.read_markdown_file(md)
+
+    def test_duplicate_field_reports_exact_line(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text("Q: First\nQ: Duplicate\nA: Answer")
+        with pytest.raises(
+            ValueError,
+            match=r"Duplicate field 'Q:'.* \(file: deck\.md, line: 2\)",
+        ):
             fs.read_markdown_file(md)
 
 
@@ -352,6 +364,39 @@ class TestParseQABlock:
         note = result.notes[0]
         assert note.fields["Extra"] == "Extra notes"
 
+    def test_note_type_inference_error_uses_basename_without_context_root(
+        self, fs, tmp_path
+    ):
+        md = tmp_path / "broken-note.md"
+        md.write_text("Q: Question only")
+        with pytest.raises(
+            ValueError,
+            match=r"Cannot determine note type from fields: Question \(file: broken-note\.md, line: 1\)",
+        ):
+            fs.read_markdown_file(md)
+
+    def test_note_type_inference_error_uses_relative_path_with_context_root(
+        self, fs, tmp_path
+    ):
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        md = nested_dir / "broken-note.md"
+        md.write_text("Q: Question only")
+        with pytest.raises(
+            ValueError,
+            match=r"Cannot determine note type from fields: Question \(file: nested/broken-note\.md, line: 1\)",
+        ):
+            fs.read_markdown_file(md, context_root=tmp_path)
+
+    def test_note_type_inference_line_ignores_note_key_comment(self, fs, tmp_path):
+        md = tmp_path / "broken-note.md"
+        md.write_text("<!-- note_key: key-1 -->\nQ: Question only")
+        with pytest.raises(
+            ValueError,
+            match=r"Cannot determine note type from fields: Question \(file: broken-note\.md, line: 2\)",
+        ):
+            fs.read_markdown_file(md)
+
 
 class TestMultiNoteFile:
     """Test parsing files with multiple notes separated by ---."""
@@ -363,6 +408,15 @@ class TestMultiNoteFile:
         assert len(result.notes) == 2
         assert result.notes[0].fields["Question"] == "Q1"
         assert result.notes[1].fields["Question"] == "Q2"
+
+    def test_error_context_uses_second_note_line(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text("Q: Q1\nA: A1\n\n---\n\nQ: Question only")
+        with pytest.raises(
+            ValueError,
+            match=r"Cannot determine note type from fields: Question \(file: deck\.md, line: 6\)",
+        ):
+            fs.read_markdown_file(md)
 
 
 class TestNoteInference:

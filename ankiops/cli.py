@@ -62,6 +62,24 @@ def _format_media_status(media_result, *, from_anki: bool) -> str:
     return f"Media: {checked} files checked — {summary.format()}"
 
 
+def _log_import_errors(import_summary: CollectionResult) -> None:
+    has_errors = False
+    for result in import_summary.results:
+        if not result.errors:
+            continue
+
+        if not has_errors:
+            logger.error("Import errors:")
+            has_errors = True
+
+        source = result.name or "unknown deck"
+        if result.file_path:
+            source = f"{source} ({clickable_path(result.file_path)})"
+
+        for error in result.errors:
+            logger.error(f"  {source}: {error}")
+
+
 def run_init(args):
     """Initialize the current directory as an AnkiOps collection."""
     anki = connect_or_exit()
@@ -173,6 +191,9 @@ def run_ma(args):
         deck_fmt = deck_summary.format()
         if deck_fmt != "no changes" and res.file_path:
             logger.info(f"  {res.name}  {deck_fmt}")
+
+    if note_summary.errors:
+        _log_import_errors(import_summary)
 
     if untracked:
         logger.warning(

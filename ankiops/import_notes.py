@@ -32,6 +32,18 @@ class _PendingWrite:
     note_key_assignments: list[tuple[Note, str]]
 
 
+def _format_note_type_mismatch_error(
+    *, note_key: str, markdown_note_type: str, anki_note_type: str
+) -> str:
+    return (
+        f"Note type mismatch for note_key: {note_key}: markdown uses "
+        f"'{markdown_note_type}' but Anki has '{anki_note_type}'. "
+        "Anki cannot convert existing notes between note types. "
+        f"Remove this note's key comment (<!-- note_key: {note_key} -->) "
+        "to force creating a new note with the new type on the next import."
+    )
+
+
 def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
     """Find the line index of the first field line within a note block."""
     first_value = note.first_field_line()
@@ -258,7 +270,13 @@ def _sync_keyed_note(
         cards_to_move.extend(cards_to_move_for_note)
 
     if anki_note.note_type != parsed_note.note_type:
-        result.errors.append(f"Note type mismatch for {parsed_note.identifier}")
+        result.errors.append(
+            _format_note_type_mismatch_error(
+                note_key=note_key,
+                markdown_note_type=parsed_note.note_type,
+                anki_note_type=anki_note.note_type,
+            )
+        )
         return
 
     current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
@@ -568,7 +586,10 @@ def import_collection(
     configs = fs_port.load_note_type_configs(note_types_dir)
     config_by_name = {config.name: config for config in configs}
     md_files = fs_port.find_markdown_files(collection_dir)
-    fs_docs = [fs_port.read_markdown_file(md_file) for md_file in md_files]
+    fs_docs = [
+        fs_port.read_markdown_file(md_file, context_root=collection_dir)
+        for md_file in md_files
+    ]
 
     global_note_keys = set()
     note_key_sources = {}

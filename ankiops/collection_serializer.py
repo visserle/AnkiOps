@@ -42,7 +42,7 @@ def serialize_collection(collection_dir: Path) -> dict[str, Any]:
 
     for md_file in md_files:
         try:
-            parsed = fs.read_markdown_file(md_file)
+            parsed = fs.read_markdown_file(md_file, context_root=collection_dir)
         except Exception as error:
             errors.append(f"Error parsing {md_file.name}: {error}")
             continue

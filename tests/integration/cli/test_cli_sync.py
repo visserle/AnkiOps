@@ -50,6 +50,28 @@ def test_run_ma_has_no_untracked_warning_when_none(tmp_path, caplog):
     assert "untracked Anki deck(s)" not in caplog.text
 
 
+def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
+    sync_result = SyncResult.for_notes(
+        name="Rhetorik",
+        file_path=tmp_path / "Rhetorik.md",
+    )
+    sync_result.errors.append(
+        "Note type mismatch for note_key: nk-1: markdown uses 'AnkiOpsQA' "
+        "but Anki has 'AnkiOpsCloze'. Anki cannot convert existing notes "
+        "between note types. Remove this note's key comment "
+        "(<!-- note_key: nk-1 -->) to force creating a new note with the "
+        "new type on the next import."
+    )
+    summary = CollectionResult.for_import(results=[sync_result], untracked_decks=[])
+
+    _run_ma_with_summary(tmp_path, caplog, summary)
+
+    assert "Import errors:" in caplog.text
+    assert "Rhetorik" in caplog.text
+    assert "Remove this note's key comment" in caplog.text
+    assert "Review and resolve errors above" in caplog.text
+
+
 def test_run_ma_auto_commit_runs_before_media_sync(tmp_path):
     fake_anki = MagicMock()
     fake_anki.get_active_profile.return_value = "TestProfile"

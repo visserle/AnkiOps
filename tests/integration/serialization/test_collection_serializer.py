@@ -93,10 +93,10 @@ def test_serialize_logs_parsing_errors_before_summary(collection, monkeypatch, c
 
     original_read = FileSystemAdapter.read_markdown_file
 
-    def _fake_read_markdown_file(self, md_file):
+    def _fake_read_markdown_file(self, md_file, *, context_root=None):
         if md_file.name == broken_name:
             raise ValueError("synthetic parse failure")
-        return original_read(self, md_file)
+        return original_read(self, md_file, context_root=context_root)
 
     monkeypatch.setattr(
         FileSystemAdapter,

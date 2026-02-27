@@ -68,14 +68,29 @@ def _load_deck_markdown_state(
     fs_port: FileSystemAdapter,
 ) -> tuple[Path, MarkdownFile, bool]:
     if existing_file_path and existing_file_path.exists():
-        return existing_file_path, fs_port.read_markdown_file(existing_file_path), False
+        return (
+            existing_file_path,
+            fs_port.read_markdown_file(
+                existing_file_path,
+                context_root=collection_dir,
+            ),
+            False,
+        )
 
     file_path = collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
     if file_path.exists():
-        return file_path, fs_port.read_markdown_file(file_path), False
+        return (
+            file_path,
+            fs_port.read_markdown_file(file_path, context_root=collection_dir),
+            False,
+        )
 
     fs_port.write_markdown_file(file_path, "")
-    return file_path, fs_port.read_markdown_file(file_path), True
+    return (
+        file_path,
+        fs_port.read_markdown_file(file_path, context_root=collection_dir),
+        True,
+    )
 
 
 def _resolve_deck_notes(

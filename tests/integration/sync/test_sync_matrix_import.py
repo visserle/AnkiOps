@@ -176,6 +176,8 @@ def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(wo
         sync_res = result.results[0]
         assert len(sync_res.errors) == 1
         assert "Note type mismatch" in sync_res.errors[0]
+        assert "Remove this note's key comment" in sync_res.errors[0]
+        assert f"<!-- note_key: {note_key} -->" in sync_res.errors[0]
         assert_summary(sync_res.summary, created=0, updated=0, moved=0, deleted=0)
         assert world.mock_anki.notes[note_id]["modelName"] == "AnkiOpsCloze"
 
