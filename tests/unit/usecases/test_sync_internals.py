@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ankiops.config import get_note_types_dir
 from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import _order_resolved_notes, _ResolvedDeckNote, _sync_deck
+from ankiops.export_notes import _order_resolved_notes, _sync_deck
 from ankiops.fs import FileSystemAdapter
 from ankiops.import_notes import _flush_writes, _PendingWrite
 from ankiops.models import AnkiNote, MarkdownFile, Note
@@ -118,45 +118,41 @@ def test_order_resolved_notes_preserves_existing_and_appends_new():
         ),
     ]
     resolved_notes = [
-        _ResolvedDeckNote(
-            note_key="k1",
-            note_id=1001,
-            note=Note(
+        (
+            "k1",
+            1001,
+            Note(
                 note_key="k1",
                 note_type="AnkiOpsQA",
                 fields={"Question": "Q1", "Answer": "A1"},
             ),
-            change=None,
         ),
-        _ResolvedDeckNote(
-            note_key="k2",
-            note_id=1002,
-            note=Note(
+        (
+            "k2",
+            1002,
+            Note(
                 note_key="k2",
                 note_type="AnkiOpsQA",
                 fields={"Question": "Q2", "Answer": "A2"},
             ),
-            change=None,
         ),
-        _ResolvedDeckNote(
-            note_key="k4",
-            note_id=2004,
-            note=Note(
+        (
+            "k4",
+            2004,
+            Note(
                 note_key="k4",
                 note_type="AnkiOpsQA",
                 fields={"Question": "Q4", "Answer": "A4"},
             ),
-            change=None,
         ),
-        _ResolvedDeckNote(
-            note_key="k3",
-            note_id=2003,
-            note=Note(
+        (
+            "k3",
+            2003,
+            Note(
                 note_key="k3",
                 note_type="AnkiOpsQA",
                 fields={"Question": "Q3", "Answer": "A3"},
             ),
-            change=None,
         ),
     ]
 
