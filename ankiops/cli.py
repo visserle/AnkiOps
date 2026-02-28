@@ -332,8 +332,6 @@ def main():
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     ignored_libraries = ["urllib3.connectionpool"]
-    if args.command == "ai" and not args.debug:
-        ignored_libraries.extend(["httpx", "httpcore"])
     configure_logging(stream_level=log_level, ignore_libs=ignored_libraries)
 
     if hasattr(args, "handler"):
