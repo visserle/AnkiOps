@@ -505,7 +505,9 @@ class FileSystemAdapter:
         self._inferred_note_type_by_signature = {}
         return configs
 
-    def _build_prefix_to_field_map(self, configs: list[NoteTypeConfig]) -> dict[str, str]:
+    def _build_prefix_to_field_map(
+        self, configs: list[NoteTypeConfig]
+    ) -> dict[str, str]:
         prefix_to_field: dict[str, str] = {}
         for config in configs:
             for field_config in config.fields:
@@ -603,33 +605,3 @@ class FileSystemAdapter:
                 ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
             )
         logger.debug(f"Ejected built-in note types to {dst_dir}")
-
-    def eject_builtin_ai_assets(self, dst_dir: Path) -> None:
-        """Copy built-in AI model/task YAML files to the filesystem."""
-        src_root = resources.files("ankiops.ai")
-        models_ref = src_root.joinpath("models")
-        tasks_ref = src_root.joinpath("tasks")
-
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        models_dst_dir = dst_dir / "models"
-        tasks_dst_dir = dst_dir / "tasks"
-        models_dst_dir.mkdir(parents=True, exist_ok=True)
-        tasks_dst_dir.mkdir(parents=True, exist_ok=True)
-
-        with (
-            resources.as_file(models_ref) as models_path,
-            resources.as_file(tasks_ref) as tasks_path,
-        ):
-            shutil.copytree(
-                models_path,
-                models_dst_dir,
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
-            )
-            shutil.copytree(
-                tasks_path,
-                tasks_dst_dir,
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__init__.py", "__pycache__", "*.pyc"),
-            )
-        logger.debug(f"Ejected built-in AI assets to {dst_dir}")
