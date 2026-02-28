@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
 _MAX_SERIALIZATION_ERRORS_TO_LOG = 20
 
 
-def serialize_collection(collection_dir: Path) -> dict[str, Any]:
+def serialize_collection(
+    collection_dir: Path,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Serialize the collection into an in-memory JSON-compatible mapping."""
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
@@ -73,6 +77,12 @@ def serialize_collection(collection_dir: Path) -> dict[str, Any]:
     )
     total_decks = len(serialized_data["decks"])
     logger.debug(f"Serialized {total_decks} deck(s), {total_notes} note(s) in memory")
+
+    if errors and strict:
+        error_lines = "\n".join(errors[:_MAX_SERIALIZATION_ERRORS_TO_LOG])
+        raise ValueError(
+            f"Serialization failed with {len(errors)} error(s):\n{error_lines}"
+        )
 
     if errors:
         for error_message in errors[:_MAX_SERIALIZATION_ERRORS_TO_LOG]:

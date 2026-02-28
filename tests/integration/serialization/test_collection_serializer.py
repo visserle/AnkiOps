@@ -111,6 +111,31 @@ def test_serialize_logs_parsing_errors_before_summary(collection, monkeypatch, c
     assert "Serialization completed with 1 error(s)." in caplog.text
 
 
+def test_strict_serialize_raises_on_parsing_error(collection, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    _set_note_type_paths(monkeypatch, collection / "note_types")
+
+    broken_name = f"{deck_name_to_file_stem('BrokenDeck')}.md"
+    broken_file = collection / broken_name
+    broken_file.write_text("Q: Broken", encoding="utf-8")
+
+    original_read = FileSystemAdapter.read_markdown_file
+
+    def _fake_read_markdown_file(self, md_file, *, context_root=None):
+        if md_file.name == broken_name:
+            raise ValueError("synthetic parse failure")
+        return original_read(self, md_file, context_root=context_root)
+
+    monkeypatch.setattr(
+        FileSystemAdapter,
+        "read_markdown_file",
+        _fake_read_markdown_file,
+    )
+
+    with pytest.raises(ValueError, match="Serialization failed with 1 error"):
+        serialize_collection(collection, strict=True)
+
+
 def test_roundtrip(collection, tmp_path, monkeypatch):
     """Serialize then deserialize should preserve deck note content."""
     _set_collection_paths(monkeypatch, collection)

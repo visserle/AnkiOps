@@ -1,0 +1,23 @@
+version: 1
+name: grammar
+provider: ollama-local
+
+decks:
+  include: ["*"]
+  exclude: []
+
+prompt: |
+  Correct grammar, spelling, and punctuation in editable fields.
+  Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
+  Do not add facts or change correctness.
+
+fields:
+  exceptions:
+    - read_only: ["Source"]
+    - note_types: ["AnkiOpsChoice"]
+      read_only: ["Answer"]
+    - hidden: ["AI Notes"]
+
+request:
+  temperature: 0
+

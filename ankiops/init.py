@@ -7,6 +7,9 @@ from pathlib import Path
 
 from ankiops.config import (
     ANKIOPS_DB,
+    LLM_DIR,
+    LLM_PROVIDERS_DIR,
+    LLM_TASKS_DIR,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
@@ -74,6 +77,45 @@ def _setup_git(collection_dir: Path):
     logger.info(f"Initialized git repository in {collection_dir}")
 
 
+def _copy_llm_template(
+    collection_dir: Path,
+    *,
+    resource_path: str,
+    target_relative_path: str,
+) -> None:
+    from importlib import resources
+
+    destination = collection_dir / target_relative_path
+    if destination.exists():
+        return
+
+    resource = resources.files("ankiops.llm.templates").joinpath(resource_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _setup_llm_configs(collection_dir: Path) -> None:
+    llm_root = collection_dir / LLM_DIR
+    (llm_root / LLM_TASKS_DIR).mkdir(parents=True, exist_ok=True)
+    (llm_root / LLM_PROVIDERS_DIR).mkdir(parents=True, exist_ok=True)
+
+    _copy_llm_template(
+        collection_dir,
+        resource_path="tasks/grammar.yaml",
+        target_relative_path=f"{LLM_DIR}/{LLM_TASKS_DIR}/grammar.yaml",
+    )
+    _copy_llm_template(
+        collection_dir,
+        resource_path="providers/ollama-local.yaml",
+        target_relative_path=f"{LLM_DIR}/{LLM_PROVIDERS_DIR}/ollama-local.yaml",
+    )
+    _copy_llm_template(
+        collection_dir,
+        resource_path="providers/openai-default.yaml",
+        target_relative_path=f"{LLM_DIR}/{LLM_PROVIDERS_DIR}/openai-default.yaml",
+    )
+
+
 def initialize_collection(profile: str) -> Path:
     """Initialize the current directory as an AnkiOps collection.
 
@@ -93,6 +135,7 @@ def initialize_collection(profile: str) -> Path:
     _setup_vscode_settings(collection_dir)
     _setup_gitignore(collection_dir)
     _setup_git(collection_dir)
+    _setup_llm_configs(collection_dir)
 
     # Eject built-in note types
     fs = FileSystemAdapter()

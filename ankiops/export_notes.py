@@ -143,9 +143,7 @@ def _resolve_deck_notes(
                 bucketed_changes.skips.append(
                     Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
                 )
-                resolved_notes.append(
-                    (note_key, anki_note.note_id, local_match)
-                )
+                resolved_notes.append((note_key, anki_note.note_id, local_match))
                 _queue_fingerprint(note_key, local_md_hash, current_anki_hash)
                 continue
 
@@ -175,9 +173,7 @@ def _resolve_deck_notes(
             bucketed_changes.skips.append(
                 Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
             )
-            resolved_notes.append(
-                (note_key, anki_note.note_id, local_match)
-            )
+            resolved_notes.append((note_key, anki_note.note_id, local_match))
             md_hash = note_fingerprint(local_match.note_type, local_match.fields)
             _queue_fingerprint(note_key, md_hash, current_anki_hash)
             continue
@@ -201,9 +197,7 @@ def _resolve_deck_notes(
             )
             logger.debug(f"  Updated {domain_note.identifier}")
 
-        resolved_notes.append(
-            (note_key, anki_note.note_id, domain_note)
-        )
+        resolved_notes.append((note_key, anki_note.note_id, domain_note))
         md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
         _queue_fingerprint(note_key, md_hash, current_anki_hash)
 

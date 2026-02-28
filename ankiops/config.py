@@ -9,6 +9,9 @@ logger = logging.getLogger(__name__)
 ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
+LLM_DIR = "llm"
+LLM_TASKS_DIR = "tasks"
+LLM_PROVIDERS_DIR = "providers"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -83,6 +86,33 @@ def get_collection_dir() -> Path:
 def get_note_types_dir() -> Path:
     """Get the standard note types directory path."""
     return get_collection_dir() / NOTE_TYPES_DIR
+
+
+def get_llm_dir() -> Path:
+    """Get the LLM config root directory path."""
+    return get_collection_dir() / LLM_DIR
+
+
+def get_llm_tasks_dir() -> Path:
+    """Get the task config directory path."""
+    return get_llm_dir() / LLM_TASKS_DIR
+
+
+def get_llm_providers_dir() -> Path:
+    """Get the provider config directory path."""
+    return get_llm_dir() / LLM_PROVIDERS_DIR
+
+
+def require_initialized_collection_dir() -> Path:
+    """Return the collection directory, or exit if not initialized."""
+    collection_dir = get_collection_dir()
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
+        logger.error(
+            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
+        )
+        raise SystemExit(1)
+    return collection_dir
 
 
 def require_collection_dir(active_profile: str) -> Path:

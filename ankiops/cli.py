@@ -12,6 +12,7 @@ from ankiops.config import (
     get_collection_dir,
     get_note_types_dir,
     require_collection_dir,
+    require_initialized_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
@@ -19,6 +20,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
+from ankiops.llm.runner import list_providers, list_tasks, run_task
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
@@ -247,6 +249,62 @@ def run_deserialize(args):
     )
 
 
+def _exit_with_llm_config_errors(errors: dict[str, str]) -> None:
+    for message in errors.values():
+        logger.error(message)
+    raise SystemExit(1)
+
+
+def run_llm_tasks(_args):
+    """List configured LLM tasks."""
+    collection_dir = require_initialized_collection_dir()
+    tasks, errors = list_tasks(collection_dir)
+    if tasks:
+        for task in sorted(tasks, key=lambda task_config: task_config.name):
+            include = ",".join(task.decks.include)
+            exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
+            logger.info(
+                f"{task.name}  provider={task.provider}  include={include}  "
+                f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
+            )
+    if errors:
+        _exit_with_llm_config_errors(errors)
+
+
+def run_llm_providers(_args):
+    """List configured LLM providers."""
+    collection_dir = require_initialized_collection_dir()
+    providers, errors = list_providers(collection_dir)
+    if providers:
+        for provider in sorted(
+            providers,
+            key=lambda provider_config: provider_config.name,
+        ):
+            logger.info(
+                f"{provider.name}  type={provider.type.value}  "
+                f"base_url={provider.base_url}  model={provider.model}"
+            )
+    if errors:
+        _exit_with_llm_config_errors(errors)
+
+
+def run_llm_run(args):
+    """Execute a configured LLM task."""
+    collection_dir = require_initialized_collection_dir()
+    try:
+        run_task(
+            collection_dir=collection_dir,
+            task_name=args.task_name,
+            provider_override=args.provider,
+            model_override=args.model,
+            dry_run=args.dry_run,
+            no_auto_commit=args.no_auto_commit,
+        )
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="AnkiOps – Manage Anki decks as Markdown files.",
@@ -328,6 +386,50 @@ def main():
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
+    llm_parser = subparsers.add_parser(
+        "llm",
+        help="Run LLM tasks against the local collection",
+    )
+    llm_subparsers = llm_parser.add_subparsers(dest="llm_command", required=True)
+
+    llm_tasks_parser = llm_subparsers.add_parser(
+        "tasks",
+        help="List configured LLM tasks",
+    )
+    llm_tasks_parser.set_defaults(handler=run_llm_tasks)
+
+    llm_providers_parser = llm_subparsers.add_parser(
+        "providers",
+        help="List configured LLM providers",
+    )
+    llm_providers_parser.set_defaults(handler=run_llm_providers)
+
+    llm_run_parser = llm_subparsers.add_parser(
+        "run",
+        help="Run a configured LLM task",
+    )
+    llm_run_parser.add_argument("task_name", help="Task name to run")
+    llm_run_parser.add_argument(
+        "--provider",
+        help="Override the task's default provider",
+    )
+    llm_run_parser.add_argument(
+        "--model",
+        help="Override the resolved model",
+    )
+    llm_run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the task without writing markdown files",
+    )
+    llm_run_parser.add_argument(
+        "--no-auto-commit",
+        "-n",
+        action="store_true",
+        help="Skip the automatic git commit for this operation",
+    )
+    llm_run_parser.set_defaults(handler=run_llm_run)
+
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
@@ -350,6 +452,7 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
+        print("  llm               Run configured LLM tasks on local markdown")
         print()
         print("Usage examples:")
         print(
@@ -371,6 +474,7 @@ def main():
             "  ankiops deserialize -i my-deck.json          "
             "# Deserialize file, then run init"
         )
+        print("  ankiops llm run grammar                       # Run the grammar task")
         print()
         print("For more information:")
         print("  ankiops --help                 # Show general help")
