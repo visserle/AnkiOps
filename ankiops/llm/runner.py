@@ -48,7 +48,6 @@ def _provider_for(config: ProviderConfig) -> LlmProvider:
 def _build_note_payload(
     task: TaskConfig,
     *,
-    deck_name: str,
     note: dict[str, Any],
     note_type_field_names: set[str],
 ) -> NotePayload | None:
@@ -86,7 +85,6 @@ def _build_note_payload(
 
     return NotePayload(
         note_key=note_key,
-        deck_name=deck_name,
         note_type=note_type,
         editable_fields=editable_fields,
         read_only_fields=read_only_fields,
@@ -97,7 +95,7 @@ def _apply_note_patch(
     *,
     serialized_note: dict[str, Any],
     payload: NotePayload,
-    updated_fields: dict[str, str],
+    edits: dict[str, str],
     note_type_config,
 ) -> bool:
     if payload.note_key != serialized_note.get("note_key"):
@@ -109,7 +107,7 @@ def _apply_note_patch(
 
     next_fields = dict(raw_fields)
     changed = False
-    for field_name, value in updated_fields.items():
+    for field_name, value in edits.items():
         if field_name not in payload.editable_fields:
             if field_name in payload.read_only_fields:
                 raise ProviderNoteError(
@@ -237,7 +235,6 @@ def run_task(
             }
             payload = _build_note_payload(
                 task,
-                deck_name=deck_name,
                 note=note,
                 note_type_field_names=note_field_names,
             )
@@ -258,7 +255,7 @@ def run_task(
                 changed = _apply_note_patch(
                     serialized_note=note,
                     payload=payload,
-                    updated_fields=patch.updated_fields,
+                    edits=patch.edits,
                     note_type_config=note_type_config,
                 )
             except ProviderFatalError:

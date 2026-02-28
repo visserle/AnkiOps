@@ -96,16 +96,15 @@ class ProviderConfig:
 @dataclass(frozen=True)
 class NotePayload:
     note_key: str
-    deck_name: str
     note_type: str
     editable_fields: dict[str, str]
-    read_only_fields: dict[str, str]
+    read_only_fields: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class NotePatch:
     note_key: str
-    updated_fields: dict[str, str]
+    edits: dict[str, str]
 
 
 @dataclass

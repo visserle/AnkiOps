@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
 from .models import NotePayload
 
@@ -11,12 +10,12 @@ NOTE_PATCH_JSON_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
         "note_key": {"type": "string"},
-        "updated_fields": {
+        "edits": {
             "type": "object",
             "additionalProperties": {"type": "string"},
         },
     },
-    "required": ["note_key", "updated_fields"],
+    "required": ["note_key", "edits"],
     "additionalProperties": False,
 }
 
@@ -26,10 +25,10 @@ The JSON must match the provided schema exactly.
 Repeat the input note_key exactly.
 Only modify fields listed in editable_fields.
 Do not modify read_only_fields.
-Do not add or remove fields.
+Do not invent new field names or change field names.
 Preserve Markdown structure, math, code fences, links, cloze syntax, and meaning.
-Return only changed editable fields in updated_fields.
-If no changes are needed, return an empty updated_fields object."""
+Return only changed editable fields in edits.
+If no changes are needed, return an empty edits object."""
 
 
 def build_instructions(task_prompt: str) -> str:
@@ -39,4 +38,11 @@ def build_instructions(task_prompt: str) -> str:
 
 def build_user_payload(note_payload: NotePayload) -> str:
     """Serialize the note payload for the model request."""
-    return json.dumps(asdict(note_payload), ensure_ascii=False, indent=2)
+    payload: dict[str, object] = {
+        "note_key": note_payload.note_key,
+        "note_type": note_payload.note_type,
+        "editable_fields": note_payload.editable_fields,
+    }
+    if note_payload.read_only_fields:
+        payload["read_only_fields"] = note_payload.read_only_fields
+    return json.dumps(payload, ensure_ascii=False, indent=2)

@@ -104,9 +104,9 @@ def test_run_task_updates_markdown_and_respects_read_only(tmp_path, monkeypatch)
             [
                 NotePatch(
                     note_key="nk-1",
-                    updated_fields={"Question": "This is a fixed question."},
+                    edits={"Question": "This is a fixed question."},
                 ),
-                NotePatch(note_key="nk-2", updated_fields={}),
+                NotePatch(note_key="nk-2", edits={}),
             ]
         ),
     )
@@ -136,8 +136,8 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch):
         "ankiops.llm.runner._provider_for",
         lambda _config: _StubProvider(
             [
-                NotePatch(note_key="nk-1", updated_fields={}),
-                NotePatch(note_key="nk-2", updated_fields={"Answer": "2"}),
+                NotePatch(note_key="nk-1", edits={}),
+                NotePatch(note_key="nk-2", edits={"Answer": "2"}),
             ]
         ),
     )

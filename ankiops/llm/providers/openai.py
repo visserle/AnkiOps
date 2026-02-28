@@ -87,16 +87,14 @@ def _parse_note_patch(raw_text: str) -> NotePatch:
         raise ProviderNoteError("OpenAI response must be a JSON object")
 
     note_key = data.get("note_key")
-    updated_fields = data.get("updated_fields")
-    if not isinstance(note_key, str) or not isinstance(updated_fields, dict):
-        raise ProviderNoteError("OpenAI response is missing note_key or updated_fields")
+    edits = data.get("edits")
+    if not isinstance(note_key, str) or not isinstance(edits, dict):
+        raise ProviderNoteError("OpenAI response is missing note_key or edits")
 
     parsed_fields: dict[str, str] = {}
-    for field_name, value in updated_fields.items():
+    for field_name, value in edits.items():
         if not isinstance(field_name, str) or not isinstance(value, str):
-            raise ProviderNoteError(
-                "OpenAI response updated_fields must be string values"
-            )
+            raise ProviderNoteError("OpenAI response edits must be string values")
         parsed_fields[field_name] = value
 
-    return NotePatch(note_key=note_key, updated_fields=parsed_fields)
+    return NotePatch(note_key=note_key, edits=parsed_fields)
