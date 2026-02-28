@@ -13,11 +13,9 @@ prompt: |
 
 fields:
   exceptions:
-    - read_only: ["Source"]
+    - hidden: ["AI Notes"]
     - note_types: ["AnkiOpsChoice"]
       read_only: ["Answer"]
-    - hidden: ["AI Notes"]
 
 request:
   temperature: 0
-

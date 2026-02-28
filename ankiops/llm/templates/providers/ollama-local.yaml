@@ -3,8 +3,7 @@ version: 1
 name: ollama-local
 type: ollama
 base_url: http://127.0.0.1:11434
-model: gpt-oss
+model: gemma3:4b
 timeout_seconds: 120
 request_defaults:
   temperature: 0
-
