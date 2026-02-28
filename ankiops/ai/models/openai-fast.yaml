@@ -1,6 +1,0 @@
-schema: ai.model.v1
-default: false
-provider: openai
-model: gpt-4o-mini
-timeout_seconds: 60
-max_in_flight: 8

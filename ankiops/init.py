@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 
 from ankiops.config import (
-    AI_DIR,
     ANKIOPS_DB,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -98,7 +97,6 @@ def initialize_collection(profile: str) -> Path:
     # Eject built-in note types
     fs = FileSystemAdapter()
     fs.eject_builtin_note_types(collection_dir / NOTE_TYPES_DIR)
-    fs.eject_builtin_ai_assets(collection_dir / AI_DIR)
 
     return collection_dir
 

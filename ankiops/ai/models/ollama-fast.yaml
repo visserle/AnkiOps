@@ -1,7 +1,0 @@
-schema: ai.model.v1
-default: true
-provider: ollama
-# model: llama3.1:8b
-model: gemma3:4b
-timeout_seconds: 60
-max_in_flight: 4

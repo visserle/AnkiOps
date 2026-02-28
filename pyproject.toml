@@ -58,8 +58,6 @@ ankiops = [
     "note_types/**/*.anki",
     "note_types/**/*.css",
     "note_types/**/*.yaml",
-    "ai/models/**/*.yaml",
-    "ai/tasks/**/*.yaml",
 ]
 
 [tool.ruff]
@@ -79,6 +77,5 @@ convention = "pep257"
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["ankiops/ai"]
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]

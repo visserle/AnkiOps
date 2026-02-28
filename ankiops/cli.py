@@ -3,12 +3,6 @@ import logging
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.cli_ai import (
-    add_ai_runtime_args,
-    add_ai_task_args,
-    run_ai_config,
-    run_ai_task,
-)
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
@@ -334,42 +328,7 @@ def main():
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
-    # AI parser
-    ai_parser = subparsers.add_parser(
-        "ai",
-        help="Run task-driven AI edits on serialized collection data",
-    )
-    ai_parser.set_defaults(handler=run_ai_task)
-    add_ai_task_args(ai_parser)
-    add_ai_runtime_args(ai_parser)
-    ai_parser.set_defaults(
-        profile=None,
-        provider=None,
-        model=None,
-        base_url=None,
-        api_key_env=None,
-        api_key=None,
-        timeout=None,
-        max_in_flight=None,
-    )
-
-    ai_subparsers = ai_parser.add_subparsers(dest="ai_command", required=False)
-
-    ai_config_parser = ai_subparsers.add_parser(
-        "config",
-        help="Show resolved runtime config from ai/models/*.yaml",
-    )
-    add_ai_runtime_args(ai_config_parser)
-    ai_config_parser.set_defaults(handler=run_ai_config)
-
     args = parser.parse_args()
-
-    if (
-        args.command == "ai"
-        and getattr(args, "ai_command", None) != "config"
-        and not getattr(args, "task", None)
-    ):
-        parser.error("the following arguments are required: --task")
 
     log_level = logging.DEBUG if args.debug else logging.INFO
     ignored_libraries = ["urllib3.connectionpool"]
@@ -393,7 +352,6 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
-        print("  ai                Run task-driven AI edits (or ai config)")
         print()
         print("Usage examples:")
         print(
@@ -414,13 +372,6 @@ def main():
         print(
             "  ankiops deserialize -i my-deck.json          "
             "# Deserialize file, then run init"
-        )
-        print(
-            "  ankiops ai --task grammar --profile ollama-fast -d Biology"
-            "  # Run a task over a deck tree"
-        )
-        print(
-            "  ankiops ai config --profile openai-fast      # Show runtime model config"
         )
         print()
         print("For more information:")
