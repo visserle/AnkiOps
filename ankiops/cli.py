@@ -270,8 +270,8 @@ def run_llm_tasks(_args):
             include = ",".join(task.decks.include)
             exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
             logger.info(
-                f"{task.name}  provider={task.provider}  include={include}  "
-                f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
+                f"{task.name}  include={include}  exclude={exclude}  "
+                f"exceptions={len(task.field_exceptions)}"
             )
     if errors:
         _exit_with_llm_config_errors(errors)
@@ -426,7 +426,7 @@ def main():
     llm_run_parser.add_argument("task_name", help="Task name to run")
     llm_run_parser.add_argument(
         "--provider",
-        help="Override the task's default provider",
+        help="Override llm/config.yaml default_provider",
     )
     llm_run_parser.add_argument(
         "--model",

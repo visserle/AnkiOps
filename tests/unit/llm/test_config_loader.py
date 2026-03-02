@@ -28,7 +28,6 @@ def test_load_llm_config_set_accepts_valid_exceptions(tmp_path, monkeypatch):
     _write(
         tmp_path / "llm/providers/ollama-local.yaml",
         """
-        version: 1
         name: ollama-local
         type: ollama
         base_url: http://127.0.0.1:11434
@@ -38,7 +37,6 @@ def test_load_llm_config_set_accepts_valid_exceptions(tmp_path, monkeypatch):
     _write(
         tmp_path / "llm/providers/openai-default.yaml",
         """
-        version: 1
         name: openai-default
         type: openai
         base_url: https://api.openai.com/v1
@@ -49,9 +47,7 @@ def test_load_llm_config_set_accepts_valid_exceptions(tmp_path, monkeypatch):
     _write(
         tmp_path / "llm/tasks/grammar.yaml",
         """
-        version: 1
         name: grammar
-        provider: ollama-local
         prompt: fix grammar
         fields:
           exceptions:
@@ -75,7 +71,6 @@ def test_load_llm_config_set_rejects_invalid_exception_field(tmp_path):
     _write(
         tmp_path / "llm/providers/ollama-local.yaml",
         """
-        version: 1
         name: ollama-local
         type: ollama
         base_url: http://127.0.0.1:11434
@@ -85,9 +80,7 @@ def test_load_llm_config_set_rejects_invalid_exception_field(tmp_path):
     _write(
         tmp_path / "llm/tasks/grammar.yaml",
         """
-        version: 1
         name: grammar
-        provider: ollama-local
         prompt: fix grammar
         fields:
           exceptions:
@@ -110,7 +103,6 @@ def test_load_llm_config_set_rejects_missing_openai_env(tmp_path):
     _write(
         tmp_path / "llm/providers/openai-default.yaml",
         """
-        version: 1
         name: openai-default
         type: openai
         base_url: https://api.openai.com/v1
@@ -125,3 +117,62 @@ def test_load_llm_config_set_rejects_missing_openai_env(tmp_path):
     error = next(iter(config_set.provider_errors.values()))
     assert "OPENAI_API_KEY" in error
     monkeypatch.undo()
+
+
+def test_load_llm_config_set_parses_decks_include_subdecks(tmp_path):
+    note_type_configs = _note_type_configs(tmp_path)
+    _write(
+        tmp_path / "llm/providers/ollama-local.yaml",
+        """
+        name: ollama-local
+        type: ollama
+        base_url: http://127.0.0.1:11434
+        model: gpt-oss
+        """,
+    )
+    _write(
+        tmp_path / "llm/tasks/grammar.yaml",
+        (
+            "name: grammar\n"
+            "prompt: fix grammar\n"
+            "decks:\n"
+            '  include: ["Parent"]\n'
+            "  include_subdecks: false\n"
+        ),
+    )
+
+    config_set = load_llm_config_set(tmp_path, note_type_configs=note_type_configs)
+
+    assert not config_set.task_errors
+    task = config_set.tasks_by_name["grammar"]
+    assert task.decks.include == ["Parent"]
+    assert task.decks.include_subdecks is False
+
+
+def test_load_llm_config_set_rejects_non_boolean_include_subdecks(tmp_path):
+    note_type_configs = _note_type_configs(tmp_path)
+    _write(
+        tmp_path / "llm/providers/ollama-local.yaml",
+        """
+        name: ollama-local
+        type: ollama
+        base_url: http://127.0.0.1:11434
+        model: gpt-oss
+        """,
+    )
+    _write(
+        tmp_path / "llm/tasks/grammar.yaml",
+        (
+            "name: grammar\n"
+            "prompt: fix grammar\n"
+            "decks:\n"
+            '  include: ["Parent"]\n'
+            '  include_subdecks: "yes"\n'
+        ),
+    )
+
+    config_set = load_llm_config_set(tmp_path, note_type_configs=note_type_configs)
+
+    assert not config_set.tasks_by_name
+    error = next(iter(config_set.task_errors.values()))
+    assert "decks.include_subdecks" in error

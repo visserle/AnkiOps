@@ -1,10 +1,9 @@
-version: 1
 name: grammar
-provider: ollama-local
 
 decks:
   include: ["*"]
   exclude: []
+  include_subdecks: true
 
 prompt: |
   Correct grammar, spelling, and punctuation in editable fields.

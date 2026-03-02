@@ -22,10 +22,41 @@ class ProviderType(Enum):
 class DeckScope:
     include: list[str] = field(default_factory=lambda: ["*"])
     exclude: list[str] = field(default_factory=list)
+    include_subdecks: bool = True
+
+    @staticmethod
+    def _matches_pattern(
+        deck_name: str,
+        pattern: str,
+        *,
+        include_subdecks: bool,
+    ) -> bool:
+        if any(char in pattern for char in ("*", "?", "[")):
+            return fnmatchcase(deck_name, pattern)
+
+        if deck_name == pattern:
+            return True
+        if include_subdecks and deck_name.startswith(f"{pattern}::"):
+            return True
+        return False
 
     def matches(self, deck_name: str) -> bool:
-        return any(fnmatchcase(deck_name, pattern) for pattern in self.include) and (
-            not any(fnmatchcase(deck_name, pattern) for pattern in self.exclude)
+        return any(
+            self._matches_pattern(
+                deck_name,
+                pattern,
+                include_subdecks=self.include_subdecks,
+            )
+            for pattern in self.include
+        ) and (
+            not any(
+                self._matches_pattern(
+                    deck_name,
+                    pattern,
+                    include_subdecks=self.include_subdecks,
+                )
+                for pattern in self.exclude
+            )
         )
 
 
@@ -61,9 +92,7 @@ class TaskRequestOptions:
 
 @dataclass(frozen=True)
 class TaskConfig:
-    version: int
     name: str
-    provider: str
     prompt: str
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
@@ -83,7 +112,6 @@ class TaskConfig:
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    version: int
     name: str
     type: ProviderType
     base_url: str
@@ -91,6 +119,11 @@ class ProviderConfig:
     api_key_env: str | None = None
     timeout_seconds: int = 60
     request_defaults: TaskRequestOptions = field(default_factory=TaskRequestOptions)
+
+
+@dataclass(frozen=True)
+class LlmSettingsConfig:
+    default_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +165,7 @@ class TaskRunSummary:
 
 @dataclass(frozen=True)
 class LlmConfigSet:
+    settings: LlmSettingsConfig
     providers_by_name: dict[str, ProviderConfig]
     tasks_by_name: dict[str, TaskConfig]
     provider_errors: dict[str, str]

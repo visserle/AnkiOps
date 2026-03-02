@@ -10,6 +10,7 @@ def test_initialize_collection_scaffolds_llm_configs(tmp_path, monkeypatch):
     collection_dir = initialize_collection("TestProfile")
 
     assert collection_dir == tmp_path
+    assert (tmp_path / "llm/config.yaml").exists()
     assert (tmp_path / "llm/tasks/grammar.yaml").exists()
     assert (tmp_path / "llm/providers/ollama-local.yaml").exists()
     assert (tmp_path / "llm/providers/openai-default.yaml").exists()

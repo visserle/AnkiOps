@@ -37,6 +37,21 @@ from .providers import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
+    include = task.decks.include
+    if task.decks.exclude or len(include) != 1:
+        return None, False
+
+    deck_name = include[0].strip()
+    if not deck_name:
+        return None, False
+
+    if any(char in deck_name for char in ("*", "?", "[")):
+        return None, False
+
+    return deck_name, not task.decks.include_subdecks
+
+
 def _provider_for(config: ProviderConfig) -> LlmProvider:
     if config.type is ProviderType.OPENAI:
         return OpenAIProvider(config)
@@ -157,7 +172,7 @@ def list_tasks(collection_dir: Path) -> tuple[list[TaskConfig], dict[str, str]]:
 
 def list_providers(collection_dir: Path) -> tuple[list[ProviderConfig], dict[str, str]]:
     config_set, _ = _load_config_set(collection_dir)
-    errors = {**config_set.provider_errors}
+    errors = {**config_set.provider_errors, **config_set.task_errors}
     return list(config_set.providers_by_name.values()), errors
 
 
@@ -176,7 +191,12 @@ def run_task(
     if task is None:
         raise ValueError(f"Unknown or invalid task '{task_name}'")
 
-    provider_name = provider_override or task.provider
+    provider_name = provider_override or config_set.settings.default_provider
+    if not provider_name:
+        raise ValueError(
+            "No provider resolved. Set llm/config.yaml 'default_provider' "
+            "or pass --provider."
+        )
     provider = config_set.providers_by_name.get(provider_name)
     if provider is None:
         raise ValueError(f"Unknown or invalid provider '{provider_name}'")
@@ -194,7 +214,13 @@ def run_task(
     if not no_auto_commit:
         git_snapshot(collection_dir, f"llm:{task.name}")
 
-    data = serialize_collection(collection_dir, strict=True)
+    deck, no_subdecks = _resolve_serializer_scope(task)
+    data = serialize_collection(
+        collection_dir,
+        strict=True,
+        deck=deck,
+        no_subdecks=no_subdecks,
+    )
     instructions = build_instructions(task.prompt)
 
     decks = data.get("decks")

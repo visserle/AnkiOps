@@ -101,6 +101,12 @@ def _setup_llm_configs(collection_dir: Path) -> None:
 
     _copy_llm_template(
         collection_dir,
+        resource_path="config.yaml",
+        target_relative_path=f"{LLM_DIR}/config.yaml",
+    )
+
+    _copy_llm_template(
+        collection_dir,
         resource_path="tasks/grammar.yaml",
         target_relative_path=f"{LLM_DIR}/{LLM_TASKS_DIR}/grammar.yaml",
     )

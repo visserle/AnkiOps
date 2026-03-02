@@ -60,7 +60,6 @@ def _prepare_collection(tmp_path: Path, monkeypatch) -> Path:
     _write(
         tmp_path / "llm/providers/ollama-local.yaml",
         """
-        version: 1
         name: ollama-local
         type: ollama
         base_url: http://127.0.0.1:11434
@@ -68,11 +67,15 @@ def _prepare_collection(tmp_path: Path, monkeypatch) -> Path:
         """,
     )
     _write(
+        tmp_path / "llm/config.yaml",
+        """
+        default_provider: ollama-local
+        """,
+    )
+    _write(
         tmp_path / "llm/tasks/grammar.yaml",
         """
-        version: 1
         name: grammar
-        provider: ollama-local
         prompt: fix grammar
         fields:
           exceptions:
@@ -153,3 +156,164 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch):
     assert exc.value.code == 1
     content = (collection / "TestDeck.md").read_text(encoding="utf-8")
     assert "A: 1" in content
+
+
+def test_run_task_uses_scoped_serialization_for_single_exact_deck(
+    tmp_path, monkeypatch
+):
+    collection = _prepare_collection(tmp_path, monkeypatch)
+    _write(
+        collection / "llm/tasks/grammar.yaml",
+        """
+        name: grammar
+        prompt: fix grammar
+        decks:
+          include: ["TestDeck"]
+        fields:
+          exceptions:
+            - read_only: ["Source"]
+        """,
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_serialize(
+        _collection_dir,
+        *,
+        strict=False,
+        deck=None,
+        no_subdecks=False,
+    ):
+        captured["strict"] = strict
+        captured["deck"] = deck
+        captured["no_subdecks"] = no_subdecks
+        return {
+            "collection": {"serialized_at": "2026-03-02T00:00:00Z"},
+            "decks": [],
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner._provider_for",
+        lambda _config: _StubProvider([]),
+    )
+
+    run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        dry_run=True,
+        no_auto_commit=True,
+    )
+
+    assert captured == {
+        "strict": True,
+        "deck": "TestDeck",
+        "no_subdecks": False,
+    }
+
+
+def test_run_task_maps_include_subdecks_false_to_exact_scope(tmp_path, monkeypatch):
+    collection = _prepare_collection(tmp_path, monkeypatch)
+    _write(
+        collection / "llm/tasks/grammar.yaml",
+        (
+            "name: grammar\n"
+            "prompt: fix grammar\n"
+            "decks:\n"
+            '  include: ["TestDeck"]\n'
+            "  include_subdecks: false\n"
+            "fields:\n"
+            "  exceptions:\n"
+            '    - read_only: ["Source"]\n'
+        ),
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_serialize(
+        _collection_dir,
+        *,
+        strict=False,
+        deck=None,
+        no_subdecks=False,
+    ):
+        captured["strict"] = strict
+        captured["deck"] = deck
+        captured["no_subdecks"] = no_subdecks
+        return {
+            "collection": {"serialized_at": "2026-03-02T00:00:00Z"},
+            "decks": [],
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner._provider_for",
+        lambda _config: _StubProvider([]),
+    )
+
+    run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        dry_run=True,
+        no_auto_commit=True,
+    )
+
+    assert captured == {
+        "strict": True,
+        "deck": "TestDeck",
+        "no_subdecks": True,
+    }
+
+
+def test_run_task_keeps_full_serialization_for_wildcard_deck_scope(
+    tmp_path, monkeypatch
+):
+    collection = _prepare_collection(tmp_path, monkeypatch)
+    _write(
+        collection / "llm/tasks/grammar.yaml",
+        """
+        name: grammar
+        prompt: fix grammar
+        decks:
+          include: ["Test*"]
+        fields:
+          exceptions:
+            - read_only: ["Source"]
+        """,
+    )
+
+    captured: dict[str, object] = {}
+
+    def _fake_serialize(
+        _collection_dir,
+        *,
+        strict=False,
+        deck=None,
+        no_subdecks=False,
+    ):
+        captured["strict"] = strict
+        captured["deck"] = deck
+        captured["no_subdecks"] = no_subdecks
+        return {
+            "collection": {"serialized_at": "2026-03-02T00:00:00Z"},
+            "decks": [],
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner._provider_for",
+        lambda _config: _StubProvider([]),
+    )
+
+    run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        dry_run=True,
+        no_auto_commit=True,
+    )
+
+    assert captured == {
+        "strict": True,
+        "deck": None,
+        "no_subdecks": False,
+    }

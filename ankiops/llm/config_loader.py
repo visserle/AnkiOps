@@ -16,6 +16,7 @@ from .models import (
     DeckScope,
     FieldExceptionRule,
     LlmConfigSet,
+    LlmSettingsConfig,
     ProviderConfig,
     ProviderType,
     TaskConfig,
@@ -55,13 +56,6 @@ def _optional_str(mapping: dict[str, Any], key: str, path: Path) -> str | None:
     if not isinstance(value, str) or not value.strip():
         raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
     return value.strip()
-
-
-def _require_version(mapping: dict[str, Any], path: Path) -> int:
-    version = mapping.get("version")
-    if version != 1:
-        raise LlmConfigError(f"{path}: only version 1 configs are supported")
-    return 1
 
 
 def _require_name_stem(name: str, path: Path) -> None:
@@ -128,20 +122,27 @@ def _parse_deck_scope(value: Any, path: Path) -> DeckScope:
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'decks' must be a mapping")
 
-    unknown = sorted(set(value.keys()) - {"include", "exclude"})
+    unknown = sorted(set(value.keys()) - {"include", "exclude", "include_subdecks"})
     if unknown:
         raise LlmConfigError(f"{path}: unknown deck scope key(s): {', '.join(unknown)}")
 
     include_value = value.get("include", ["*"])
     exclude_value = value.get("exclude", [])
+    include_subdecks = value.get("include_subdecks", True)
     if not isinstance(include_value, list) or not include_value:
         raise LlmConfigError(f"{path}: 'decks.include' must be a non-empty list")
     if not isinstance(exclude_value, list):
         raise LlmConfigError(f"{path}: 'decks.exclude' must be a list")
+    if not isinstance(include_subdecks, bool):
+        raise LlmConfigError(f"{path}: 'decks.include_subdecks' must be a boolean")
 
     include = _parse_str_list(include_value, "decks.include", path)
     exclude = _parse_optional_str_list(exclude_value, "decks.exclude", path)
-    return DeckScope(include=include, exclude=exclude)
+    return DeckScope(
+        include=include,
+        exclude=exclude,
+        include_subdecks=include_subdecks,
+    )
 
 
 def _field_names_by_note_type(
@@ -235,7 +236,6 @@ def _parse_field_exceptions(
 
 def _parse_provider(path: Path) -> ProviderConfig:
     mapping = _read_yaml_mapping(path)
-    version = _require_version(mapping, path)
     name = _require_str(mapping, "name", path)
     _require_name_stem(name, path)
     provider_type_raw = _require_str(mapping, "type", path)
@@ -255,6 +255,21 @@ def _parse_provider(path: Path) -> ProviderConfig:
 
     request_defaults = _parse_request_options(mapping.get("request_defaults"), path)
 
+    unknown = sorted(
+        set(mapping.keys())
+        - {
+            "name",
+            "type",
+            "base_url",
+            "model",
+            "api_key_env",
+            "timeout_seconds",
+            "request_defaults",
+        }
+    )
+    if unknown:
+        raise LlmConfigError(f"{path}: unknown provider key(s): {', '.join(unknown)}")
+
     if provider_type is ProviderType.OPENAI and not api_key_env:
         raise LlmConfigError(f"{path}: openai provider requires 'api_key_env'")
     if api_key_env and not os.environ.get(api_key_env):
@@ -263,7 +278,6 @@ def _parse_provider(path: Path) -> ProviderConfig:
         )
 
     return ProviderConfig(
-        version=version,
         name=name,
         type=provider_type,
         base_url=base_url,
@@ -274,12 +288,23 @@ def _parse_provider(path: Path) -> ProviderConfig:
     )
 
 
+def _parse_settings(path: Path) -> LlmSettingsConfig:
+    mapping = _read_yaml_mapping(path)
+    default_provider = _optional_str(mapping, "default_provider", path)
+
+    unknown = sorted(set(mapping.keys()) - {"default_provider"})
+    if unknown:
+        raise LlmConfigError(f"{path}: unknown settings key(s): {', '.join(unknown)}")
+
+    return LlmSettingsConfig(
+        default_provider=default_provider,
+    )
+
+
 def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
-    version = _require_version(mapping, path)
     name = _require_str(mapping, "name", path)
     _require_name_stem(name, path)
-    provider = _require_str(mapping, "provider", path)
     prompt = _require_str(mapping, "prompt", path)
     decks = _parse_deck_scope(mapping.get("decks"), path)
     field_exceptions = _parse_field_exceptions(
@@ -290,16 +315,13 @@ def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskC
     request = _parse_request_options(mapping.get("request"), path)
 
     unknown = sorted(
-        set(mapping.keys())
-        - {"version", "name", "provider", "decks", "prompt", "fields", "request"}
+        set(mapping.keys()) - {"name", "decks", "prompt", "fields", "request"}
     )
     if unknown:
         raise LlmConfigError(f"{path}: unknown task key(s): {', '.join(unknown)}")
 
     return TaskConfig(
-        version=version,
         name=name,
-        provider=provider,
         prompt=prompt,
         decks=decks,
         field_exceptions=field_exceptions,
@@ -313,13 +335,21 @@ def load_llm_config_set(
     note_type_configs: list[NoteTypeConfig],
 ) -> LlmConfigSet:
     llm_dir = collection_dir / LLM_DIR
+    settings_path = llm_dir / "config.yaml"
     providers_dir = llm_dir / LLM_PROVIDERS_DIR
     tasks_dir = llm_dir / LLM_TASKS_DIR
 
+    settings = LlmSettingsConfig(default_provider=None)
     providers_by_name: dict[str, ProviderConfig] = {}
     tasks_by_name: dict[str, TaskConfig] = {}
     provider_errors: dict[str, str] = {}
     task_errors: dict[str, str] = {}
+
+    if settings_path.exists():
+        try:
+            settings = _parse_settings(settings_path)
+        except LlmConfigError as error:
+            task_errors[str(settings_path)] = str(error)
 
     if providers_dir.exists():
         for path in _iter_yaml_files(providers_dir):
@@ -339,16 +369,18 @@ def load_llm_config_set(
                 task = _parse_task(path, note_type_configs=note_type_configs)
                 if task.name in tasks_by_name:
                     raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
-                if task.provider not in providers_by_name:
-                    raise LlmConfigError(
-                        f"{path}: referenced provider '{task.provider}' "
-                        "is invalid or missing"
-                    )
                 tasks_by_name[task.name] = task
             except LlmConfigError as error:
                 task_errors[str(path)] = str(error)
 
+    if settings.default_provider and settings.default_provider not in providers_by_name:
+        task_errors[str(settings_path)] = (
+            f"{settings_path}: referenced default provider "
+            f"'{settings.default_provider}' is invalid or missing"
+        )
+
     return LlmConfigSet(
+        settings=settings,
         providers_by_name=providers_by_name,
         tasks_by_name=tasks_by_name,
         provider_errors=provider_errors,

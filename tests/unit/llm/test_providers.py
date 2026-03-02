@@ -44,7 +44,6 @@ def test_openai_provider_shapes_responses_request(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     provider = OpenAIProvider(
         ProviderConfig(
-            version=1,
             name="openai-default",
             type=ProviderType.OPENAI,
             base_url="https://api.openai.com/v1",
@@ -110,7 +109,6 @@ def test_openai_provider_shapes_responses_request(monkeypatch):
 def test_ollama_provider_shapes_chat_request():
     provider = OllamaProvider(
         ProviderConfig(
-            version=1,
             name="ollama-local",
             type=ProviderType.OLLAMA,
             base_url="http://127.0.0.1:11434",
@@ -162,7 +160,6 @@ def test_openai_provider_omits_empty_read_only_fields(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     provider = OpenAIProvider(
         ProviderConfig(
-            version=1,
             name="openai-default",
             type=ProviderType.OPENAI,
             base_url="https://api.openai.com/v1",
