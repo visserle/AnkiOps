@@ -83,6 +83,64 @@ def test_in_memory_serialize(collection, monkeypatch):
     assert result["decks"][0]["notes"][1]["note_key"] == "nk-2"
 
 
+def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+
+    (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
+        ("<!-- note_key: nk-child-1 -->\nQ: Child question\nA: Child answer"),
+        encoding="utf-8",
+    )
+    (collection / f"{deck_name_to_file_stem('OtherDeck')}.md").write_text(
+        ("<!-- note_key: nk-other-1 -->\nQ: Other question\nA: Other answer"),
+        encoding="utf-8",
+    )
+
+    result = serialize_collection(collection, deck="TestDeck")
+
+    deck_names = {deck["name"] for deck in result["decks"]}
+    assert deck_names == {"TestDeck", "TestDeck::Child"}
+
+
+def test_serialize_single_deck_excludes_subdecks_with_no_subdecks(
+    collection, monkeypatch
+):
+    _set_collection_paths(monkeypatch, collection)
+
+    (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
+        ("<!-- note_key: nk-child-1 -->\nQ: Child question\nA: Child answer"),
+        encoding="utf-8",
+    )
+
+    result = serialize_collection(
+        collection,
+        deck="TestDeck",
+        no_subdecks=True,
+    )
+
+    assert [deck["name"] for deck in result["decks"]] == ["TestDeck"]
+
+
+def test_serialize_collection_to_json_accepts_deck_scope(
+    collection, tmp_path, monkeypatch
+):
+    _set_collection_paths(monkeypatch, collection)
+
+    (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
+        ("<!-- note_key: nk-child-1 -->\nQ: Child question\nA: Child answer"),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "scoped.json"
+    result = serialize_collection_to_json(
+        collection,
+        output,
+        deck="TestDeck",
+        no_subdecks=True,
+    )
+
+    assert [deck["name"] for deck in result["decks"]] == ["TestDeck"]
+
+
 def test_serialize_logs_parsing_errors_before_summary(collection, monkeypatch, caplog):
     _set_collection_paths(monkeypatch, collection)
     _set_note_type_paths(monkeypatch, collection / "note_types")

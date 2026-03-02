@@ -38,7 +38,7 @@ def _format_note_type_mismatch_error(
     return (
         f"Note type mismatch for note_key: {note_key}: markdown uses "
         f"'{markdown_note_type}' but Anki has '{anki_note_type}'. "
-        "Anki cannot convert existing notes between note types. "
+        "AnkiConnect cannot convert existing notes between note types. "
         f"Remove this note's key comment (<!-- note_key: {note_key} -->) "
         "to force creating a new note with the new type on the next import."
     )

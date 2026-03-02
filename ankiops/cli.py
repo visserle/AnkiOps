@@ -209,6 +209,10 @@ def run_ma(args):
 
 def run_serialize(args):
     """Serialize collection to JSON format."""
+    if args.no_subdecks and not args.deck:
+        logger.error("--no-subdecks requires --deck")
+        raise SystemExit(2)
+
     collection_dir = get_collection_dir()
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
@@ -228,6 +232,8 @@ def run_serialize(args):
     serialize_collection_to_json(
         collection_dir,
         output_file,
+        deck=args.deck,
+        no_subdecks=args.no_subdecks,
     )
 
 
@@ -366,6 +372,15 @@ def main():
         "--output",
         "-o",
         help="Output file path (default: <collection-name>.json)",
+    )
+    serialize_parser.add_argument(
+        "--deck",
+        help="Serialize only this deck (includes subdecks by default)",
+    )
+    serialize_parser.add_argument(
+        "--no-subdecks",
+        action="store_true",
+        help="With --deck, serialize only the exact deck (exclude subdecks)",
     )
     serialize_parser.set_defaults(handler=run_serialize)
 

@@ -25,6 +25,8 @@ def serialize_collection(
     collection_dir: Path,
     *,
     strict: bool = False,
+    deck: str | None = None,
+    no_subdecks: bool = False,
 ) -> dict[str, Any]:
     """Serialize the collection into an in-memory JSON-compatible mapping."""
     db_path = collection_dir / ANKIOPS_DB
@@ -43,6 +45,23 @@ def serialize_collection(
 
     errors = []
     md_files = fs.find_markdown_files(collection_dir)
+    deck_filter = deck.strip() if isinstance(deck, str) else None
+
+    if deck_filter:
+        if no_subdecks:
+            md_files = [
+                md_file
+                for md_file in md_files
+                if file_stem_to_deck_name(md_file.stem) == deck_filter
+            ]
+        else:
+            prefix = f"{deck_filter}::"
+            md_files = [
+                md_file
+                for md_file in md_files
+                if file_stem_to_deck_name(md_file.stem) == deck_filter
+                or file_stem_to_deck_name(md_file.stem).startswith(prefix)
+            ]
 
     for md_file in md_files:
         try:
@@ -101,17 +120,26 @@ def serialize_collection(
 def serialize_collection_to_json(
     collection_dir: Path,
     output_file: Path,
+    *,
+    deck: str | None = None,
+    no_subdecks: bool = False,
 ) -> dict[str, Any]:
     """Serialize entire collection to JSON format.
 
     Args:
         collection_dir: Path to the collection directory
         output_file: Path where JSON file will be written
+        deck: Optional deck name scope for serialization
+        no_subdecks: If True with deck set, include only exact deck
 
     Returns:
         Dictionary containing the serialized data
     """
-    serialized_data = serialize_collection(collection_dir)
+    serialized_data = serialize_collection(
+        collection_dir,
+        deck=deck,
+        no_subdecks=no_subdecks,
+    )
     total_notes = sum(
         len(deck.get("notes", []))
         for deck in serialized_data["decks"]

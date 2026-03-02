@@ -145,6 +145,8 @@ uv run python -m main ma
 
 **`serialize`:**
 - `--output`, `-o` - Output file path (default: `<collection-name>.json`)
+- `--deck` - Serialize only one deck (includes subdecks by default)
+- `--no-subdecks` - With `--deck`, exclude subdecks (exact deck only)
 
 **`deserialize`:**
 - `--input`, `-i` - Input file path (default: `<collection-name>.json`)

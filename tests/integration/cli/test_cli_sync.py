@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ankiops.cli import main, run_am, run_ma
+from ankiops.cli import main, run_am, run_ma, run_serialize
+from ankiops.config import ANKIOPS_DB
 from ankiops.models import (
     Change,
     ChangeType,
@@ -172,5 +173,46 @@ def test_removed_full_sync_flags_are_rejected(argv):
     with patch("sys.argv", argv):
         with pytest.raises(SystemExit) as exc:
             main()
+
+    assert exc.value.code == 2
+
+
+def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
+    db_path = tmp_path / ANKIOPS_DB
+    db_path.write_text("", encoding="utf-8")
+
+    args = SimpleNamespace(
+        output=str(tmp_path / "out.json"),
+        deck="Parent",
+        no_subdecks=True,
+    )
+
+    with (
+        patch("ankiops.cli.get_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_collection_to_json") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        tmp_path / "out.json",
+        deck="Parent",
+        no_subdecks=True,
+    )
+
+
+def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
+    db_path = tmp_path / ANKIOPS_DB
+    db_path.write_text("", encoding="utf-8")
+
+    args = SimpleNamespace(
+        output=None,
+        deck=None,
+        no_subdecks=True,
+    )
+
+    with patch("ankiops.cli.get_collection_dir", return_value=tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            run_serialize(args)
 
     assert exc.value.code == 2
