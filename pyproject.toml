@@ -86,4 +86,3 @@ convention = "pep257"
 python_version = "3.10"
 strict = true
 ignore_missing_imports = true
-plugins = ["pydantic.mypy"]
