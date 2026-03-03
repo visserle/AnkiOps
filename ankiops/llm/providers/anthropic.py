@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 
 from anthropic import (
@@ -18,13 +17,14 @@ from ankiops.llm.models import (
     ProviderConfig,
     TaskRequestOptions,
 )
-from ankiops.llm.prompting import build_note_patch_schema, build_user_payload
+from ankiops.llm.prompting import build_user_payload
+from ankiops.llm.structured_output import (
+    StructuredOutputError,
+    build_note_patch_contract,
+    parse_note_patch_json,
+)
 
 from .errors import ProviderFatalError, ProviderNoteError
-
-logger = logging.getLogger(__name__)
-
-_STRUCTURED_OUTPUTS_BETA = "structured-outputs-2025-11-13"
 
 
 class AnthropicProvider:
@@ -53,24 +53,20 @@ class AnthropicProvider:
         request_options: TaskRequestOptions,
         model: str,
     ) -> NotePatch:
-        response_schema = build_note_patch_schema(note_payload)
-        tool_def = {
-            "name": "note_patch",
-            "description": "Return the edited note fields.",
-            "input_schema": response_schema,
-            "strict": True,
-        }
-
+        contract = build_note_patch_contract(note_payload)
         kwargs: dict[str, object] = {
             "model": model,
             "system": instructions,
             "messages": [
                 {"role": "user", "content": build_user_payload(note_payload)},
             ],
-            "tools": [tool_def],
-            "tool_choice": {"type": "tool", "name": "note_patch"},
             "max_tokens": request_options.max_output_tokens or 4096,
-            "extra_headers": {"anthropic-beta": _STRUCTURED_OUTPUTS_BETA},
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": contract.schema,
+                }
+            },
         }
         if request_options.temperature is not None:
             kwargs["temperature"] = request_options.temperature
@@ -86,34 +82,37 @@ class AnthropicProvider:
                 f"Failed to connect to provider: {error}"
             ) from error
         except APIStatusError as error:
+            if "does not support output format" in error.message:
+                raise ProviderFatalError(
+                    "Configured Anthropic model does not support structured outputs. "
+                    "Use a current supported model such as 'claude-sonnet-4-6'."
+                ) from error
             raise ProviderNoteError(
                 f"Provider returned HTTP {error.status_code}: {error.message}"
             ) from error
 
-        # Extract the tool use block from the response
-        for block in response.content:
-            if block.type == "tool_use" and block.name == "note_patch":
-                return _parse_tool_input(block.input)  # type: ignore[arg-type]
+        raw_text = _extract_text_content(response.content)
+        if response.stop_reason == "refusal":
+            message = raw_text or "Model refused to produce a structured response"
+            raise ProviderNoteError(f"Provider refused request: {message}")
 
-        raise ProviderNoteError("Anthropic response contained no tool_use block")
+        if not raw_text:
+            raise ProviderNoteError("Anthropic response contained no JSON text output")
+
+        try:
+            return parse_note_patch_json(raw_text, contract=contract)
+        except StructuredOutputError as error:
+            raise ProviderNoteError(str(error)) from error
 
 
-def _parse_tool_input(data: dict[str, object]) -> NotePatch:
-    note_key = data.get("note_key")
-    edits = data.get("edits")
-    if not isinstance(note_key, str) or not isinstance(edits, dict):
-        raise ProviderNoteError(
-            f"Response is missing note_key or edits (got keys: {list(data.keys())})"
-        )
-
-    parsed_fields: dict[str, str] = {}
-    for field_name, value in edits.items():
-        if not isinstance(field_name, str):
-            raise ProviderNoteError("Response edits keys must be strings")
-        if value is None:
+def _extract_text_content(blocks: object) -> str:
+    parts: list[str] = []
+    if not isinstance(blocks, list):
+        return ""
+    for block in blocks:
+        if getattr(block, "type", None) != "text":
             continue
-        if not isinstance(value, str):
-            raise ProviderNoteError("Response edits values must be strings")
-        parsed_fields[field_name] = value
-
-    return NotePatch(note_key=note_key, edits=parsed_fields)
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)

@@ -2,6 +2,6 @@
 name: anthropic
 sdk: anthropic
 api_key_env: ANTHROPIC_API_KEY
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-6
 request_defaults:
   temperature: 0

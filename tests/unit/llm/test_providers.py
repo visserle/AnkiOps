@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,9 +12,143 @@ from ankiops.llm.models import (
     SdkType,
     TaskRequestOptions,
 )
+from ankiops.llm.providers.anthropic import AnthropicProvider
 from ankiops.llm.providers.errors import ProviderFatalError, ProviderNoteError
 from ankiops.llm.providers.ollama import OllamaProvider
 from ankiops.llm.providers.openai import OpenAIProvider
+
+# ---------------------------------------------------------------------------
+# Anthropic provider tests
+# ---------------------------------------------------------------------------
+
+
+class TestAnthropicProvider:
+    @pytest.fixture()
+    def provider(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        return AnthropicProvider(
+            ProviderConfig(
+                name="anthropic",
+                sdk=SdkType.ANTHROPIC,
+                model="claude-sonnet-4-6",
+                api_key_env="ANTHROPIC_API_KEY",
+            )
+        )
+
+    @pytest.fixture()
+    def note_payload(self):
+        return NotePayload(
+            note_key="nk-1",
+            note_type="AnkiOpsQA",
+            editable_fields={"Question": "Broken"},
+            read_only_fields={"Source": "Book"},
+        )
+
+    def test_generate_patch_success(self, provider, note_payload):
+        mock_response = MagicMock()
+        mock_response.content = [
+            SimpleNamespace(
+                type="text",
+                text='{"note_key":"nk-1","edits":{"Question":"Fixed"}}',
+            )
+        ]
+        mock_response.stop_reason = "end_turn"
+
+        with patch.object(
+            provider._client.messages, "create", return_value=mock_response
+        ) as mock_create:
+            patch_result = provider.generate_patch(
+                note_payload=note_payload,
+                instructions="Fix grammar",
+                request_options=TaskRequestOptions(
+                    temperature=0, max_output_tokens=200
+                ),
+                model="claude-sonnet-4-6",
+            )
+
+        assert patch_result.note_key == "nk-1"
+        assert patch_result.edits == {"Question": "Fixed"}
+
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs["model"] == "claude-sonnet-4-6"
+        assert call_kwargs["system"] == "Fix grammar"
+        assert json.loads(call_kwargs["messages"][0]["content"]) == {
+            "note_key": "nk-1",
+            "note_type": "AnkiOpsQA",
+            "editable_fields": {"Question": "Broken"},
+            "read_only_fields": {"Source": "Book"},
+        }
+        assert call_kwargs["temperature"] == 0
+        assert call_kwargs["max_tokens"] == 200
+        assert "extra_headers" not in call_kwargs
+        assert "tools" not in call_kwargs
+        assert "tool_choice" not in call_kwargs
+        schema = call_kwargs["output_config"]["format"]["schema"]
+        assert call_kwargs["output_config"]["format"]["type"] == "json_schema"
+        assert "Question" in schema["properties"]["edits"]["properties"]
+        assert "required" not in schema["properties"]["edits"]
+
+    def test_generate_patch_refusal_raises(self, provider, note_payload):
+        mock_response = MagicMock()
+        mock_response.content = [SimpleNamespace(type="text", text="Cannot comply")]
+        mock_response.stop_reason = "refusal"
+
+        with patch.object(
+            provider._client.messages, "create", return_value=mock_response
+        ):
+            with pytest.raises(ProviderNoteError, match="Provider refused request"):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="claude-sonnet-4-6",
+                )
+
+    def test_generate_patch_missing_json_text_raises(self, provider, note_payload):
+        mock_response = MagicMock()
+        mock_response.content = [SimpleNamespace(type="thinking", thinking="...")]
+        mock_response.stop_reason = "end_turn"
+
+        with patch.object(
+            provider._client.messages, "create", return_value=mock_response
+        ):
+            with pytest.raises(ProviderNoteError, match="no JSON text output"):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="claude-sonnet-4-6",
+                )
+
+    def test_generate_patch_unsupported_model_raises_fatal(
+        self, provider, note_payload
+    ):
+        from anthropic import APIStatusError
+
+        error = APIStatusError(
+            message=(
+                "Error code: 400 - {'type': 'error', 'error': "
+                "{'type': 'invalid_request_error', 'message': "
+                "\"'claude-sonnet-4-20250514' does not support output format.\"}}"
+            ),
+            response=MagicMock(status_code=400),
+            body=None,
+        )
+        with patch.object(
+            provider._client.messages,
+            "create",
+            side_effect=error,
+        ):
+            with pytest.raises(
+                ProviderFatalError,
+                match="Configured Anthropic model does not support structured outputs",
+            ):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="claude-sonnet-4-20250514",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +180,7 @@ class TestOpenAIProvider:
 
     def test_generate_patch_success(self, provider, note_payload):
         mock_response = MagicMock()
+        mock_response.output = []
         mock_response.output_text = '{"note_key":"nk-1","edits":{"Question":"Fixed"}}'
 
         with patch.object(
@@ -74,28 +209,57 @@ class TestOpenAIProvider:
         }
         schema = call_kwargs["text"]["format"]["schema"]
         assert "Question" in schema["properties"]["edits"]["properties"]
+        assert "required" not in schema["properties"]["edits"]
+        assert call_kwargs["text"]["format"]["strict"] is True
         assert call_kwargs["temperature"] == 0
         assert call_kwargs["max_output_tokens"] == 200
 
-    def test_generate_patch_drops_null_edits(self, provider, note_payload):
+    def test_generate_patch_rejects_null_edits(self, provider, note_payload):
         mock_response = MagicMock()
+        mock_response.output = []
         mock_response.output_text = (
-            '{"note_key":"nk-1","edits":{"Question":"Fixed","Source":null}}'
+            '{"note_key":"nk-1","edits":{"Question":null}}'
+        )
+        error_match = (
+            "Structured output validation failed: "
+            "edits.Question must be a string"
         )
         with patch.object(
             provider._client.responses, "create", return_value=mock_response
         ):
-            patch_result = provider.generate_patch(
-                note_payload=note_payload,
-                instructions="Fix grammar",
-                request_options=TaskRequestOptions(),
-                model="gpt-5",
-            )
+            with pytest.raises(ProviderNoteError, match=error_match):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="gpt-5",
+                )
 
-        assert patch_result.edits == {"Question": "Fixed"}
+    def test_generate_patch_refusal_raises(self, provider, note_payload):
+        mock_response = MagicMock()
+        mock_response.output_text = ""
+        mock_response.output = [
+            SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="refusal", refusal="Unsafe request")],
+            )
+        ]
+        with patch.object(
+            provider._client.responses, "create", return_value=mock_response
+        ):
+            with pytest.raises(
+                ProviderNoteError, match="Provider refused request: Unsafe request"
+            ):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="gpt-5",
+                )
 
     def test_generate_patch_empty_output_raises(self, provider, note_payload):
         mock_response = MagicMock()
+        mock_response.output = []
         mock_response.output_text = ""
         with patch.object(
             provider._client.responses, "create", return_value=mock_response
@@ -115,6 +279,7 @@ class TestOpenAIProvider:
             editable_fields={"Question": "Broken"},
         )
         mock_response = MagicMock()
+        mock_response.output = []
         mock_response.output_text = '{"note_key":"nk-1","edits":{}}'
         with patch.object(
             provider._client.responses, "create", return_value=mock_response
@@ -228,23 +393,45 @@ class TestOllamaProvider:
         assert call_kwargs["messages"][0]["role"] == "system"
         schema = call_kwargs["format"]
         assert "Question" in schema["properties"]["edits"]["properties"]
+        assert "required" not in schema["properties"]["edits"]
         assert call_kwargs["options"]["temperature"] == 0
         assert call_kwargs["options"]["num_predict"] == 128
 
-    def test_generate_patch_drops_null_edits(self, provider, note_payload):
+    def test_generate_patch_rejects_null_edits(self, provider, note_payload):
         mock_response = MagicMock()
         mock_response.message.content = (
-            '{"note_key":"nk-1","edits":{"Question":"Fixed","Source":null}}'
+            '{"note_key":"nk-1","edits":{"Question":null}}'
+        )
+        error_match = (
+            "Structured output validation failed: "
+            "edits.Question must be a string"
         )
         with patch.object(provider._client, "chat", return_value=mock_response):
-            patch_result = provider.generate_patch(
-                note_payload=note_payload,
-                instructions="Fix grammar",
-                request_options=TaskRequestOptions(),
-                model="gpt-oss",
-            )
+            with pytest.raises(ProviderNoteError, match=error_match):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="gpt-oss",
+                )
 
-        assert patch_result.edits == {"Question": "Fixed"}
+    def test_generate_patch_rejects_unknown_edit_fields(self, provider, note_payload):
+        mock_response = MagicMock()
+        mock_response.message.content = (
+            '{"note_key":"nk-1","edits":{"Source":"Book"}}'
+        )
+        error_match = (
+            "Structured output validation failed: "
+            "edits.Source is not editable"
+        )
+        with patch.object(provider._client, "chat", return_value=mock_response):
+            with pytest.raises(ProviderNoteError, match=error_match):
+                provider.generate_patch(
+                    note_payload=note_payload,
+                    instructions="Fix grammar",
+                    request_options=TaskRequestOptions(),
+                    model="gpt-oss",
+                )
 
     def test_generate_patch_empty_content_raises(self, provider, note_payload):
         mock_response = MagicMock()

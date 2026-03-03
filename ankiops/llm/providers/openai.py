@@ -6,8 +6,6 @@ by setting ``base_url`` in the provider config.
 
 from __future__ import annotations
 
-import json
-import logging
 import os
 
 from openai import (
@@ -23,11 +21,14 @@ from ankiops.llm.models import (
     ProviderConfig,
     TaskRequestOptions,
 )
-from ankiops.llm.prompting import build_note_patch_schema, build_user_payload
+from ankiops.llm.prompting import build_user_payload
+from ankiops.llm.structured_output import (
+    StructuredOutputError,
+    build_note_patch_contract,
+    parse_note_patch_json,
+)
 
 from .errors import ProviderFatalError, ProviderNoteError
-
-logger = logging.getLogger(__name__)
 
 
 class OpenAIProvider:
@@ -56,7 +57,7 @@ class OpenAIProvider:
         request_options: TaskRequestOptions,
         model: str,
     ) -> NotePatch:
-        response_schema = build_note_patch_schema(note_payload)
+        contract = build_note_patch_contract(note_payload)
         kwargs: dict[str, object] = {
             "model": model,
             "instructions": instructions,
@@ -65,7 +66,7 @@ class OpenAIProvider:
                 "format": {
                     "type": "json_schema",
                     "name": "note_patch",
-                    "schema": response_schema,
+                    "schema": contract.schema,
                     "strict": True,
                 }
             },
@@ -90,35 +91,35 @@ class OpenAIProvider:
                 f"Provider returned HTTP {error.status_code}: {error.message}"
             ) from error
 
+        refusal_message = _extract_refusal_message(response)
+        if refusal_message is not None:
+            raise ProviderNoteError(f"Provider refused request: {refusal_message}")
+
         raw_text = response.output_text
         if not raw_text:
             raise ProviderNoteError(
                 "OpenAI response contained no structured output text"
             )
-        return _parse_note_patch(raw_text)
+        try:
+            return parse_note_patch_json(raw_text, contract=contract)
+        except StructuredOutputError as error:
+            raise ProviderNoteError(str(error)) from error
 
 
-def _parse_note_patch(raw_text: str) -> NotePatch:
-    try:
-        data = json.loads(raw_text)
-    except ValueError as error:
-        raise ProviderNoteError("Response was not valid JSON") from error
-    if not isinstance(data, dict):
-        raise ProviderNoteError("Response must be a JSON object")
-
-    note_key = data.get("note_key")
-    edits = data.get("edits")
-    if not isinstance(note_key, str) or not isinstance(edits, dict):
-        raise ProviderNoteError("Response is missing note_key or edits")
-
-    parsed_fields: dict[str, str] = {}
-    for field_name, value in edits.items():
-        if not isinstance(field_name, str):
-            raise ProviderNoteError("Response edits keys must be strings")
-        if value is None:
+def _extract_refusal_message(response: object) -> str | None:
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return None
+    for item in output:
+        if getattr(item, "type", None) != "message":
             continue
-        if not isinstance(value, str):
-            raise ProviderNoteError("Response edits values must be strings")
-        parsed_fields[field_name] = value
-
-    return NotePatch(note_key=note_key, edits=parsed_fields)
+        content = getattr(item, "content", None)
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if getattr(block, "type", None) != "refusal":
+                continue
+            refusal = getattr(block, "refusal", None)
+            if isinstance(refusal, str) and refusal:
+                return refusal
+    return None

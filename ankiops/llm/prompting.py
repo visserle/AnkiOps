@@ -15,7 +15,9 @@ Do not modify read_only_fields.
 Do not invent new field names or change field names.
 Preserve Markdown structure, math, code fences, links, cloze syntax, and meaning.
 Return only changed editable fields in edits.
-If no changes are needed, return an empty edits object."""
+If no changes are needed, return an empty edits object.
+Do not use null values anywhere in edits.
+Use an empty string only when you intentionally want to clear a field."""
 
 
 def build_instructions(task_prompt: str) -> str:
@@ -33,29 +35,3 @@ def build_user_payload(note_payload: NotePayload) -> str:
     if note_payload.read_only_fields:
         payload["read_only_fields"] = note_payload.read_only_fields
     return json.dumps(payload, ensure_ascii=False, indent=2)
-
-
-def build_note_patch_schema(note_payload: NotePayload) -> dict[str, object]:
-    """Build a JSON Schema for a note patch response.
-
-    The schema includes the exact editable field names so models produce
-    tightly constrained output.
-    """
-    edit_field_names = list(note_payload.editable_fields.keys())
-    edit_properties: dict[str, object] = {
-        field_name: {"type": ["string", "null"]} for field_name in edit_field_names
-    }
-    return {
-        "type": "object",
-        "properties": {
-            "note_key": {"type": "string"},
-            "edits": {
-                "type": "object",
-                "properties": edit_properties,
-                "required": edit_field_names,
-                "additionalProperties": False,
-            },
-        },
-        "required": ["note_key", "edits"],
-        "additionalProperties": False,
-    }
