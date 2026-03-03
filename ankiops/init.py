@@ -99,27 +99,20 @@ def _setup_llm_configs(collection_dir: Path) -> None:
     (llm_root / LLM_TASKS_DIR).mkdir(parents=True, exist_ok=True)
     (llm_root / LLM_PROVIDERS_DIR).mkdir(parents=True, exist_ok=True)
 
-    _copy_llm_template(
-        collection_dir,
-        resource_path="config.yaml",
-        target_relative_path=f"{LLM_DIR}/config.yaml",
-    )
-
-    _copy_llm_template(
-        collection_dir,
-        resource_path="tasks/grammar.yaml",
-        target_relative_path=f"{LLM_DIR}/{LLM_TASKS_DIR}/grammar.yaml",
-    )
-    _copy_llm_template(
-        collection_dir,
-        resource_path="providers/ollama-local.yaml",
-        target_relative_path=f"{LLM_DIR}/{LLM_PROVIDERS_DIR}/ollama-local.yaml",
-    )
-    _copy_llm_template(
-        collection_dir,
-        resource_path="providers/openai-default.yaml",
-        target_relative_path=f"{LLM_DIR}/{LLM_PROVIDERS_DIR}/openai-default.yaml",
-    )
+    templates = [
+        "config.yaml",
+        f"{LLM_TASKS_DIR}/grammar.yaml",
+        f"{LLM_PROVIDERS_DIR}/ollama-local.yaml",
+        f"{LLM_PROVIDERS_DIR}/openai-default.yaml",
+        f"{LLM_PROVIDERS_DIR}/groq.yaml",
+        f"{LLM_PROVIDERS_DIR}/anthropic.yaml",
+    ]
+    for template in templates:
+        _copy_llm_template(
+            collection_dir,
+            resource_path=template,
+            target_relative_path=f"{LLM_DIR}/{template}",
+        )
 
 
 def initialize_collection(profile: str) -> Path:

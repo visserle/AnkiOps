@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-import pytest
-
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.config_loader import load_llm_config_set
 
