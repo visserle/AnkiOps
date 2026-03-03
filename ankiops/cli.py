@@ -20,6 +20,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
+
 from ankiops.llm.runner import list_providers, list_tasks, run_task
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
@@ -287,8 +288,8 @@ def run_llm_providers(_args):
             key=lambda provider_config: provider_config.name,
         ):
             logger.info(
-                f"{provider.name}  type={provider.type.value}  "
-                f"base_url={provider.base_url}  model={provider.model}"
+                f"{provider.name}  sdk={provider.sdk.value}  "
+                f"model={provider.model}"
             )
     if errors:
         _exit_with_llm_config_errors(errors)

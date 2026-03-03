@@ -13,8 +13,9 @@ class FieldAccess(Enum):
     HIDDEN = "hidden"
 
 
-class ProviderType(Enum):
+class SdkType(Enum):
     OPENAI = "openai"
+    ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
 
 
@@ -113,9 +114,9 @@ class TaskConfig:
 @dataclass(frozen=True)
 class ProviderConfig:
     name: str
-    type: ProviderType
-    base_url: str
+    sdk: SdkType
     model: str
+    base_url: str | None = None
     api_key_env: str | None = None
     timeout_seconds: int = 60
     request_defaults: TaskRequestOptions = field(default_factory=TaskRequestOptions)
@@ -144,7 +145,7 @@ class NotePatch:
 class TaskRunSummary:
     task_name: str
     provider_name: str
-    provider_type: ProviderType
+    sdk_type: SdkType
     model: str
     eligible: int = 0
     updated: int = 0

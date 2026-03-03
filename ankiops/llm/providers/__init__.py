@@ -1,13 +1,14 @@
-"""Provider adapters for the LLM task runner."""
+"""LLM provider implementations."""
 
-from .base import LlmProvider, ProviderFatalError, ProviderNoteError
+from .anthropic import AnthropicProvider
+from .errors import ProviderFatalError, ProviderNoteError
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 
 __all__ = [
-    "LlmProvider",
-    "ProviderFatalError",
-    "ProviderNoteError",
+    "AnthropicProvider",
     "OllamaProvider",
     "OpenAIProvider",
+    "ProviderFatalError",
+    "ProviderNoteError",
 ]

@@ -1,9 +1,7 @@
 # Update the model name to the remote OpenAI model you want to use.
 name: openai-default
-type: openai
-base_url: https://api.openai.com/v1
+sdk: openai
 api_key_env: OPENAI_API_KEY
-model: gpt-5
-timeout_seconds: 60
+model: gpt-4.1-mini
 request_defaults:
   temperature: 0

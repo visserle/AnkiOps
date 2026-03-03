@@ -1,0 +1,7 @@
+# Update the model name to the Anthropic model you want to use.
+name: anthropic
+sdk: anthropic
+api_key_env: ANTHROPIC_API_KEY
+model: claude-sonnet-4-20250514
+request_defaults:
+  temperature: 0

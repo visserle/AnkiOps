@@ -1,20 +1,15 @@
-"""OpenAI SDK adapter.
-
-Works with any OpenAI-compatible API (OpenAI, Groq, Together, etc.)
-by setting ``base_url`` in the provider config.
-"""
+"""Anthropic SDK adapter."""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 
-from openai import (
+from anthropic import (
+    Anthropic,
     APIConnectionError,
     APIStatusError,
     AuthenticationError,
-    OpenAI,
 )
 
 from ankiops.llm.models import (
@@ -30,8 +25,8 @@ from .errors import ProviderFatalError, ProviderNoteError
 logger = logging.getLogger(__name__)
 
 
-class OpenAIProvider:
-    """Provider adapter using the ``openai`` SDK."""
+class AnthropicProvider:
+    """Provider adapter using the ``anthropic`` SDK."""
 
     def __init__(self, config: ProviderConfig) -> None:
         api_key: str | None = None
@@ -42,8 +37,8 @@ class OpenAIProvider:
                     f"Required environment variable '{config.api_key_env}' is not set"
                 )
         self._config = config
-        self._client = OpenAI(
-            api_key=api_key or "unused",
+        self._client = Anthropic(
+            api_key=api_key,
             base_url=config.base_url,
             timeout=float(config.timeout_seconds),
         )
@@ -57,26 +52,27 @@ class OpenAIProvider:
         model: str,
     ) -> NotePatch:
         response_schema = build_note_patch_schema(note_payload)
+        tool_def = {
+            "name": "note_patch",
+            "description": "Return the edited note fields.",
+            "input_schema": response_schema,
+        }
+
         kwargs: dict[str, object] = {
             "model": model,
-            "instructions": instructions,
-            "input": build_user_payload(note_payload),
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "note_patch",
-                    "schema": response_schema,
-                    "strict": True,
-                }
-            },
+            "system": instructions,
+            "messages": [
+                {"role": "user", "content": build_user_payload(note_payload)},
+            ],
+            "tools": [tool_def],
+            "tool_choice": {"type": "tool", "name": "note_patch"},
+            "max_tokens": request_options.max_output_tokens or 4096,
         }
         if request_options.temperature is not None:
             kwargs["temperature"] = request_options.temperature
-        if request_options.max_output_tokens is not None:
-            kwargs["max_output_tokens"] = request_options.max_output_tokens
 
         try:
-            response = self._client.responses.create(**kwargs)  # type: ignore[arg-type]
+            response = self._client.messages.create(**kwargs)  # type: ignore[arg-type]
         except AuthenticationError as error:
             raise ProviderFatalError(
                 f"Provider authentication failed: {error.message}"
@@ -90,22 +86,15 @@ class OpenAIProvider:
                 f"Provider returned HTTP {error.status_code}: {error.message}"
             ) from error
 
-        raw_text = response.output_text
-        if not raw_text:
-            raise ProviderNoteError(
-                "OpenAI response contained no structured output text"
-            )
-        return _parse_note_patch(raw_text)
+        # Extract the tool use block from the response
+        for block in response.content:
+            if block.type == "tool_use" and block.name == "note_patch":
+                return _parse_tool_input(block.input)  # type: ignore[arg-type]
+
+        raise ProviderNoteError("Anthropic response contained no tool_use block")
 
 
-def _parse_note_patch(raw_text: str) -> NotePatch:
-    try:
-        data = json.loads(raw_text)
-    except ValueError as error:
-        raise ProviderNoteError("Response was not valid JSON") from error
-    if not isinstance(data, dict):
-        raise ProviderNoteError("Response must be a JSON object")
-
+def _parse_tool_input(data: dict[str, object]) -> NotePatch:
     note_key = data.get("note_key")
     edits = data.get("edits")
     if not isinstance(note_key, str) or not isinstance(edits, dict):

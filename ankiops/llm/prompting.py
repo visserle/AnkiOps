@@ -6,19 +6,6 @@ import json
 
 from .models import NotePayload
 
-NOTE_PATCH_JSON_SCHEMA: dict[str, object] = {
-    "type": "object",
-    "properties": {
-        "note_key": {"type": "string"},
-        "edits": {
-            "type": "object",
-            "additionalProperties": {"type": "string"},
-        },
-    },
-    "required": ["note_key", "edits"],
-    "additionalProperties": False,
-}
-
 _SYSTEM_PROMPT = """You are editing a single serialized Anki note.
 Return JSON only.
 The JSON must match the provided schema exactly.
@@ -46,3 +33,29 @@ def build_user_payload(note_payload: NotePayload) -> str:
     if note_payload.read_only_fields:
         payload["read_only_fields"] = note_payload.read_only_fields
     return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def build_note_patch_schema(note_payload: NotePayload) -> dict[str, object]:
+    """Build a JSON Schema for a note patch response.
+
+    The schema includes the exact editable field names so models produce
+    tightly constrained output.
+    """
+    edit_field_names = list(note_payload.editable_fields.keys())
+    edit_properties: dict[str, object] = {
+        field_name: {"type": ["string", "null"]} for field_name in edit_field_names
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "note_key": {"type": "string"},
+            "edits": {
+                "type": "object",
+                "properties": edit_properties,
+                "required": edit_field_names,
+                "additionalProperties": False,
+            },
+        },
+        "required": ["note_key", "edits"],
+        "additionalProperties": False,
+    }

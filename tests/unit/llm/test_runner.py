@@ -61,8 +61,7 @@ def _prepare_collection(tmp_path: Path, monkeypatch) -> Path:
         tmp_path / "llm/providers/ollama-local.yaml",
         """
         name: ollama-local
-        type: ollama
-        base_url: http://127.0.0.1:11434
+        sdk: ollama
         model: gpt-oss
         """,
     )

@@ -21,13 +21,13 @@ from .models import (
     LlmConfigSet,
     NotePayload,
     ProviderConfig,
-    ProviderType,
+    SdkType,
     TaskConfig,
     TaskRunSummary,
 )
 from .prompting import build_instructions
 from .providers import (
-    LlmProvider,
+    AnthropicProvider,
     OllamaProvider,
     OpenAIProvider,
     ProviderFatalError,
@@ -52,12 +52,14 @@ def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
     return deck_name, not task.decks.include_subdecks
 
 
-def _provider_for(config: ProviderConfig) -> LlmProvider:
-    if config.type is ProviderType.OPENAI:
+def _provider_for(config: ProviderConfig):
+    if config.sdk is SdkType.OPENAI:
         return OpenAIProvider(config)
-    if config.type is ProviderType.OLLAMA:
+    if config.sdk is SdkType.ANTHROPIC:
+        return AnthropicProvider(config)
+    if config.sdk is SdkType.OLLAMA:
         return OllamaProvider(config)
-    raise ValueError(f"Unsupported provider type: {config.type.value}")
+    raise ValueError(f"Unsupported sdk: {config.sdk.value}")
 
 
 def _build_note_payload(
@@ -207,7 +209,7 @@ def run_task(
     summary = TaskRunSummary(
         task_name=task.name,
         provider_name=provider.name,
-        provider_type=provider.type,
+        sdk_type=provider.sdk,
         model=model,
     )
 

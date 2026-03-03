@@ -21,27 +21,15 @@ def _note_type_configs(tmp_path: Path):
     return fs.load_note_type_configs(note_types_dir)
 
 
-def test_load_llm_config_set_accepts_valid_exceptions(tmp_path, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_load_llm_config_set_accepts_valid_exceptions(tmp_path):
     note_type_configs = _note_type_configs(tmp_path)
 
     _write(
         tmp_path / "llm/providers/ollama-local.yaml",
         """
         name: ollama-local
-        type: ollama
-        base_url: http://127.0.0.1:11434
+        sdk: ollama
         model: gpt-oss
-        """,
-    )
-    _write(
-        tmp_path / "llm/providers/openai-default.yaml",
-        """
-        name: openai-default
-        type: openai
-        base_url: https://api.openai.com/v1
-        api_key_env: OPENAI_API_KEY
-        model: gpt-5
         """,
     )
     _write(
@@ -63,7 +51,7 @@ def test_load_llm_config_set_accepts_valid_exceptions(tmp_path, monkeypatch):
     assert not config_set.provider_errors
     assert not config_set.task_errors
     assert "grammar" in config_set.tasks_by_name
-    assert "openai-default" in config_set.providers_by_name
+    assert "ollama-local" in config_set.providers_by_name
 
 
 def test_load_llm_config_set_rejects_invalid_exception_field(tmp_path):
@@ -72,8 +60,7 @@ def test_load_llm_config_set_rejects_invalid_exception_field(tmp_path):
         tmp_path / "llm/providers/ollama-local.yaml",
         """
         name: ollama-local
-        type: ollama
-        base_url: http://127.0.0.1:11434
+        sdk: ollama
         model: gpt-oss
         """,
     )
@@ -96,37 +83,13 @@ def test_load_llm_config_set_rejects_invalid_exception_field(tmp_path):
     assert "DoesNotExist" in error
 
 
-def test_load_llm_config_set_rejects_missing_openai_env(tmp_path):
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    note_type_configs = _note_type_configs(tmp_path)
-    _write(
-        tmp_path / "llm/providers/openai-default.yaml",
-        """
-        name: openai-default
-        type: openai
-        base_url: https://api.openai.com/v1
-        api_key_env: OPENAI_API_KEY
-        model: gpt-5
-        """,
-    )
-
-    config_set = load_llm_config_set(tmp_path, note_type_configs=note_type_configs)
-
-    assert not config_set.providers_by_name
-    error = next(iter(config_set.provider_errors.values()))
-    assert "OPENAI_API_KEY" in error
-    monkeypatch.undo()
-
-
 def test_load_llm_config_set_parses_decks_include_subdecks(tmp_path):
     note_type_configs = _note_type_configs(tmp_path)
     _write(
         tmp_path / "llm/providers/ollama-local.yaml",
         """
         name: ollama-local
-        type: ollama
-        base_url: http://127.0.0.1:11434
+        sdk: ollama
         model: gpt-oss
         """,
     )
@@ -155,8 +118,7 @@ def test_load_llm_config_set_rejects_non_boolean_include_subdecks(tmp_path):
         tmp_path / "llm/providers/ollama-local.yaml",
         """
         name: ollama-local
-        type: ollama
-        base_url: http://127.0.0.1:11434
+        sdk: ollama
         model: gpt-oss
         """,
     )

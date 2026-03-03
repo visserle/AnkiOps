@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -18,7 +17,7 @@ from .models import (
     LlmConfigSet,
     LlmSettingsConfig,
     ProviderConfig,
-    ProviderType,
+    SdkType,
     TaskConfig,
     TaskRequestOptions,
 )
@@ -238,16 +237,16 @@ def _parse_provider(path: Path) -> ProviderConfig:
     mapping = _read_yaml_mapping(path)
     name = _require_str(mapping, "name", path)
     _require_name_stem(name, path)
-    provider_type_raw = _require_str(mapping, "type", path)
+    sdk_raw = _require_str(mapping, "sdk", path)
     try:
-        provider_type = ProviderType(provider_type_raw)
+        sdk = SdkType(sdk_raw)
     except ValueError as error:
-        raise LlmConfigError(
-            f"{path}: unsupported provider type '{provider_type_raw}'"
-        ) from error
+        raise LlmConfigError(f"{path}: unsupported sdk '{sdk_raw}'") from error
 
-    base_url = _require_str(mapping, "base_url", path).rstrip("/")
     model = _require_str(mapping, "model", path)
+    base_url = _optional_str(mapping, "base_url", path)
+    if base_url is not None:
+        base_url = base_url.rstrip("/")
     api_key_env = _optional_str(mapping, "api_key_env", path)
     timeout_seconds = mapping.get("timeout_seconds", 60)
     if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
@@ -259,7 +258,7 @@ def _parse_provider(path: Path) -> ProviderConfig:
         set(mapping.keys())
         - {
             "name",
-            "type",
+            "sdk",
             "base_url",
             "model",
             "api_key_env",
@@ -270,18 +269,11 @@ def _parse_provider(path: Path) -> ProviderConfig:
     if unknown:
         raise LlmConfigError(f"{path}: unknown provider key(s): {', '.join(unknown)}")
 
-    if provider_type is ProviderType.OPENAI and not api_key_env:
-        raise LlmConfigError(f"{path}: openai provider requires 'api_key_env'")
-    if api_key_env and not os.environ.get(api_key_env):
-        raise LlmConfigError(
-            f"{path}: required environment variable '{api_key_env}' is not set"
-        )
-
     return ProviderConfig(
         name=name,
-        type=provider_type,
-        base_url=base_url,
+        sdk=sdk,
         model=model,
+        base_url=base_url,
         api_key_env=api_key_env,
         timeout_seconds=timeout_seconds,
         request_defaults=request_defaults,
