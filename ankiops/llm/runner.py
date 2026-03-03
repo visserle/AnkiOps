@@ -290,7 +290,7 @@ def run_task(
                 raise
             except ProviderNoteError as error:
                 summary.errors += 1
-                logger.warning(
+                logger.error(
                     f"LLM note error in {deck_name} ({payload.note_key}): {error}"
                 )
                 continue

@@ -24,6 +24,8 @@ from .errors import ProviderFatalError, ProviderNoteError
 
 logger = logging.getLogger(__name__)
 
+_STRUCTURED_OUTPUTS_BETA = "structured-outputs-2025-11-13"
+
 
 class AnthropicProvider:
     """Provider adapter using the ``anthropic`` SDK."""
@@ -56,6 +58,7 @@ class AnthropicProvider:
             "name": "note_patch",
             "description": "Return the edited note fields.",
             "input_schema": response_schema,
+            "strict": True,
         }
 
         kwargs: dict[str, object] = {
@@ -67,6 +70,7 @@ class AnthropicProvider:
             "tools": [tool_def],
             "tool_choice": {"type": "tool", "name": "note_patch"},
             "max_tokens": request_options.max_output_tokens or 4096,
+            "extra_headers": {"anthropic-beta": _STRUCTURED_OUTPUTS_BETA},
         }
         if request_options.temperature is not None:
             kwargs["temperature"] = request_options.temperature
@@ -98,7 +102,9 @@ def _parse_tool_input(data: dict[str, object]) -> NotePatch:
     note_key = data.get("note_key")
     edits = data.get("edits")
     if not isinstance(note_key, str) or not isinstance(edits, dict):
-        raise ProviderNoteError("Response is missing note_key or edits")
+        raise ProviderNoteError(
+            f"Response is missing note_key or edits (got keys: {list(data.keys())})"
+        )
 
     parsed_fields: dict[str, str] = {}
     for field_name, value in edits.items():
