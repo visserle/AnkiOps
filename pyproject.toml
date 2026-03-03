@@ -17,6 +17,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Education",
 ]
 dependencies = [
@@ -36,7 +38,10 @@ dependencies = [
 Repository = "https://github.com/visserle/AnkiOps"
 Issues = "https://github.com/visserle/AnkiOps/issues"
 
-[project.optional-dependencies]
+[project.scripts]
+ankiops = "ankiops.cli:main"
+
+[dependency-groups]
 dev = [
     "hypothesis>=6.0.0",
     "mypy>=1.12.0",
@@ -46,8 +51,8 @@ dev = [
     "types-PyYAML>=6.0.12.20250915",
 ]
 
-[project.scripts]
-ankiops = "ankiops.cli:main"
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.setuptools.packages.find]
 where = ["."]
