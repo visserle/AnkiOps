@@ -148,17 +148,11 @@ def _load_config_set(
     return config_set, config_by_name
 
 
-def list_tasks(collection_dir: Path) -> tuple[list[TaskConfig], dict[str, str]]:
-    config_set, _ = _load_config_set(collection_dir)
-    return list(config_set.tasks_by_name.values()), config_set.errors
-
-
 def run_task(
     *,
     collection_dir: Path,
     task_name: str,
     model_override: str | None = None,
-    dry_run: bool = False,
     no_auto_commit: bool = False,
 ) -> TaskRunSummary:
     config_set, note_type_configs = _load_config_set(collection_dir)
@@ -261,9 +255,7 @@ def run_task(
             else:
                 summary.unchanged += 1
 
-    if dry_run:
-        logger.info("Dry run: no files written")
-    elif summary.updated > 0:
+    if summary.updated > 0:
         deserialize_collection_data(data, overwrite=True)
 
     logger.info(summary.format())

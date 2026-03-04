@@ -20,7 +20,8 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.llm.runner import list_tasks, run_task
+from ankiops.llm.config_loader import load_llm_task_catalog
+from ankiops.llm.runner import run_task
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
@@ -255,37 +256,37 @@ def run_deserialize(args):
     )
 
 
-def _exit_with_llm_config_errors(errors: dict[str, str]) -> None:
-    for message in errors.values():
-        logger.error(message)
-    raise SystemExit(1)
-
-
-def run_llm_tasks(_args):
-    """List configured LLM tasks."""
+def run_llm(args):
+    """List configured LLM tasks or execute one by name."""
     collection_dir = require_initialized_collection_dir()
-    tasks, errors = list_tasks(collection_dir)
-    if tasks:
-        for task in sorted(tasks, key=lambda task_config: task_config.name):
-            include = ",".join(task.decks.include)
-            exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
-            logger.info(
-                f"{task.name}  model={task.model}  include={include}  "
-                f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
-            )
-    if errors:
-        _exit_with_llm_config_errors(errors)
+    if args.task_name is None:
+        note_type_configs = FileSystemAdapter().load_note_type_configs(
+            get_note_types_dir()
+        )
+        catalog = load_llm_task_catalog(
+            collection_dir,
+            note_type_configs=note_type_configs,
+        )
+        tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
+        if tasks:
+            for task in tasks:
+                include = ",".join(task.decks.include)
+                exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
+                logger.info(
+                    f"{task.name}  model={task.model}  include={include}  "
+                    f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
+                )
+        if catalog.errors:
+            for message in catalog.errors.values():
+                logger.error(message)
+            raise SystemExit(1)
+        return
 
-
-def run_llm_run(args):
-    """Execute a configured LLM task."""
-    collection_dir = require_initialized_collection_dir()
     try:
         run_task(
             collection_dir=collection_dir,
             task_name=args.task_name,
             model_override=args.model,
-            dry_run=args.dry_run,
             no_auto_commit=args.no_auto_commit,
         )
     except ValueError as error:
@@ -385,37 +386,24 @@ def main():
 
     llm_parser = subparsers.add_parser(
         "llm",
-        help="Run LLM tasks against the local collection",
+        help="List configured LLM tasks or run one by name",
     )
-    llm_subparsers = llm_parser.add_subparsers(dest="llm_command", required=True)
-
-    llm_tasks_parser = llm_subparsers.add_parser(
-        "tasks",
-        help="List configured LLM tasks",
+    llm_parser.add_argument(
+        "task_name",
+        nargs="?",
+        help="Task name to run (omit to list configured tasks)",
     )
-    llm_tasks_parser.set_defaults(handler=run_llm_tasks)
-
-    llm_run_parser = llm_subparsers.add_parser(
-        "run",
-        help="Run a configured LLM task",
-    )
-    llm_run_parser.add_argument("task_name", help="Task name to run")
-    llm_run_parser.add_argument(
+    llm_parser.add_argument(
         "--model",
         help="Override the resolved model",
     )
-    llm_run_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run the task without writing markdown files",
-    )
-    llm_run_parser.add_argument(
+    llm_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
         help="Skip the automatic git commit for this operation",
     )
-    llm_run_parser.set_defaults(handler=run_llm_run)
+    llm_parser.set_defaults(handler=run_llm)
 
     args = parser.parse_args()
 
@@ -461,7 +449,11 @@ def main():
             "  ankiops deserialize -i my-deck.json          "
             "# Deserialize file, then run init"
         )
-        print("  ankiops llm run grammar                       # Run the grammar task")
+        print(
+            "  ankiops llm                                  "
+            "# List configured LLM tasks"
+        )
+        print("  ankiops llm grammar                          # Run the grammar task")
         print()
         print("For more information:")
         print("  ankiops --help                 # Show general help")

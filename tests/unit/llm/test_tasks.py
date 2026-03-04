@@ -278,7 +278,6 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     summary = run_task(
         collection_dir=collection,
         task_name="grammar",
-        dry_run=False,
         no_auto_commit=True,
     )
 
@@ -312,7 +311,6 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch):
         run_task(
             collection_dir=collection,
             task_name="grammar",
-            dry_run=True,
             no_auto_commit=True,
         )
 
@@ -400,7 +398,6 @@ def test_run_task_uses_expected_serialize_scope(
     run_task(
         collection_dir=collection,
         task_name="grammar",
-        dry_run=True,
         no_auto_commit=True,
     )
 
