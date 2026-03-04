@@ -1,4 +1,4 @@
-"""Prompt helpers for the LLM task runner."""
+"""Prompt helpers for Claude task requests."""
 
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ Do not use null values anywhere in edits.
 Use an empty string only when you intentionally want to clear a field."""
 
 
-def build_instructions(task_prompt: str) -> str:
-    """Build the final instructions sent to the model."""
-    return f"{_SYSTEM_PROMPT}\n\nTask instructions:\n{task_prompt.strip()}"
+def build_system_prompt() -> str:
+    """Build the stable Claude system prompt."""
+    return _SYSTEM_PROMPT
 
 
-def build_user_payload(note_payload: NotePayload) -> str:
-    """Serialize the note payload for the model request."""
+def build_user_message(task_prompt: str, note_payload: NotePayload) -> str:
+    """Build the user turn with explicit task and note context."""
     payload: dict[str, object] = {
         "note_key": note_payload.note_key,
         "note_type": note_payload.note_type,
@@ -34,4 +34,5 @@ def build_user_payload(note_payload: NotePayload) -> str:
     }
     if note_payload.read_only_fields:
         payload["read_only_fields"] = note_payload.read_only_fields
-    return json.dumps(payload, ensure_ascii=False, indent=2)
+    note_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    return f"<task>\n{task_prompt.strip()}\n</task>\n\n<note>\n{note_json}\n</note>"

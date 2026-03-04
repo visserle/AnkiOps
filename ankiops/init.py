@@ -8,7 +8,6 @@ from pathlib import Path
 from ankiops.config import (
     ANKIOPS_DB,
     LLM_DIR,
-    LLM_PROVIDERS_DIR,
     LLM_TASKS_DIR,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -77,42 +76,24 @@ def _setup_git(collection_dir: Path):
     logger.info(f"Initialized git repository in {collection_dir}")
 
 
-def _copy_llm_template(
-    collection_dir: Path,
-    *,
-    resource_path: str,
-    target_relative_path: str,
-) -> None:
+def _eject_llm_tasks(collection_dir: Path) -> None:
     from importlib import resources
 
-    destination = collection_dir / target_relative_path
-    if destination.exists():
-        return
+    tasks_dir = collection_dir / LLM_DIR / LLM_TASKS_DIR
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    for resource in resources.files("ankiops.llm.tasks").iterdir():
+        if not resource.is_file() or resource.suffix != ".yaml":
+            continue
 
-    resource = resources.files("ankiops.llm.templates").joinpath(resource_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
+        destination = tasks_dir / resource.name
+        if destination.exists():
+            continue
+
+        destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _setup_llm_configs(collection_dir: Path) -> None:
-    llm_root = collection_dir / LLM_DIR
-    (llm_root / LLM_TASKS_DIR).mkdir(parents=True, exist_ok=True)
-    (llm_root / LLM_PROVIDERS_DIR).mkdir(parents=True, exist_ok=True)
-
-    templates = [
-        "config.yaml",
-        f"{LLM_TASKS_DIR}/grammar.yaml",
-        f"{LLM_PROVIDERS_DIR}/ollama-local.yaml",
-        f"{LLM_PROVIDERS_DIR}/openai-default.yaml",
-        f"{LLM_PROVIDERS_DIR}/groq.yaml",
-        f"{LLM_PROVIDERS_DIR}/anthropic.yaml",
-    ]
-    for template in templates:
-        _copy_llm_template(
-            collection_dir,
-            resource_path=template,
-            target_relative_path=f"{LLM_DIR}/{template}",
-        )
+    _eject_llm_tasks(collection_dir)
 
 
 def initialize_collection(profile: str) -> Path:

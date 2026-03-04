@@ -1,4 +1,4 @@
-"""Execution of collection-local LLM tasks."""
+"""Execution of collection-local Claude tasks."""
 
 from __future__ import annotations
 
@@ -15,23 +15,15 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 
-from .config_loader import load_llm_config_set
+from .claude import ClaudeClient
+from .config_loader import load_llm_task_catalog
+from .errors import LlmFatalError, LlmNoteError
 from .models import (
     FieldAccess,
-    LlmConfigSet,
     NotePayload,
-    ProviderConfig,
-    SdkType,
+    TaskCatalog,
     TaskConfig,
     TaskRunSummary,
-)
-from .prompting import build_instructions
-from .providers import (
-    AnthropicProvider,
-    OllamaProvider,
-    OpenAIProvider,
-    ProviderFatalError,
-    ProviderNoteError,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,16 +42,6 @@ def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
         return None, False
 
     return deck_name, not task.decks.include_subdecks
-
-
-def _provider_for(config: ProviderConfig):
-    if config.sdk is SdkType.OPENAI:
-        return OpenAIProvider(config)
-    if config.sdk is SdkType.ANTHROPIC:
-        return AnthropicProvider(config)
-    if config.sdk is SdkType.OLLAMA:
-        return OllamaProvider(config)
-    raise ValueError(f"Unsupported sdk: {config.sdk.value}")
 
 
 def _build_note_payload(
@@ -116,21 +98,21 @@ def _apply_note_patch(
     note_type_config,
 ) -> bool:
     if payload.note_key != serialized_note.get("note_key"):
-        raise ProviderNoteError("Patch note_key did not match serialized note")
+        raise LlmNoteError("Patch note_key did not match serialized note")
 
     raw_fields = serialized_note.get("fields")
     if not isinstance(raw_fields, dict):
-        raise ProviderNoteError("Serialized note fields must be a mapping")
+        raise LlmNoteError("Serialized note fields must be a mapping")
 
     next_fields = dict(raw_fields)
     changed = False
     for field_name, value in edits.items():
         if field_name not in payload.editable_fields:
             if field_name in payload.read_only_fields:
-                raise ProviderNoteError(
+                raise LlmNoteError(
                     f"Model attempted to update read-only field '{field_name}'"
                 )
-            raise ProviderNoteError(
+            raise LlmNoteError(
                 f"Model attempted to update hidden or unknown field '{field_name}'"
             )
         if next_fields.get(field_name) != value:
@@ -147,7 +129,7 @@ def _apply_note_patch(
     )
     errors = note.validate(note_type_config)
     if errors:
-        raise ProviderNoteError("; ".join(errors))
+        raise LlmNoteError("; ".join(errors))
 
     serialized_note["fields"] = next_fields
     return True
@@ -155,10 +137,10 @@ def _apply_note_patch(
 
 def _load_config_set(
     collection_dir: Path,
-) -> tuple[LlmConfigSet, dict[str, NoteTypeConfig]]:
+) -> tuple[TaskCatalog, dict[str, NoteTypeConfig]]:
     fs = FileSystemAdapter()
     note_type_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
-    config_set = load_llm_config_set(
+    config_set = load_llm_task_catalog(
         collection_dir,
         note_type_configs=note_type_configs,
     )
@@ -168,21 +150,13 @@ def _load_config_set(
 
 def list_tasks(collection_dir: Path) -> tuple[list[TaskConfig], dict[str, str]]:
     config_set, _ = _load_config_set(collection_dir)
-    errors = {**config_set.provider_errors, **config_set.task_errors}
-    return list(config_set.tasks_by_name.values()), errors
-
-
-def list_providers(collection_dir: Path) -> tuple[list[ProviderConfig], dict[str, str]]:
-    config_set, _ = _load_config_set(collection_dir)
-    errors = {**config_set.provider_errors, **config_set.task_errors}
-    return list(config_set.providers_by_name.values()), errors
+    return list(config_set.tasks_by_name.values()), config_set.errors
 
 
 def run_task(
     *,
     collection_dir: Path,
     task_name: str,
-    provider_override: str | None = None,
     model_override: str | None = None,
     dry_run: bool = False,
     no_auto_commit: bool = False,
@@ -193,23 +167,12 @@ def run_task(
     if task is None:
         raise ValueError(f"Unknown or invalid task '{task_name}'")
 
-    provider_name = provider_override or config_set.settings.default_provider
-    if not provider_name:
-        raise ValueError(
-            "No provider resolved. Set llm/config.yaml 'default_provider' "
-            "or pass --provider."
-        )
-    provider = config_set.providers_by_name.get(provider_name)
-    if provider is None:
-        raise ValueError(f"Unknown or invalid provider '{provider_name}'")
-
-    model = model_override or provider.model
-    request_options = provider.request_defaults.merged(task.request)
-    provider_client = _provider_for(provider)
+    model = model_override or task.model
+    if not model.startswith("claude-"):
+        raise ValueError("Only Anthropic Claude models are supported")
+    provider_client = ClaudeClient(task)
     summary = TaskRunSummary(
         task_name=task.name,
-        provider_name=provider.name,
-        sdk_type=provider.sdk,
         model=model,
     )
 
@@ -223,8 +186,6 @@ def run_task(
         deck=deck,
         no_subdecks=no_subdecks,
     )
-    instructions = build_instructions(task.prompt)
-
     decks = data.get("decks")
     if not isinstance(decks, list):
         raise ValueError("Serialized collection is missing a decks list")
@@ -274,21 +235,21 @@ def run_task(
             try:
                 patch = provider_client.generate_patch(
                     note_payload=payload,
-                    instructions=instructions,
-                    request_options=request_options,
+                    task_prompt=task.prompt,
+                    request_options=task.request,
                     model=model,
                 )
                 if patch.note_key != payload.note_key:
-                    raise ProviderNoteError("Model returned mismatched note_key")
+                    raise LlmNoteError("Model returned mismatched note_key")
                 changed = _apply_note_patch(
                     serialized_note=note,
                     payload=payload,
                     edits=patch.edits,
                     note_type_config=note_type_config,
                 )
-            except ProviderFatalError:
+            except LlmFatalError:
                 raise
-            except ProviderNoteError as error:
+            except LlmNoteError as error:
                 summary.errors += 1
                 logger.error(
                     f"LLM note error in {deck_name} ({payload.note_key}): {error}"

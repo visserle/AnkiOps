@@ -1,4 +1,6 @@
+# Set ANTHROPIC_API_KEY in your environment before running this task.
 name: grammar
+model: claude-sonnet-4-20250514
 
 decks:
   include: ["*"]
@@ -18,3 +20,4 @@ fields:
 
 request:
   temperature: 0
+  max_output_tokens: 2048

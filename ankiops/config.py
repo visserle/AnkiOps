@@ -11,7 +11,6 @@ NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 LLM_DIR = "llm"
 LLM_TASKS_DIR = "tasks"
-LLM_PROVIDERS_DIR = "providers"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -94,13 +93,8 @@ def get_llm_dir() -> Path:
 
 
 def get_llm_tasks_dir() -> Path:
-    """Get the task config directory path."""
+    """Get the Claude task config directory path."""
     return get_llm_dir() / LLM_TASKS_DIR
-
-
-def get_llm_providers_dir() -> Path:
-    """Get the provider config directory path."""
-    return get_llm_dir() / LLM_PROVIDERS_DIR
 
 
 def require_initialized_collection_dir() -> Path:

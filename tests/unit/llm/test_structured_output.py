@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
 
-from ankiops.llm.models import NotePayload
+from ankiops.llm.models import NotePatch, NotePayload
 from ankiops.llm.structured_output import (
+    NotePatchContract,
     StructuredOutputError,
     build_note_patch_contract,
     parse_note_patch_json,
@@ -11,8 +14,16 @@ from ankiops.llm.structured_output import (
 )
 
 
-@pytest.fixture()
-def note_payload():
+def _parse(contract: NotePatchContract, payload: str) -> NotePatch:
+    return parse_note_patch_json(payload, contract=contract)
+
+
+def _validate(contract: NotePatchContract, payload: object) -> NotePatch:
+    return validate_note_patch_data(payload, contract=contract)
+
+
+@pytest.fixture
+def note_payload() -> NotePayload:
     return NotePayload(
         note_key="nk-1",
         note_type="AnkiOpsQA",
@@ -24,9 +35,14 @@ def note_payload():
     )
 
 
-def test_build_note_patch_contract_uses_exact_editable_fields(note_payload):
-    contract = build_note_patch_contract(note_payload)
+@pytest.fixture
+def contract(note_payload: NotePayload) -> NotePatchContract:
+    return build_note_patch_contract(note_payload)
 
+
+def test_build_note_patch_contract_uses_exact_editable_fields(
+    contract: NotePatchContract,
+):
     assert contract.editable_fields == frozenset({"Question Text", "AI Notes"})
     assert contract.schema == {
         "type": "object",
@@ -46,115 +62,93 @@ def test_build_note_patch_contract_uses_exact_editable_fields(note_payload):
     }
 
 
-def test_parse_note_patch_json_accepts_sparse_edits(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    patch = parse_note_patch_json(
-        '{"note_key":"nk-1","edits":{"AI Notes":"Updated"}}',
-        contract=contract,
-    )
+@pytest.mark.parametrize(
+    ("loader", "payload", "expected_edits"),
+    [
+        (
+            _parse,
+            '{"note_key":"nk-1","edits":{"AI Notes":"Updated"}}',
+            {"AI Notes": "Updated"},
+        ),
+        (
+            _validate,
+            {"note_key": "nk-1", "edits": {}},
+            {},
+        ),
+        (
+            _validate,
+            {"note_key": "nk-1", "edits": {"Question Text": ""}},
+            {"Question Text": ""},
+        ),
+    ],
+    ids=["sparse-json-edits", "empty-edits", "empty-string-clears"],
+)
+def test_note_patch_validation_accepts_valid_payloads(
+    contract: NotePatchContract,
+    loader: Callable[[NotePatchContract, object], NotePatch],
+    payload: object,
+    expected_edits: dict[str, str],
+):
+    patch = loader(contract, payload)
 
     assert patch.note_key == "nk-1"
-    assert patch.edits == {"AI Notes": "Updated"}
+    assert patch.edits == expected_edits
 
 
-def test_validate_note_patch_data_allows_empty_edits(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    patch = validate_note_patch_data(
-        {"note_key": "nk-1", "edits": {}},
-        contract=contract,
-    )
-
-    assert patch.edits == {}
-
-
-def test_validate_note_patch_data_allows_empty_string_field_clears(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    patch = validate_note_patch_data(
-        {"note_key": "nk-1", "edits": {"Question Text": ""}},
-        contract=contract,
-    )
-
-    assert patch.edits == {"Question Text": ""}
-
-
-def test_parse_note_patch_json_rejects_null_values(note_payload):
-    contract = build_note_patch_contract(note_payload)
-    error_match = (
-        "Structured output validation failed: "
-        "edits.Question Text must be a string"
-    )
-
-    with pytest.raises(StructuredOutputError, match=error_match):
-        parse_note_patch_json(
+@pytest.mark.parametrize(
+    ("loader", "payload", "expected_error"),
+    [
+        (
+            _parse,
+            "not json",
+            "Response was not valid JSON",
+        ),
+        (
+            _parse,
             '{"note_key":"nk-1","edits":{"Question Text":null}}',
-            contract=contract,
-        )
-
-
-def test_validate_note_patch_data_rejects_non_string_edit_values(note_payload):
-    contract = build_note_patch_contract(note_payload)
-    error_match = (
-        "Structured output validation failed: "
-        "edits.Question Text must be a string"
-    )
-
-    with pytest.raises(StructuredOutputError, match=error_match):
-        validate_note_patch_data(
+            "Structured output validation failed: edits.Question Text must be a string",
+        ),
+        (
+            _validate,
             {"note_key": "nk-1", "edits": {"Question Text": 3}},
-            contract=contract,
-        )
-
-
-def test_validate_note_patch_data_rejects_non_object_edits(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    with pytest.raises(
-        StructuredOutputError,
-        match="Structured output validation failed: edits must be an object",
-    ):
-        validate_note_patch_data(
+            "Structured output validation failed: edits.Question Text must be a string",
+        ),
+        (
+            _validate,
             {"note_key": "nk-1", "edits": "Question Text"},
-            contract=contract,
-        )
-
-
-def test_validate_note_patch_data_rejects_missing_note_key(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    with pytest.raises(
-        StructuredOutputError,
-        match="Structured output validation failed: note_key must be a string",
-    ):
-        validate_note_patch_data(
+            "Structured output validation failed: edits must be an object",
+        ),
+        (
+            _validate,
             {"edits": {"Question Text": "Fixed"}},
-            contract=contract,
-        )
-
-
-def test_validate_note_patch_data_rejects_read_only_or_unknown_fields(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    with pytest.raises(
-        StructuredOutputError,
-        match="Structured output validation failed: edits.Source is not editable",
-    ):
-        validate_note_patch_data(
+            "Structured output validation failed: note_key must be a string",
+        ),
+        (
+            _validate,
             {"note_key": "nk-1", "edits": {"Source": "Book"}},
-            contract=contract,
-        )
-
-
-def test_validate_note_patch_data_rejects_top_level_unknown_fields(note_payload):
-    contract = build_note_patch_contract(note_payload)
-
-    with pytest.raises(
-        StructuredOutputError,
-        match="Structured output validation failed: extra is not allowed",
-    ):
-        validate_note_patch_data(
+            "Structured output validation failed: edits.Source is not editable",
+        ),
+        (
+            _validate,
             {"note_key": "nk-1", "edits": {}, "extra": "nope"},
-            contract=contract,
-        )
+            "Structured output validation failed: extra is not allowed",
+        ),
+    ],
+    ids=[
+        "invalid-json",
+        "null-edit-value",
+        "non-string-edit-value",
+        "non-object-edits",
+        "missing-note-key",
+        "read-only-field",
+        "unknown-top-level-field",
+    ],
+)
+def test_note_patch_validation_rejects_invalid_payloads(
+    contract: NotePatchContract,
+    loader: Callable[[NotePatchContract, object], NotePatch],
+    payload: object,
+    expected_error: str,
+):
+    with pytest.raises(StructuredOutputError, match=expected_error):
+        loader(contract, payload)

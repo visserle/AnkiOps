@@ -1,4 +1,4 @@
-"""YAML config loading for LLM tasks and providers."""
+"""YAML config loading for Claude task specs."""
 
 from __future__ import annotations
 
@@ -8,23 +8,20 @@ from typing import Any
 
 import yaml
 
-from ankiops.config import LLM_DIR, LLM_PROVIDERS_DIR, LLM_TASKS_DIR
+from ankiops.config import LLM_DIR, LLM_TASKS_DIR
 from ankiops.models import NoteTypeConfig
 
 from .models import (
     DeckScope,
     FieldExceptionRule,
-    LlmConfigSet,
-    LlmSettingsConfig,
-    ProviderConfig,
-    SdkType,
+    TaskCatalog,
     TaskConfig,
     TaskRequestOptions,
 )
 
 
 class LlmConfigError(ValueError):
-    """Raised when an LLM task or provider config is invalid."""
+    """Raised when a Claude task config is invalid."""
 
 
 def _iter_yaml_files(directory: Path) -> list[Path]:
@@ -100,8 +97,11 @@ def _parse_request_options(value: Any, path: Path) -> TaskRequestOptions:
         raise LlmConfigError(f"{path}: unknown request option(s): {', '.join(unknown)}")
 
     temperature = value.get("temperature")
-    if temperature is not None and not isinstance(temperature, (int, float)):
-        raise LlmConfigError(f"{path}: 'temperature' must be numeric")
+    if temperature is not None:
+        if not isinstance(temperature, (int, float)):
+            raise LlmConfigError(f"{path}: 'temperature' must be numeric")
+        if not 0 <= float(temperature) <= 1:
+            raise LlmConfigError(f"{path}: 'temperature' must be between 0 and 1")
 
     max_output_tokens = value.get("max_output_tokens")
     if max_output_tokens is not None and (
@@ -233,71 +233,18 @@ def _parse_field_exceptions(
     return parsed
 
 
-def _parse_provider(path: Path) -> ProviderConfig:
-    mapping = _read_yaml_mapping(path)
-    name = _require_str(mapping, "name", path)
-    _require_name_stem(name, path)
-    sdk_raw = _require_str(mapping, "sdk", path)
-    try:
-        sdk = SdkType(sdk_raw)
-    except ValueError as error:
-        raise LlmConfigError(f"{path}: unsupported sdk '{sdk_raw}'") from error
-
-    model = _require_str(mapping, "model", path)
-    base_url = _optional_str(mapping, "base_url", path)
-    if base_url is not None:
-        base_url = base_url.rstrip("/")
-    api_key_env = _optional_str(mapping, "api_key_env", path)
-    timeout_seconds = mapping.get("timeout_seconds", 60)
-    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
-        raise LlmConfigError(f"{path}: 'timeout_seconds' must be a positive integer")
-
-    request_defaults = _parse_request_options(mapping.get("request_defaults"), path)
-
-    unknown = sorted(
-        set(mapping.keys())
-        - {
-            "name",
-            "sdk",
-            "base_url",
-            "model",
-            "api_key_env",
-            "timeout_seconds",
-            "request_defaults",
-        }
-    )
-    if unknown:
-        raise LlmConfigError(f"{path}: unknown provider key(s): {', '.join(unknown)}")
-
-    return ProviderConfig(
-        name=name,
-        sdk=sdk,
-        model=model,
-        base_url=base_url,
-        api_key_env=api_key_env,
-        timeout_seconds=timeout_seconds,
-        request_defaults=request_defaults,
-    )
-
-
-def _parse_settings(path: Path) -> LlmSettingsConfig:
-    mapping = _read_yaml_mapping(path)
-    default_provider = _optional_str(mapping, "default_provider", path)
-
-    unknown = sorted(set(mapping.keys()) - {"default_provider"})
-    if unknown:
-        raise LlmConfigError(f"{path}: unknown settings key(s): {', '.join(unknown)}")
-
-    return LlmSettingsConfig(
-        default_provider=default_provider,
-    )
-
-
 def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
     name = _require_str(mapping, "name", path)
     _require_name_stem(name, path)
+    model = _require_str(mapping, "model", path)
+    if not model.startswith("claude-"):
+        raise LlmConfigError(f"{path}: 'model' must be an Anthropic Claude model id")
     prompt = _require_str(mapping, "prompt", path)
+    api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
+    timeout_seconds = mapping.get("timeout_seconds", 60)
+    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        raise LlmConfigError(f"{path}: 'timeout_seconds' must be a positive integer")
     decks = _parse_deck_scope(mapping.get("decks"), path)
     field_exceptions = _parse_field_exceptions(
         mapping.get("fields"),
@@ -307,53 +254,42 @@ def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskC
     request = _parse_request_options(mapping.get("request"), path)
 
     unknown = sorted(
-        set(mapping.keys()) - {"name", "decks", "prompt", "fields", "request"}
+        set(mapping.keys())
+        - {
+            "name",
+            "model",
+            "prompt",
+            "api_key_env",
+            "timeout_seconds",
+            "decks",
+            "fields",
+            "request",
+        }
     )
     if unknown:
         raise LlmConfigError(f"{path}: unknown task key(s): {', '.join(unknown)}")
 
     return TaskConfig(
         name=name,
+        model=model,
         prompt=prompt,
+        api_key_env=api_key_env,
+        timeout_seconds=timeout_seconds,
         decks=decks,
         field_exceptions=field_exceptions,
         request=request,
     )
 
 
-def load_llm_config_set(
+def load_llm_task_catalog(
     collection_dir: Path,
     *,
     note_type_configs: list[NoteTypeConfig],
-) -> LlmConfigSet:
+) -> TaskCatalog:
     llm_dir = collection_dir / LLM_DIR
-    settings_path = llm_dir / "config.yaml"
-    providers_dir = llm_dir / LLM_PROVIDERS_DIR
     tasks_dir = llm_dir / LLM_TASKS_DIR
-
-    settings = LlmSettingsConfig(default_provider=None)
-    providers_by_name: dict[str, ProviderConfig] = {}
     tasks_by_name: dict[str, TaskConfig] = {}
-    provider_errors: dict[str, str] = {}
-    task_errors: dict[str, str] = {}
-
-    if settings_path.exists():
-        try:
-            settings = _parse_settings(settings_path)
-        except LlmConfigError as error:
-            task_errors[str(settings_path)] = str(error)
-
-    if providers_dir.exists():
-        for path in _iter_yaml_files(providers_dir):
-            try:
-                provider = _parse_provider(path)
-                if provider.name in providers_by_name:
-                    raise LlmConfigError(
-                        f"{path}: duplicate provider name '{provider.name}'"
-                    )
-                providers_by_name[provider.name] = provider
-            except LlmConfigError as error:
-                provider_errors[str(path)] = str(error)
+    errors: dict[str, str] = {}
 
     if tasks_dir.exists():
         for path in _iter_yaml_files(tasks_dir):
@@ -363,18 +299,9 @@ def load_llm_config_set(
                     raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
                 tasks_by_name[task.name] = task
             except LlmConfigError as error:
-                task_errors[str(path)] = str(error)
+                errors[str(path)] = str(error)
 
-    if settings.default_provider and settings.default_provider not in providers_by_name:
-        task_errors[str(settings_path)] = (
-            f"{settings_path}: referenced default provider "
-            f"'{settings.default_provider}' is invalid or missing"
-        )
-
-    return LlmConfigSet(
-        settings=settings,
-        providers_by_name=providers_by_name,
+    return TaskCatalog(
         tasks_by_name=tasks_by_name,
-        provider_errors=provider_errors,
-        task_errors=task_errors,
+        errors=errors,
     )

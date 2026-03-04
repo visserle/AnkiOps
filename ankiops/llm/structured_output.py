@@ -24,9 +24,7 @@ class StructuredOutputError(ValueError):
 def build_note_patch_contract(note_payload: NotePayload) -> NotePatchContract:
     """Build the shared JSON schema contract for a note patch response."""
     editable_fields = tuple(note_payload.editable_fields.keys())
-    edit_properties = {
-        field_name: {"type": "string"} for field_name in editable_fields
-    }
+    edit_properties = {field_name: {"type": "string"} for field_name in editable_fields}
     schema: dict[str, object] = {
         "type": "object",
         "properties": {

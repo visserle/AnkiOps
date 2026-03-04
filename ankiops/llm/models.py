@@ -1,4 +1,4 @@
-"""Typed models for the AnkiOps LLM pipeline."""
+"""Typed models for the AnkiOps Claude task pipeline."""
 
 from __future__ import annotations
 
@@ -11,12 +11,6 @@ class FieldAccess(Enum):
     EDIT = "edit"
     READ_ONLY = "read_only"
     HIDDEN = "hidden"
-
-
-class SdkType(Enum):
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    OLLAMA = "ollama"
 
 
 @dataclass(frozen=True)
@@ -76,25 +70,14 @@ class TaskRequestOptions:
     temperature: float | None = None
     max_output_tokens: int | None = None
 
-    def merged(self, override: "TaskRequestOptions") -> "TaskRequestOptions":
-        return TaskRequestOptions(
-            temperature=(
-                override.temperature
-                if override.temperature is not None
-                else self.temperature
-            ),
-            max_output_tokens=(
-                override.max_output_tokens
-                if override.max_output_tokens is not None
-                else self.max_output_tokens
-            ),
-        )
-
 
 @dataclass(frozen=True)
 class TaskConfig:
     name: str
+    model: str
     prompt: str
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
@@ -109,22 +92,6 @@ class TaskConfig:
             if field_name in rule.hidden:
                 access = FieldAccess.HIDDEN
         return access
-
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    name: str
-    sdk: SdkType
-    model: str
-    base_url: str | None = None
-    api_key_env: str | None = None
-    timeout_seconds: int = 60
-    request_defaults: TaskRequestOptions = field(default_factory=TaskRequestOptions)
-
-
-@dataclass(frozen=True)
-class LlmSettingsConfig:
-    default_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -144,8 +111,6 @@ class NotePatch:
 @dataclass
 class TaskRunSummary:
     task_name: str
-    provider_name: str
-    sdk_type: SdkType
     model: str
     eligible: int = 0
     updated: int = 0
@@ -159,15 +124,13 @@ class TaskRunSummary:
             parts.append(f"{self.skipped} skipped")
         if self.errors:
             parts.append(f"{self.errors} errors")
-        return f"LLM task '{self.task_name}': {self.eligible} notes — " + ", ".join(
-            parts
+        return (
+            f"LLM task '{self.task_name}' ({self.model}): {self.eligible} notes — "
+            + ", ".join(parts)
         )
 
 
 @dataclass(frozen=True)
-class LlmConfigSet:
-    settings: LlmSettingsConfig
-    providers_by_name: dict[str, ProviderConfig]
+class TaskCatalog:
     tasks_by_name: dict[str, TaskConfig]
-    provider_errors: dict[str, str]
-    task_errors: dict[str, str]
+    errors: dict[str, str]

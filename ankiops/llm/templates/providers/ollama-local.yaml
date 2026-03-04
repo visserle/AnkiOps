@@ -1,7 +1,0 @@
-# Update the model name to the local model you have installed.
-name: ollama-local
-sdk: ollama
-model: gemma3:4b
-timeout_seconds: 120
-request_defaults:
-  temperature: 0

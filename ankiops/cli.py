@@ -20,7 +20,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.llm.runner import list_providers, list_tasks, run_task
+from ankiops.llm.runner import list_tasks, run_task
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
@@ -270,24 +270,8 @@ def run_llm_tasks(_args):
             include = ",".join(task.decks.include)
             exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
             logger.info(
-                f"{task.name}  include={include}  exclude={exclude}  "
-                f"exceptions={len(task.field_exceptions)}"
-            )
-    if errors:
-        _exit_with_llm_config_errors(errors)
-
-
-def run_llm_providers(_args):
-    """List configured LLM providers."""
-    collection_dir = require_initialized_collection_dir()
-    providers, errors = list_providers(collection_dir)
-    if providers:
-        for provider in sorted(
-            providers,
-            key=lambda provider_config: provider_config.name,
-        ):
-            logger.info(
-                f"{provider.name}  sdk={provider.sdk.value}  model={provider.model}"
+                f"{task.name}  model={task.model}  include={include}  "
+                f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
             )
     if errors:
         _exit_with_llm_config_errors(errors)
@@ -300,7 +284,6 @@ def run_llm_run(args):
         run_task(
             collection_dir=collection_dir,
             task_name=args.task_name,
-            provider_override=args.provider,
             model_override=args.model,
             dry_run=args.dry_run,
             no_auto_commit=args.no_auto_commit,
@@ -412,21 +395,11 @@ def main():
     )
     llm_tasks_parser.set_defaults(handler=run_llm_tasks)
 
-    llm_providers_parser = llm_subparsers.add_parser(
-        "providers",
-        help="List configured LLM providers",
-    )
-    llm_providers_parser.set_defaults(handler=run_llm_providers)
-
     llm_run_parser = llm_subparsers.add_parser(
         "run",
         help="Run a configured LLM task",
     )
     llm_run_parser.add_argument("task_name", help="Task name to run")
-    llm_run_parser.add_argument(
-        "--provider",
-        help="Override llm/config.yaml default_provider",
-    )
     llm_run_parser.add_argument(
         "--model",
         help="Override the resolved model",
