@@ -1,6 +1,6 @@
 # Set ANTHROPIC_API_KEY in your environment before running this task.
 name: grammar
-model: claude-sonnet-4-20250514
+model: claude-sonnet-4-6
 
 decks:
   include: ["*"]

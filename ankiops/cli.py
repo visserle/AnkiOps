@@ -450,8 +450,7 @@ def main():
             "# Deserialize file, then run init"
         )
         print(
-            "  ankiops llm                                  "
-            "# List configured LLM tasks"
+            "  ankiops llm                                  # List configured LLM tasks"
         )
         print("  ankiops llm grammar                          # Run the grammar task")
         print()
