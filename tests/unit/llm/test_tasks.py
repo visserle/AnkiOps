@@ -13,7 +13,7 @@ from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.models import NotePatch
 from ankiops.llm.runner import run_task
 
-TASK_FILE = Path("llm/tasks/grammar.yaml")
+TASK_FILE = Path("llm/grammar.yaml")
 TEST_DECK = "TestDeck"
 TEST_DECK_MARKDOWN = """
 <!-- note_key: nk-1 -->
@@ -125,14 +125,12 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
         for resource in resources.files("ankiops.llm.tasks").iterdir()
         if resource.is_file() and resource.suffix == ".yaml"
     )
-    ejected_tasks = sorted(
-        path.name for path in (tmp_path / "llm/tasks").glob("*.yaml")
-    )
+    ejected_tasks = sorted(path.name for path in (tmp_path / "llm").glob("*.yaml"))
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
     assert "model: claude-sonnet-4-20250514" in (
-        tmp_path / "llm/tasks/grammar.yaml"
+        tmp_path / "llm/grammar.yaml"
     ).read_text(encoding="utf-8")
 
 

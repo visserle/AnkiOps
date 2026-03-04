@@ -8,7 +8,6 @@ from pathlib import Path
 from ankiops.config import (
     ANKIOPS_DB,
     LLM_DIR,
-    LLM_TASKS_DIR,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
@@ -79,13 +78,13 @@ def _setup_git(collection_dir: Path):
 def _eject_llm_tasks(collection_dir: Path) -> None:
     from importlib import resources
 
-    tasks_dir = collection_dir / LLM_DIR / LLM_TASKS_DIR
-    tasks_dir.mkdir(parents=True, exist_ok=True)
+    llm_dir = collection_dir / LLM_DIR
+    llm_dir.mkdir(parents=True, exist_ok=True)
     for resource in resources.files("ankiops.llm.tasks").iterdir():
         if not resource.is_file() or resource.suffix != ".yaml":
             continue
 
-        destination = tasks_dir / resource.name
+        destination = llm_dir / resource.name
         if destination.exists():
             continue
 

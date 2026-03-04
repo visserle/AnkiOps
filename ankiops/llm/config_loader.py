@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from ankiops.config import LLM_DIR, LLM_TASKS_DIR
+from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
 from .models import (
@@ -287,12 +287,11 @@ def load_llm_task_catalog(
     note_type_configs: list[NoteTypeConfig],
 ) -> TaskCatalog:
     llm_dir = collection_dir / LLM_DIR
-    tasks_dir = llm_dir / LLM_TASKS_DIR
     tasks_by_name: dict[str, TaskConfig] = {}
     errors: dict[str, str] = {}
 
-    if tasks_dir.exists():
-        for path in _iter_yaml_files(tasks_dir):
+    if llm_dir.exists():
+        for path in _iter_yaml_files(llm_dir):
             try:
                 task = _parse_task(path, note_type_configs=note_type_configs)
                 if task.name in tasks_by_name:
