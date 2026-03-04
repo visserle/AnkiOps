@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from importlib import resources
 from pathlib import Path
 from textwrap import dedent
@@ -9,8 +10,9 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
+from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.models import NotePatch
+from ankiops.llm.models import GenerateUpdateResult, NoteUpdate
 from ankiops.llm.runner import run_task
 
 TASK_FILE = Path("llm/grammar.yaml")
@@ -47,7 +49,7 @@ def _write(path: Path, content: str) -> None:
 
 def _task_config(
     *,
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "sonnet",
     prompt: str = "fix grammar",
     extra: str = "",
 ) -> str:
@@ -102,11 +104,33 @@ def _prepare_runner_collection(
 
 
 class _StubClient:
-    def __init__(self, patches: list[NotePatch]) -> None:
-        self._patches = patches
+    def __init__(self, results: list[GenerateUpdateResult]) -> None:
+        self._results = results
 
-    def generate_patch(self, **_kwargs) -> NotePatch:
-        return self._patches.pop(0)
+    def generate_update(self, **_kwargs) -> GenerateUpdateResult:
+        return self._results.pop(0)
+
+
+def _result(
+    note_key: str,
+    edits: dict[str, str],
+    *,
+    message_id: str = "msg_123",
+    model: str = "claude-sonnet-4-6",
+    stop_reason: str = "end_turn",
+    input_tokens: int = 11,
+    output_tokens: int = 7,
+    latency_ms: int = 900,
+) -> GenerateUpdateResult:
+    return GenerateUpdateResult(
+        update=NoteUpdate(note_key=note_key, edits=edits),
+        message_id=message_id,
+        model=model,
+        stop_reason=stop_reason,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latency_ms=latency_ms,
+    )
 
 
 @pytest.fixture
@@ -129,7 +153,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
-    assert "model: claude-sonnet-4-20250514" in (
+    assert "model: sonnet" in (
         tmp_path / "llm/grammar.yaml"
     ).read_text(encoding="utf-8")
 
@@ -171,7 +195,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model == "claude-sonnet-4-20250514"
+    assert task.model == SONNET
     assert task.api_key_env == "ANTHROPIC_API_KEY"
     assert task.decks.include == ["Parent"]
     assert task.decks.include_subdecks is False
@@ -203,7 +227,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
         ),
         (
             _task_config(model="gpt-5"),
-            "Claude model id",
+            "must be one of: opus, sonnet, haiku",
         ),
         (
             _task_config(extra="sdk: anthropic"),
@@ -247,7 +271,7 @@ def test_load_llm_task_catalog_ignores_non_task_dirs(
         tmp_path / "llm/providers/anthropic.yaml",
         """
         name: anthropic
-        model: claude-sonnet-4-20250514
+        model: sonnet
         """,
     )
 
@@ -266,11 +290,20 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
         "ankiops.llm.runner.ClaudeClient",
         lambda _task: _StubClient(
             [
-                NotePatch(
-                    note_key="nk-1",
-                    edits={"Question": "This is a fixed question."},
+                _result(
+                    "nk-1",
+                    {"Question": "This is a fixed question."},
+                    input_tokens=21,
+                    output_tokens=9,
+                    latency_ms=1200,
                 ),
-                NotePatch(note_key="nk-2", edits={}),
+                _result(
+                    "nk-2",
+                    {},
+                    input_tokens=13,
+                    output_tokens=4,
+                    latency_ms=800,
+                ),
             ]
         ),
     )
@@ -283,7 +316,11 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 
     content = (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
 
-    assert summary.model == "claude-sonnet-4-20250514"
+    assert summary.model == SONNET
+    assert summary.requests == 2
+    assert summary.input_tokens == 34
+    assert summary.output_tokens == 13
+    assert summary.provider_latency_ms_total == 2000
     assert summary.updated == 1
     assert summary.unchanged == 1
     assert "Q: This is a fixed question." in content
@@ -292,7 +329,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     assert "A: 1" in content
 
 
-def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch):
+def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
@@ -301,21 +338,185 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch):
         "ankiops.llm.runner.ClaudeClient",
         lambda _task: _StubClient(
             [
-                NotePatch(note_key="nk-1", edits={}),
-                NotePatch(note_key="nk-2", edits={"Answer": "2"}),
+                _result(
+                    "nk-1",
+                    {"Question": "This is a fixed question."},
+                    input_tokens=21,
+                    output_tokens=9,
+                    latency_ms=1200,
+                ),
+                _result(
+                    "nk-2",
+                    {},
+                    input_tokens=13,
+                    output_tokens=4,
+                    latency_ms=800,
+                ),
             ]
         ),
     )
 
-    with pytest.raises(SystemExit) as exc:
-        run_task(
+    with caplog.at_level(logging.DEBUG):
+        summary = run_task(
             collection_dir=collection,
             task_name="grammar",
             no_auto_commit=True,
         )
 
+    assert summary.requests == 2
+    assert (
+        "Starting LLM task 'grammar' (model=sonnet, "
+        "api_model=claude-sonnet-4-6"
+    ) in caplog.text
+    assert (
+        "LLM request defaults: timeout=60s max_tokens=2048 temperature=default"
+    ) in caplog.text
+    assert "LLM serializer scope: *" in caplog.text
+    assert "Auto-commit disabled (--no-auto-commit)" in caplog.text
+    assert "Serialized 1 deck(s), 2 note(s) in memory" in caplog.text
+    assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
+    assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
+    assert (
+        "LLM task 'grammar' (sonnet): 2 notes — "
+        "1 updated, 1 unchanged"
+    ) in caplog.text
+    assert (
+        "LLM usage: 2 requests, 34 input tokens, 13 output tokens, "
+        "2.0s provider time"
+    ) in caplog.text
+    assert (
+        "LLM estimated cost: $0.000297 ($0.000102 input + $0.000195 output)"
+    ) in caplog.text
+    assert "Broken" not in caplog.text
+    assert "<task>" not in caplog.text
+    assert '{"note_key"' not in caplog.text
+
+
+def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient(
+            [
+                _result("nk-1", {}),
+                _result("nk-2", {"Answer": "2"}),
+            ]
+        ),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(SystemExit) as exc:
+            run_task(
+                collection_dir=collection,
+                task_name="grammar",
+                no_auto_commit=True,
+            )
+
     assert exc.value.code == 1
     assert "A: 1" in (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
+    assert (
+        "LLM note error for nk-2 in 'TestDeck' (AnkiOpsChoice): "
+        "Model attempted to update read-only field 'Answer'"
+    ) in caplog.text
+    assert (
+        "LLM task 'grammar' (sonnet): 2 notes — "
+        "1 unchanged, 1 error"
+    ) in caplog.text
+    assert (
+        "LLM usage: 2 requests, 22 input tokens, 14 output tokens, "
+        "1.8s provider time"
+    ) in caplog.text
+    assert (
+        "LLM estimated cost: $0.000276 ($0.000066 input + $0.00021 output)"
+    ) in caplog.text
+
+
+def test_run_task_logs_deck_scope_skips(tmp_path, monkeypatch, caplog):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=_task_config(
+            extra="""
+            decks:
+              include: ["Other*"]
+            fields:
+              exceptions:
+                - read_only: ["Source"]
+            """
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient([]),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        summary = run_task(
+            collection_dir=collection,
+            task_name="grammar",
+            no_auto_commit=True,
+        )
+
+    assert summary.decks_seen == 1
+    assert summary.decks_matched == 0
+    assert summary.notes_seen == 2
+    assert summary.skipped_deck_scope == 2
+    assert "Skipping deck 'TestDeck' (2 notes): outside task scope" in caplog.text
+    assert "LLM task 'grammar' (sonnet): 0 notes — 2 skipped" in caplog.text
+
+
+def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+
+    def _fake_serialize(*_args, **_kwargs):
+        return {
+            "collection": {"serialized_at": "2026-03-02T00:00:00Z"},
+            "decks": [
+                {
+                    "name": TEST_DECK,
+                    "notes": [
+                        {
+                            "note_key": "nk-ro",
+                            "note_type": "AnkiOpsQA",
+                            "fields": {
+                                "Source": "grammar book",
+                                "AI Notes": "hidden content",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient([]),
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        summary = run_task(
+            collection_dir=collection,
+            task_name="grammar",
+            no_auto_commit=True,
+        )
+
+    assert summary.notes_seen == 1
+    assert summary.skipped_no_editable_fields == 1
+    assert (
+        "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): "
+        "no editable non-empty fields"
+    ) in caplog.text
+    assert "LLM task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
 
 
 @pytest.mark.parametrize(

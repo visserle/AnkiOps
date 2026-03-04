@@ -4,22 +4,22 @@ from collections.abc import Callable
 
 import pytest
 
-from ankiops.llm.models import NotePatch, NotePayload
+from ankiops.llm.models import NotePayload, NoteUpdate
 from ankiops.llm.structured_output import (
-    NotePatchContract,
+    NoteUpdateContract,
     StructuredOutputError,
-    build_note_patch_contract,
-    parse_note_patch_json,
-    validate_note_patch_data,
+    build_note_update_contract,
+    parse_note_update_json,
+    validate_note_update_data,
 )
 
 
-def _parse(contract: NotePatchContract, payload: str) -> NotePatch:
-    return parse_note_patch_json(payload, contract=contract)
+def _parse(contract: NoteUpdateContract, payload: str) -> NoteUpdate:
+    return parse_note_update_json(payload, contract=contract)
 
 
-def _validate(contract: NotePatchContract, payload: object) -> NotePatch:
-    return validate_note_patch_data(payload, contract=contract)
+def _validate(contract: NoteUpdateContract, payload: object) -> NoteUpdate:
+    return validate_note_update_data(payload, contract=contract)
 
 
 @pytest.fixture
@@ -36,12 +36,12 @@ def note_payload() -> NotePayload:
 
 
 @pytest.fixture
-def contract(note_payload: NotePayload) -> NotePatchContract:
-    return build_note_patch_contract(note_payload)
+def contract(note_payload: NotePayload) -> NoteUpdateContract:
+    return build_note_update_contract(note_payload)
 
 
-def test_build_note_patch_contract_uses_exact_editable_fields(
-    contract: NotePatchContract,
+def test_build_note_update_contract_uses_exact_editable_fields(
+    contract: NoteUpdateContract,
 ):
     assert contract.editable_fields == frozenset({"Question Text", "AI Notes"})
     assert contract.schema == {
@@ -83,16 +83,16 @@ def test_build_note_patch_contract_uses_exact_editable_fields(
     ],
     ids=["sparse-json-edits", "empty-edits", "empty-string-clears"],
 )
-def test_note_patch_validation_accepts_valid_payloads(
-    contract: NotePatchContract,
-    loader: Callable[[NotePatchContract, object], NotePatch],
+def test_note_update_validation_accepts_valid_payloads(
+    contract: NoteUpdateContract,
+    loader: Callable[[NoteUpdateContract, object], NoteUpdate],
     payload: object,
     expected_edits: dict[str, str],
 ):
-    patch = loader(contract, payload)
+    update = loader(contract, payload)
 
-    assert patch.note_key == "nk-1"
-    assert patch.edits == expected_edits
+    assert update.note_key == "nk-1"
+    assert update.edits == expected_edits
 
 
 @pytest.mark.parametrize(
@@ -144,9 +144,9 @@ def test_note_patch_validation_accepts_valid_payloads(
         "unknown-top-level-field",
     ],
 )
-def test_note_patch_validation_rejects_invalid_payloads(
-    contract: NotePatchContract,
-    loader: Callable[[NotePatchContract, object], NotePatch],
+def test_note_update_validation_rejects_invalid_payloads(
+    contract: NoteUpdateContract,
+    loader: Callable[[NoteUpdateContract, object], NoteUpdate],
     payload: object,
     expected_error: str,
 ):

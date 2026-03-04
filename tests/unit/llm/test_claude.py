@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.claude import ClaudeClient
 from ankiops.llm.errors import LlmFatalError, LlmNoteError
 from ankiops.llm.models import NotePayload, TaskConfig, TaskRequestOptions
@@ -18,10 +20,24 @@ def _extract_note_json(message: str) -> dict[str, object]:
     return json.loads(message[start:end])
 
 
-def _response(*, blocks: list[object], stop_reason: str = "end_turn") -> MagicMock:
+def _response(
+    *,
+    blocks: list[object],
+    stop_reason: str = "end_turn",
+    message_id: str = "msg_123",
+    model: str = "claude-sonnet-4-6",
+    input_tokens: int = 311,
+    output_tokens: int = 37,
+) -> MagicMock:
     response = MagicMock()
+    response.id = message_id
+    response.model = model
     response.content = blocks
     response.stop_reason = stop_reason
+    response.usage = SimpleNamespace(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
     return response
 
 
@@ -29,7 +45,7 @@ def _response(*, blocks: list[object], stop_reason: str = "end_turn") -> MagicMo
 def task_config() -> TaskConfig:
     return TaskConfig(
         name="grammar",
-        model="claude-sonnet-4-20250514",
+        model=SONNET,
         prompt="Fix grammar",
         api_key_env="ANTHROPIC_API_KEY",
     )
@@ -51,9 +67,11 @@ def note_payload() -> NotePayload:
     )
 
 
-def test_generate_patch_builds_request_and_returns_patch(
+def test_generate_update_builds_request_and_returns_update(
     client: ClaudeClient,
     note_payload: NotePayload,
+    monkeypatch,
+    caplog,
 ):
     response = _response(
         blocks=[
@@ -63,24 +81,34 @@ def test_generate_patch_builds_request_and_returns_patch(
             )
         ]
     )
+    monotonic = iter([100.0, 102.172])
+    monkeypatch.setattr("ankiops.llm.claude.time.monotonic", lambda: next(monotonic))
 
-    with patch.object(
-        client._client.messages,
-        "create",
-        return_value=response,
-    ) as create:
-        patch_result = client.generate_patch(
+    with (
+        patch.object(
+            client._client.messages,
+            "create",
+            return_value=response,
+        ) as create,
+        caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
+    ):
+        update_result = client.generate_update(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
-            model="claude-sonnet-4-20250514",
+            api_model="claude-sonnet-4-6",
         )
 
-    assert patch_result.note_key == "nk-1"
-    assert patch_result.edits == {"Question": "Fixed"}
+    assert update_result.update.note_key == "nk-1"
+    assert update_result.update.edits == {"Question": "Fixed"}
+    assert update_result.message_id == "msg_123"
+    assert update_result.model == "claude-sonnet-4-6"
+    assert update_result.input_tokens == 311
+    assert update_result.output_tokens == 37
+    assert update_result.latency_ms == 2172
 
     call_kwargs = create.call_args.kwargs
-    assert call_kwargs["model"] == "claude-sonnet-4-20250514"
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
     assert call_kwargs["system"] == build_system_prompt()
     assert "<task>\nFix grammar\n</task>" in call_kwargs["messages"][0]["content"]
     assert _extract_note_json(call_kwargs["messages"][0]["content"]) == {
@@ -95,6 +123,16 @@ def test_generate_patch_builds_request_and_returns_patch(
     schema = call_kwargs["output_config"]["format"]["schema"]
     assert "Question" in schema["properties"]["edits"]["properties"]
     assert "required" not in schema["properties"]["edits"]
+    assert (
+        "Requesting update for nk-1 (AnkiOpsQA, editable=1, read_only=1)"
+    ) in caplog.text
+    assert (
+        "Response for nk-1: message_id=msg_123, stop_reason=end_turn, "
+        "input_tokens=311, output_tokens=37, latency_ms=2172"
+    ) in caplog.text
+    assert "Broken" not in caplog.text
+    assert "<task>" not in caplog.text
+    assert '{"note_key"' not in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -113,26 +151,37 @@ def test_generate_patch_builds_request_and_returns_patch(
     ],
     ids=["refusal", "missing-json-text"],
 )
-def test_generate_patch_rejects_note_level_failures(
+def test_generate_update_rejects_note_level_failures(
     client: ClaudeClient,
     note_payload: NotePayload,
     blocks: list[object],
     stop_reason: str,
     expected_error: str,
+    caplog,
 ):
     response = _response(blocks=blocks, stop_reason=stop_reason)
 
-    with patch.object(client._client.messages, "create", return_value=response):
+    with (
+        patch.object(client._client.messages, "create", return_value=response),
+        caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
+    ):
         with pytest.raises(LlmNoteError, match=expected_error):
-            client.generate_patch(
+            client.generate_update(
                 note_payload=note_payload,
                 task_prompt="Fix grammar",
                 request_options=TaskRequestOptions(),
-                model="claude-sonnet-4-20250514",
+                api_model="claude-sonnet-4-6",
             )
 
+    assert (
+        "Requesting update for nk-1 (AnkiOpsQA, editable=1, read_only=1)"
+    ) in caplog.text
+    assert "Response for nk-1: message_id=msg_123" in caplog.text
+    assert "Broken" not in caplog.text
+    assert "<task>" not in caplog.text
 
-def test_generate_patch_surfaces_unsupported_model_as_fatal(
+
+def test_generate_update_surfaces_unsupported_model_as_fatal(
     client: ClaudeClient,
     note_payload: NotePayload,
 ):
@@ -142,7 +191,7 @@ def test_generate_patch_surfaces_unsupported_model_as_fatal(
         message=(
             "Error code: 400 - {'type': 'error', 'error': "
             "{'type': 'invalid_request_error', 'message': "
-            "\"'claude-sonnet-4-20250514' does not support output format.\"}}"
+            "\"'claude-sonnet-4-6' does not support output format.\"}}"
         ),
         response=MagicMock(status_code=400),
         body=None,
@@ -153,11 +202,11 @@ def test_generate_patch_surfaces_unsupported_model_as_fatal(
             LlmFatalError,
             match="Configured Anthropic model does not support structured outputs",
         ):
-            client.generate_patch(
+            client.generate_update(
                 note_payload=note_payload,
                 task_prompt="Fix grammar",
                 request_options=TaskRequestOptions(),
-                model="claude-sonnet-4-20250514",
+                api_model="claude-sonnet-4-6",
             )
 
 

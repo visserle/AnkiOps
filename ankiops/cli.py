@@ -20,7 +20,9 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
+from ankiops.llm.anthropic_models import supported_model_names
 from ankiops.llm.config_loader import load_llm_task_catalog
+from ankiops.llm.errors import LlmFatalError
 from ankiops.llm.runner import run_task
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
@@ -292,6 +294,9 @@ def run_llm(args):
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error
+    except LlmFatalError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
 
 
 def main():
@@ -395,7 +400,8 @@ def main():
     )
     llm_parser.add_argument(
         "--model",
-        help="Override the resolved model",
+        choices=supported_model_names(),
+        help="Override model class (opus, sonnet, haiku)",
     )
     llm_parser.add_argument(
         "--no-auto-commit",
@@ -408,8 +414,7 @@ def main():
     args = parser.parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO
-    ignored_libraries = ["urllib3.connectionpool"]
-    configure_logging(stream_level=log_level, ignore_libs=ignored_libraries)
+    configure_logging(stream_level=log_level)
 
     if hasattr(args, "handler"):
         args.handler(args)

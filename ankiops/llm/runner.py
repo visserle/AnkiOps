@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -15,13 +16,14 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 
+from .anthropic_models import format_supported_model_names, parse_model
 from .claude import ClaudeClient
 from .config_loader import load_llm_task_catalog
 from .errors import LlmFatalError, LlmNoteError
 from .models import (
     FieldAccess,
+    GenerateUpdateResult,
     NotePayload,
-    TaskCatalog,
     TaskConfig,
     TaskRunSummary,
 )
@@ -42,6 +44,49 @@ def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
         return None, False
 
     return deck_name, not task.decks.include_subdecks
+
+
+def _format_deck_scope(task: TaskConfig) -> str:
+    include = ",".join(task.decks.include)
+    exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
+    if include == "*" and exclude == "-" and task.decks.include_subdecks:
+        return "*"
+    return (
+        f"include={include} exclude={exclude} "
+        f"include_subdecks={str(task.decks.include_subdecks).lower()}"
+    )
+
+
+def _format_serializer_scope(deck: str | None, no_subdecks: bool) -> str:
+    if deck is None:
+        return "*"
+    if no_subdecks:
+        return f"exact:{deck}"
+    return deck
+
+
+def _format_request_defaults(task: TaskConfig) -> str:
+    max_tokens = task.request.max_output_tokens or 2048
+    temperature = (
+        task.request.temperature
+        if task.request.temperature is not None
+        else "default"
+    )
+    return (
+        f"timeout={task.timeout_seconds}s "
+        f"max_tokens={max_tokens} temperature={temperature}"
+    )
+
+
+def _resolve_model(task: TaskConfig, model_override: str | None):
+    if model_override is None:
+        return task.model
+
+    model = parse_model(model_override)
+    if model is None:
+        supported = format_supported_model_names()
+        raise ValueError(f"Model must be one of: {supported}")
+    return model
 
 
 def _build_note_payload(
@@ -90,22 +135,22 @@ def _build_note_payload(
     )
 
 
-def _apply_note_patch(
+def _apply_note_update(
     *,
     serialized_note: dict[str, Any],
     payload: NotePayload,
     edits: dict[str, str],
-    note_type_config,
-) -> bool:
+    note_type_config: NoteTypeConfig,
+) -> list[str]:
     if payload.note_key != serialized_note.get("note_key"):
-        raise LlmNoteError("Patch note_key did not match serialized note")
+        raise LlmNoteError("Update note_key did not match serialized note")
 
     raw_fields = serialized_note.get("fields")
     if not isinstance(raw_fields, dict):
         raise LlmNoteError("Serialized note fields must be a mapping")
 
     next_fields = dict(raw_fields)
-    changed = False
+    changed_fields: list[str] = []
     for field_name, value in edits.items():
         if field_name not in payload.editable_fields:
             if field_name in payload.read_only_fields:
@@ -117,10 +162,10 @@ def _apply_note_patch(
             )
         if next_fields.get(field_name) != value:
             next_fields[field_name] = value
-            changed = True
+            changed_fields.append(field_name)
 
-    if not changed:
-        return False
+    if not changed_fields:
+        return []
 
     note = Note(
         note_key=payload.note_key,
@@ -132,54 +177,33 @@ def _apply_note_patch(
         raise LlmNoteError("; ".join(errors))
 
     serialized_note["fields"] = next_fields
-    return True
+    return changed_fields
 
 
-def _load_config_set(
-    collection_dir: Path,
-) -> tuple[TaskCatalog, dict[str, NoteTypeConfig]]:
-    fs = FileSystemAdapter()
-    note_type_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
-    config_set = load_llm_task_catalog(
-        collection_dir,
-        note_type_configs=note_type_configs,
-    )
-    config_by_name = {config.name: config for config in note_type_configs}
-    return config_set, config_by_name
-
-
-def run_task(
+def _load_task(
     *,
     collection_dir: Path,
     task_name: str,
-    model_override: str | None = None,
-    no_auto_commit: bool = False,
-) -> TaskRunSummary:
-    config_set, note_type_configs = _load_config_set(collection_dir)
-
-    task = config_set.tasks_by_name.get(task_name)
+) -> tuple[TaskConfig, dict[str, NoteTypeConfig]]:
+    fs = FileSystemAdapter()
+    note_type_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
+    catalog = load_llm_task_catalog(
+        collection_dir,
+        note_type_configs=note_type_configs,
+    )
+    task = catalog.tasks_by_name.get(task_name)
     if task is None:
         raise ValueError(f"Unknown or invalid task '{task_name}'")
 
-    model = model_override or task.model
-    if not model.startswith("claude-"):
-        raise ValueError("Only Anthropic Claude models are supported")
-    provider_client = ClaudeClient(task)
-    summary = TaskRunSummary(
-        task_name=task.name,
-        model=model,
-    )
+    config_by_name = {config.name: config for config in note_type_configs}
+    return task, config_by_name
 
-    if not no_auto_commit:
-        git_snapshot(collection_dir, f"llm:{task.name}")
 
-    deck, no_subdecks = _resolve_serializer_scope(task)
-    data = serialize_collection(
-        collection_dir,
-        strict=True,
-        deck=deck,
-        no_subdecks=no_subdecks,
-    )
+def _iter_decks(
+    data: dict[str, Any],
+    *,
+    summary: TaskRunSummary,
+) -> Iterator[tuple[str, list[Any]]]:
     decks = data.get("decks")
     if not isinstance(decks, list):
         raise ValueError("Serialized collection is missing a decks list")
@@ -192,73 +216,196 @@ def run_task(
         if not isinstance(deck_name, str) or not isinstance(notes, list):
             continue
 
-        if not task.decks.matches(deck_name):
-            summary.skipped += len(notes)
+        summary.decks_seen += 1
+        summary.notes_seen += len(notes)
+        yield deck_name, notes
+
+
+def _record_provider_result(
+    summary: TaskRunSummary,
+    result: GenerateUpdateResult,
+) -> None:
+    summary.requests += 1
+    summary.input_tokens += result.input_tokens
+    summary.output_tokens += result.output_tokens
+    summary.provider_latency_ms_total += result.latency_ms
+
+
+def _process_note(
+    *,
+    deck_name: str,
+    note: dict[str, Any],
+    task: TaskConfig,
+    api_model: str,
+    note_type_configs: dict[str, NoteTypeConfig],
+    provider_client: ClaudeClient,
+    summary: TaskRunSummary,
+) -> None:
+    note_key = note.get("note_key")
+    note_type_name = note.get("note_type")
+    note_label = note_key if isinstance(note_key, str) else "unknown"
+    note_type_label = note_type_name if isinstance(note_type_name, str) else "unknown"
+
+    note_type_config = (
+        note_type_configs.get(note_type_name)
+        if isinstance(note_type_name, str)
+        else None
+    )
+    if note_type_config is None:
+        raise ValueError(f"Unknown note type '{note_type_name}' in serialized note")
+
+    note_field_names = {
+        field.name
+        for field in note_type_config.fields
+        if field.name != ANKIOPS_KEY_FIELD.name
+    }
+    payload = _build_note_payload(
+        task,
+        note=note,
+        note_type_field_names=note_field_names,
+    )
+    if payload is None:
+        summary.skipped_no_editable_fields += 1
+        logger.debug(
+            "  Skipped %s in '%s' (%s): no editable non-empty fields",
+            note_label,
+            deck_name,
+            note_type_label,
+        )
+        return
+
+    summary.eligible += 1
+    try:
+        result = provider_client.generate_update(
+            note_payload=payload,
+            task_prompt=task.prompt,
+            request_options=task.request,
+            api_model=api_model,
+        )
+        _record_provider_result(summary, result)
+
+        update = result.update
+        if update.note_key != payload.note_key:
+            raise LlmNoteError("Model returned mismatched note_key")
+
+        changed_fields = _apply_note_update(
+            serialized_note=note,
+            payload=payload,
+            edits=update.edits,
+            note_type_config=note_type_config,
+        )
+    except LlmFatalError:
+        raise
+    except LlmNoteError as error:
+        summary.errors += 1
+        logger.error(
+            "LLM note error for %s in '%s' (%s): %s",
+            payload.note_key,
+            deck_name,
+            payload.note_type,
+            error,
+        )
+        return
+
+    if changed_fields:
+        summary.updated += 1
+        logger.debug(
+            "  Updated %s in '%s' (%s): fields=%s",
+            payload.note_key,
+            deck_name,
+            payload.note_type,
+            ",".join(changed_fields),
+        )
+        return
+
+    summary.unchanged += 1
+    logger.debug(
+        "  Unchanged %s in '%s' (%s)",
+        payload.note_key,
+        deck_name,
+        payload.note_type,
+    )
+
+
+def run_task(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None = None,
+    no_auto_commit: bool = False,
+) -> TaskRunSummary:
+    task, note_type_configs = _load_task(
+        collection_dir=collection_dir,
+        task_name=task_name,
+    )
+
+    model = _resolve_model(task, model_override)
+
+    provider_client = ClaudeClient(task)
+    summary = TaskRunSummary(
+        task_name=task.name,
+        model=model,
+    )
+
+    deck, no_subdecks = _resolve_serializer_scope(task)
+    logger.debug(
+        "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, deck_scope=%s)",
+        task.name,
+        model,
+        model.api_id,
+        collection_dir,
+        _format_deck_scope(task),
+    )
+    logger.debug("LLM request defaults: %s", _format_request_defaults(task))
+    logger.debug(
+        "LLM serializer scope: %s",
+        _format_serializer_scope(deck, no_subdecks),
+    )
+
+    if not no_auto_commit:
+        logger.debug("Creating pre-LLM git snapshot")
+        git_snapshot(collection_dir, f"llm:{task.name}")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
+    data = serialize_collection(
+        collection_dir,
+        strict=True,
+        deck=deck,
+        no_subdecks=no_subdecks,
+    )
+
+    for deck_name, notes in _iter_decks(data, summary=summary):
+        if task.decks.matches(deck_name):
+            summary.decks_matched += 1
+        else:
+            summary.skipped_deck_scope += len(notes)
+            logger.debug(
+                "Skipping deck '%s' (%d notes): outside task scope",
+                deck_name,
+                len(notes),
+            )
             continue
 
         for note in notes:
             if not isinstance(note, dict):
                 continue
-
-            note_type_name = note.get("note_type")
-            note_type_config = (
-                note_type_configs.get(note_type_name)
-                if isinstance(note_type_name, str)
-                else None
-            )
-            if note_type_config is None:
-                raise ValueError(
-                    f"Unknown note type '{note_type_name}' in serialized note"
-                )
-
-            note_field_names = {
-                field.name
-                for field in note_type_config.fields
-                if field.name != ANKIOPS_KEY_FIELD.name
-            }
-            payload = _build_note_payload(
-                task,
+            _process_note(
+                deck_name=deck_name,
                 note=note,
-                note_type_field_names=note_field_names,
+                task=task,
+                api_model=model.api_id,
+                note_type_configs=note_type_configs,
+                provider_client=provider_client,
+                summary=summary,
             )
-            if payload is None:
-                summary.skipped += 1
-                continue
-
-            summary.eligible += 1
-            try:
-                patch = provider_client.generate_patch(
-                    note_payload=payload,
-                    task_prompt=task.prompt,
-                    request_options=task.request,
-                    model=model,
-                )
-                if patch.note_key != payload.note_key:
-                    raise LlmNoteError("Model returned mismatched note_key")
-                changed = _apply_note_patch(
-                    serialized_note=note,
-                    payload=payload,
-                    edits=patch.edits,
-                    note_type_config=note_type_config,
-                )
-            except LlmFatalError:
-                raise
-            except LlmNoteError as error:
-                summary.errors += 1
-                logger.error(
-                    f"LLM note error in {deck_name} ({payload.note_key}): {error}"
-                )
-                continue
-
-            if changed:
-                summary.updated += 1
-            else:
-                summary.unchanged += 1
 
     if summary.updated > 0:
         deserialize_collection_data(data, overwrite=True)
 
     logger.info(summary.format())
+    logger.debug(summary.format_usage())
+    logger.debug(summary.format_cost())
     if summary.errors:
         raise SystemExit(1)
     return summary

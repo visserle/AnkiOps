@@ -6,6 +6,13 @@ import platform
 import sys
 from pathlib import Path
 
+DEFAULT_QUIET_LOGGERS = (
+    "urllib3.connectionpool",
+    "anthropic",
+    "httpx",
+    "httpcore",
+)
+
 
 def format_changes(**counts: int) -> str:
     """Format non-zero change counts into a compact string.
@@ -122,11 +129,16 @@ def configure_logging(
         handlers.append(file_handler)
 
     # Set the logging level for ignored libraries to WARNING
+    extra_ignored_libs: list[str] = []
     if ignore_libs:
         if isinstance(ignore_libs, str):
-            ignore_libs = [ignore_libs]
-        for lib in ignore_libs:
-            logging.getLogger(lib).setLevel(logging.WARNING)
+            extra_ignored_libs = [ignore_libs]
+        else:
+            extra_ignored_libs = list(ignore_libs)
+
+    quiet_loggers = dict.fromkeys((*DEFAULT_QUIET_LOGGERS, *extra_ignored_libs))
+    for lib in quiet_loggers:
+        logging.getLogger(lib).setLevel(logging.WARNING)
 
     # Clear any previously added handlers from the root logger
     logging.getLogger().handlers = []

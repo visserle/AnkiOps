@@ -11,6 +11,7 @@ import yaml
 from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
+from .anthropic_models import format_supported_model_names, parse_model
 from .models import (
     DeckScope,
     FieldExceptionRule,
@@ -237,9 +238,11 @@ def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskC
     mapping = _read_yaml_mapping(path)
     name = _require_str(mapping, "name", path)
     _require_name_stem(name, path)
-    model = _require_str(mapping, "model", path)
-    if not model.startswith("claude-"):
-        raise LlmConfigError(f"{path}: 'model' must be an Anthropic Claude model id")
+    model_name = _require_str(mapping, "model", path)
+    model = parse_model(model_name)
+    if model is None:
+        supported = format_supported_model_names()
+        raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
     prompt = _require_str(mapping, "prompt", path)
     api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
     timeout_seconds = mapping.get("timeout_seconds", 60)

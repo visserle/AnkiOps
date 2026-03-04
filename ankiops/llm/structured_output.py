@@ -1,4 +1,4 @@
-"""Shared structured-output helpers for note patch responses."""
+"""Shared structured-output helpers for note update responses."""
 
 from __future__ import annotations
 
@@ -6,23 +6,23 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .models import NotePatch, NotePayload
+from .models import NotePayload, NoteUpdate
 
 
 @dataclass(frozen=True)
-class NotePatchContract:
-    """Shared contract for structured note patch responses."""
+class NoteUpdateContract:
+    """Shared contract for structured note update responses."""
 
     schema: dict[str, object]
     editable_fields: frozenset[str]
 
 
 class StructuredOutputError(ValueError):
-    """Raised when a model response violates the note patch contract."""
+    """Raised when a model response violates the note update contract."""
 
 
-def build_note_patch_contract(note_payload: NotePayload) -> NotePatchContract:
-    """Build the shared JSON schema contract for a note patch response."""
+def build_note_update_contract(note_payload: NotePayload) -> NoteUpdateContract:
+    """Build the shared JSON schema contract for a note update response."""
     editable_fields = tuple(note_payload.editable_fields.keys())
     edit_properties = {field_name: {"type": "string"} for field_name in editable_fields}
     schema: dict[str, object] = {
@@ -38,31 +38,31 @@ def build_note_patch_contract(note_payload: NotePayload) -> NotePatchContract:
         "required": ["note_key", "edits"],
         "additionalProperties": False,
     }
-    return NotePatchContract(
+    return NoteUpdateContract(
         schema=schema,
         editable_fields=frozenset(editable_fields),
     )
 
 
-def parse_note_patch_json(
+def parse_note_update_json(
     raw_text: str,
     *,
-    contract: NotePatchContract,
-) -> NotePatch:
-    """Parse and validate a JSON note patch response."""
+    contract: NoteUpdateContract,
+) -> NoteUpdate:
+    """Parse and validate a JSON note update response."""
     try:
         data = json.loads(raw_text)
     except ValueError as error:
         raise StructuredOutputError("Response was not valid JSON") from error
-    return validate_note_patch_data(data, contract=contract)
+    return validate_note_update_data(data, contract=contract)
 
 
-def validate_note_patch_data(
+def validate_note_update_data(
     data: object,
     *,
-    contract: NotePatchContract,
-) -> NotePatch:
-    """Validate a parsed note patch response against the shared contract."""
+    contract: NoteUpdateContract,
+) -> NoteUpdate:
+    """Validate a parsed note update response against the shared contract."""
     if not isinstance(data, Mapping):
         _raise_validation_error("response must be an object")
 
@@ -86,7 +86,7 @@ def validate_note_patch_data(
             _raise_validation_error(f"edits.{field_name} must be a string")
         parsed_edits[field_name] = value
 
-    return NotePatch(note_key=note_key, edits=parsed_edits)
+    return NoteUpdate(note_key=note_key, edits=parsed_edits)
 
 
 def _reject_unknown_top_level_keys(data: Mapping[object, object]) -> None:

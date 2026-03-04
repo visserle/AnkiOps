@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatchcase
 
+from ankiops.log import format_changes
+
+from .anthropic_models import AnthropicModel
+
 
 class FieldAccess(Enum):
     EDIT = "edit"
@@ -74,7 +78,7 @@ class TaskRequestOptions:
 @dataclass(frozen=True)
 class TaskConfig:
     name: str
-    model: str
+    model: AnthropicModel
     prompt: str
     api_key_env: str = "ANTHROPIC_API_KEY"
     timeout_seconds: int = 60
@@ -103,31 +107,71 @@ class NotePayload:
 
 
 @dataclass(frozen=True)
-class NotePatch:
+class NoteUpdate:
     note_key: str
     edits: dict[str, str]
+
+
+@dataclass(frozen=True)
+class GenerateUpdateResult:
+    update: NoteUpdate
+    message_id: str
+    model: str
+    stop_reason: str | None
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
 
 
 @dataclass
 class TaskRunSummary:
     task_name: str
-    model: str
+    model: AnthropicModel
+    decks_seen: int = 0
+    decks_matched: int = 0
+    notes_seen: int = 0
     eligible: int = 0
     updated: int = 0
     unchanged: int = 0
-    skipped: int = 0
+    skipped_deck_scope: int = 0
+    skipped_no_editable_fields: int = 0
     errors: int = 0
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    provider_latency_ms_total: int = 0
+
+    @property
+    def skipped(self) -> int:
+        return self.skipped_deck_scope + self.skipped_no_editable_fields
 
     def format(self) -> str:
-        parts = [f"{self.updated} updated", f"{self.unchanged} unchanged"]
-        if self.skipped:
-            parts.append(f"{self.skipped} skipped")
-        if self.errors:
-            parts.append(f"{self.errors} errors")
         return (
             f"LLM task '{self.task_name}' ({self.model}): {self.eligible} notes — "
-            + ", ".join(parts)
+            + format_changes(
+                updated=self.updated,
+                unchanged=self.unchanged,
+                skipped=self.skipped,
+                errors=self.errors,
+            )
         )
+
+    def format_usage(self) -> str:
+        request_label = "request" if self.requests == 1 else "requests"
+        provider_seconds = self.provider_latency_ms_total / 1000
+        return (
+            f"LLM usage: {self.requests} {request_label}, "
+            f"{self.input_tokens} input tokens, "
+            f"{self.output_tokens} output tokens, "
+            f"{provider_seconds:.1f}s provider time"
+        )
+
+    def format_cost(self) -> str:
+        estimate = self.model.estimate_cost(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+        )
+        return estimate.format()
 
 
 @dataclass(frozen=True)
