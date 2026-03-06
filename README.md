@@ -151,3 +151,7 @@ uv run python -m main ma
 **`deserialize`:**
 - `--input`, `-i` - Input file path (default: `<collection-name>.json`)
 - `--overwrite` - Overwrite existing markdown files
+
+**`note-type`:**
+- `ankiops note-type --info` - Show taken prefixes and per-note-type prefix details
+- `ankiops note-type <name>` - Copy a note type from Anki into local `note_types/` with interactive prefix/identifying prompts
