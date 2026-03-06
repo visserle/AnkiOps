@@ -162,6 +162,33 @@ def test_run_am_logs_missing_media_summary(tmp_path, caplog):
     assert "1 pulled, 2 missing in Anki" in caplog.text
 
 
+def test_run_ma_logs_missing_local_media_summary(tmp_path, caplog):
+    fake_anki = MagicMock()
+    fake_anki.get_active_profile.return_value = "TestProfile"
+    args = SimpleNamespace(no_auto_commit=True)
+    media_result = SyncResult.for_media()
+    media_result.changes = [Change(ChangeType.SYNC, "a.png", "a.png")]
+    media_result.checked = 5
+    media_result.missing = 2
+
+    with (
+        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.sync_media_to_anki", return_value=media_result),
+        patch("ankiops.cli.sync_note_types", return_value=""),
+        patch(
+            "ankiops.cli.import_collection",
+            return_value=CollectionResult.for_import(results=[], untracked_decks=[]),
+        ),
+        caplog.at_level(logging.INFO),
+    ):
+        run_ma(args)
+
+    assert "Media: 5 files checked" in caplog.text
+    assert "1 synced, 2 missing locally" in caplog.text
+
+
 @pytest.mark.parametrize(
     "argv",
     [

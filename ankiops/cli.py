@@ -52,10 +52,15 @@ def _format_media_status(media_result, *, from_anki: bool) -> str:
     if checked == 0:
         return "Media: no referenced files"
 
-    if from_anki and media_result.missing:
+    if media_result.missing:
+        if from_anki:
+            return (
+                f"Media: {checked} files checked — "
+                f"{summary.synced} pulled, {media_result.missing} missing in Anki"
+            )
         return (
             f"Media: {checked} files checked — "
-            f"{summary.synced} pulled, {media_result.missing} missing in Anki"
+            f"{summary.format()}, {media_result.missing} missing locally"
         )
 
     return f"Media: {checked} files checked — {summary.format()}"

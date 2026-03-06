@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -247,3 +248,37 @@ class TestMediaSyncIncremental:
         assert "[sound:clip_" in content
         assert ".mp3]" in content
         assert result.summary.synced == 1
+
+    def test_sync_media_to_anki_reports_missing_local_references(
+        self, fs, tmp_path, caplog
+    ):
+        media_dir = tmp_path / LOCAL_MEDIA_DIR
+        media_dir.mkdir()
+        (media_dir / "present.png").write_bytes(b"image-content")
+        (tmp_path / "deck.md").write_text(
+            (
+                "Q: Prompt\n"
+                "A: ![present](media/present.png)\n"
+                "![missing](media/missing.png)\n"
+            ),
+            encoding="utf-8",
+        )
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.load(tmp_path)
+        try:
+            with caplog.at_level(logging.WARNING):
+                result = sync_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        assert result.checked == 2
+        assert result.missing == 1
+        assert result.summary.synced == 1
+        assert anki.push_count == 1
+        assert "missing.png referenced in markdown but missing in local media/" in (
+            caplog.text
+        )

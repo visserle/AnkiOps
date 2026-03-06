@@ -251,6 +251,24 @@ def sync_media_to_anki(
         return result
 
     media_files = sorted(media_root.glob("*"), key=lambda file_path: file_path.name)
+    local_media_names = {
+        file_path.name
+        for file_path in media_files
+        if file_path.is_file() and not file_path.name.startswith(".")
+    }
+    missing_local_refs = sorted(
+        name
+        for name in active_refs
+        if not name.startswith("_") and name not in local_media_names
+    )
+    if missing_local_refs:
+        result.missing += len(missing_local_refs)
+        for name in missing_local_refs:
+            logger.warning(
+                f"Media {name} referenced in markdown but missing in local "
+                f"{LOCAL_MEDIA_DIR}/"
+            )
+
     push_candidates = [
         file_path.name
         for file_path in media_files
@@ -258,7 +276,7 @@ def sync_media_to_anki(
         and not file_path.name.startswith(".")
         and (file_path.name in active_refs or file_path.name.startswith("_"))
     ]
-    result.checked = len(push_candidates)
+    result.checked = len(active_refs)
     cached_push_state = db_port.get_media_push_state_bulk(push_candidates)
     cached_fingerprints = db_port.get_media_fingerprints_bulk(push_candidates)
 
