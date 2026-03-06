@@ -364,6 +364,15 @@ class TestParseQABlock:
         note = result.notes[0]
         assert note.fields["Extra"] == "Extra notes"
 
+    def test_qa_with_cloze_syntax_fails_validation(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text("Q: {{c1::Question}}\nA: Answer")
+        with pytest.raises(
+            ValueError,
+            match=r"AnkiOpsQA note must not contain cloze syntax",
+        ):
+            fs.read_markdown_file(md)
+
     def test_note_type_inference_error_uses_basename_without_context_root(
         self, fs, tmp_path
     ):

@@ -226,6 +226,15 @@ class Note:
                     f"{self.note_type} note must contain cloze syntax "
                     "(e.g. {{c1::answer}})"
                 )
+        else:
+            has_cloze = any(
+                _CLOZE_PATTERN.search(val) for val in self.fields.values() if val
+            )
+            if has_cloze:
+                errors.append(
+                    f"{self.note_type} note must not contain cloze syntax "
+                    "(e.g. {{c1::answer}})"
+                )
 
         if has_choices:
             if choice_count < 2:
