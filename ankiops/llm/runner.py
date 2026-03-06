@@ -191,6 +191,9 @@ def _load_task(
         collection_dir,
         note_type_configs=note_type_configs,
     )
+    if catalog.errors:
+        joined_errors = "\n".join(catalog.errors.values())
+        raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
     task = catalog.tasks_by_name.get(task_name)
     if task is None:
         raise ValueError(f"Unknown or invalid task '{task_name}'")

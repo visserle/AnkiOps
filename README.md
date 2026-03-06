@@ -11,7 +11,7 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Simple CLI interface: after initialization, only two commands are needed for daily use
 - Fully round-trip, bi-directional sync that handles note creation, deletion, movements across decks, and conflicts
 - Markdown rendering with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Support for all standard note types, plus Single & Multiple Choice
+- Support for all standard note types, plus Single & Multiple Choice and Cloze Hide All
 - Embed images via VS Code where they are directly copied into your Anki media folder (automatically set up)
 - Built-in Git integration with autocommit for tracking all changes
 - High-performance processing: handles thousands of cards across hundreds of decks in mere seconds
@@ -20,6 +20,10 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 
 > [!NOTE]
 > Runtime note type config is IaC-only: AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth.
+
+> [!NOTE]
+> LLM task config is also IaC-only. AnkiOps reads from your local `llm/` folder with this structure:
+> `llm/system_prompt.md`, `llm/tasks/*.yaml`, and task prompt files referenced via `prompt_file` (for example `llm/prompts/grammar.md`).
 
 ## Getting Started
 
@@ -91,6 +95,7 @@ Each note type is identified by its field labels. `E:` (Extra) and `M:` (More, r
 | **AnkiOpsCloze** | `T:` |
 | **AnkiOpsInput** | `Q:`, `I:` |
 | **AnkiOpsChoice** | `Q:`, `C1:``C8:`, `A:` |
+| **AnkiOpsImageOcclusion** | `IO_ID:`, `IO_IM:`, `IO_QM:`, `IO_AM:`, `IO_OM:` |
 
 ### How does it work?
 

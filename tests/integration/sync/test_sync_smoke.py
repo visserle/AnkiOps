@@ -278,7 +278,16 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
             "Q: Choice Question\n"
             "C1: Option A\n"
             "C2: Option B\n"
-            "A: 1"
+            "A: 1\n\n"
+            "---\n\n"
+            "IO_ID: io-1\n"
+            "IO_IM: <img src='io-base.png'>\n"
+            "IO_QM: <img src='io-question.png'>\n"
+            "IO_AM: <img src='io-answer.png'>\n"
+            "IO_OM: <img src='io-original.png'>\n"
+            "IO_H: IO Header\n"
+            "IO_F: IO Footer\n"
+            "E: IO Extra"
         ),
         encoding="utf-8",
     )
@@ -286,17 +295,18 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     import_result = _run_import(tmp_path)
     assert import_result.results[0].errors == []
     assert_summary(
-        import_result.summary, created=5, updated=0, moved=0, deleted=0, errors=0
+        import_result.summary, created=6, updated=0, moved=0, deleted=0, errors=0
     )
 
     notes = list(mock_anki.notes.values())
-    assert len(notes) == 5
+    assert len(notes) == 6
     assert {note_data["modelName"] for note_data in notes} == {
         "AnkiOpsQA",
         "AnkiOpsReversed",
         "AnkiOpsCloze",
         "AnkiOpsInput",
         "AnkiOpsChoice",
+        "AnkiOpsImageOcclusion",
     }
 
     for note in notes:
@@ -313,6 +323,12 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
         elif model == "AnkiOpsChoice":
             assert "Option A" in fields["Choice 1"]["value"]
             assert fields["Answer"]["value"] == "1"
+        elif model == "AnkiOpsImageOcclusion":
+            assert fields["ID (hidden)"]["value"] == "io-1"
+            assert "io-base.png" in fields["Image"]["value"]
+            assert "io-question.png" in fields["Question Mask"]["value"]
+            assert "io-answer.png" in fields["Answer Mask"]["value"]
+            assert "io-original.png" in fields["Original Mask"]["value"]
 
     md_file.unlink()
     export_result = _run_export(tmp_path)
@@ -323,6 +339,8 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     assert "T: Cloze with {{c1::hidden}} text" in new_content
     assert "I: Input Answer" in new_content
     assert "C1: Option A" in new_content
+    assert "IO_ID: io-1" in new_content
+    assert "IO_QM:" in new_content
 
 
 def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):

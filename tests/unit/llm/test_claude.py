@@ -46,6 +46,7 @@ def task_config() -> TaskConfig:
     return TaskConfig(
         name="grammar",
         model=SONNET,
+        system_prompt="System prompt for tests",
         prompt="Fix grammar",
         api_key_env="ANTHROPIC_API_KEY",
     )
@@ -68,6 +69,7 @@ def note_payload() -> NotePayload:
 
 
 def test_generate_update_builds_request_and_returns_update(
+    task_config: TaskConfig,
     client: ClaudeClient,
     note_payload: NotePayload,
     monkeypatch,
@@ -109,7 +111,7 @@ def test_generate_update_builds_request_and_returns_update(
 
     call_kwargs = create.call_args.kwargs
     assert call_kwargs["model"] == "claude-sonnet-4-6"
-    assert call_kwargs["system"] == build_system_prompt()
+    assert call_kwargs["system"] == build_system_prompt(task_config.system_prompt)
     assert "<task>\nFix grammar\n</task>" in call_kwargs["messages"][0]["content"]
     assert _extract_note_json(call_kwargs["messages"][0]["content"]) == {
         "note_key": "nk-1",

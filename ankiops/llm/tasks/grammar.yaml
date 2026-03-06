@@ -1,16 +1,11 @@
 # Set ANTHROPIC_API_KEY in your environment before running this task.
-name: grammar
 model: sonnet
+prompt_file: ../prompts/grammar.md
 
 decks:
   include: ["*"]
   exclude: []
   include_subdecks: true
-
-prompt: |
-  Correct grammar, spelling, and punctuation in editable fields.
-  Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
-  Do not add facts or change correctness.
 
 fields:
   exceptions:

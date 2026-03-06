@@ -75,24 +75,43 @@ def _setup_git(collection_dir: Path):
     logger.info(f"Initialized git repository in {collection_dir}")
 
 
-def _eject_llm_tasks(collection_dir: Path) -> None:
+def _eject_llm_configs(collection_dir: Path) -> None:
     from importlib import resources
 
     llm_dir = collection_dir / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
-    for resource in resources.files("ankiops.llm.tasks").iterdir():
-        if not resource.is_file() or resource.suffix != ".yaml":
-            continue
 
-        destination = llm_dir / resource.name
+    system_prompt_src = resources.files("ankiops.llm").joinpath("system_prompt.md")
+    system_prompt_dst = llm_dir / "system_prompt.md"
+    if not system_prompt_dst.exists():
+        system_prompt_dst.write_text(
+            system_prompt_src.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    tasks_dir = llm_dir / "tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    for resource in resources.files("ankiops.llm.tasks").iterdir():
+        if not resource.is_file() or resource.suffix not in {".yaml", ".yml"}:
+            continue
+        destination = tasks_dir / resource.name
         if destination.exists():
             continue
+        destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
 
+    prompts_dir = llm_dir / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    for resource in resources.files("ankiops.llm.prompts").iterdir():
+        if not resource.is_file():
+            continue
+        destination = prompts_dir / resource.name
+        if destination.exists():
+            continue
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def _setup_llm_configs(collection_dir: Path) -> None:
-    _eject_llm_tasks(collection_dir)
+    _eject_llm_configs(collection_dir)
 
 
 def initialize_collection(profile: str) -> Path:

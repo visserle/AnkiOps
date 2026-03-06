@@ -15,7 +15,9 @@ from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.models import GenerateUpdateResult, NoteUpdate
 from ankiops.llm.runner import run_task
 
-TASK_FILE = Path("llm/grammar.yaml")
+TASK_FILE = Path("llm/tasks/grammar.yaml")
+PROMPT_FILE = Path("llm/prompts/grammar.md")
+SYSTEM_PROMPT_FILE = Path("llm/system_prompt.md")
 TEST_DECK = "TestDeck"
 TEST_DECK_MARKDOWN = """
 <!-- note_key: nk-1 -->
@@ -40,6 +42,8 @@ fields:
       read_only: ["Answer"]
     - hidden: ["AI Notes"]
 """
+DEFAULT_SYSTEM_PROMPT = "You are a strict editor."
+DEFAULT_TASK_PROMPT = "fix grammar"
 
 
 def _write(path: Path, content: str) -> None:
@@ -50,14 +54,28 @@ def _write(path: Path, content: str) -> None:
 def _task_config(
     *,
     model: str = "sonnet",
-    prompt: str = "fix grammar",
+    prompt_file: str = "../prompts/grammar.md",
     extra: str = "",
 ) -> str:
     suffix = f"\n{dedent(extra).strip()}" if extra.strip() else ""
-    return f"name: grammar\nmodel: {model}\nprompt: {prompt}{suffix}\n"
+    return f"model: {model}\nprompt_file: {prompt_file}{suffix}\n"
+
+
+def _write_prompt(collection_dir: Path, content: str = DEFAULT_TASK_PROMPT) -> None:
+    _write(collection_dir / PROMPT_FILE, content)
+
+
+def _write_system_prompt(
+    collection_dir: Path, content: str = DEFAULT_SYSTEM_PROMPT
+) -> None:
+    _write(collection_dir / SYSTEM_PROMPT_FILE, content)
 
 
 def _write_task(collection_dir: Path, *, content: str) -> None:
+    if not (collection_dir / SYSTEM_PROMPT_FILE).exists():
+        _write_system_prompt(collection_dir)
+    if not (collection_dir / PROMPT_FILE).exists():
+        _write_prompt(collection_dir)
     _write(collection_dir / TASK_FILE, content)
 
 
@@ -149,12 +167,17 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
         for resource in resources.files("ankiops.llm.tasks").iterdir()
         if resource.is_file() and resource.suffix == ".yaml"
     )
-    ejected_tasks = sorted(path.name for path in (tmp_path / "llm").glob("*.yaml"))
+    ejected_tasks = sorted(path.name for path in (tmp_path / "llm/tasks").glob("*.yaml"))
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
+    assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
+    assert (tmp_path / PROMPT_FILE).exists()
     assert "model: sonnet" in (
-        tmp_path / "llm/grammar.yaml"
+        tmp_path / "llm/tasks/grammar.yaml"
+    ).read_text(encoding="utf-8")
+    assert "prompt_file: ../prompts/grammar.md" in (
+        tmp_path / "llm/tasks/grammar.yaml"
     ).read_text(encoding="utf-8")
 
 
@@ -164,16 +187,21 @@ def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
 
     existing_task = tmp_path / TASK_FILE
     existing_task.parent.mkdir(parents=True, exist_ok=True)
-    existing_task.write_text("name: grammar\nprompt: keep mine\n", encoding="utf-8")
+    existing_task.write_text(
+        "model: sonnet\nprompt_file: ../prompts/custom.md\n",
+        encoding="utf-8",
+    )
 
     initialize_collection("TestProfile")
 
     assert existing_task.read_text(encoding="utf-8") == (
-        "name: grammar\nprompt: keep mine\n"
+        "model: sonnet\nprompt_file: ../prompts/custom.md\n"
     )
 
 
 def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Path):
+    _write_system_prompt(tmp_path, "System rules")
+    _write_prompt(tmp_path, "Fix grammar from file")
     _write_task(
         tmp_path,
         content=_task_config(
@@ -197,8 +225,23 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     task = catalog.tasks_by_name["grammar"]
     assert task.model == SONNET
     assert task.api_key_env == "ANTHROPIC_API_KEY"
+    assert task.system_prompt == "System rules"
+    assert task.prompt == "Fix grammar from file"
     assert task.decks.include == ["Parent"]
     assert task.decks.include_subdecks is False
+
+
+def test_load_llm_task_catalog_requires_system_prompt(note_type_configs, tmp_path: Path):
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write(
+        tmp_path / TASK_FILE,
+        _task_config(),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "system prompt file not found" in next(iter(catalog.errors.values()))
 
 
 @pytest.mark.parametrize(

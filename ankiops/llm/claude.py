@@ -40,6 +40,7 @@ class ClaudeClient:
                 f"Required environment variable '{task.api_key_env}' is not set"
             )
 
+        self._system_prompt = task.system_prompt
         self._client = Anthropic(
             api_key=api_key,
             timeout=float(task.timeout_seconds),
@@ -57,7 +58,7 @@ class ClaudeClient:
         max_tokens = request_options.max_output_tokens or 2048
         kwargs: dict[str, object] = {
             "model": api_model,
-            "system": build_system_prompt(),
+            "system": build_system_prompt(self._system_prompt),
             "messages": [
                 {
                     "role": "user",

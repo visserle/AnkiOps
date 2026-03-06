@@ -79,6 +79,7 @@ class TaskRequestOptions:
 class TaskConfig:
     name: str
     model: AnthropicModel
+    system_prompt: str
     prompt: str
     api_key_env: str = "ANTHROPIC_API_KEY"
     timeout_seconds: int = 60

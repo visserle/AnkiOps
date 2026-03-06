@@ -25,6 +25,10 @@ class LlmConfigError(ValueError):
     """Raised when a Claude task config is invalid."""
 
 
+_SYSTEM_PROMPT_FILE_NAME = "system_prompt.md"
+_TASKS_DIR_NAME = "tasks"
+
+
 def _iter_yaml_files(directory: Path) -> list[Path]:
     files = sorted(directory.glob("*.yaml"))
     files.extend(sorted(directory.glob("*.yml")))
@@ -55,11 +59,30 @@ def _optional_str(mapping: dict[str, Any], key: str, path: Path) -> str | None:
     return value.strip()
 
 
-def _require_name_stem(name: str, path: Path) -> None:
-    if path.stem != name:
+def _read_text_file(path: Path, *, label: str) -> str:
+    if not path.exists() or not path.is_file():
+        raise LlmConfigError(f"{path}: {label} file not found")
+    value = path.read_text(encoding="utf-8")
+    if not value.strip():
+        raise LlmConfigError(f"{path}: {label} file must be non-empty")
+    return value.strip()
+
+
+def _resolve_relative_file(
+    task_path: Path,
+    raw_reference: str,
+    *,
+    llm_dir: Path,
+    key: str,
+) -> Path:
+    candidate = (task_path.parent / raw_reference).resolve()
+    try:
+        candidate.relative_to(llm_dir.resolve())
+    except ValueError as error:
         raise LlmConfigError(
-            f"{path}: config name '{name}' must match file name '{path.stem}'"
-        )
+            f"{task_path}: '{key}' must stay within {llm_dir}"
+        ) from error
+    return candidate
 
 
 def _parse_str_list(value: Any, key: str, path: Path) -> list[str]:
@@ -234,16 +257,28 @@ def _parse_field_exceptions(
     return parsed
 
 
-def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskConfig:
+def _parse_task(
+    path: Path,
+    *,
+    note_type_configs: list[NoteTypeConfig],
+    llm_dir: Path,
+    system_prompt: str,
+) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
-    name = _require_str(mapping, "name", path)
-    _require_name_stem(name, path)
+    name = path.stem
     model_name = _require_str(mapping, "model", path)
     model = parse_model(model_name)
     if model is None:
         supported = format_supported_model_names()
         raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
-    prompt = _require_str(mapping, "prompt", path)
+    prompt_file_ref = _require_str(mapping, "prompt_file", path)
+    prompt_file_path = _resolve_relative_file(
+        path,
+        prompt_file_ref,
+        llm_dir=llm_dir,
+        key="prompt_file",
+    )
+    prompt = _read_text_file(prompt_file_path, label="prompt")
     api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
     timeout_seconds = mapping.get("timeout_seconds", 60)
     if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
@@ -259,9 +294,8 @@ def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskC
     unknown = sorted(
         set(mapping.keys())
         - {
-            "name",
             "model",
-            "prompt",
+            "prompt_file",
             "api_key_env",
             "timeout_seconds",
             "decks",
@@ -275,6 +309,7 @@ def _parse_task(path: Path, *, note_type_configs: list[NoteTypeConfig]) -> TaskC
     return TaskConfig(
         name=name,
         model=model,
+        system_prompt=system_prompt,
         prompt=prompt,
         api_key_env=api_key_env,
         timeout_seconds=timeout_seconds,
@@ -293,15 +328,46 @@ def load_llm_task_catalog(
     tasks_by_name: dict[str, TaskConfig] = {}
     errors: dict[str, str] = {}
 
-    if llm_dir.exists():
-        for path in _iter_yaml_files(llm_dir):
-            try:
-                task = _parse_task(path, note_type_configs=note_type_configs)
-                if task.name in tasks_by_name:
-                    raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
-                tasks_by_name[task.name] = task
-            except LlmConfigError as error:
-                errors[str(path)] = str(error)
+    if not llm_dir.exists() or not llm_dir.is_dir():
+        errors[str(llm_dir)] = (
+            f"{llm_dir}: LLM config directory not found. "
+            "Run 'ankiops init' to create IaC LLM configs."
+        )
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    system_prompt_path = llm_dir / _SYSTEM_PROMPT_FILE_NAME
+    try:
+        system_prompt = _read_text_file(system_prompt_path, label="system prompt")
+    except LlmConfigError as error:
+        errors[str(system_prompt_path)] = str(error)
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    tasks_dir = llm_dir / _TASKS_DIR_NAME
+    if not tasks_dir.exists() or not tasks_dir.is_dir():
+        errors[str(tasks_dir)] = (
+            f"{tasks_dir}: task directory not found. "
+            "Expected task YAML files in llm/tasks/."
+        )
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    task_files = _iter_yaml_files(tasks_dir)
+    if not task_files:
+        errors[str(tasks_dir)] = f"{tasks_dir}: no task YAML files found"
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    for path in task_files:
+        try:
+            task = _parse_task(
+                path,
+                note_type_configs=note_type_configs,
+                llm_dir=llm_dir,
+                system_prompt=system_prompt,
+            )
+            if task.name in tasks_by_name:
+                raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
+            tasks_by_name[task.name] = task
+        except LlmConfigError as error:
+            errors[str(path)] = str(error)
 
     return TaskCatalog(
         tasks_by_name=tasks_by_name,
