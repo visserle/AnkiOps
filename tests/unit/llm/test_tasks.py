@@ -532,7 +532,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
                     - read_only: ["Source"]
                 """
             ),
-            {"strict": True, "deck": TEST_DECK, "no_subdecks": False},
+            {"deck": TEST_DECK, "no_subdecks": False},
         ),
         (
             _task_config(
@@ -545,7 +545,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
                     - read_only: ["Source"]
                 """
             ),
-            {"strict": True, "deck": TEST_DECK, "no_subdecks": True},
+            {"deck": TEST_DECK, "no_subdecks": True},
         ),
         (
             _task_config(
@@ -557,7 +557,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
                     - read_only: ["Source"]
                 """
             ),
-            {"strict": True, "deck": None, "no_subdecks": False},
+            {"deck": None, "no_subdecks": False},
         ),
     ],
     ids=["exact-deck", "exact-deck-without-subdecks", "wildcard-deck"],
@@ -578,11 +578,9 @@ def test_run_task_uses_expected_serialize_scope(
     def _fake_serialize(
         _collection_dir,
         *,
-        strict: bool = False,
         deck: str | None = None,
         no_subdecks: bool = False,
     ):
-        captured["strict"] = strict
         captured["deck"] = deck
         captured["no_subdecks"] = no_subdecks
         return {

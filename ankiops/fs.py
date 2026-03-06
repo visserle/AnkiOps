@@ -390,10 +390,16 @@ class FileSystemAdapter:
 
             config_path = subdir / "note_type.yaml"
             if not config_path.exists():
-                continue
+                raise ValueError(
+                    f"Note type directory '{subdir.name}' is missing note_type.yaml."
+                )
 
             with open(config_path, "r", encoding="utf-8") as file:
                 info = yaml.safe_load(file) or {}
+            if not isinstance(info, dict):
+                raise ValueError(
+                    f"Note type '{subdir.name}' config must be a YAML mapping."
+                )
 
             name = subdir.name
             if "name" in info:
@@ -424,63 +430,136 @@ class FileSystemAdapter:
                 fields.append(ANKIOPS_KEY_FIELD)
 
             # CSS
-            styling_input = info.get("styling", [])
+            styling_input = info.get("styling")
             if isinstance(styling_input, str):
-                styling_input = [styling_input]
+                styling_files = [styling_input]
+            elif isinstance(styling_input, list):
+                styling_files = []
+                for css_file in styling_input:
+                    if not isinstance(css_file, str) or not css_file.strip():
+                        raise ValueError(
+                            f"Note type '{name}' has invalid styling entry "
+                            f"'{css_file}'. Expected non-empty file names."
+                        )
+                    styling_files.append(css_file.strip())
+            else:
+                raise ValueError(
+                    f"Note type '{name}' has invalid 'styling' value. "
+                    "Expected a string or list of strings."
+                )
+            if not styling_files:
+                raise ValueError(
+                    f"Note type '{name}' must reference at least one styling file."
+                )
 
             css_parts = []
-            for css_file in styling_input:
+            for css_file in styling_files:
                 css_path = subdir / css_file
-                if css_path.exists():
-                    css_parts.append(css_path.read_text(encoding="utf-8"))
+                if not css_path.exists() or not css_path.is_file():
+                    raise ValueError(
+                        f"Note type '{name}' references missing styling file "
+                        f"'{css_file}'."
+                    )
+                css_parts.append(css_path.read_text(encoding="utf-8"))
             css = "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
 
             # Templates
-            raw_templates = info.get("templates", [])
+            raw_templates = info.get("templates")
             templates = []
 
-            if not raw_templates:
+            if raw_templates is None:
                 # Implicit loading
                 front = subdir / "Front.template.anki"
                 back = subdir / "Back.template.anki"
-                if front.exists() and back.exists():
-                    name_card1 = "Cloze" if info.get("is_cloze") else "Card 1"
-                    templates.append(
-                        {
-                            "Name": name_card1,
-                            "Front": front.read_text(encoding="utf-8"),
-                            "Back": back.read_text(encoding="utf-8"),
-                        }
+                if not front.exists() or not back.exists():
+                    missing = []
+                    if not front.exists():
+                        missing.append("Front.template.anki")
+                    if not back.exists():
+                        missing.append("Back.template.anki")
+                    missing_text = ", ".join(missing)
+                    raise ValueError(
+                        f"Note type '{name}' is missing template file(s): "
+                        f"{missing_text}."
                     )
 
-                    template_index = 2
-                    while True:
-                        front_n = subdir / f"Front{template_index}.template.anki"
-                        back_n = subdir / f"Back{template_index}.template.anki"
-                        if front_n.exists() and back_n.exists():
-                            templates.append(
-                                {
-                                    "Name": f"Card {template_index}",
-                                    "Front": front_n.read_text(encoding="utf-8"),
-                                    "Back": back_n.read_text(encoding="utf-8"),
-                                }
-                            )
-                            template_index += 1
-                        else:
-                            break
+                name_card1 = "Cloze" if info.get("is_cloze") else "Card 1"
+                templates.append(
+                    {
+                        "Name": name_card1,
+                        "Front": front.read_text(encoding="utf-8"),
+                        "Back": back.read_text(encoding="utf-8"),
+                    }
+                )
+
+                template_index = 2
+                while True:
+                    front_n = subdir / f"Front{template_index}.template.anki"
+                    back_n = subdir / f"Back{template_index}.template.anki"
+                    has_front = front_n.exists()
+                    has_back = back_n.exists()
+                    if has_front and has_back:
+                        templates.append(
+                            {
+                                "Name": f"Card {template_index}",
+                                "Front": front_n.read_text(encoding="utf-8"),
+                                "Back": back_n.read_text(encoding="utf-8"),
+                            }
+                        )
+                        template_index += 1
+                    elif has_front != has_back:
+                        missing_file = (
+                            f"Back{template_index}.template.anki"
+                            if has_front
+                            else f"Front{template_index}.template.anki"
+                        )
+                        raise ValueError(
+                            f"Note type '{name}' has incomplete template pair for "
+                            f"Card {template_index}; missing '{missing_file}'."
+                        )
+                    else:
+                        break
             else:
+                if not isinstance(raw_templates, list) or not raw_templates:
+                    raise ValueError(
+                        f"Note type '{name}' must define a non-empty 'templates' list."
+                    )
                 for template_data in raw_templates:
-                    front = subdir / template_data["front"]
-                    back = subdir / template_data["back"]
+                    if not isinstance(template_data, dict):
+                        raise ValueError(
+                            f"Note type '{name}' has invalid template entry "
+                            f"'{template_data}'. Expected a mapping."
+                        )
+
+                    front_ref = template_data.get("front")
+                    back_ref = template_data.get("back")
+                    if not isinstance(front_ref, str) or not front_ref.strip():
+                        raise ValueError(
+                            f"Note type '{name}' has template with invalid 'front'."
+                        )
+                    if not isinstance(back_ref, str) or not back_ref.strip():
+                        raise ValueError(
+                            f"Note type '{name}' has template with invalid 'back'."
+                        )
+
+                    front = subdir / front_ref.strip()
+                    back = subdir / back_ref.strip()
+                    if not front.exists() or not front.is_file():
+                        raise ValueError(
+                            f"Note type '{name}' references missing template file "
+                            f"'{front_ref}'."
+                        )
+                    if not back.exists() or not back.is_file():
+                        raise ValueError(
+                            f"Note type '{name}' references missing template file "
+                            f"'{back_ref}'."
+                        )
+
                     templates.append(
                         {
                             "Name": str(template_data.get("name", "Card")),
-                            "Front": front.read_text(encoding="utf-8")
-                            if front.exists()
-                            else "",
-                            "Back": back.read_text(encoding="utf-8")
-                            if back.exists()
-                            else "",
+                            "Front": front.read_text(encoding="utf-8"),
+                            "Back": back.read_text(encoding="utf-8"),
                         }
                     )
 

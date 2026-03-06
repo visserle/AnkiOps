@@ -370,7 +370,6 @@ def run_task(
 
     data = serialize_collection(
         collection_dir,
-        strict=True,
         deck=deck,
         no_subdecks=no_subdecks,
     )

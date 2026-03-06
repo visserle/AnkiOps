@@ -225,12 +225,16 @@ def run_serialize(args):
     logger.debug(f"Serializing collection from: {collection_dir}")
     logger.debug(f"Output file: {output_file}")
 
-    serialize_collection_to_json(
-        collection_dir,
-        output_file,
-        deck=args.deck,
-        no_subdecks=args.no_subdecks,
-    )
+    try:
+        serialize_collection_to_json(
+            collection_dir,
+            output_file,
+            deck=args.deck,
+            no_subdecks=args.no_subdecks,
+        )
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
 
 
 def run_deserialize(args):

@@ -16,6 +16,14 @@ from ankiops.models import (
 )
 
 
+def _write_basic_template_pair(note_type_dir: Path) -> None:
+    (note_type_dir / "Front.template.anki").write_text("{{Term}}", encoding="utf-8")
+    (note_type_dir / "Back.template.anki").write_text(
+        "{{FrontSide}}<hr id=answer>{{Definition}}",
+        encoding="utf-8",
+    )
+
+
 def test_label_reuse_same_field_and_identifying_is_allowed():
     """Label reuse is allowed globally when field and identifying are identical."""
     config_a = NoteTypeConfig(
@@ -95,6 +103,7 @@ def test_load_custom_from_dir():
         (note_types / "MyCustomType" / "AnkiOpsStyling.css").write_text(
             ".custom { color: red; }", encoding="utf-8"
         )
+        _write_basic_template_pair(note_types / "MyCustomType")
 
         fs = FileSystemAdapter()
         configs = fs.load_note_type_configs(note_types)
@@ -126,6 +135,16 @@ def test_note_type_load_empty_dir_fails(tmp_path):
 
     fs = FileSystemAdapter()
     with pytest.raises(ValueError, match="No note type definitions found"):
+        fs.load_note_type_configs(note_types)
+
+
+def test_note_type_subdir_missing_note_type_yaml_fails(tmp_path):
+    note_types = tmp_path / "note_types"
+    missing_config = note_types / "BadType"
+    missing_config.mkdir(parents=True, exist_ok=True)
+
+    fs = FileSystemAdapter()
+    with pytest.raises(ValueError, match="is missing note_type.yaml"):
         fs.load_note_type_configs(note_types)
 
 
@@ -197,6 +216,54 @@ def test_reject_name_key_in_note_type_yaml():
             fs.load_note_type_configs(note_types)
 
 
+def test_missing_styling_file_fails(tmp_path):
+    note_types = tmp_path / "note_types"
+    subdir = note_types / "BrokenType"
+    subdir.mkdir(parents=True, exist_ok=True)
+    (subdir / "note_type.yaml").write_text(
+        yaml.dump(
+            {
+                "fields": [{"name": "Term", "label": "TM:", "identifying": True}],
+                "styling": "Missing.css",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_basic_template_pair(subdir)
+
+    fs = FileSystemAdapter()
+    with pytest.raises(ValueError, match="references missing styling file"):
+        fs.load_note_type_configs(note_types)
+
+
+def test_missing_template_file_fails(tmp_path):
+    note_types = tmp_path / "note_types"
+    subdir = note_types / "BrokenType"
+    subdir.mkdir(parents=True, exist_ok=True)
+    (subdir / "note_type.yaml").write_text(
+        yaml.dump(
+            {
+                "fields": [{"name": "Term", "label": "TM:", "identifying": True}],
+                "styling": "Style.css",
+                "templates": [
+                    {
+                        "name": "Card 1",
+                        "front": "Front.template.anki",
+                        "back": "Back.template.anki",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (subdir / "Style.css").write_text(".card{}", encoding="utf-8")
+    (subdir / "Front.template.anki").write_text("{{Term}}", encoding="utf-8")
+
+    fs = FileSystemAdapter()
+    with pytest.raises(ValueError, match="references missing template file"):
+        fs.load_note_type_configs(note_types)
+
+
 def test_note_type_load_uses_cache_when_unchanged(tmp_path, monkeypatch):
     note_types = tmp_path / "note_types"
     (note_types / "MyCustomType").mkdir(parents=True, exist_ok=True)
@@ -215,6 +282,7 @@ def test_note_type_load_uses_cache_when_unchanged(tmp_path, monkeypatch):
     (note_types / "MyCustomType" / "AnkiOpsStyling.css").write_text(
         ".custom { color: red; }", encoding="utf-8"
     )
+    _write_basic_template_pair(note_types / "MyCustomType")
 
     calls = {"count": 0}
     original = yaml.safe_load
@@ -252,6 +320,7 @@ def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
     )
     css_path = note_types / "MyCustomType" / "AnkiOpsStyling.css"
     css_path.write_text(".custom { color: red; }", encoding="utf-8")
+    _write_basic_template_pair(note_types / "MyCustomType")
 
     calls = {"count": 0}
     original = yaml.safe_load

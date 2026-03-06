@@ -18,13 +18,9 @@ from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
 
-_MAX_SERIALIZATION_ERRORS_TO_LOG = 20
-
-
 def serialize_collection(
     collection_dir: Path,
     *,
-    strict: bool = False,
     deck: str | None = None,
     no_subdecks: bool = False,
 ) -> dict[str, Any]:
@@ -43,7 +39,6 @@ def serialize_collection(
         "decks": [],
     }
 
-    errors = []
     md_files = fs.find_markdown_files(collection_dir)
     deck_filter = deck.strip() if isinstance(deck, str) else None
 
@@ -67,8 +62,7 @@ def serialize_collection(
         try:
             parsed = fs.read_markdown_file(md_file, context_root=collection_dir)
         except Exception as error:
-            errors.append(f"Error parsing {md_file.name}: {error}")
-            continue
+            raise ValueError(f"Error parsing {md_file.name}: {error}") from error
 
         deck_data: dict[str, Any] = {
             "name": file_stem_to_deck_name(md_file.stem),
@@ -96,23 +90,6 @@ def serialize_collection(
     )
     total_decks = len(serialized_data["decks"])
     logger.debug(f"Serialized {total_decks} deck(s), {total_notes} note(s) in memory")
-
-    if errors and strict:
-        error_lines = "\n".join(errors[:_MAX_SERIALIZATION_ERRORS_TO_LOG])
-        raise ValueError(
-            f"Serialization failed with {len(errors)} error(s):\n{error_lines}"
-        )
-
-    if errors:
-        for error_message in errors[:_MAX_SERIALIZATION_ERRORS_TO_LOG]:
-            logger.warning(error_message)
-        remaining_errors = len(errors) - _MAX_SERIALIZATION_ERRORS_TO_LOG
-        if remaining_errors > 0:
-            logger.warning(f"... and {remaining_errors} more parse error(s).")
-        logger.warning(
-            f"Serialization completed with {len(errors)} error(s). "
-            "Some notes were skipped. Review errors above."
-        )
 
     return serialized_data
 
