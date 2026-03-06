@@ -405,7 +405,7 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
 
 
 def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankiops):
-    """Generated note_key comment should sit immediately above the note prefix."""
+    """Generated note_key comment should sit immediately above the note label."""
     deck_file = tmp_path / f"{deck_name_to_file_stem('TrailingSpaceDeck')}.md"
     deck_file.write_text(
         "Q: Trailing Space Question \nA: Normal Answer\n",

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
-_PREFIX_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9]*:)(?:\s|$)")
+_LABEL_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*:)(?:\s|$)")
 _RESERVED_NOTE_FIELD_NAMES = frozenset({ANKIOPS_KEY_FIELD.name})
 
 
@@ -34,7 +34,7 @@ class FileSystemAdapter:
         self._md_to_html = MarkdownToHTML()
         self._html_to_md = HTMLToMarkdown()
         self._note_type_configs: list[NoteTypeConfig] = []
-        self._prefix_to_field: dict[str, str] = {}
+        self._label_to_field: dict[str, str] = {}
         self._note_type_cache_signature: tuple | None = None
         self._inferred_note_type_by_signature: dict[
             tuple[frozenset[str], frozenset[str] | None], str
@@ -42,7 +42,7 @@ class FileSystemAdapter:
 
     def set_configs(self, configs: list[NoteTypeConfig]):
         self._note_type_configs = configs
-        self._prefix_to_field = self._build_prefix_to_field_map(configs)
+        self._label_to_field = self._build_label_to_field_map(configs)
         # External callers can override configs in-memory; invalidate disk cache.
         self._note_type_cache_signature = None
         self._inferred_note_type_by_signature = {}
@@ -114,7 +114,7 @@ class FileSystemAdapter:
             current_content: list[str] = []
             in_code_block = False
             seen: set[str] = set()
-            seen_prefixes: set[str] = set()
+            seen_labels: set[str] = set()
             first_field_line: int | None = None
 
             for offset, line in enumerate(lines):
@@ -137,26 +137,26 @@ class FileSystemAdapter:
                     continue
 
                 matched_field = None
-                for prefix, field_name in self._prefix_to_field.items():
-                    if line.startswith(prefix + " ") or line == prefix:
+                for label, field_name in self._label_to_field.items():
+                    if line.startswith(label + " ") or line == label:
                         if field_name in seen:
                             raise ValueError(
                                 self._with_parse_error_context(
-                                    f"Duplicate field '{prefix}'.",
+                                    f"Duplicate field '{label}'.",
                                     display_path=display_path,
                                     line_number=current_line_number,
                                 )
                             )
 
                         seen.add(field_name)
-                        seen_prefixes.add(prefix)
+                        seen_labels.add(label)
                         if current_field:
                             fields[current_field] = "\n".join(current_content).strip()
 
                         matched_field = field_name
                         current_content = (
-                            [line[len(prefix) + 1 :]]
-                            if line.startswith(prefix + " ")
+                            [line[len(label) + 1 :]]
+                            if line.startswith(label + " ")
                             else []
                         )
                         current_field = field_name
@@ -167,15 +167,15 @@ class FileSystemAdapter:
                 if matched_field is None and current_field:
                     current_content.append(line)
                 elif matched_field is None:
-                    prefix_match = _PREFIX_CANDIDATE_PATTERN.match(stripped)
-                    if prefix_match:
-                        unknown_prefix = prefix_match.group(1)
-                        if unknown_prefix not in self._prefix_to_field:
+                    label_match = _LABEL_CANDIDATE_PATTERN.match(stripped)
+                    if label_match:
+                        unknown_label = label_match.group(1)
+                        if unknown_label not in self._label_to_field:
                             raise ValueError(
                                 self._with_parse_error_context(
                                     (
-                                        f"Unknown field prefix '{unknown_prefix}'. "
-                                        "Check your note type prefixes."
+                                        f"Unknown field label '{unknown_label}'. "
+                                        "Check your note type labels."
                                     ),
                                     display_path=display_path,
                                     line_number=current_line_number,
@@ -189,7 +189,7 @@ class FileSystemAdapter:
                 raise ValueError(
                     self._with_parse_error_context(
                         (
-                            "Found content but no valid field prefixes in block "
+                            "Found content but no valid field labels in block "
                             f"starting with: '{block.strip()[:50]}...'"
                         ),
                         display_path=display_path,
@@ -199,7 +199,7 @@ class FileSystemAdapter:
 
             # Infer Note Type
             try:
-                note_type = self._infer_note_type(fields, prefixes=seen_prefixes)
+                note_type = self._infer_note_type(fields, labels=seen_labels)
             except ValueError as error:
                 raise ValueError(
                     self._with_parse_error_context(
@@ -239,19 +239,19 @@ class FileSystemAdapter:
         self,
         fields: dict[str, str],
         *,
-        prefixes: set[str] | None = None,
+        labels: set[str] | None = None,
     ) -> str:
         note_fields_frozen = frozenset(
             key for key in fields.keys() if key not in _RESERVED_NOTE_FIELD_NAMES
         )
-        note_prefixes_frozen = frozenset(prefixes) if prefixes is not None else None
-        signature = (note_fields_frozen, note_prefixes_frozen)
+        note_labels_frozen = frozenset(labels) if labels is not None else None
+        signature = (note_fields_frozen, note_labels_frozen)
         cached = self._inferred_note_type_by_signature.get(signature)
         if cached is not None:
             return cached
 
         note_fields = set(note_fields_frozen)
-        note_prefixes = set(note_prefixes_frozen) if note_prefixes_frozen else None
+        note_labels = set(note_labels_frozen) if note_labels_frozen else None
         candidates: list[str] = []
 
         for config in self._note_type_configs:
@@ -259,13 +259,13 @@ class FileSystemAdapter:
             if not note_fields.issubset(type_all_fields):
                 continue
 
-            if note_prefixes is not None:
-                type_all_prefixes = {
-                    str(field.prefix)
+            if note_labels is not None:
+                type_all_labels = {
+                    str(field.label)
                     for field in config.fields
-                    if field.prefix is not None
+                    if field.label is not None
                 }
-                if not note_prefixes.issubset(type_all_prefixes):
+                if not note_labels.issubset(type_all_labels):
                     continue
 
             type_ident_fields = {
@@ -286,35 +286,35 @@ class FileSystemAdapter:
                 if not (note_fields & choice_fields):
                     continue
 
-                if note_prefixes is not None:
-                    base_ident_prefixes = {
-                        str(field.prefix)
+                if note_labels is not None:
+                    base_ident_labels = {
+                        str(field.label)
                         for field in config.fields
                         if (
                             field.identifying
-                            and field.prefix is not None
+                            and field.label is not None
                             and "Choice" not in field.name
                         )
                     }
-                    choice_prefixes = {
-                        str(field.prefix)
+                    choice_labels = {
+                        str(field.label)
                         for field in config.fields
-                        if field.prefix is not None and "Choice" in field.name
+                        if field.label is not None and "Choice" in field.name
                     }
-                    if not base_ident_prefixes.issubset(note_prefixes):
+                    if not base_ident_labels.issubset(note_labels):
                         continue
-                    if not (note_prefixes & choice_prefixes):
+                    if not (note_labels & choice_labels):
                         continue
             else:
                 if not type_ident_fields.issubset(note_fields):
                     continue
-                if note_prefixes is not None:
-                    type_ident_prefixes = {
-                        str(field.prefix)
+                if note_labels is not None:
+                    type_ident_labels = {
+                        str(field.label)
                         for field in config.fields
-                        if field.identifying and field.prefix is not None
+                        if field.identifying and field.label is not None
                     }
-                    if not type_ident_prefixes.issubset(note_prefixes):
+                    if not type_ident_labels.issubset(note_labels):
                         continue
 
             candidates.append(config.name)
@@ -338,189 +338,190 @@ class FileSystemAdapter:
     def find_markdown_files(self, directory: Path) -> list[Path]:
         return sorted(directory.glob("*.md"))
 
-    def _resolve_note_type_dirs(self, note_types_dir: Path) -> list[Path]:
-        directories_to_scan = []
-        builtin_dir = Path(__file__).parent / "note_types"
-        if builtin_dir.exists():
-            directories_to_scan.append(builtin_dir)
-
-        if note_types_dir.exists():
-            try:
-                if not builtin_dir.exists() or not note_types_dir.samefile(builtin_dir):
-                    directories_to_scan.append(note_types_dir)
-            except Exception:
-                directories_to_scan.append(note_types_dir)
-
-        return directories_to_scan
-
     def _note_type_signature(self, note_types_dir: Path) -> tuple:
         """Build a filesystem signature to invalidate note type cache on changes."""
+        if not note_types_dir.exists() or not note_types_dir.is_dir():
+            return (("missing", str(note_types_dir.resolve()), 0, 0),)
+
         signature_parts: list[tuple[str, str, int, int]] = []
-        for target_dir in self._resolve_note_type_dirs(note_types_dir):
-            signature_parts.append(("dir", str(target_dir.resolve()), 0, 0))
-            for subdir in sorted(
-                target_dir.iterdir(), key=lambda path_entry: path_entry.name
+        target_dir = note_types_dir
+        signature_parts.append(("dir", str(target_dir.resolve()), 0, 0))
+        for subdir in sorted(
+            target_dir.iterdir(), key=lambda path_entry: path_entry.name
+        ):
+            if not subdir.is_dir():
+                continue
+            signature_parts.append(
+                ("subdir", str(subdir.relative_to(target_dir)), 0, 0)
+            )
+            for file_path in sorted(
+                subdir.rglob("*"), key=lambda path_entry: str(path_entry)
             ):
-                if not subdir.is_dir():
+                if not file_path.is_file():
                     continue
+                stat = file_path.stat()
                 signature_parts.append(
-                    ("subdir", str(subdir.relative_to(target_dir)), 0, 0)
-                )
-                for file_path in sorted(
-                    subdir.rglob("*"), key=lambda path_entry: str(path_entry)
-                ):
-                    if not file_path.is_file():
-                        continue
-                    stat = file_path.stat()
-                    signature_parts.append(
-                        (
-                            "file",
-                            str(file_path.relative_to(target_dir)),
-                            stat.st_mtime_ns,
-                            stat.st_size,
-                        )
+                    (
+                        "file",
+                        str(file_path.relative_to(target_dir)),
+                        stat.st_mtime_ns,
+                        stat.st_size,
                     )
+                )
         return tuple(signature_parts)
 
     def load_note_type_configs(self, note_types_dir: Path) -> list[NoteTypeConfig]:
+        if not note_types_dir.exists() or not note_types_dir.is_dir():
+            raise ValueError(
+                f"Note types directory not found: {note_types_dir}. "
+                "Initialize or create local note_types definitions first."
+            )
+
         configs_dict: dict[str, NoteTypeConfig] = {}
         signature = self._note_type_signature(note_types_dir)
         if self._note_type_configs and self._note_type_cache_signature == signature:
             return self._note_type_configs
 
-        directories_to_scan = self._resolve_note_type_dirs(note_types_dir)
+        for subdir in sorted(
+            note_types_dir.iterdir(), key=lambda path_entry: path_entry.name
+        ):
+            if not subdir.is_dir():
+                continue
 
-        # Builtin & folder-based
-        for target_dir in directories_to_scan:
-            for subdir in target_dir.iterdir():
-                if not subdir.is_dir():
-                    continue
+            config_path = subdir / "note_type.yaml"
+            if not config_path.exists():
+                continue
 
-                config_path = subdir / "note_type.yaml"
-                if not config_path.exists():
-                    continue
+            with open(config_path, "r", encoding="utf-8") as file:
+                info = yaml.safe_load(file) or {}
 
-                with open(config_path, "r", encoding="utf-8") as file:
-                    info = yaml.safe_load(file) or {}
-
-                name = info.get("name", subdir.name)
-
-                is_builtin = name.startswith("AnkiOps")
-                if not is_builtin and "styling" not in info:
-                    raise ValueError(
-                        f"Note type '{name}' is missing mandatory 'styling' key "
-                        "in note_type.yaml"
-                    )
-
-                fields = []
-                for field_data in info.get("fields", []):
-                    fields.append(
-                        Field(
-                            field_data["name"],
-                            field_data["prefix"],
-                            identifying=field_data["identifying"],
-                        )
-                    )
-
-                if ANKIOPS_KEY_FIELD.name not in [
-                    field_config.name for field_config in fields
-                ]:
-                    fields.append(ANKIOPS_KEY_FIELD)
-
-                # CSS
-                styling_input = info.get("styling", [])
-                if isinstance(styling_input, str):
-                    styling_input = [styling_input]
-
-                css_parts = []
-                for css_file in styling_input:
-                    css_path = subdir / css_file
-                    if css_path.exists():
-                        css_parts.append(css_path.read_text(encoding="utf-8"))
-                css = "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
-
-                # Templates
-                raw_templates = info.get("templates", [])
-                templates = []
-
-                if not raw_templates:
-                    # Implicit loading
-                    front = subdir / "Front.template.anki"
-                    back = subdir / "Back.template.anki"
-                    if front.exists() and back.exists():
-                        name_card1 = "Cloze" if info.get("is_cloze") else "Card 1"
-                        templates.append(
-                            {
-                                "Name": name_card1,
-                                "Front": front.read_text(encoding="utf-8"),
-                                "Back": back.read_text(encoding="utf-8"),
-                            }
-                        )
-
-                        template_index = 2
-                        while True:
-                            front_n = subdir / f"Front{template_index}.template.anki"
-                            back_n = subdir / f"Back{template_index}.template.anki"
-                            if front_n.exists() and back_n.exists():
-                                templates.append(
-                                    {
-                                        "Name": f"Card {template_index}",
-                                        "Front": front_n.read_text(encoding="utf-8"),
-                                        "Back": back_n.read_text(encoding="utf-8"),
-                                    }
-                                )
-                                template_index += 1
-                            else:
-                                break
-                else:
-                    for template_data in raw_templates:
-                        front = subdir / template_data["front"]
-                        back = subdir / template_data["back"]
-                        templates.append(
-                            {
-                                "Name": str(template_data.get("name", "Card")),
-                                "Front": front.read_text(encoding="utf-8")
-                                if front.exists()
-                                else "",
-                                "Back": back.read_text(encoding="utf-8")
-                                if back.exists()
-                                else "",
-                            }
-                        )
-
-                configs_dict[name] = NoteTypeConfig(
-                    name=name,
-                    fields=fields,
-                    css=css,
-                    is_cloze=bool(info.get("is_cloze", False)),
-                    is_choice=bool(info.get("is_choice", False)),
-                    templates=templates,
+            name = subdir.name
+            if "name" in info:
+                raise ValueError(
+                    f"Note type '{name}' must not define 'name' in note_type.yaml. "
+                    "Use the directory name as the note type name."
                 )
 
+            if "styling" not in info:
+                raise ValueError(
+                    f"Note type '{name}' is missing mandatory 'styling' key "
+                    "in note_type.yaml"
+                )
+
+            fields = []
+            for field_data in info.get("fields", []):
+                fields.append(
+                    Field(
+                        field_data["name"],
+                        field_data["label"],
+                        identifying=field_data["identifying"],
+                    )
+                )
+
+            if ANKIOPS_KEY_FIELD.name not in [
+                field_config.name for field_config in fields
+            ]:
+                fields.append(ANKIOPS_KEY_FIELD)
+
+            # CSS
+            styling_input = info.get("styling", [])
+            if isinstance(styling_input, str):
+                styling_input = [styling_input]
+
+            css_parts = []
+            for css_file in styling_input:
+                css_path = subdir / css_file
+                if css_path.exists():
+                    css_parts.append(css_path.read_text(encoding="utf-8"))
+            css = "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
+
+            # Templates
+            raw_templates = info.get("templates", [])
+            templates = []
+
+            if not raw_templates:
+                # Implicit loading
+                front = subdir / "Front.template.anki"
+                back = subdir / "Back.template.anki"
+                if front.exists() and back.exists():
+                    name_card1 = "Cloze" if info.get("is_cloze") else "Card 1"
+                    templates.append(
+                        {
+                            "Name": name_card1,
+                            "Front": front.read_text(encoding="utf-8"),
+                            "Back": back.read_text(encoding="utf-8"),
+                        }
+                    )
+
+                    template_index = 2
+                    while True:
+                        front_n = subdir / f"Front{template_index}.template.anki"
+                        back_n = subdir / f"Back{template_index}.template.anki"
+                        if front_n.exists() and back_n.exists():
+                            templates.append(
+                                {
+                                    "Name": f"Card {template_index}",
+                                    "Front": front_n.read_text(encoding="utf-8"),
+                                    "Back": back_n.read_text(encoding="utf-8"),
+                                }
+                            )
+                            template_index += 1
+                        else:
+                            break
+            else:
+                for template_data in raw_templates:
+                    front = subdir / template_data["front"]
+                    back = subdir / template_data["back"]
+                    templates.append(
+                        {
+                            "Name": str(template_data.get("name", "Card")),
+                            "Front": front.read_text(encoding="utf-8")
+                            if front.exists()
+                            else "",
+                            "Back": back.read_text(encoding="utf-8")
+                            if back.exists()
+                            else "",
+                        }
+                    )
+
+            configs_dict[name] = NoteTypeConfig(
+                name=name,
+                fields=fields,
+                css=css,
+                is_cloze=bool(info.get("is_cloze", False)),
+                is_choice=bool(info.get("is_choice", False)),
+                templates=templates,
+            )
+
         configs = list(configs_dict.values())
+        if not configs:
+            raise ValueError(
+                f"No note type definitions found in {note_types_dir}. "
+                "Add at least one note type directory with note_type.yaml."
+            )
         NoteTypeConfig.validate_configs(configs)
         self._note_type_configs = configs
-        self._prefix_to_field = self._build_prefix_to_field_map(configs)
+        self._label_to_field = self._build_label_to_field_map(configs)
         self._note_type_cache_signature = signature
         self._inferred_note_type_by_signature = {}
         return configs
 
-    def _build_prefix_to_field_map(
+    def _build_label_to_field_map(
         self, configs: list[NoteTypeConfig]
     ) -> dict[str, str]:
-        prefix_to_field: dict[str, str] = {}
+        label_to_field: dict[str, str] = {}
         for config in configs:
             for field_config in config.fields:
-                if field_config.prefix is None:
+                if field_config.label is None:
                     continue
-                existing_field = prefix_to_field.get(field_config.prefix)
+                existing_field = label_to_field.get(field_config.label)
                 if existing_field is not None and existing_field != field_config.name:
                     raise ValueError(
-                        f"Prefix '{field_config.prefix}' maps to both '{existing_field}' "
-                        f"and '{field_config.name}'."
+                        f"Label '{field_config.label}' maps to both "
+                        f"'{existing_field}' and '{field_config.name}'."
                     )
-                prefix_to_field[field_config.prefix] = field_config.name
-        return prefix_to_field
+                label_to_field[field_config.label] = field_config.name
+        return label_to_field
 
     def calculate_blake3(self, file_path: Path) -> str:
         hash_state = blake3()
@@ -547,18 +548,18 @@ class FileSystemAdapter:
             # Determine which pattern matched
             media_context = "other"
             if match.group(1) is not None:
-                prefix = match.group(1)
+                opener = match.group(1)
                 # Path can be in group 2 (angle brackets) or group 3 (plain).
                 path = match.group(2) or match.group(3)
                 suffix = match.group(4)
                 is_markdown = True
                 media_context = "markdown"
             elif match.group(5) is not None:
-                prefix, path, suffix = match.group(5), match.group(6), match.group(7)
+                opener, path, suffix = match.group(5), match.group(6), match.group(7)
                 is_markdown = False
                 media_context = "html"
             else:
-                prefix, path, suffix = match.group(8), match.group(9), match.group(10)
+                opener, path, suffix = match.group(8), match.group(9), match.group(10)
                 is_markdown = False
                 media_context = "sound"
 
@@ -576,7 +577,7 @@ class FileSystemAdapter:
                     # Wrap markdown links in angle brackets for safer parsing.
                     if not new_path.startswith("<"):
                         new_path = f"<{new_path}>"
-                return f"{prefix}{new_path}{suffix}"
+                return f"{opener}{new_path}{suffix}"
             return match.group(0)
 
         for md_file in directory.glob("*.md"):

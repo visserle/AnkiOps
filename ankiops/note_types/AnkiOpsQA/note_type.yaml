@@ -1,4 +1,3 @@
-name: AnkiOpsQA
 styling:
   - ../AnkiOpsStyling.css
   - ../SyntaxHighlighting.css
@@ -8,20 +7,20 @@ templates:
     back: Back.template.anki
 fields:
   - name: Question
-    prefix: "Q:"
+    label: "Q:"
     identifying: true
   - name: Answer
-    prefix: "A:"
+    label: "A:"
     identifying: true
   - name: Extra
-    prefix: "E:"
+    label: "E:"
     identifying: false
   - name: More
-    prefix: "M:"
+    label: "M:"
     identifying: false
   - name: Source
-    prefix: "S:"
+    label: "S:"
     identifying: false
   - name: AI Notes
-    prefix: "AI:"
+    label: "AI:"
     identifying: false

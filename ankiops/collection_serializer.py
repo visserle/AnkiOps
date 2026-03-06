@@ -55,12 +55,12 @@ def serialize_collection(
                 if file_stem_to_deck_name(md_file.stem) == deck_filter
             ]
         else:
-            prefix = f"{deck_filter}::"
+            subdeck_scope = f"{deck_filter}::"
             md_files = [
                 md_file
                 for md_file in md_files
                 if file_stem_to_deck_name(md_file.stem) == deck_filter
-                or file_stem_to_deck_name(md_file.stem).startswith(prefix)
+                or file_stem_to_deck_name(md_file.stem).startswith(subdeck_scope)
             ]
 
     for md_file in md_files:
@@ -257,8 +257,8 @@ def deserialize_collection_data(
 
             for field in config.fields:
                 field_content = fields.get(field.name)
-                if field_content and field.prefix:
-                    lines.append(f"{field.prefix} {field_content}")
+                if field_content and field.label:
+                    lines.append(f"{field.label} {field_content}")
             written_notes += 1
 
             lines.append("")

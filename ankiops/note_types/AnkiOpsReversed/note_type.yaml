@@ -1,4 +1,3 @@
-name: AnkiOpsReversed
 styling:
   - ../AnkiOpsStyling.css
   - ../SyntaxHighlighting.css
@@ -11,20 +10,20 @@ templates:
     back: Back2.template.anki
 fields:
   - name: Front
-    prefix: "F:"
+    label: "F:"
     identifying: true
   - name: Back
-    prefix: "B:"
+    label: "B:"
     identifying: true
   - name: Extra
-    prefix: "E:"
+    label: "E:"
     identifying: false
   - name: More
-    prefix: "M:"
+    label: "M:"
     identifying: false
   - name: Source
-    prefix: "S:"
+    label: "S:"
     identifying: false
   - name: AI Notes
-    prefix: "AI:"
+    label: "AI:"
     identifying: false

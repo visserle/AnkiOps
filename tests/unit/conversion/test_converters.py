@@ -229,8 +229,8 @@ def test_unknown_tags_preserved_or_stripped(html_to_md):
     assert "Text" in md
 
 
-def test_media_prefix_stripping(md_to_html):
-    """Test that media/ prefix is stripped from image src."""
+def test_media_leading_segment_stripping(md_to_html):
+    """Test that leading media/ segment is stripped from image src."""
     md = "![Alt](media/img.png)"
     html = md_to_html.convert(md)
     # Should result in src="img.png" NOT src="media/img.png"

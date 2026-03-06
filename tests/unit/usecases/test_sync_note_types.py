@@ -13,8 +13,8 @@ def _qa_config(*, css: str) -> NoteTypeConfig:
     return NoteTypeConfig(
         name="AnkiOpsQA",
         fields=[
-            Field(name="Question", prefix="Q:", identifying=True),
-            Field(name="Answer", prefix="A:", identifying=True),
+            Field(name="Question", label="Q:", identifying=True),
+            Field(name="Answer", label="A:", identifying=True),
         ],
         css=css,
         templates=[{"Name": "Card 1", "Front": "{{Question}}", "Back": "{{Answer}}"}],

@@ -58,11 +58,11 @@ def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
             (line_index for line_index, line in enumerate(lines) if line.strip()), 0
         )
 
-    # Search the note block for a line containing this value with a prefix.
+    # Search the note block for a line containing this value with a field label.
     for line_index, line in enumerate(lines):
         stripped = line.strip()
         if stripped.endswith(first_value_stripped) and ":" in stripped:
-            # Verify this is a prefixed line (e.g. "Q: Question 1").
+            # Verify this is a labeled line (e.g. "Q: Question 1").
             try:
                 idx = stripped.rindex(first_value_stripped)
                 prefix_part = stripped[:idx].rstrip()
@@ -148,7 +148,7 @@ def _to_html(
         for name, content in note.fields.items()
     }
     for field_config in config.fields:
-        if field_config.prefix is None:
+        if field_config.label is None:
             continue
         html.setdefault(field_config.name, "")
     return html

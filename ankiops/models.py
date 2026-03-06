@@ -20,7 +20,7 @@ class Field:
     """Definition of a field in a note type."""
 
     name: str
-    prefix: str | None
+    label: str | None
     identifying: bool
 
 
@@ -39,37 +39,38 @@ class NoteTypeConfig:
     templates: list[dict[str, str]] = field(default_factory=list)
 
     @property
-    def identifying_prefixes(self) -> set[str]:
-        """Return prefixes of identifying fields."""
+    def identifying_labels(self) -> set[str]:
+        """Return labels of identifying fields."""
         return {
-            str(field_config.prefix)
+            str(field_config.label)
             for field_config in self.fields
-            if field_config.prefix is not None and field_config.identifying
+            if field_config.label is not None and field_config.identifying
         }
 
     @classmethod
     def validate_configs(cls, configs: list[NoteTypeConfig]) -> None:
-        """Validate a set of note type configurations to ensure data integrity,
-        local field uniqueness, strict built-in reservations, and lack
-        of ambiguity.
+        """Validate note type configs using global set invariants.
+
+        Invariants:
+        - Field names/labels are unique within each note type.
+        - A label maps to a single field name globally.
+        - A label has one identifying flag globally.
+        - Identifying label signatures are unique across note types.
+        - Choice note types have identifying base and identifying choice fields.
         """
         reserved_names = {ANKIOPS_KEY_FIELD.name}
-        built_in_prefixes = {
-            str(field_config.prefix)
-            for config in configs
-            if config.name.startswith("AnkiOps")
-            for field_config in config.fields
-            if field_config.prefix is not None
-        }
-        custom_prefix_to_type: dict[str, str] = {}
+        label_to_field_name: dict[str, str] = {}
+        label_to_identifying: dict[str, bool] = {}
         identifying_signature_to_type: dict[frozenset[str], str] = {}
 
         for config in configs:
-            is_builtin = config.name.startswith("AnkiOps")
             seen_names: set[str] = set()
-            seen_prefixes: set[str] = set()
+            seen_labels: set[str] = set()
+            identifying_choice_labels: set[str] = set()
+            identifying_non_choice_labels: set[str] = set()
+            has_choice_field = False
 
-            # 1. Reservation Checks (Names and Prefixes)
+            # 1) Local uniqueness + reserved fields + global label invariants.
             for field_config in config.fields:
                 if field_config.name in seen_names:
                     raise ValueError(
@@ -79,22 +80,22 @@ class NoteTypeConfig:
                     )
                 seen_names.add(field_config.name)
 
-                if field_config.prefix is not None:
-                    if field_config.prefix in seen_prefixes:
+                if field_config.label is not None:
+                    if field_config.label in seen_labels:
                         raise ValueError(
-                            f"Note type '{config.name}' has duplicate field prefix "
-                            f"'{field_config.prefix}'. "
-                            "Field prefixes must be unique within a "
+                            f"Note type '{config.name}' has duplicate field label "
+                            f"'{field_config.label}'. "
+                            "Field labels must be unique within a "
                             "note type."
                         )
-                    seen_prefixes.add(field_config.prefix)
+                    seen_labels.add(field_config.label)
 
                 if field_config.name in reserved_names:
-                    if field_config.prefix != ANKIOPS_KEY_FIELD.prefix:
+                    if field_config.label != ANKIOPS_KEY_FIELD.label:
                         raise ValueError(
                             f"Note type '{config.name}' uses reserved "
-                            f"field name '{field_config.name}' with invalid prefix. "
-                            f"Expected no prefix."
+                            f"field name '{field_config.name}' with invalid label. "
+                            "Expected no label."
                         )
                     if field_config.identifying != ANKIOPS_KEY_FIELD.identifying:
                         raise ValueError(
@@ -103,29 +104,39 @@ class NoteTypeConfig:
                             "which is not allowed."
                         )
 
-                if field_config.prefix is not None and not is_builtin:
-                    if field_config.prefix in built_in_prefixes:
+                if field_config.label is not None:
+                    existing_name = label_to_field_name.get(field_config.label)
+                    if existing_name is not None and existing_name != field_config.name:
                         raise ValueError(
-                            f"Note type '{config.name}' uses reserved built-in "
-                            f"prefix '{field_config.prefix}'"
+                            f"Label '{field_config.label}' maps to both "
+                            f"'{existing_name}' and '{field_config.name}'."
                         )
+                    label_to_field_name[field_config.label] = field_config.name
 
-                    existing_type = custom_prefix_to_type.get(field_config.prefix)
-                    if existing_type is not None and existing_type != config.name:
+                    existing_identifying = label_to_identifying.get(
+                        field_config.label
+                    )
+                    if (
+                        existing_identifying is not None
+                        and existing_identifying != field_config.identifying
+                    ):
                         raise ValueError(
-                            f"Note type '{config.name}' reuses custom prefix "
-                            f"'{field_config.prefix}' already used by "
-                            f"'{existing_type}'. "
-                            "Prefixes must be unique across custom note types."
+                            f"Label '{field_config.label}' has conflicting "
+                            "identifying flag across note types."
                         )
-                    custom_prefix_to_type[field_config.prefix] = config.name
+                    label_to_identifying[field_config.label] = (
+                        field_config.identifying
+                    )
 
-            # 2. Choice Validation
+                    if "choice" in field_config.name.lower():
+                        has_choice_field = True
+                        if field_config.identifying:
+                            identifying_choice_labels.add(field_config.label)
+                    elif field_config.identifying:
+                        identifying_non_choice_labels.add(field_config.label)
+
+            # 2) Choice constraints for inference safety.
             if config.is_choice:
-                has_choice_field = any(
-                    "choice" in field_config.name.lower()
-                    for field_config in config.fields
-                )
                 if not has_choice_field:
                     raise ValueError(
                         f"Note type '{config.name}' is marked as 'is_choice', "
@@ -133,9 +144,19 @@ class NoteTypeConfig:
                         "Choice note types must have at least one field with "
                         "'choice' in its name."
                     )
+                if not identifying_non_choice_labels:
+                    raise ValueError(
+                        f"Note type '{config.name}' is marked as 'is_choice', "
+                        "but has no identifying non-choice field."
+                    )
+                if not identifying_choice_labels:
+                    raise ValueError(
+                        f"Note type '{config.name}' is marked as 'is_choice', "
+                        "but has no identifying choice field."
+                    )
 
-            # 3. Distinctness Checks
-            signature = frozenset(config.identifying_prefixes)
+            # 3) Distinct identifying signatures across note types.
+            signature = frozenset(config.identifying_labels)
             existing_type = identifying_signature_to_type.get(signature)
             if existing_type is not None and existing_type != config.name:
                 raise ValueError(
@@ -187,13 +208,13 @@ class Note:
                 continue
 
             if (
-                field_config.prefix is not None
+                field_config.label is not None
                 and field_config.identifying
                 and not self.fields.get(field_config.name)
             ):
                 errors.append(
                     f"Missing mandatory field '{field_config.name}' "
-                    f"({field_config.prefix})"
+                    f"({field_config.label})"
                 )
 
         if config.is_cloze:

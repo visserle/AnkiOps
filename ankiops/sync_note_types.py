@@ -24,7 +24,7 @@ def _note_types_sync_hash(configs) -> str:
                 "fields": [
                     {
                         "name": field.name,
-                        "prefix": field.prefix,
+                        "label": field.label,
                         "identifying": field.identifying,
                     }
                     for field in config.fields

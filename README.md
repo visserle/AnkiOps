@@ -19,7 +19,7 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
 > [!NOTE]
-> AnkiOps syncs notes using built-in AnkiOps note types (`AnkiOpsQA`, `AnkiOpsReversed`, `AnkiOpsCloze`, `AnkiOpsClozeHideAll`, `AnkiOpsInput`, and `AnkiOpsChoice`) plus local custom note types defined under `note_types/`.
+> Runtime note type config is IaC-only: AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth.
 
 ## Getting Started
 
@@ -82,7 +82,7 @@ In this example, the last note is a new note which will get a `note_key` comment
 
 ### How are the different note types identified?
 
-Each note type is identified by its field prefixes. `E:` (Extra) and `M:` (More, revealed on click) are optional fields shared across all note types.
+Each note type is identified by its field labels. `E:` (Extra) and `M:` (More, revealed on click) are optional fields shared across all note types.
 
 | Note Type | Fields |
 |---|---|
@@ -114,7 +114,7 @@ For standard note types, migration is straightforward:
 2. Export your notes from Anki to Markdown using `ankiops am`.
 3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
 
-If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type with unique field prefixes (and unique field names within that note type) for automatic note type detection, and add your card's templates to `ankiops/card_templates`.
+If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type with unique field labels (and unique field names within that note type) for automatic note type detection, and add your card's templates to `ankiops/note_types`.
 
 ### How can I develop AnkiOps locally?
 
@@ -153,5 +153,5 @@ uv run python -m main ma
 - `--overwrite` - Overwrite existing markdown files
 
 **`note-type`:**
-- `ankiops note-type --info` - Show taken prefixes and per-note-type prefix details
-- `ankiops note-type <name>` - Copy a note type from Anki into local `note_types/` with interactive prefix/identifying prompts
+- `ankiops note-type --info` - Show taken labels and per-note-type label details
+- `ankiops note-type <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts

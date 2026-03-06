@@ -28,7 +28,7 @@ def _complete_fields(
     return {
         field.name: html_fields.get(field.name, "")
         for field in config.fields
-        if field.prefix is not None
+        if field.label is not None
     }
 
 

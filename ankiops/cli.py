@@ -2,9 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-import yaml
-
-from ankiops.anki import AnkiAdapter
+from ankiops.cli_anki import connect_or_exit
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
     serialize_collection_to_json,
@@ -27,31 +25,12 @@ from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.errors import LlmFatalError
 from ankiops.llm.runner import run_task
 from ankiops.log import clickable_path, configure_logging
-from ankiops.models import CollectionResult, Field, NoteTypeConfig
-from ankiops.note_type_cli import (
-    _build_template_output_files,
-    _is_choice_field,
-    _log_note_type_prefix_info,
-    _prompt_field_identifying,
-    _prompt_field_prefix,
-)
+from ankiops.models import CollectionResult
+from ankiops.note_type_cli import run as run_note_type
 from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
-
-
-def connect_or_exit() -> AnkiAdapter:
-    """Verify AnkiConnect is reachable; exit on failure. Returns the adapter."""
-    anki = AnkiAdapter()
-    try:
-        version = anki.get_version()
-        logger.debug(f"Connected to AnkiConnect (version {version})")
-    except Exception as error:
-        logger.error(f"Error connecting to AnkiConnect: {error}")
-        logger.error("Make sure Anki is running and AnkiConnect is installed.")
-        raise SystemExit(1)
-    return anki
 
 
 def _format_media_status(media_result, *, from_anki: bool) -> str:
@@ -313,133 +292,6 @@ def run_llm(args):
         raise SystemExit(1) from error
 
 
-def run_note_type(args) -> None:
-    """Show note type prefix information or copy a note type from Anki."""
-    if args.info and args.name:
-        logger.error("Cannot combine note type name with --info.")
-        raise SystemExit(2)
-    if not args.info and not args.name:
-        logger.error("A note type name is required unless --info is used.")
-        raise SystemExit(2)
-
-    note_types_dir = get_note_types_dir()
-    fs = FileSystemAdapter()
-
-    if args.info:
-        require_initialized_collection_dir()
-        note_type_configs = fs.load_note_type_configs(note_types_dir)
-        _log_note_type_prefix_info(note_type_configs)
-        return
-
-    anki = connect_or_exit()
-    active_profile = anki.get_active_profile()
-    collection_dir = require_collection_dir(active_profile)
-    logger.debug(f"Collection directory: {collection_dir}")
-
-    note_type_name = str(args.name)
-    destination_dir = note_types_dir / note_type_name
-    if destination_dir.exists():
-        logger.error(
-            f"Target note type directory already exists: {destination_dir}. "
-            "Use a different name or remove the existing folder first."
-        )
-        raise SystemExit(1)
-
-    model_names = set(anki.fetch_model_names())
-    if note_type_name not in model_names:
-        available = ", ".join(sorted(model_names)) or "(none)"
-        logger.error(
-            f"Note type '{note_type_name}' not found in Anki. Available: {available}"
-        )
-        raise SystemExit(1)
-
-    state = anki.fetch_model_states([note_type_name]).get(note_type_name)
-    if state is None:
-        logger.error(f"Could not fetch note type state for '{note_type_name}'.")
-        raise SystemExit(1)
-
-    fields = []
-    used_prefixes: set[str] = set()
-    logger.info(f"Copying note type '{note_type_name}' from Anki.")
-    for field_name in state["fields"]:
-        prefix = _prompt_field_prefix(field_name, used_prefixes=used_prefixes)
-        used_prefixes.add(prefix)
-        identifying = _prompt_field_identifying(field_name)
-        fields.append(Field(name=field_name, prefix=prefix, identifying=identifying))
-
-    templates = state["templates"]
-    is_choice = any(_is_choice_field(field_name) for field_name in state["fields"])
-    is_cloze = any(
-        "{{cloze:" in str(template_data.get(template_side, "")).lower()
-        for template_data in templates.values()
-        for template_side in ("Front", "Back")
-    )
-    candidate_config = NoteTypeConfig(
-        name=note_type_name,
-        fields=fields,
-        css=str(state["styling"]),
-        is_choice=is_choice,
-        is_cloze=is_cloze,
-        templates=[
-            {
-                "Name": template_name,
-                "Front": str(template_data.get("Front", "")),
-                "Back": str(template_data.get("Back", "")),
-            }
-            for template_name, template_data in templates.items()
-        ],
-    )
-
-    existing_configs = fs.load_note_type_configs(note_types_dir)
-    try:
-        NoteTypeConfig.validate_configs([*existing_configs, candidate_config])
-    except ValueError as error:
-        logger.error(f"Invalid note type configuration: {error}")
-        raise SystemExit(1) from error
-
-    note_types_dir.mkdir(parents=True, exist_ok=True)
-    destination_dir.mkdir(parents=True, exist_ok=False)
-
-    yaml_templates, template_files = _build_template_output_files(templates)
-    yaml_data = {
-        "name": note_type_name,
-        "styling": "Styling.css",
-        "templates": yaml_templates,
-        "fields": [
-            {
-                "name": field_config.name,
-                "prefix": field_config.prefix,
-                "identifying": field_config.identifying,
-            }
-            for field_config in fields
-        ],
-    }
-    if is_choice:
-        yaml_data["is_choice"] = True
-    if is_cloze:
-        yaml_data["is_cloze"] = True
-
-    for filename, content in template_files.items():
-        (destination_dir / filename).write_text(content, encoding="utf-8")
-
-    styling_path = destination_dir / "Styling.css"
-    styling_path.write_text(str(state["styling"]), encoding="utf-8")
-
-    config_path = destination_dir / "note_type.yaml"
-    config_path.write_text(
-        yaml.safe_dump(yaml_data, sort_keys=False, allow_unicode=False),
-        encoding="utf-8",
-    )
-
-    identifying_count = sum(1 for field_config in fields if field_config.identifying)
-    logger.info(
-        f"Copied note type '{note_type_name}' with {len(fields)} fields "
-        f"({identifying_count} identifying)."
-    )
-    logger.info(f"Saved to: {clickable_path(destination_dir)}")
-    logger.info(f"Config: {clickable_path(config_path)}")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="AnkiOps – Manage Anki decks as Markdown files.",
@@ -554,7 +406,7 @@ def main():
 
     note_type_parser = subparsers.add_parser(
         "note-type",
-        help="Show prefix info or copy an Anki note type into local note_types/",
+        help="Show label info or copy an Anki note type into local note_types/",
     )
     note_type_parser.add_argument(
         "name",
@@ -564,7 +416,7 @@ def main():
     note_type_parser.add_argument(
         "--info",
         action="store_true",
-        help="Show taken prefixes and note type prefix details",
+        help="Show taken labels and note type label details",
     )
     note_type_parser.set_defaults(handler=run_note_type)
 
@@ -590,7 +442,7 @@ def main():
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
         print("  llm               Run configured LLM tasks on local markdown")
-        print("  note-type         Show prefix info or copy note types from Anki")
+        print("  note-type         Show label info or copy note types from Anki")
         print()
         print("Usage examples:")
         print(
@@ -617,7 +469,7 @@ def main():
         )
         print("  ankiops llm grammar                          # Run the grammar task")
         print(
-            "  ankiops note-type --info                     # Show taken prefixes"
+            "  ankiops note-type --info                     # Show taken labels"
         )
         print(
             "  ankiops note-type MyCustomType               # Copy note type from Anki"

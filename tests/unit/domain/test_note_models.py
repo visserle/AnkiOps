@@ -26,7 +26,7 @@ class TestParseChoiceBlock:
         assert note.fields["Choice 2"] == "Paris"
         assert note.fields["Answer"] == "1"
 
-    def test_choice_without_id_detected_from_prefix(self, fs, tmp_path):
+    def test_choice_without_id_detected_from_label(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nC1: A\nC2: B\nA: 2")
         result = fs.read_markdown_file(md)
@@ -297,7 +297,7 @@ class TestParseClozeBlock:
         assert note.note_type == "AnkiOpsCloze"
         assert "{{c1::cloze}}" in note.fields["Text"]
 
-    def test_cloze_without_id_detected_from_prefix(self, fs, tmp_path):
+    def test_cloze_without_id_detected_from_label(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("T: This is {{c1::a test}}")
         result = fs.read_markdown_file(md)
@@ -317,12 +317,12 @@ class TestParseClozeBlock:
         assert note.fields["Text"] == "{{c1::text}}"
         assert note.fields["Extra"] == "extra info"
 
-    def test_unknown_prefix_before_first_field_fails(self, fs, tmp_path):
+    def test_unknown_label_before_first_field_fails(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("RANDOMPREFIX: {{c1::text}}\nE: extra info")
         with pytest.raises(
             ValueError,
-            match=r"Unknown field prefix 'RANDOMPREFIX:'.* \(file: deck\.md, line: 1\)",
+            match=r"Unknown field label 'RANDOMPREFIX:'.* \(file: deck\.md, line: 1\)",
         ):
             fs.read_markdown_file(md)
 
@@ -420,15 +420,15 @@ class TestMultiNoteFile:
 
 
 class TestNoteInference:
-    """Test note type inference from field names/prefixes."""
+    """Test note type inference from field names/labels."""
 
     def test_infer_qa(self, fs):
         assert fs._infer_note_type({"Question": "q", "Answer": "a"}) == "AnkiOpsQA"
 
     def test_infer_cloze(self, fs):
-        assert fs._infer_note_type({"Text": "t"}, prefixes={"T:"}) == "AnkiOpsCloze"
+        assert fs._infer_note_type({"Text": "t"}, labels={"T:"}) == "AnkiOpsCloze"
 
-    def test_infer_text_without_prefix_is_ambiguous(self, fs):
+    def test_infer_text_without_label_is_ambiguous(self, fs):
         with pytest.raises(ValueError, match="Ambiguous note type"):
             fs._infer_note_type({"Text": "t"})
 

@@ -5,10 +5,20 @@ from __future__ import annotations
 import logging
 import re
 
-from ankiops.models import NoteTypeConfig
+import yaml
+
+from ankiops.cli_anki import connect_or_exit
+from ankiops.config import (
+    get_note_types_dir,
+    require_collection_dir,
+    require_initialized_collection_dir,
+)
+from ankiops.fs import FileSystemAdapter
+from ankiops.log import clickable_path
+from ankiops.models import Field, NoteTypeConfig
 
 logger = logging.getLogger(__name__)
-_VALID_FIELD_PREFIX_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9]*:$")
+_VALID_FIELD_LABEL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 def _parse_identifying_answer(value: str) -> bool:
@@ -20,25 +30,28 @@ def _parse_identifying_answer(value: str) -> bool:
     raise ValueError("Please enter 'y' or 'n'.")
 
 
-def _validate_prefix_input(prefix: str, *, used_prefixes: set[str]) -> str:
-    normalized = prefix.strip()
+def _validate_label_input(label: str, *, used_labels: set[str]) -> str:
+    normalized = label.strip()
+    if normalized.endswith(":"):
+        normalized = normalized[:-1].strip()
     if not normalized:
-        raise ValueError("Prefix cannot be empty.")
-    if not _VALID_FIELD_PREFIX_PATTERN.match(normalized):
+        raise ValueError("Label cannot be empty.")
+    if not _VALID_FIELD_LABEL_PATTERN.match(normalized):
         raise ValueError(
-            "Prefix must start with a letter, contain only letters/numbers, "
-            "and end with ':'."
+            "Label must start with a letter and contain only letters, "
+            "numbers, '_' or '-'."
         )
-    if normalized in used_prefixes:
-        raise ValueError(f"Prefix '{normalized}' is already used in this note type.")
-    return normalized
+    canonical = f"{normalized}:"
+    if canonical in used_labels:
+        raise ValueError(f"Label '{canonical}' is already used in this note type.")
+    return canonical
 
 
-def _prompt_field_prefix(field_name: str, *, used_prefixes: set[str]) -> str:
+def _prompt_field_label(field_name: str, *, used_labels: set[str]) -> str:
     while True:
-        raw = input(f"Field '{field_name}' prefix: ").strip()
+        raw = input(f"Field '{field_name}' label (':' added automatically): ").strip()
         try:
-            return _validate_prefix_input(raw, used_prefixes=used_prefixes)
+            return _validate_label_input(raw, used_labels=used_labels)
         except ValueError as error:
             logger.error(str(error))
 
@@ -56,23 +69,49 @@ def _is_choice_field(field_name: str) -> bool:
     return "choice" in field_name.lower()
 
 
-def _format_owner_entry(
-    note_type_name: str,
-    field_name: str,
+def _build_global_label_constraints(
+    note_type_configs: list[NoteTypeConfig],
+) -> tuple[dict[str, str], dict[str, bool]]:
+    label_to_field_name: dict[str, str] = {}
+    label_to_identifying: dict[str, bool] = {}
+    for config in note_type_configs:
+        for field_config in config.fields:
+            if field_config.label is None:
+                continue
+            label_to_field_name[field_config.label] = field_config.name
+            label_to_identifying[field_config.label] = field_config.identifying
+    return label_to_field_name, label_to_identifying
+
+
+def _validate_global_label_reuse(
     *,
-    show_identifying: bool,
-) -> str:
-    suffix = " [IDENTIFYING]" if show_identifying else ""
-    return f"{note_type_name}.{field_name}{suffix}"
+    label: str,
+    field_name: str,
+    identifying: bool,
+    label_to_field_name: dict[str, str],
+    label_to_identifying: dict[str, bool],
+) -> None:
+    existing_field_name = label_to_field_name.get(label)
+    if existing_field_name is not None and existing_field_name != field_name:
+        raise ValueError(
+            f"Label '{label}' is already mapped to field '{existing_field_name}'."
+        )
+
+    existing_identifying = label_to_identifying.get(label)
+    if existing_identifying is not None and existing_identifying != identifying:
+        raise ValueError(
+            f"Label '{label}' already has IDENTIFYING={existing_identifying} "
+            f"in existing note types."
+        )
 
 
-def _log_note_type_prefix_info(note_type_configs: list[NoteTypeConfig]) -> None:
-    prefix_index: dict[str, list[tuple[str, str, bool]]] = {}
+def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
+    label_index: dict[str, list[tuple[str, str, bool]]] = {}
     for config in sorted(note_type_configs, key=lambda config_item: config_item.name):
         for field_config in config.fields:
-            if field_config.prefix is None:
+            if field_config.label is None:
                 continue
-            entries = prefix_index.setdefault(field_config.prefix, [])
+            entries = label_index.setdefault(field_config.label, [])
             entries.append(
                 (
                     config.name,
@@ -81,44 +120,43 @@ def _log_note_type_prefix_info(note_type_configs: list[NoteTypeConfig]) -> None:
                 )
             )
 
-    logger.info("Taken prefixes:")
-    for prefix in sorted(prefix_index):
-        entries = sorted(prefix_index[prefix], key=lambda entry: (entry[0], entry[1]))
+    logger.info("Taken labels:")
+    for label in sorted(label_index):
+        entries = sorted(label_index[label], key=lambda entry: (entry[0], entry[1]))
         owners = ", ".join(
-            _format_owner_entry(
-                note_type_name=note_type_name,
-                field_name=field_name,
-                show_identifying=show_identifying,
-            )
-            for note_type_name, field_name, show_identifying in entries
+            f"{note_type_name}.{field_name}"
+            for note_type_name, field_name, _ in entries
         )
-        logger.info(f"  {prefix:<4} -> {owners}")
+        identifying_marker = " [IDENTIFYING]" if any(
+            is_identifying for _, _, is_identifying in entries
+        ) else ""
+        logger.info(f"  {label:<4}{identifying_marker} -> {owners}")
     logger.info("")
-    logger.info("Free prefixes: any valid prefix not listed above.")
+    logger.info("Free labels: any valid label not listed above.")
     logger.info("")
 
     logger.info("By note type:")
     sorted_configs = sorted(note_type_configs, key=lambda config_item: config_item.name)
     for config_index, config in enumerate(sorted_configs):
-        prefix_parts = []
-        base_identifying_prefixes = []
+        label_parts = []
+        base_identifying_labels = []
         for field_config in config.fields:
-            if field_config.prefix is None:
+            if field_config.label is None:
                 continue
             is_choice_field = config.is_choice and _is_choice_field(field_config.name)
-            prefix_parts.append(field_config.prefix)
+            label_parts.append(field_config.label)
             if field_config.identifying and not is_choice_field:
-                base_identifying_prefixes.append(field_config.prefix)
-        logger.info(f"  {config.name}: {', '.join(prefix_parts)}")
+                base_identifying_labels.append(field_config.label)
+        logger.info(f"  {config.name}: {', '.join(label_parts)}")
         if config.is_choice:
-            base_identifying = ", ".join(base_identifying_prefixes) or "(none)"
+            base_identifying = ", ".join(base_identifying_labels) or "(none)"
             logger.info(
-                "    IDENTIFYING rule: base IDENTIFYING prefixes "
-                f"({base_identifying}) + any one Choice n prefix"
+                "    IDENTIFYING rule: base IDENTIFYING labels "
+                f"({base_identifying}) + any one Choice n label"
             )
         else:
-            identifying_rendered = ", ".join(base_identifying_prefixes) or "(none)"
-            logger.info(f"    IDENTIFYING prefixes: {identifying_rendered}")
+            identifying_rendered = ", ".join(base_identifying_labels) or "(none)"
+            logger.info(f"    IDENTIFYING labels: {identifying_rendered}")
         if config_index < len(sorted_configs) - 1:
             logger.info("")
 
@@ -147,3 +185,157 @@ def _build_template_output_files(
         file_contents[back_filename] = str(template_data.get("Back", ""))
 
     return yaml_templates, file_contents
+
+
+def run(args) -> None:
+    """Show note type label information or copy a note type from Anki."""
+    if args.info and args.name:
+        logger.error("Cannot combine note type name with --info.")
+        raise SystemExit(2)
+    if not args.info and not args.name:
+        logger.error("A note type name is required unless --info is used.")
+        raise SystemExit(2)
+
+    note_types_dir = get_note_types_dir()
+    fs = FileSystemAdapter()
+
+    if args.info:
+        require_initialized_collection_dir()
+        try:
+            note_type_configs = fs.load_note_type_configs(note_types_dir)
+        except ValueError as error:
+            logger.error(str(error))
+            raise SystemExit(1) from error
+        _log_note_type_label_info(note_type_configs)
+        return
+
+    anki = connect_or_exit()
+    active_profile = anki.get_active_profile()
+    collection_dir = require_collection_dir(active_profile)
+    logger.debug(f"Collection directory: {collection_dir}")
+
+    note_type_name = str(args.name)
+    destination_dir = note_types_dir / note_type_name
+    if destination_dir.exists():
+        logger.error(
+            f"Target note type directory already exists: {destination_dir}. "
+            "Use a different name or remove the existing folder first."
+        )
+        raise SystemExit(1)
+
+    model_names = set(anki.fetch_model_names())
+    if note_type_name not in model_names:
+        available = ", ".join(sorted(model_names)) or "(none)"
+        logger.error(
+            f"Note type '{note_type_name}' not found in Anki. Available: {available}"
+        )
+        raise SystemExit(1)
+
+    state = anki.fetch_model_states([note_type_name]).get(note_type_name)
+    if state is None:
+        logger.error(f"Could not fetch note type state for '{note_type_name}'.")
+        raise SystemExit(1)
+
+    try:
+        existing_configs = fs.load_note_type_configs(note_types_dir)
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+
+    label_to_field_name, label_to_identifying = _build_global_label_constraints(
+        existing_configs
+    )
+
+    fields = []
+    used_labels: set[str] = set()
+    logger.info(f"Copying note type '{note_type_name}' from Anki.")
+    for field_name in state["fields"]:
+        while True:
+            label = _prompt_field_label(field_name, used_labels=used_labels)
+            identifying = _prompt_field_identifying(field_name)
+            try:
+                _validate_global_label_reuse(
+                    label=label,
+                    field_name=field_name,
+                    identifying=identifying,
+                    label_to_field_name=label_to_field_name,
+                    label_to_identifying=label_to_identifying,
+                )
+            except ValueError as error:
+                logger.error(str(error))
+                continue
+            used_labels.add(label)
+            label_to_field_name[label] = field_name
+            label_to_identifying[label] = identifying
+            fields.append(Field(name=field_name, label=label, identifying=identifying))
+            break
+
+    templates = state["templates"]
+    is_choice = any(_is_choice_field(field_name) for field_name in state["fields"])
+    is_cloze = any(
+        "{{cloze:" in str(template_data.get(template_side, "")).lower()
+        for template_data in templates.values()
+        for template_side in ("Front", "Back")
+    )
+    candidate_config = NoteTypeConfig(
+        name=note_type_name,
+        fields=fields,
+        css=str(state["styling"]),
+        is_choice=is_choice,
+        is_cloze=is_cloze,
+        templates=[
+            {
+                "Name": template_name,
+                "Front": str(template_data.get("Front", "")),
+                "Back": str(template_data.get("Back", "")),
+            }
+            for template_name, template_data in templates.items()
+        ],
+    )
+
+    try:
+        NoteTypeConfig.validate_configs([*existing_configs, candidate_config])
+    except ValueError as error:
+        logger.error(f"Invalid note type configuration: {error}")
+        raise SystemExit(1) from error
+
+    note_types_dir.mkdir(parents=True, exist_ok=True)
+    destination_dir.mkdir(parents=True, exist_ok=False)
+
+    yaml_templates, template_files = _build_template_output_files(templates)
+    yaml_data = {
+        "styling": "Styling.css",
+        "templates": yaml_templates,
+        "fields": [
+            {
+                "name": field_config.name,
+                "label": field_config.label,
+                "identifying": field_config.identifying,
+            }
+            for field_config in fields
+        ],
+    }
+    if is_choice:
+        yaml_data["is_choice"] = True
+    if is_cloze:
+        yaml_data["is_cloze"] = True
+
+    for filename, content in template_files.items():
+        (destination_dir / filename).write_text(content, encoding="utf-8")
+
+    styling_path = destination_dir / "Styling.css"
+    styling_path.write_text(str(state["styling"]), encoding="utf-8")
+
+    config_path = destination_dir / "note_type.yaml"
+    config_path.write_text(
+        yaml.safe_dump(yaml_data, sort_keys=False, allow_unicode=False),
+        encoding="utf-8",
+    )
+
+    identifying_count = sum(1 for field_config in fields if field_config.identifying)
+    logger.info(
+        f"Copied note type '{note_type_name}' with {len(fields)} fields "
+        f"({identifying_count} identifying)."
+    )
+    logger.info(f"Saved to: {clickable_path(destination_dir)}")
+    logger.info(f"Config: {clickable_path(config_path)}")

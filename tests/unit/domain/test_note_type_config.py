@@ -16,35 +16,33 @@ from ankiops.models import (
 )
 
 
-def test_register_custom_conflict_with_builtin():
-    """Ensure custom types cannot use built-in prefixes."""
-    builtin = NoteTypeConfig(
-        name="AnkiOpsQA",
+def test_label_reuse_same_field_and_identifying_is_allowed():
+    """Label reuse is allowed globally when field and identifying are identical."""
+    config_a = NoteTypeConfig(
+        name="TypeA",
         fields=[Field("Question", "Q:", identifying=True), ANKIOPS_KEY_FIELD],
     )
-    custom = NoteTypeConfig(
-        name="BadCustom",
+    config_b = NoteTypeConfig(
+        name="TypeB",
         fields=[
             Field("Question", "Q:", identifying=True),
-            Field("Another", "X:", identifying=True),
+            Field("Context", "CTX:", identifying=True),
         ],
     )
-    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
-        NoteTypeConfig.validate_configs([builtin, custom])
+    NoteTypeConfig.validate_configs([config_a, config_b])
 
 
-def test_register_custom_conflict_with_builtin_optional_prefix():
-    """Ensure custom types cannot use built-in optional prefixes either."""
-    builtin = NoteTypeConfig(
-        name="AnkiOpsQA",
-        fields=[Field("Extra", "E:", identifying=False), ANKIOPS_KEY_FIELD],
+def test_label_reuse_conflicting_identifying_fails():
+    config_a = NoteTypeConfig(
+        name="TypeA",
+        fields=[Field("Extra", "E:", identifying=True)],
     )
-    custom = NoteTypeConfig(
-        name="BadCustom",
-        fields=[Field("Custom Extra", "E:", identifying=True)],
+    config_b = NoteTypeConfig(
+        name="TypeB",
+        fields=[Field("Extra", "E:", identifying=False)],
     )
-    with pytest.raises(ValueError, match="uses reserved built-in prefix"):
-        NoteTypeConfig.validate_configs([builtin, custom])
+    with pytest.raises(ValueError, match="conflicting identifying flag"):
+        NoteTypeConfig.validate_configs([config_a, config_b])
 
 
 def test_register_conflict_with_reserved():
@@ -79,7 +77,7 @@ def test_mandatory_set_collision():
 
 
 def test_load_custom_from_dir():
-    """Test loading custom configurations from a directory using FileSystemAdapter."""
+    """Runtime loading uses local note_types only."""
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
 
@@ -88,8 +86,8 @@ def test_load_custom_from_dir():
 
         data = {
             "fields": [
-                {"name": "Term", "prefix": "TM:", "identifying": True},
-                {"name": "Definition", "prefix": "D:", "identifying": True},
+                {"name": "Term", "label": "TM:", "identifying": True},
+                {"name": "Definition", "label": "D:", "identifying": True},
             ],
             "styling": "AnkiOpsStyling.css",
         }
@@ -101,11 +99,8 @@ def test_load_custom_from_dir():
         fs = FileSystemAdapter()
         configs = fs.load_note_type_configs(note_types)
 
-        # 6 built-in types + 1 custom type = 7
-        assert len(configs) == 7
-        config = next(
-            config_item for config_item in configs if config_item.name == "MyCustomType"
-        )
+        assert len(configs) == 1
+        config = configs[0]
 
         assert sorted(
             [
@@ -119,6 +114,21 @@ def test_load_custom_from_dir():
         ]
 
 
+def test_note_type_load_missing_dir_fails(tmp_path):
+    fs = FileSystemAdapter()
+    with pytest.raises(ValueError, match="directory not found"):
+        fs.load_note_type_configs(tmp_path / "missing_note_types")
+
+
+def test_note_type_load_empty_dir_fails(tmp_path):
+    note_types = tmp_path / "note_types"
+    note_types.mkdir(parents=True, exist_ok=True)
+
+    fs = FileSystemAdapter()
+    with pytest.raises(ValueError, match="No note type definitions found"):
+        fs.load_note_type_configs(note_types)
+
+
 def test_require_styling_key():
     """Test that missing mandatory styling in per-folder YAML raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -127,11 +137,63 @@ def test_require_styling_key():
         subdir.mkdir()
         yaml_path = subdir / "note_type.yaml"
         # Missing 'styling' key
-        data = {"fields": [{"name": "XField", "prefix": "XF:", "identifying": True}]}
+        data = {"fields": [{"name": "XField", "label": "XF:", "identifying": True}]}
         yaml_path.write_text(yaml.dump(data), encoding="utf-8")
 
         fs = FileSystemAdapter()
         with pytest.raises(ValueError, match="missing mandatory 'styling' key"):
+            fs.load_note_type_configs(note_types)
+
+
+def test_require_styling_key_for_ankiops_name_too():
+    """No namespace-based exception: AnkiOps* names still require styling."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        note_types = Path(tmpdir)
+        subdir = note_types / "AnkiOpsPretend"
+        subdir.mkdir()
+        yaml_path = subdir / "note_type.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "fields": [
+                        {
+                            "name": "Question",
+                            "label": "QX:",
+                            "identifying": True,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        fs = FileSystemAdapter()
+        with pytest.raises(ValueError, match="missing mandatory 'styling' key"):
+            fs.load_note_type_configs(note_types)
+
+
+def test_reject_name_key_in_note_type_yaml():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        note_types = Path(tmpdir)
+        subdir = note_types / "BadType"
+        subdir.mkdir()
+        yaml_path = subdir / "note_type.yaml"
+        yaml_path.write_text(
+            yaml.dump(
+                {
+                    "name": "DifferentName",
+                    "styling": "AnkiOpsStyling.css",
+                    "fields": [
+                        {"name": "XField", "label": "XF:", "identifying": True}
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (subdir / "AnkiOpsStyling.css").write_text(".x{}", encoding="utf-8")
+
+        fs = FileSystemAdapter()
+        with pytest.raises(ValueError, match="must not define 'name'"):
             fs.load_note_type_configs(note_types)
 
 
@@ -142,8 +204,8 @@ def test_note_type_load_uses_cache_when_unchanged(tmp_path, monkeypatch):
         yaml.dump(
             {
                 "fields": [
-                    {"name": "Term", "prefix": "TM:", "identifying": True},
-                    {"name": "Definition", "prefix": "D:", "identifying": True},
+                    {"name": "Term", "label": "TM:", "identifying": True},
+                    {"name": "Definition", "label": "D:", "identifying": True},
                 ],
                 "styling": "AnkiOpsStyling.css",
             }
@@ -180,8 +242,8 @@ def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
         yaml.dump(
             {
                 "fields": [
-                    {"name": "Term", "prefix": "TM:", "identifying": True},
-                    {"name": "Definition", "prefix": "D:", "identifying": True},
+                    {"name": "Term", "label": "TM:", "identifying": True},
+                    {"name": "Definition", "label": "D:", "identifying": True},
                 ],
                 "styling": "AnkiOpsStyling.css",
             }
@@ -209,8 +271,8 @@ def test_note_type_load_cache_invalidates_on_file_change(tmp_path, monkeypatch):
     assert calls["count"] > first_call_count
 
 
-def test_prefix_collision_different_field():
-    """Ensure custom note types cannot share the same prefix."""
+def test_label_collision_different_field():
+    """A label cannot map to two different field names globally."""
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("FieldA", "X:", identifying=True)],
@@ -219,12 +281,12 @@ def test_prefix_collision_different_field():
         name="Type2",
         fields=[Field("FieldB", "X:", identifying=True)],
     )
-    with pytest.raises(ValueError, match="reuses custom prefix"):
+    with pytest.raises(ValueError, match="maps to both"):
         NoteTypeConfig.validate_configs([config1, config2])
 
 
-def test_prefix_sharing_custom_field_fails():
-    """Ensure two custom note types cannot share a prefix even with same field name."""
+def test_label_sharing_same_field_and_identifying_is_valid():
+    """Sharing a label is valid when both field name and identifying match."""
     config1 = NoteTypeConfig(
         name="Type1",
         fields=[Field("Description", "D:", identifying=True)],
@@ -236,8 +298,7 @@ def test_prefix_sharing_custom_field_fails():
             Field("Other", "O:", identifying=True),
         ],
     )
-    with pytest.raises(ValueError, match="reuses custom prefix"):
-        NoteTypeConfig.validate_configs([config1, config2])
+    NoteTypeConfig.validate_configs([config1, config2])
 
 
 def test_subset_inference():
@@ -293,7 +354,7 @@ def test_duplicate_field_names_within_note_type_fail():
         NoteTypeConfig.validate_configs([config])
 
 
-def test_duplicate_field_prefixes_within_note_type_fail():
+def test_duplicate_field_labels_within_note_type_fail():
     config = NoteTypeConfig(
         name="DuplicatePrefixes",
         fields=[
@@ -301,7 +362,7 @@ def test_duplicate_field_prefixes_within_note_type_fail():
             Field("Answer", "Q:", identifying=True),
         ],
     )
-    with pytest.raises(ValueError, match="duplicate field prefix"):
+    with pytest.raises(ValueError, match="duplicate field label"):
         NoteTypeConfig.validate_configs([config])
 
 
@@ -400,10 +461,8 @@ def test_inference_unknown_field_fails():
         fs._infer_note_type(note_fields)
 
 
-def test_choice_validation():
-    """Ensure choice note types must have at least one field with 'choice' in name."""
-    # 1. is_choice=True, no choice field -> Fail
-    config1 = NoteTypeConfig(
+def test_choice_validation_requires_choice_field_name():
+    config = NoteTypeConfig(
         name="BadChoice",
         is_choice=True,
         fields=[
@@ -412,26 +471,42 @@ def test_choice_validation():
         ],
     )
     with pytest.raises(ValueError, match="containing the word 'choice' were found"):
-        NoteTypeConfig.validate_configs([config1])
+        NoteTypeConfig.validate_configs([config])
 
-    # 2. is_choice=True, has choice field -> Pass
-    config2 = NoteTypeConfig(
+
+def test_choice_validation_requires_identifying_non_choice_field():
+    config = NoteTypeConfig(
+        name="BadChoice",
+        is_choice=True,
+        fields=[
+            Field("Question", "QX:", identifying=False),
+            Field("Choice 1", "CX1:", identifying=True),
+        ],
+    )
+    with pytest.raises(ValueError, match="no identifying non-choice field"):
+        NoteTypeConfig.validate_configs([config])
+
+
+def test_choice_validation_requires_identifying_choice_field():
+    config = NoteTypeConfig(
+        name="BadChoice",
+        is_choice=True,
+        fields=[
+            Field("Question", "QX:", identifying=True),
+            Field("Choice 1", "CX1:", identifying=False),
+        ],
+    )
+    with pytest.raises(ValueError, match="no identifying choice field"):
+        NoteTypeConfig.validate_configs([config])
+
+
+def test_choice_validation_passes_with_identifying_base_and_choice():
+    config = NoteTypeConfig(
         name="GoodChoice",
         is_choice=True,
         fields=[
-            Field("MyQuestion", "XQ:", identifying=True),
+            Field("Question", "XQ:", identifying=True),
             Field("Choice 1", "XC1:", identifying=True),
         ],
     )
-    NoteTypeConfig.validate_configs([config2])
-
-    # 3. is_choice=False, no choice field -> Pass
-    config3 = NoteTypeConfig(
-        name="NormalQA",
-        is_choice=False,
-        fields=[
-            Field("MyQuestion", "XQ:", identifying=True),
-            Field("MyAnswer", "XA:", identifying=True),
-        ],
-    )
-    NoteTypeConfig.validate_configs([config3])
+    NoteTypeConfig.validate_configs([config])

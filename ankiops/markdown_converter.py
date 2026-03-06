@@ -75,7 +75,7 @@ class AnkiRenderer(mistune.HTMLRenderer):
 
     Only overrides methods where Anki's HTML model differs from standard:
     - No <p> wrapping (Anki uses <br> between blocks).
-    - media/ prefix stripping on images
+    - leading media/ segment stripping on images
     - --> and ==> arrow replacements
     - Syntax highlighting via Pygments
     """

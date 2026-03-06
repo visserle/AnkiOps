@@ -283,12 +283,12 @@ def _render_notes_to_markdown(
         cfg = config_by_name[note.note_type]
         for field_config in cfg.fields:
             if (
-                field_config.prefix
+                field_config.label
                 and field_config.name in note.fields
                 and note.fields[field_config.name]
             ):
                 lines = note.fields[field_config.name].split("\n")
-                parts.append(f"{field_config.prefix} {lines[0]}")
+                parts.append(f"{field_config.label} {lines[0]}")
                 if len(lines) > 1:
                     parts.extend(lines[1:])
 
