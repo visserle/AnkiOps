@@ -164,7 +164,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
 
     packaged_tasks = sorted(
         resource.name
-        for resource in resources.files("ankiops.llm.tasks").iterdir()
+        for resource in resources.files("ankiops.llm").joinpath("tasks").iterdir()
         if resource.is_file() and resource.suffix == ".yaml"
     )
     ejected_tasks = sorted(path.name for path in (tmp_path / "llm/tasks").glob("*.yaml"))
