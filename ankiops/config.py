@@ -50,8 +50,15 @@ def deck_name_to_file_stem(deck_name: str) -> str:
     - ``::`` (subdeck separator) becomes ``__`` for readability.
     - Literal ``__`` is escaped as ``%5F%5F`` to avoid ambiguity.
     - Literal ``%`` is escaped first so decoding is lossless.
+    - Path separators (``/`` and ``\\``) are escaped to keep files at root.
     """
-    return deck_name.replace("%", "%25").replace("__", "%5F%5F").replace("::", "__")
+    return (
+        deck_name.replace("%", "%25")
+        .replace("__", "%5F%5F")
+        .replace("::", "__")
+        .replace("/", "%2F")
+        .replace("\\", "%5C")
+    )
 
 
 def file_stem_to_deck_name(file_stem: str) -> str:

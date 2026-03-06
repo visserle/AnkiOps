@@ -99,6 +99,20 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiop
     assert "Q: Q2" in content_b
 
 
+def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki, run_ankiops):
+    """Export should escape slash deck names into a single markdown filename."""
+    deck_name = "EEG/MEG I"
+    mock_anki.add_note(deck_name, "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
+
+    summary = _run_export(tmp_path)
+    assert len(summary.results) == 1
+
+    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
+    assert md_file.exists()
+    assert not (tmp_path / "EEG").exists()
+    assert "Q: Q1" in md_file.read_text(encoding="utf-8")
+
+
 def test_export_first_time_orders_by_note_id(tmp_path, mock_anki, run_ankiops):
     """First export should use note_id ascending as creation-time ordering."""
     deck_name = "OrderFreshDeck"
@@ -306,6 +320,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
         "AnkiOpsCloze",
         "AnkiOpsInput",
         "AnkiOpsChoice",
+        "AnkiOpsImageOcclusion",
     }
 
     for note in notes:

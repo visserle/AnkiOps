@@ -256,6 +256,22 @@ def test_html_to_markdown_enforces_brackets(html_to_md):
     assert "[Link](<https://example.com/(test)>)" in md_link_parens
 
 
+def test_html_to_markdown_bullet_spans_with_br_and_images(html_to_md):
+    """Regression: bullet + <br> HTML should not panic and should preserve layout."""
+    html = (
+        "<div>Gipfel:</div><div><div class='centeredbox'><div class='leftalign'>"
+        "<span class='font_size_80'>• Anorexie 16-17 Jahre</span><br>"
+        "<span class='font_size_80'>• Bulimie 18-19 Jahre</span><br>"
+        "</div><div class='leftalign'>"
+        "<img src='paste-a.png' style='width: 971.502px;'></div>"
+        "</div></div>"
+    )
+    md = html_to_md.convert(html)
+    assert "• Anorexie 16-17 Jahre" in md
+    assert "\n• Bulimie 18-19 Jahre" in md
+    assert "![](<media/paste-a.png>){width=971}" in md
+
+
 @pytest.mark.parametrize(
     "anki_in,expected_html,expected_md",
     [

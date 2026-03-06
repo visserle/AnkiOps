@@ -28,3 +28,11 @@ def test_percent_literal_is_roundtrip_safe():
 
     assert stem == "A%2520B"
     assert file_stem_to_deck_name(stem) == deck_name
+
+
+def test_path_separators_are_roundtrip_safe():
+    deck_name = "A/B\\C"
+    stem = deck_name_to_file_stem(deck_name)
+
+    assert stem == "A%2FB%5CC"
+    assert file_stem_to_deck_name(stem) == deck_name

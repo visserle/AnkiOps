@@ -1,9 +1,10 @@
 """HTML to Markdown converter."""
 
 import re
+import warnings
 
-from bs4 import BeautifulSoup
-from html_to_markdown import ConversionOptions, convert_with_visitor
+from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
+from html_to_markdown import ConversionOptions, convert
 
 from ankiops.config import LOCAL_MEDIA_DIR
 
@@ -32,58 +33,64 @@ _PROTECTED_TAGS = {
     "h6",
 }
 
+_HTML_TAG_RE = re.compile(
+    r"(?is)(<!--.*?-->|</?[a-z][a-z0-9-]*(?:\s[^<>]*?)?>|<!doctype\s+html[^>]*>)"
+)
+_HTML_ENTITY_RE = re.compile(
+    r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);"
+)
+_MATH_PATTERN = re.compile(r"(\\\(.*?\\\)|\\\[.*?\\\])", re.DOTALL)
+_MARKDOWN_LINK_RE = re.compile(
+    r"(\[[^\]]*\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\))"
+)
+
+
+def _looks_like_html(text: str) -> bool:
+    """Heuristic check for HTML fragments/entities."""
+    return bool(_HTML_TAG_RE.search(text) or _HTML_ENTITY_RE.search(text))
+
+
+def _escape_special_chars(text: str) -> str:
+    """Escape markdown special chars while preserving explicit LaTeX math blocks."""
+
+    def _escape_segment(segment: str) -> str:
+        if "\\" in segment:
+            segment = segment.replace("\\", _MD_SPECIAL_CHARS["\\"])
+        for char, placeholder in _MD_SPECIAL_CHARS.items():
+            if char != "\\":
+                segment = segment.replace(char, placeholder)
+        return segment
+
+    # Skip escaping inside explicit LaTeX delimiters.
+    if r"\(" not in text and r"\[" not in text:
+        return _escape_segment(text)
+
+    parts = []
+    last_end = 0
+    for match in _MATH_PATTERN.finditer(text):
+        parts.append(_escape_segment(text[last_end : match.start()]))
+        parts.append(match.group(0))
+        last_end = match.end()
+    parts.append(_escape_segment(text[last_end:]))
+    return "".join(parts)
+
 
 def _protect_literal_chars(html: str) -> str:
     """Replace special markdown chars in plain text with placeholders."""
-    soup = BeautifulSoup(html, "html.parser")
+    if not _looks_like_html(html):
+        return _escape_special_chars(html)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
+        soup = BeautifulSoup(html, "html.parser")
 
     for text_node in soup.find_all(string=True):
         # Skip if inside a tag that's already handled by markdown syntax
-        if text_node.parent.name in _PROTECTED_TAGS:
+        parent = text_node.parent
+        if parent is not None and parent.name in _PROTECTED_TAGS:
             continue
 
-        text = str(text_node)
-
-        # Don't escape inside LaTeX math expressions
-        # Math delimiters: \(...\) for inline, \[...\] for block, dollar signs not
-        # protected
-        if r"\(" in text or r"\[" in text:
-            # Check if this looks like it contains math
-            # Pattern for inline math: \(...\)
-            # Pattern for block math: \[...\]
-            # Only match explicit math delimiters with backslashes
-            math_pattern = r"(\\\(.*?\\\)|\\\[.*?\\\])"
-
-            # Split by math regions to preserve them
-            parts = []
-            last_end = 0
-            for match in re.finditer(math_pattern, text, re.DOTALL):
-                # Add text before math (with escaping)
-                before = text[last_end : match.start()]
-                for char, placeholder in _MD_SPECIAL_CHARS.items():
-                    before = before.replace(char, placeholder)
-                parts.append(before)
-                # Add math part (without escaping)
-                parts.append(match.group(0))
-                last_end = match.end()
-
-            # Add remaining text after last math (with escaping)
-            after = text[last_end:]
-            for char, placeholder in _MD_SPECIAL_CHARS.items():
-                after = after.replace(char, placeholder)
-            parts.append(after)
-
-            text = "".join(parts)
-        else:
-            # No math, escape normally
-            # Order matters: escape backslashes first
-            if "\\" in text:
-                text = text.replace("\\", _MD_SPECIAL_CHARS["\\"])
-            for char, placeholder in _MD_SPECIAL_CHARS.items():
-                if char != "\\":
-                    text = text.replace(char, placeholder)
-
-        text_node.replace_with(text)
+        text_node.replace_with(_escape_special_chars(str(text_node)))
 
     return str(soup)
 
@@ -98,34 +105,62 @@ def _restore_escaped_chars(md: str) -> str:
     return md
 
 
-class _AnkiVisitor:
-    """Visitor for Anki-specific HTML elements."""
+def _prepare_custom_tag_placeholders(html: str) -> tuple[str, dict[str, str]]:
+    """Replace HTML tags that need Anki-specific markdown with stable placeholders."""
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
+        soup = BeautifulSoup(html, "html.parser")
 
-    def visit_image(self, node, src, alt, title):
-        style = node["attributes"].get("style", "")
+    replacements: dict[str, str] = {}
+    counter = 0
+
+    def _token() -> str:
+        nonlocal counter
+        token = f"ANKIOPSTOKEN{counter}END"
+        counter += 1
+        return token
+
+    for image in soup.find_all("img"):
+        src = image.get("src", "")
+        alt = image.get("alt", "")
+        style = image.get("style", "")
         width_match = re.search(r"width:\s*([\d.]+)px", style)
         width_attr = (
             f"{{width={int(float(width_match.group(1)))}}}" if width_match else ""
         )
-        return {
-            "type": "custom",
-            "output": f"![{alt}](<{LOCAL_MEDIA_DIR}/{src}>){width_attr}",
-        }
+        token = _token()
+        replacements[token] = f"![{alt}](<{LOCAL_MEDIA_DIR}/{src}>){width_attr}"
+        image.replace_with(token)
 
-    def visit_underline(self, node, text):
-        content = text.strip()
-        if content:
-            return {"type": "custom", "output": f"<u>{content}</u>"}
-        return {"type": "skip"}
+    for underline in soup.find_all("u"):
+        content = underline.get_text().strip()
+        token = _token()
+        replacements[token] = f"<u>{content}</u>" if content else ""
+        underline.replace_with(token)
 
-    def visit_link(self, node, href, text, title):
-        # Always use angle brackets for robustness
-        return {"type": "custom", "output": f"[{text}](<{href}>)"}
+    for br in soup.find_all("br"):
+        token = _token()
+        replacements[token] = "\n"
+        br.replace_with(token)
 
-    def visit_element_end(self, node, text):
-        if node["tag_name"] == "br":
-            return {"type": "custom", "output": "\n"}
-        return {"type": "continue"}
+    return str(soup), replacements
+
+
+def _restore_custom_tag_placeholders(md: str, replacements: dict[str, str]) -> str:
+    """Restore placeholder tokens back to custom markdown fragments."""
+    for token, output in replacements.items():
+        md = md.replace(token, output)
+    return md
+
+
+def _enforce_link_angle_brackets(md: str) -> str:
+    """Ensure markdown links always use angle-bracket destinations."""
+
+    def _replace(match: re.Match[str]) -> str:
+        destination = match.group(2) or match.group(3) or ""
+        return f"{match.group(1)}<{destination}>{match.group(4)}"
+
+    return _MARKDOWN_LINK_RE.sub(_replace, md)
 
 
 class HTMLToMarkdown:
@@ -145,15 +180,26 @@ class HTMLToMarkdown:
         if not html or not html.strip():
             return ""
 
+        is_html_input = _looks_like_html(html)
+
         # Normalize multiple <br> before blockquotes to ensure stable round-trips
         # The html-to-markdown library treats <br><br><blockquote> incorrectly,
         # producing only \n> instead of \n\n>. We normalize to single <br>.
-        html = re.sub(r"(<br>\s*)+(<blockquote>)", r"<br>\2", html, flags=re.IGNORECASE)
+        if is_html_input:
+            html = re.sub(
+                r"(<br>\s*)+(<blockquote>)", r"<br>\2", html, flags=re.IGNORECASE
+            )
 
         # Protect literal characters before conversion
         html = _protect_literal_chars(html)
 
-        md = convert_with_visitor(html, self._OPTIONS, visitor=_AnkiVisitor())
+        if is_html_input:
+            html, replacements = _prepare_custom_tag_placeholders(html)
+            md = convert(html, self._OPTIONS)
+            md = _restore_custom_tag_placeholders(md, replacements)
+            md = _enforce_link_angle_brackets(md)
+        else:
+            md = html
 
         # Restore as escaped characters
         md = _restore_escaped_chars(md)
