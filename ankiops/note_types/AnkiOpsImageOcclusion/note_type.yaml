@@ -1,0 +1,38 @@
+styling:
+  - ../AnkiOpsStyling.css
+  - ImageOcclusion.css
+templates:
+  - name: IO Card
+    front: Front.template.anki
+    back: Back.template.anki
+fields:
+  - name: ID (hidden)
+    label: "IO_ID:"
+    identifying: true
+  - name: Image
+    label: "IO_IM:"
+    identifying: true
+  - name: Question Mask
+    label: "IO_QM:"
+    identifying: true
+  - name: Answer Mask
+    label: "IO_AM:"
+    identifying: true
+  - name: Original Mask
+    label: "IO_OM:"
+    identifying: true
+  - name: Header
+    label: "IO_H:"
+    identifying: false
+  - name: Footer
+    label: "IO_F:"
+    identifying: false
+  - name: Extra
+    label: "E:"
+    identifying: false
+  - name: More
+    label: "M:"
+    identifying: false
+  - name: Source
+    label: "S:"
+    identifying: false

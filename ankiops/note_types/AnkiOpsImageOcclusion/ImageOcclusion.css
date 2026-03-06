@@ -1,0 +1,93 @@
+#io-header,
+#io-footer {
+  margin: 0 auto 12px;
+  max-width: 900px;
+  text-align: left;
+}
+
+#io-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+#io-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: block;
+}
+
+#io-original {
+  position: relative;
+  visibility: hidden;
+  display: block;
+}
+
+#io-overlay p,
+#io-original p {
+  margin: 0;
+}
+
+#io-overlay img,
+#io-original img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+#io-revl-btn {
+  margin-top: 14px;
+  padding: 6px 14px;
+  border: 1px solid #666;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+#io-extra-wrapper {
+  margin-top: 18px;
+}
+
+#io-extra {
+  margin: 0 auto;
+  max-width: 900px;
+  text-align: left;
+}
+
+.io-extra-entry {
+  margin: 10px 0;
+}
+
+.io-field-descr {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #666;
+  margin-bottom: 3px;
+}
+
+.night-mode #io-revl-btn {
+  background: #333;
+  color: #fff;
+  border-color: #666;
+}
+
+.night-mode .io-field-descr {
+  color: #bbb;
+}
+
+.mobile .night_mode #io-revl-btn {
+  background: #333;
+  color: #fff;
+  border-color: #666;
+}
+
+.mobile .night_mode .io-field-descr {
+  color: #bbb;
+}

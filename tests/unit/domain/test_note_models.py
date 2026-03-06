@@ -441,6 +441,17 @@ class TestNoteInference:
         fields = {"Question": "q", "Input": "i"}
         assert fs._infer_note_type(fields) == "AnkiOpsInput"
 
+    def test_infer_image_occlusion(self, fs):
+        fields = {
+            "ID (hidden)": "io-1",
+            "Image": "<img src='base.png'>",
+            "Question Mask": "<img src='q.png'>",
+            "Answer Mask": "<img src='a.png'>",
+            "Original Mask": "<img src='o.png'>",
+        }
+        labels = {"IO_ID:", "IO_IM:", "IO_QM:", "IO_AM:", "IO_OM:"}
+        assert fs._infer_note_type(fields, labels=labels) == "AnkiOpsImageOcclusion"
+
     def test_unknown_fails(self, fs):
         with pytest.raises(ValueError, match="Cannot determine note type"):
             fs._infer_note_type({"Unknown": "v", "Random": "r"})
