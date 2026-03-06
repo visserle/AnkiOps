@@ -95,7 +95,6 @@ Each note type is identified by its field labels. `E:` (Extra) and `M:` (More, r
 | **AnkiOpsCloze** | `T:` |
 | **AnkiOpsInput** | `Q:`, `I:` |
 | **AnkiOpsChoice** | `Q:`, `C1:``C8:`, `A:` |
-| **AnkiOpsImageOcclusion** | `IO_ID:`, `IO_IM:`, `IO_QM:`, `IO_AM:`, `IO_OM:` |
 
 ### How does it work?
 

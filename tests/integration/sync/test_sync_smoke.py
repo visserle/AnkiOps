@@ -306,7 +306,6 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
         "AnkiOpsCloze",
         "AnkiOpsInput",
         "AnkiOpsChoice",
-        "AnkiOpsImageOcclusion",
     }
 
     for note in notes:
@@ -323,12 +322,6 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
         elif model == "AnkiOpsChoice":
             assert "Option A" in fields["Choice 1"]["value"]
             assert fields["Answer"]["value"] == "1"
-        elif model == "AnkiOpsImageOcclusion":
-            assert fields["ID (hidden)"]["value"] == "io-1"
-            assert "io-base.png" in fields["Image"]["value"]
-            assert "io-question.png" in fields["Question Mask"]["value"]
-            assert "io-answer.png" in fields["Answer Mask"]["value"]
-            assert "io-original.png" in fields["Original Mask"]["value"]
 
     md_file.unlink()
     export_result = _run_export(tmp_path)

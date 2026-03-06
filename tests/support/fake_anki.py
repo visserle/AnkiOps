@@ -89,7 +89,6 @@ class MockAnki:
                     "AnkiOpsCloze",
                     "AnkiOpsInput",
                     "AnkiOpsChoice",
-                    "AnkiOpsImageOcclusion",
                 ]
 
             case "modelFieldNames":
@@ -147,20 +146,6 @@ class MockAnki:
                         "More",
                         "Source",
                         "AI Notes",
-                        "AnkiOps Key",
-                    ]
-                elif model == "AnkiOpsImageOcclusion":
-                    return [
-                        "ID (hidden)",
-                        "Image",
-                        "Question Mask",
-                        "Answer Mask",
-                        "Original Mask",
-                        "Header",
-                        "Footer",
-                        "Extra",
-                        "More",
-                        "Source",
                         "AnkiOps Key",
                     ]
                 return []
