@@ -1,0 +1,89 @@
+/* GENERAL CARD STYLE */
+.card {
+  font-family: "Helvetica LT Std", Helvetica, Arial, Sans;
+  font-size: 150%;
+  text-align: center;
+  color: black;
+  background-color: white;
+}
+
+/* OCCLUSION CSS START - don't edit this */
+#io-overlay {
+  position:absolute;
+  top:0;
+  width:100%;
+  z-index:3
+}
+
+#io-original {
+  position:relative;
+  top:0;
+  width:100%;
+  z-index:2;
+  visibility: hidden;
+}
+
+#io-wrapper {
+  position:relative;
+  width: 100%;
+}
+/* OCCLUSION CSS END */
+
+/* OTHER STYLES */
+#io-header{
+  font-size: 1.1em;
+  margin-bottom: 0.2em;
+}
+
+#io-footer{
+  max-width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0.8em;
+  font-style: italic;
+}
+
+#io-extra-wrapper{
+  /* the wrapper is needed to center the
+  left-aligned blocks below it */
+  width: 80%;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0.5em;
+}
+
+#io-extra{
+  text-align:center;
+  display: inline-block;
+}
+
+.io-extra-entry{
+  margin-top: 0.8em;
+  font-size: 0.9em;
+  text-align:left;
+}
+
+.io-field-descr{
+  margin-bottom: 0.2em;
+  font-weight: bold;
+  font-size: 1em;
+}
+
+#io-revl-btn {
+  font-size: 0.5em;
+}
+
+/* ADJUSTMENTS FOR MOBILE DEVICES */
+
+.mobile .card, .mobile #content {
+  font-size: 120%;
+  margin: 0;
+}
+
+.mobile #io-extra-wrapper {
+  width: 95%;
+}
+
+.mobile #io-revl-btn {
+  font-size: 0.8em;
+}

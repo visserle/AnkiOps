@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from ankiops.anki import AnkiAdapter
 from ankiops.anki_client import AnkiConnectError
 from ankiops.models import Change, ChangeType, Note
@@ -80,3 +82,56 @@ def test_apply_note_changes_surfaces_ankiconnect_exception():
 
     assert created_ids == []
     assert errors == ["boom"]
+
+
+def test_fetch_model_states_normalizes_dict_styling_payload():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        return_value=[
+            ["Term"],
+            {"name": "MyType", "css": ".card { color: red; }"},
+            {"Card 1": {"Front": "{{Term}}", "Back": "{{Term}}"}},
+            [""],
+            {},
+        ],
+    ):
+        states = adapter.fetch_model_states(["MyType"])
+
+    assert states["MyType"]["styling"] == ".card { color: red; }"
+
+
+def test_fetch_model_states_preserves_string_styling_payload():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        return_value=[
+            ["Term"],
+            ".card { color: blue; }",
+            {"Card 1": {"Front": "{{Term}}", "Back": "{{Term}}"}},
+            [""],
+            {},
+        ],
+    ):
+        states = adapter.fetch_model_states(["MyType"])
+
+    assert states["MyType"]["styling"] == ".card { color: blue; }"
+
+
+def test_fetch_model_states_raises_on_malformed_styling_payload():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        return_value=[
+            ["Term"],
+            {"name": "MyType"},
+            {"Card 1": {"Front": "{{Term}}", "Back": "{{Term}}"}},
+            [""],
+            {},
+        ],
+    ):
+        with pytest.raises(AnkiConnectError, match="Malformed modelStyling response"):
+            adapter.fetch_model_states(["MyType"])

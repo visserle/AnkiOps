@@ -29,6 +29,24 @@ def _action(action_str: str, **params) -> dict:
     return {"action": action_str, "params": params}
 
 
+def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str:
+    """Normalize modelStyling payloads to raw CSS text."""
+    if isinstance(styling, str):
+        return styling
+    if isinstance(styling, dict):
+        css = styling.get("css")
+        if isinstance(css, str):
+            return css
+        raise AnkiConnectError(
+            "Malformed modelStyling response for "
+            f"'{model_name}': expected dict with string 'css'."
+        )
+    raise AnkiConnectError(
+        "Malformed modelStyling response for "
+        f"'{model_name}': expected string or dict with string 'css'."
+    )
+
+
 class AnkiAdapter:
     """Adapter for AnkiConnect HTTP API."""
 
@@ -94,11 +112,15 @@ class AnkiAdapter:
         for model_index, name in enumerate(model_names):
             base = model_index * 5
             field_names = read_results[base]
+            styling = _normalize_model_styling_payload(
+                read_results[base + 1],
+                model_name=name,
+            )
             raw_desc = read_results[base + 3]
             descriptions = dict(zip(field_names, raw_desc))
             states[name] = {
                 "fields": field_names,
-                "styling": read_results[base + 1],
+                "styling": styling,
                 "templates": read_results[base + 2],
                 "descriptions": descriptions,
                 "fonts": read_results[base + 4],

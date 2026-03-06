@@ -187,6 +187,19 @@ def _build_template_output_files(
     return yaml_templates, file_contents
 
 
+def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
+    if isinstance(styling, str):
+        return styling
+    if isinstance(styling, dict):
+        css = styling.get("css")
+        if isinstance(css, str):
+            return css
+    raise ValueError(
+        f"Invalid styling payload for note type '{note_type_name}'. "
+        "Expected a string or object with string 'css'."
+    )
+
+
 def run(args) -> None:
     """Show note type label information or copy a note type from Anki."""
     if args.info and args.name:
@@ -235,6 +248,14 @@ def run(args) -> None:
     if state is None:
         logger.error(f"Could not fetch note type state for '{note_type_name}'.")
         raise SystemExit(1)
+    try:
+        styling_css = _normalize_styling_payload(
+            state.get("styling"),
+            note_type_name=note_type_name,
+        )
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
 
     try:
         existing_configs = fs.load_note_type_configs(note_types_dir)
@@ -280,7 +301,7 @@ def run(args) -> None:
     candidate_config = NoteTypeConfig(
         name=note_type_name,
         fields=fields,
-        css=str(state["styling"]),
+        css=styling_css,
         is_choice=is_choice,
         is_cloze=is_cloze,
         templates=[
@@ -324,7 +345,7 @@ def run(args) -> None:
         (destination_dir / filename).write_text(content, encoding="utf-8")
 
     styling_path = destination_dir / "Styling.css"
-    styling_path.write_text(str(state["styling"]), encoding="utf-8")
+    styling_path.write_text(styling_css, encoding="utf-8")
 
     config_path = destination_dir / "note_type.yaml"
     config_path.write_text(

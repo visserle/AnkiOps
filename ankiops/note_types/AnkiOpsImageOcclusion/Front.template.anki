@@ -1,0 +1,23 @@
+{{#Image}}
+<div id="io-header">{{Header}}</div>
+<div id="io-wrapper">
+  <div id="io-overlay">{{Question Mask}}</div>
+  <div id="io-original">{{Image}}</div>
+</div>
+<div id="io-footer">{{Footer}}</div>
+
+<script>
+// Prevent original image from loading before mask
+aFade = 50, qFade = 0;
+var mask = document.querySelector('#io-overlay>img');
+function loaded() {
+    var original = document.querySelector('#io-original');
+    original.style.visibility = "visible";
+}
+if (mask === null || mask.complete) {
+    loaded();
+} else {
+    mask.addEventListener('load', loaded);
+}
+</script>
+{{/Image}}

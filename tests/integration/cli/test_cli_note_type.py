@@ -69,7 +69,7 @@ def test_note_type_copy_writes_files_and_summary(tmp_path, caplog):
     fake_anki.fetch_model_states.return_value = {
         "MyType": {
             "fields": ["Term", "Definition", "Choice 1"],
-            "styling": ".card { color: red; }",
+            "styling": {"name": "MyType", "css": ".card { color: red; }"},
             "templates": {
                 "Card 1": {"Front": "{{Term}}", "Back": "{{Definition}}"},
                 "Card 2": {"Front": "{{Definition}}", "Back": "{{Term}}"},
@@ -103,6 +103,7 @@ def test_note_type_copy_writes_files_and_summary(tmp_path, caplog):
     assert (note_type_dir / "Back.template.anki").exists()
     assert (note_type_dir / "Front2.template.anki").exists()
     assert (note_type_dir / "Back2.template.anki").exists()
+    assert (note_type_dir / "Styling.css").read_text("utf-8") == ".card { color: red; }"
 
     payload = yaml.safe_load((note_type_dir / "note_type.yaml").read_text("utf-8"))
     assert "name" not in payload
