@@ -16,7 +16,7 @@ fields:
     label: "B:"
     identifying: true
   - name: Divider
-    label: "D"
+    label: "D:"
     identifying: false
   - name: Extra
     label: "E:"
