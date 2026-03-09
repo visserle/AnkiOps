@@ -36,13 +36,13 @@
 	align-items: center;
 	height: calc(0.7em * 1.2);
 	/* matches label line height */
-	margin: 16px 0 12px;
+	margin: 16px 0 16px;
 }
 
 .hr-with-text {
 	display: flex;
 	align-items: center;
-	margin: 16px 0 12px;
+	margin: 16px 0 16px;
 }
 
 .hr-without-text::before,
