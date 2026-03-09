@@ -242,3 +242,43 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert db.get_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
+
+
+def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world):
+    """IMP-RUN-MOVE-002."""
+    moved_note_key = "imp-run-move-002-moved"
+    existing_note_key = "imp-run-move-002-existing"
+
+    moved_note_id = world.add_qa_note(
+        deck_name="Personen",
+        question="Moved Q",
+        answer="Moved A",
+        note_key=moved_note_key,
+    )
+    existing_note_id = world.add_qa_note(
+        deck_name="Geschichte",
+        question="Existing Q",
+        answer="Existing A",
+        note_key=existing_note_key,
+    )
+
+    world.write_qa_deck(
+        "Geschichte",
+        [
+            ("Existing Q", "Existing A", existing_note_key),
+            ("Moved Q", "Moved A", moved_note_key),
+        ],
+    )
+
+    with world.db_session() as db:
+        db.set_note(moved_note_key, moved_note_id)
+        db.set_note(existing_note_key, existing_note_id)
+
+        result = world.sync_import(db)
+
+        assert result.summary.moved == 1
+        assert result.summary.errors == 0
+        assert all(deck.deck_name != "Personen" for deck in result.untracked_decks)
+
+        card_id = world.mock_anki.notes[moved_note_id]["cards"][0]
+        assert world.mock_anki.cards[card_id]["deckName"] == "Geschichte"

@@ -161,6 +161,71 @@ def _html_match(html: dict[str, str], anki: AnkiNote) -> bool:
     )
 
 
+def _group_note_ids_by_deck_name(anki_cards: dict[int, dict]) -> dict[str, set[int]]:
+    note_ids_by_deck_name: dict[str, set[int]] = {}
+    for card_info in anki_cards.values():
+        deck_name = card_info.get("deckName")
+        note_id = card_info.get("note")
+        if deck_name and note_id:
+            note_ids_by_deck_name.setdefault(deck_name, set()).add(note_id)
+    return note_ids_by_deck_name
+
+
+def _remove_note_ids_from_deck_membership(
+    note_ids_by_deck_name: dict[str, set[int]],
+    note_ids_to_remove: set[int],
+) -> None:
+    if not note_ids_to_remove:
+        return
+
+    empty_decks: list[str] = []
+    for deck_name, note_ids in note_ids_by_deck_name.items():
+        note_ids.difference_update(note_ids_to_remove)
+        if not note_ids:
+            empty_decks.append(deck_name)
+
+    for deck_name in empty_decks:
+        note_ids_by_deck_name.pop(deck_name, None)
+
+
+def _collect_membership_affected_note_ids(results: list[SyncResult]) -> set[int]:
+    affected_note_ids: set[int] = set()
+    for sync_result in results:
+        for change in sync_result.changes:
+            if change.change_type not in {
+                ChangeType.CREATE,
+                ChangeType.DELETE,
+                ChangeType.MOVE,
+            }:
+                continue
+            if isinstance(change.entity_id, int):
+                affected_note_ids.add(change.entity_id)
+    return affected_note_ids
+
+
+def _refresh_membership_for_affected_notes(
+    *,
+    affected_note_ids: set[int],
+    anki_port: AnkiAdapter,
+    note_ids_by_deck_name: dict[str, set[int]],
+) -> None:
+    if not affected_note_ids:
+        return
+
+    # Clear stale memberships first, then rebuild only for surviving notes.
+    _remove_note_ids_from_deck_membership(note_ids_by_deck_name, affected_note_ids)
+
+    refreshed_notes = anki_port.fetch_notes_info(sorted(affected_note_ids))
+    refreshed_card_ids: list[int] = []
+    for refreshed_note in refreshed_notes.values():
+        refreshed_card_ids.extend(refreshed_note.card_ids)
+
+    refreshed_cards = anki_port.fetch_cards_info(refreshed_card_ids)
+    refreshed_grouped = _group_note_ids_by_deck_name(refreshed_cards)
+    for deck_name, note_ids in refreshed_grouped.items():
+        note_ids_by_deck_name.setdefault(deck_name, set()).update(note_ids)
+
+
 @dataclass(frozen=True)
 class _DeckContext:
     deck_name: str
@@ -584,6 +649,7 @@ def import_collection(
     note_types_dir: Path,
 ) -> CollectionResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
+    required_note_types = [config.name for config in configs]
     config_by_name = {config.name: config for config in configs}
     md_files = fs_port.find_markdown_files(collection_dir)
     fs_docs = [
@@ -618,7 +684,7 @@ def import_collection(
             deck_id: deck_name for deck_name, deck_id in deck_ids_by_name.items()
         }
 
-        all_note_ids = anki_port.fetch_all_note_ids([config.name for config in configs])
+        all_note_ids = anki_port.fetch_all_note_ids(required_note_types)
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
 
         # Collaboration mode: rebuild note_key->note_id mappings from embedded
@@ -646,12 +712,7 @@ def import_collection(
             all_card_ids.extend(anki_note.card_ids)
         anki_cards = anki_port.fetch_cards_info(all_card_ids)
 
-        note_ids_by_deck_name = {}
-        for card_info in anki_cards.values():
-            deck_name = card_info.get("deckName")
-            note_id = card_info.get("note")
-            if deck_name and note_id:
-                note_ids_by_deck_name.setdefault(deck_name, set()).add(note_id)
+        note_ids_by_deck_name = _group_note_ids_by_deck_name(anki_cards)
 
         results = []
         pending = []
@@ -726,6 +787,15 @@ def import_collection(
 
         _flush_writes(fs_port, pending)
         db_port.save()
+
+        # Keep membership in sync with applied structural changes without a
+        # full collection refresh.
+        affected_note_ids = _collect_membership_affected_note_ids(results)
+        _refresh_membership_for_affected_notes(
+            affected_note_ids=affected_note_ids,
+            anki_port=anki_port,
+            note_ids_by_deck_name=note_ids_by_deck_name,
+        )
 
         untracked = []
         for deck_name, note_ids in note_ids_by_deck_name.items():
