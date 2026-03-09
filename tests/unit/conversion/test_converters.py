@@ -393,6 +393,15 @@ class TestEscapeSequenceRoundTrips:
         back = html_to_md.convert(html)
         assert "\\" in back
 
+    @pytest.mark.parametrize("md", [r"\[\]\]", r"\[0\]\]", r"\[0\]\\]"])
+    def test_escaped_bracket_suffix_roundtrip_stays_stable(
+        self, md_to_html, html_to_md, md
+    ):
+        html = md_to_html.convert(md)
+        back = html_to_md.convert(html)
+        second_back = html_to_md.convert(md_to_html.convert(back))
+        assert back == second_back
+
     def test_mixed_escaped_and_formatting(self, md_to_html, html_to_md):
         md = r"**bold** and \*literal\*"
         html = md_to_html.convert(md)

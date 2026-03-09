@@ -90,7 +90,7 @@ def test_note_type_copy_writes_files_and_summary(tmp_path, caplog):
         ),
         patch(
             "builtins.input",
-            side_effect=["TM", "y", "D", "y", "X1", "y"],
+            side_effect=["TM", "y", "D", "y", "DEF", "y", "X1", "y"],
         ),
         caplog.at_level("INFO"),
     ):
@@ -110,7 +110,7 @@ def test_note_type_copy_writes_files_and_summary(tmp_path, caplog):
     assert payload["is_choice"] is True
     assert payload["fields"] == [
         {"name": "Term", "label": "TM:", "identifying": True},
-        {"name": "Definition", "label": "D:", "identifying": True},
+        {"name": "Definition", "label": "DEF:", "identifying": True},
         {"name": "Choice 1", "label": "X1:", "identifying": True},
     ]
 

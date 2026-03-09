@@ -39,10 +39,17 @@ _HTML_TAG_RE = re.compile(
 _HTML_ENTITY_RE = re.compile(
     r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);"
 )
-_MATH_PATTERN = re.compile(r"(\\\(.*?\\\)|\\\[.*?\\\])", re.DOTALL)
+# Preserve only well-formed LaTeX delimiters. Reject sequences that contain an
+# unescaped closing delimiter inside, otherwise literals like \[\]\] are
+# misclassified as math and accumulate backslashes across roundtrips.
+_MATH_PATTERN = re.compile(
+    r"(\\\((?:(?!\\\))[\s\S])+?\\\)|\\\[(?:(?!\\\])[\s\S])+?\\\])",
+    re.DOTALL,
+)
 _MARKDOWN_LINK_RE = re.compile(
     r"(\[[^\]]*\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\))"
 )
+_ESCAPED_RIGHT_BRACKET_RUN_RE = re.compile(r"(\\{2,}\])")
 
 
 def _looks_like_html(text: str) -> bool:
@@ -54,11 +61,24 @@ def _escape_special_chars(text: str) -> str:
     """Escape markdown special chars while preserving explicit LaTeX math blocks."""
 
     def _escape_segment(segment: str) -> str:
+        preserved_runs: dict[str, str] = {}
+
+        def _preserve(match: re.Match[str]) -> str:
+            token = f"\u200dMDESCRBRACKET{len(preserved_runs)}\u200d"
+            preserved_runs[token] = match.group(1)
+            return token
+
+        # HTMLToMarkdown may already have emitted a stable escaped \] sequence on
+        # a previous pass. Preserve those runs so repeated roundtrips do not
+        # multiply backslashes after a preserved \[...\] math segment.
+        segment = _ESCAPED_RIGHT_BRACKET_RUN_RE.sub(_preserve, segment)
         if "\\" in segment:
             segment = segment.replace("\\", _MD_SPECIAL_CHARS["\\"])
         for char, placeholder in _MD_SPECIAL_CHARS.items():
             if char != "\\":
                 segment = segment.replace(char, placeholder)
+        for token, original in preserved_runs.items():
+            segment = segment.replace(token, original)
         return segment
 
     # Skip escaping inside explicit LaTeX delimiters.
