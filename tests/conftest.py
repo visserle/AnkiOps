@@ -12,6 +12,14 @@ from tests.support.fake_anki import MockAnki
 from tests.support.sync_world import SyncWorld
 
 
+@pytest.fixture(scope="session", autouse=True)
+def ensure_default_note_types_dir():
+    """Bootstrap note type configs for tests in clean checkouts (e.g. CI)."""
+    note_types_dir = get_note_types_dir()
+    if not note_types_dir.exists():
+        FileSystemAdapter().eject_builtin_note_types(note_types_dir)
+
+
 @pytest.fixture(scope="session")
 def fs():
     """FileSystemAdapter pre-loaded with built-in note types (shared across tests)."""

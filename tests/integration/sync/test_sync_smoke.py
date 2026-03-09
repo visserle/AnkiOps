@@ -302,7 +302,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
             "IO_OM: <img src='io-original.png'>\n"
             "IO_H: IO Header\n"
             "IO_F: IO Footer\n"
-            "E: IO Extra"
+            "IO_E1: IO Extra"
         ),
         encoding="utf-8",
     )
