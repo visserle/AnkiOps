@@ -282,7 +282,8 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
             "A: QA Answer\n\n"
             "---\n\n"
             "F: Reversed Front\n"
-            "B: Reversed Back\n\n"
+            "B: Reversed Back\n"
+            "D: Term\n\n"
             "---\n\n"
             "T: Cloze with {{c1::hidden}} text\n\n"
             "---\n\n"
@@ -330,6 +331,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
             assert "QA Question" in fields["Question"]["value"]
         elif model == "AnkiOpsReversed":
             assert "Reversed Front" in fields["Front"]["value"]
+            assert fields["Divider"]["value"] == "Term"
         elif model == "AnkiOpsCloze":
             assert "{{c1::hidden}}" in fields["Text"]["value"]
         elif model == "AnkiOpsInput":
@@ -344,6 +346,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     new_content = export_result.results[0].file_path.read_text(encoding="utf-8")
     assert "Q: QA Question" in new_content
     assert "F: Reversed Front" in new_content
+    assert "D: Term" in new_content
     assert "T: Cloze with {{c1::hidden}} text" in new_content
     assert "I: Input Answer" in new_content
     assert "C1: Option A" in new_content

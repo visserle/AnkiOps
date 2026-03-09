@@ -5,3 +5,12 @@
 </style>
 
 {{edit:Front}}
+
+{{#Divider}}
+<div class="hr-with-text">
+    <span class="hr-with-text-label">{{edit:Divider}}</span>
+</div>
+{{/Divider}}
+{{^Divider}}
+<div class="hr-without-text"></div>
+{{/Divider}}

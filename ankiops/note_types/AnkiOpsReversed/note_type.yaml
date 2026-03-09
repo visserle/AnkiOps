@@ -15,6 +15,9 @@ fields:
   - name: Back
     label: "B:"
     identifying: true
+  - name: Divider
+    label: "D"
+    identifying: false
   - name: Extra
     label: "E:"
     identifying: false

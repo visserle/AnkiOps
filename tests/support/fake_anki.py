@@ -107,6 +107,7 @@ class MockAnki:
                     return [
                         "Front",
                         "Back",
+                        "Divider",
                         "Extra",
                         "More",
                         "Source",
