@@ -1,0 +1,57 @@
+/* Horizontal separator with centered label */
+
+.hr-without-text {
+    display: flex;
+    align-items: center;
+    height: calc(0.7em * 1.2);
+    /* matches label line height */
+    margin: 16px 0 16px;
+}
+
+.hr-with-text {
+    display: flex;
+    align-items: center;
+    margin: 16px 0 16px;
+}
+
+.hr-without-text::before,
+.hr-without-text::after,
+.hr-with-text::before,
+.hr-with-text::after {
+    content: "";
+    flex: 1;
+    border-top: solid 1px #a7a7a7;
+}
+
+.hr-with-text-label {
+    padding: 0 10px;
+    max-width: calc(100% - 80px);
+    color: #6f7277;
+    font-size: 0.9em;
+    font-style: italic;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    line-height: 1.2;
+}
+
+.night-mode .hr-with-text-label,
+.nightMode .hr-with-text-label,
+.mobile .night_mode .hr-with-text-label {
+    color: #c2c6cc;
+}
+
+.night-mode .hr-without-text::before,
+.night-mode .hr-without-text::after,
+.night-mode .hr-with-text::before,
+.night-mode .hr-with-text::after,
+.nightMode .hr-without-text::before,
+.nightMode .hr-without-text::after,
+.nightMode .hr-with-text::before,
+.nightMode .hr-with-text::after,
+.mobile .night_mode .hr-without-text::before,
+.mobile .night_mode .hr-without-text::after,
+.mobile .night_mode .hr-with-text::before,
+.mobile .night_mode .hr-with-text::after {
+    border-top-color: #777;
+}

@@ -1,6 +1,7 @@
 is_cloze: true
 styling:
   - ../AnkiOpsStyling.css
+  - ./ClozeHideAllStyling.css
   - ../SyntaxHighlighting.css
 templates:
   - name: Cloze Hide All

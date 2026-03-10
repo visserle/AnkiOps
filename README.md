@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-**Anki decks ↔ Markdown files, in perfect sync**
+**Anki decks ↔ Markdown files, in perfect sync and with LLM integration**
 
 Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge. Each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
 

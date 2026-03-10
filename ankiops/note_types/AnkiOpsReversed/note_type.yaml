@@ -1,5 +1,6 @@
 styling:
   - ../AnkiOpsStyling.css
+  - ./DividerStyling.css
   - ../SyntaxHighlighting.css
 templates:
   - name: Card 1

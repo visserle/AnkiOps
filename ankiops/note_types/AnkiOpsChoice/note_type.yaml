@@ -1,6 +1,7 @@
 is_choice: true
 styling:
   - ../AnkiOpsStyling.css
+  - ./ChoiceStyling.css
   - ../SyntaxHighlighting.css
 templates:
   - name: Card 1

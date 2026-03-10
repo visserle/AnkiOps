@@ -1,0 +1,47 @@
+/* Choice card styles */
+#answer-count-hint {
+    margin: 10px auto;
+    max-width: 600px;
+    text-align: center;
+    color: #666;
+    font-style: italic;
+}
+
+#choices {
+    margin: 20px auto;
+    max-width: 600px;
+}
+
+.choice-item {
+    text-align: left;
+    display: block;
+    padding: 7px 16px;
+    margin: 8px 0;
+    border-left: 3px solid transparent;
+    background-color: #fafafa;
+    line-height: 1.6;
+}
+
+.night-mode .choice-item {
+    background-color: #2a2a2a;
+}
+
+.choice-correct {
+    border-left-color: blue;
+    color: blue;
+    font-weight: bold;
+}
+
+.night-mode .choice-correct {
+    border-left-color: lightblue;
+    color: lightblue;
+    font-weight: bold;
+}
+
+.choice-incorrect {
+    opacity: 0.5;
+}
+
+.night-mode .choice-incorrect {
+    opacity: 0.5;
+}
