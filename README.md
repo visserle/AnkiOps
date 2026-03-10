@@ -6,6 +6,9 @@
 
 Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge. Each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
 
+> [!NOTE]
+> AnkiOps is in early development and there will be breaking changes with each release. This readme might not always reflect the current state of the codebase.
+
 ## Features
 
 - Simple CLI interface: after initialization, only two commands are needed for daily use
