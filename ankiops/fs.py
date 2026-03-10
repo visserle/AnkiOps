@@ -464,7 +464,7 @@ class FileSystemAdapter:
                         f"'{css_file}'."
                     )
                 css_parts.append(css_path.read_text(encoding="utf-8"))
-            css = "\n\n/* --- Added by Local Override --- */\n\n".join(css_parts)
+            css = "\n\n".join(css_parts)
 
             # Templates
             raw_templates = info.get("templates")
