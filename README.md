@@ -19,9 +19,6 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 - High-performance processing using hashing: handles thousands of cards across hundreds of decks in mere seconds
 - Serialize entire collections to JSON format for automated AI processing
 
-> [!NOTE]
->AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
-
 ## Getting Started
 
 
@@ -54,7 +51,7 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Biology::Cell` -> `Biology__Cell.md`). Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Anatomy::Heart` --> `Anatomy__Heart.md`). Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
 
 ```markdown
 <!-- note_key: 123487556abc -->
@@ -83,7 +80,12 @@ A: 1, 3
 
 In this example, the last note is a new note which will get a `note_key` comment assigned on the next import.
 
-### How are the different note types identified?
+
+
+
+### How are different note types handled?
+
+AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
 
 Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-type --info`.
 
