@@ -4,7 +4,7 @@
 
 **Anki ↔ Markdown, with bidirectional sync and LLM integration**
 
-Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, Git, and LLM tools. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
+Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings LLM assistance, automated batch editing, and version control to your flashcards.
 
 > [!NOTE]
 > Work in progress. This readme might not always reflect the current state of the repo.
