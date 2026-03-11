@@ -11,16 +11,16 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 
 ## Features
 
-- Simple CLI interface: after initialization, only two commands are needed for daily use
-- Fully round-trip sync that handles notes (creation, deletion, movements across decks, conflicts), media, and note types
-- Markdown rendering with nearly all features (including syntax-highlighted code blocks for on desktop and mobile)
+- Simple CLI interface: after initialization, only two commands (import/export) are needed for daily use
+- Fully round-trip sync that handles notes (creation, deletion, movements across decks, conflicts), note types, and media
+- Markdown rendering with nearly all features (including syntax-highlighted code blocks for desktop and mobile)
 - Support for custom note types following Infrastructure as Code (IaC) principles
-- Built-in Git integration with autocommit for tracking all changes
+- Built-in Git integration with auto-commit for tracking all changes
 - High-performance processing using hashing: handles thousands of cards across hundreds of decks in mere seconds
-- Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
+- Serialize entire collections to JSON format for automated AI processing
 
 > [!NOTE]
-> Runtime note type config is IaC-only: AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
+>AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
 
 ## Getting Started
 
@@ -46,15 +46,15 @@ ankiops am # anki to markdown (export)
 
 ### How is this different from other Markdown or Obsidian tools?
 
-Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. This essentially lets you manage your entire Anki collection from your favorite text editor.
+Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
 
 ### Is it safe to use?
 
-Yes, AnkiOps will never modify notes with non-AnkiOps note types. Your existing collection won't be affected and you can safely mix managed and unmanaged notes. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
+Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected and you can safely mix managed and unmanaged notes within one deck. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Biology::Cell` -> `Biology__Cell.md`). If a deck name contains a literal `__`, AnkiOps escapes it in the filename so mapping stays reversible. Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Biology::Cell` -> `Biology__Cell.md`). Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
 
 ```markdown
 <!-- note_key: 123487556abc -->
@@ -67,7 +67,9 @@ M: Content behind a "more" button (optional)
 
 <!-- note_key: 123474567def -->
 T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
-E: ![image with set width](im.png){width=700}
+E: Some *formatted* extra info.
+
+![image with set width](im.png){width=700}
 
 ---
 
@@ -75,7 +77,7 @@ Q: What is this?
 C1: A multiple choice note
 C2: with
 C3: automatically randomized answers.
-A: 1,3
+A: 1, 3
 
 ```
 
@@ -83,30 +85,19 @@ In this example, the last note is a new note which will get a `note_key` comment
 
 ### How are the different note types identified?
 
-Each note type is identified by its field labels. `E:` (Extra) and `M:` (More, revealed on click) are optional fields shared across all note types.
-
-| Note Type | Fields |
-|---|---|
-| **AnkiOpsQA** | `Q:`, `A:` |
-| **AnkiOpsReversed** | `F:`, `B:` |
-| **AnkiOpsCloze** | `T:` |
-| **AnkiOpsInput** | `Q:`, `I:` |
-| **AnkiOpsChoice** | `Q:`, `C1:``C8:`, `A:` |
+Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-type --info`.
 
 ### How does it work?
 
-On first import, AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. With note keys in place, we can track what is new, changed, moved between decks, or deleted, and AnkiOps syncs accordingly. Content is automatically converted between Anki's HTML format and Markdown during sync operations. One AnkiOps folder represents one Anki profile.
-
+AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. One AnkiOps folder represents one Anki profile. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
 ### What is the recommended workflow?
 
-We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting from the clipboard directly into the media folder (automatically set up)
+We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up)
 
 
 ### How can I share my AnkiOps collection?
 
-Use `ankiops serialize` to export your local AnkiOps collection to JSON. Recipients can import it with `ankiops deserialize --input <path>` into an initialized collection folder.
-
-Alternatively, share your collection via native Anki export (`.apkg`) or by sharing Markdown files with your local `media/` folder.
+TODO
 
 ### How can I migrate my existing notes into AnkiOps?
 
