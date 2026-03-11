@@ -9,49 +9,49 @@
 <div id="io-extra-wrapper">
   <div id="io-extra">
     {{#Remarks}}
-      <div class="io-extra-entry">
-        <div class="io-field-descr">Remarks</div>{{Remarks}}
-      </div>
+    <div class="io-extra-entry">
+      <div class="io-field-descr">Remarks</div>{{Remarks}}
+    </div>
     {{/Remarks}}
     {{#Sources}}
-      <div class="io-extra-entry">
-        <div class="io-field-descr">Sources</div>{{Sources}}
-      </div>
+    <div class="io-extra-entry">
+      <div class="io-field-descr">Sources</div>{{Sources}}
+    </div>
     {{/Sources}}
     {{#Extra 1}}
-      <div class="io-extra-entry">
-        <div class="io-field-descr">Extra 1</div>{{Extra 1}}
-      </div>
+    <div class="io-extra-entry">
+      <div class="io-field-descr">Extra 1</div>{{Extra 1}}
+    </div>
     {{/Extra 1}}
     {{#Extra 2}}
-      <div class="io-extra-entry">
-        <div class="io-field-descr">Extra 2</div>{{Extra 2}}
-      </div>
+    <div class="io-extra-entry">
+      <div class="io-field-descr">Extra 2</div>{{Extra 2}}
+    </div>
     {{/Extra 2}}
   </div>
 </div>
 
 <script>
-// Toggle answer mask on clicking the image
-var toggle = function() {
-  var amask = document.getElementById('io-overlay');
-  if (amask.style.display === 'block' || amask.style.display === '')
-    amask.style.display = 'none';
-  else
-    amask.style.display = 'block'
-}
+  // Toggle answer mask on clicking the image
+  var toggle = function () {
+    var amask = document.getElementById('io-overlay');
+    if (amask.style.display === 'block' || amask.style.display === '')
+      amask.style.display = 'none';
+    else
+      amask.style.display = 'block'
+  }
 
-// Prevent original image from loading before mask
-aFade = 50, qFade = 0;
-var mask = document.querySelector('#io-overlay>img');
-function loaded() {
+  // Prevent original image from loading before mask
+  aFade = 50, qFade = 0;
+  var mask = document.querySelector('#io-overlay>img');
+  function loaded() {
     var original = document.querySelector('#io-original');
     original.style.visibility = "visible";
-}
-if (mask === null || mask.complete) {
+  }
+  if (mask === null || mask.complete) {
     loaded();
-} else {
+  } else {
     mask.addEventListener('load', loaded);
-}
+  }
 </script>
 {{/Image}}

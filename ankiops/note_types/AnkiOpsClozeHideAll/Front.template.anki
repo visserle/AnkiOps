@@ -10,7 +10,7 @@
 <div id="content_display"></div>
 
 <script>
-    (function(){
+    (function () {
         var raw = document.getElementById("hidden_raw").innerHTML;
         var rendered = document.getElementById("cloze_rendered").innerHTML;
         var clozePattern = /\{\{c(\d+)::([\s\S]*?)\}\}/g;
@@ -78,7 +78,7 @@
         }
 
         function simulateFront(text, activeIdx) {
-            return text.replace(clozePattern, function(match, idx, inner) {
+            return text.replace(clozePattern, function (match, idx, inner) {
                 var parsed = parseInner(inner);
                 if (idx === activeIdx) {
                     var display = parsed.hint ? "[" + parsed.hint + "]" : "[...]";
@@ -116,7 +116,7 @@
         var activeIdx = detectActiveIndex(clozeIndices);
 
         // Render with detected active index
-        var result = raw.replace(clozePattern, function(match, idx, inner) {
+        var result = raw.replace(clozePattern, function (match, idx, inner) {
             var parsed = parseInner(inner);
             if (idx === activeIdx) {
                 var displayTxt = parsed.hint ? "[" + parsed.hint + "]" : "[...]";

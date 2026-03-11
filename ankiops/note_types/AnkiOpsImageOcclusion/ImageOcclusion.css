@@ -9,33 +9,34 @@
 
 /* OCCLUSION CSS START - don't edit this */
 #io-overlay {
-  position:absolute;
-  top:0;
-  width:100%;
-  z-index:3
+  position: absolute;
+  top: 0;
+  width: 100%;
+  z-index: 3
 }
 
 #io-original {
-  position:relative;
-  top:0;
-  width:100%;
-  z-index:2;
+  position: relative;
+  top: 0;
+  width: 100%;
+  z-index: 2;
   visibility: hidden;
 }
 
 #io-wrapper {
-  position:relative;
+  position: relative;
   width: 100%;
 }
+
 /* OCCLUSION CSS END */
 
 /* OTHER STYLES */
-#io-header{
+#io-header {
   font-size: 1.1em;
   margin-bottom: 0.2em;
 }
 
-#io-footer{
+#io-footer {
   max-width: 80%;
   margin-left: auto;
   margin-right: auto;
@@ -43,7 +44,7 @@
   font-style: italic;
 }
 
-#io-extra-wrapper{
+#io-extra-wrapper {
   /* the wrapper is needed to center the
   left-aligned blocks below it */
   width: 80%;
@@ -52,18 +53,18 @@
   margin-top: 0.5em;
 }
 
-#io-extra{
-  text-align:center;
+#io-extra {
+  text-align: center;
   display: inline-block;
 }
 
-.io-extra-entry{
+.io-extra-entry {
   margin-top: 0.8em;
   font-size: 0.9em;
-  text-align:left;
+  text-align: left;
 }
 
-.io-field-descr{
+.io-field-descr {
   margin-bottom: 0.2em;
   font-weight: bold;
   font-size: 1em;
@@ -75,7 +76,8 @@
 
 /* ADJUSTMENTS FOR MOBILE DEVICES */
 
-.mobile .card, .mobile #content {
+.mobile .card,
+.mobile #content {
   font-size: 120%;
   margin: 0;
 }
