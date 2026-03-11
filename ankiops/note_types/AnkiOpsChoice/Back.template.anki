@@ -4,99 +4,99 @@
 <div id="choices"></div>
 
 <script>
-// Parse answer field to determine number of correct answers
-var answerText = "{{Answer}}";
-var correctAnswers = answerText.split(',').map(function(answerToken) { return answerToken.trim(); });
-var numCorrect = correctAnswers.length;
+    // Parse answer field to determine number of correct answers
+    var answerText = "{{Answer}}";
+    var correctAnswers = answerText.split(',').map(function (answerToken) { return answerToken.trim(); });
+    var numCorrect = correctAnswers.length;
 
-// Display hint about number of correct answers (for alignment with front)
-var hintDiv = document.getElementById('answer-count-hint');
-if (numCorrect > 1) {
-    hintDiv.textContent = 'Select ' + numCorrect + ' answers.';
-} else {
-    hintDiv.textContent = 'Select 1 answer';
-}
-
-// Build choices array from fields
-var choices = [];
-{{#Choice 1}}
-choices.push({num: 1, text: `{{Choice 1}}`});
-{{/Choice 1}}
-{{#Choice 2}}
-choices.push({num: 2, text: `{{Choice 2}}`});
-{{/Choice 2}}
-{{#Choice 3}}
-choices.push({num: 3, text: `{{Choice 3}}`});
-{{/Choice 3}}
-{{#Choice 4}}
-choices.push({num: 4, text: `{{Choice 4}}`});
-{{/Choice 4}}
-{{#Choice 5}}
-choices.push({num: 5, text: `{{Choice 5}}`});
-{{/Choice 5}}
-{{#Choice 6}}
-choices.push({num: 6, text: `{{Choice 6}}`});
-{{/Choice 6}}
-{{#Choice 7}}
-choices.push({num: 7, text: `{{Choice 7}}`});
-{{/Choice 7}}
-{{#Choice 8}}
-choices.push({num: 8, text: `{{Choice 8}}`});
-{{/Choice 8}}
-
-// Get card ID and review counter for consistent shuffle matching front
-var cardId = document.documentElement.dataset.cid || '0';
-var storageKey = 'ankiops_review_' + cardId;
-
-// Read current review counter (incremented on front side)
-var reviewCount = parseInt(localStorage.getItem(storageKey) || '0', 10);
-
-// Create seed from card ID and review count with proper hashing
-var seed = 0;
-var seedStr = cardId + '_' + reviewCount;
-for (var seedIndex = 0; seedIndex < seedStr.length; seedIndex++) {
-    seed = ((seed << 5) - seed) + seedStr.charCodeAt(seedIndex);
-    seed = seed | 0; // Convert to 32bit integer
-}
-// Ensure positive seed and add choice content for uniqueness
-seed = Math.abs(seed);
-choices.forEach(function(choiceItem) {
-    for (var textIndex = 0; textIndex < choiceItem.text.length; textIndex++) {
-        seed = ((seed << 5) - seed) + choiceItem.text.charCodeAt(textIndex);
-        seed = Math.abs(seed | 0); // Keep positive
-    }
-});
-
-function seededRandom() {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-}
-
-// Shuffle array using Fisher-Yates algorithm with seeded random
-for (var choiceIndex = choices.length - 1; choiceIndex > 0; choiceIndex--) {
-    var swapIndex = Math.floor(seededRandom() * (choiceIndex + 1));
-    var temp = choices[choiceIndex];
-    choices[choiceIndex] = choices[swapIndex];
-    choices[swapIndex] = temp;
-}
-
-// Create and append choice elements with styling
-var container = document.getElementById('choices');
-choices.forEach(function(choice) {
-    var div = document.createElement('div');
-    div.className = 'choice-item';
-    div.setAttribute('data-num', choice.num);
-    div.innerHTML = choice.text;
-
-    // Highlight correct answers
-    if (correctAnswers.indexOf(String(choice.num)) !== -1) {
-        div.classList.add('choice-correct');
+    // Display hint about number of correct answers (for alignment with front)
+    var hintDiv = document.getElementById('answer-count-hint');
+    if (numCorrect > 1) {
+        hintDiv.textContent = numCorrect + ' answers';
     } else {
-        div.classList.add('choice-incorrect');
+        hintDiv.textContent = '1 answer';
     }
 
-    container.appendChild(div);
-});
+    // Build choices array from fields
+    var choices = [];
+    {{#Choice 1}}
+    choices.push({num: 1, text: `{{Choice 1}}`});
+    {{/Choice 1}}
+    {{#Choice 2}}
+    choices.push({num: 2, text: `{{Choice 2}}`});
+    {{/Choice 2}}
+    {{#Choice 3}}
+    choices.push({num: 3, text: `{{Choice 3}}`});
+    {{/Choice 3}}
+    {{#Choice 4}}
+    choices.push({num: 4, text: `{{Choice 4}}`});
+    {{/Choice 4}}
+    {{#Choice 5}}
+    choices.push({num: 5, text: `{{Choice 5}}`});
+    {{/Choice 5}}
+    {{#Choice 6}}
+    choices.push({num: 6, text: `{{Choice 6}}`});
+    {{/Choice 6}}
+    {{#Choice 7}}
+    choices.push({num: 7, text: `{{Choice 7}}`});
+    {{/Choice 7}}
+    {{#Choice 8}}
+    choices.push({num: 8, text: `{{Choice 8}}`});
+    {{/Choice 8}}
+
+    // Get card ID and review counter for consistent shuffle matching front
+    var cardId = document.documentElement.dataset.cid || '0';
+    var storageKey = 'ankiops_review_' + cardId;
+
+    // Read current review counter (incremented on front side)
+    var reviewCount = parseInt(localStorage.getItem(storageKey) || '0', 10);
+
+    // Create seed from card ID and review count with proper hashing
+    var seed = 0;
+    var seedStr = cardId + '_' + reviewCount;
+    for (var seedIndex = 0; seedIndex < seedStr.length; seedIndex++) {
+        seed = ((seed << 5) - seed) + seedStr.charCodeAt(seedIndex);
+        seed = seed | 0; // Convert to 32bit integer
+    }
+    // Ensure positive seed and add choice content for uniqueness
+    seed = Math.abs(seed);
+    choices.forEach(function (choiceItem) {
+        for (var textIndex = 0; textIndex < choiceItem.text.length; textIndex++) {
+            seed = ((seed << 5) - seed) + choiceItem.text.charCodeAt(textIndex);
+            seed = Math.abs(seed | 0); // Keep positive
+        }
+    });
+
+    function seededRandom() {
+        seed = (seed * 9301 + 49297) % 233280;
+        return seed / 233280;
+    }
+
+    // Shuffle array using Fisher-Yates algorithm with seeded random
+    for (var choiceIndex = choices.length - 1; choiceIndex > 0; choiceIndex--) {
+        var swapIndex = Math.floor(seededRandom() * (choiceIndex + 1));
+        var temp = choices[choiceIndex];
+        choices[choiceIndex] = choices[swapIndex];
+        choices[swapIndex] = temp;
+    }
+
+    // Create and append choice elements with styling
+    var container = document.getElementById('choices');
+    choices.forEach(function (choice) {
+        var div = document.createElement('div');
+        div.className = 'choice-item';
+        div.setAttribute('data-num', choice.num);
+        div.innerHTML = choice.text;
+
+        // Highlight correct answers
+        if (correctAnswers.indexOf(String(choice.num)) !== -1) {
+            div.classList.add('choice-correct');
+        } else {
+            div.classList.add('choice-incorrect');
+        }
+
+        container.appendChild(div);
+    });
 </script>
 
 <hr>
