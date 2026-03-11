@@ -4,29 +4,23 @@
 
 **Anki ↔ Markdown, with bidirectional sync and LLM integration**
 
-Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge. Each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
+Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, Git, and LLM tools. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings AI assistance, batch editing, and version control to your flashcards.
 
 > [!NOTE]
-> AnkiOps is in early development and there will be breaking changes with each release. This readme might not always reflect the current state of the codebase.
+> Work in progress. This readme might not always reflect the current state of the repo.
 
 ## Features
 
 - Simple CLI interface: after initialization, only two commands are needed for daily use
-- Fully round-trip, bi-directional sync that handles note creation, deletion, movements across decks, and conflicts
-- Markdown rendering with nearly all features (including syntax-highlighted code blocks, supported on desktop and mobile)
-- Support for all standard note types, plus Single & Multiple Choice and Cloze Hide All
-- Embed images via VS Code where they are directly copied into your Anki media folder (automatically set up)
+- Fully round-trip sync that handles notes (creation, deletion, movements across decks, conflicts), media, and note types
+- Markdown rendering with nearly all features (including syntax-highlighted code blocks for on desktop and mobile)
+- Support for custom note types following Infrastructure as Code (IaC) principles
 - Built-in Git integration with autocommit for tracking all changes
-- High-performance processing: handles thousands of cards across hundreds of decks in mere seconds
-- Thoroughly tested, bi-directional conversion between Markdown and Anki-compatible HTML
+- High-performance processing using hashing: handles thousands of cards across hundreds of decks in mere seconds
 - Serialize/deserialize entire collections to JSON format for backup, sharing, or automated AI processing
 
 > [!NOTE]
-> Runtime note type config is IaC-only: AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth.
-
-> [!NOTE]
-> LLM task config is also IaC-only. AnkiOps reads from your local `llm/` folder with this structure:
-> `llm/system_prompt.md`, `llm/tasks/*.yaml`, and task prompt files referenced via `prompt_file` (for example `llm/prompts/grammar.md`).
+> Runtime note type config is IaC-only: AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
 
 ## Getting Started
 
@@ -52,7 +46,7 @@ ankiops am # anki to markdown (export)
 
 ### How is this different from other Markdown or Obsidian tools?
 
-Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate and manage than approaches that use one file per card. This essentially lets you manage your entire Anki collection from your favorite text editor.
+Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. Additionally, AnkiOps uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. This essentially lets you manage your entire Anki collection from your favorite text editor.
 
 ### Is it safe to use?
 
@@ -105,7 +99,8 @@ On first import, AnkiOps assigns a stable `note_key` to each managed note. It is
 
 ### What is the recommended workflow?
 
-We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting (which will be saved in your Anki media folder by default).
+We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting from the clipboard directly into the media folder (automatically set up)
+
 
 ### How can I share my AnkiOps collection?
 
