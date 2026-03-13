@@ -23,18 +23,25 @@ Editing flashcards in Anki's UI is tedious when you could be using your favorite
 
 
 1. **Install AnkiOps via [pipx](https://github.com/pypa/pipx)**: Pipx will make AnkiOps globally available in your terminal.
+
 ```bash
 pipx install ankiops
 ```
+
 2. **Initialize AnkiOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize AnkiOps in any empty directory of your choosing. This is where your text-based decks will live. The additional tutorial flag creates a sample Markdown deck.
+
 ```bash
 ankiops init --tutorial
 ```
+
 3. **Execute AnkiOps**: Import the tutorial deck into Anki using:
+
 ```bash
 ankiops ma # markdown to anki (import)
 ```
+
 4. **Keep everything in sync**: When editing your Markdown files, sync Markdown → Anki (and vice versa), as each sync makes one side match the other. After reviewing and editing your cards in Anki, you can sync Anki → Markdown using the following command:
+
 ```bash
 ankiops am # anki to markdown (export)
 ```
@@ -75,19 +82,13 @@ C1: A multiple choice note
 C2: with
 C3: automatically randomized answers.
 A: 1, 3
-
 ```
 
 In this example, the last note is a new note which will get a `note_key` comment assigned on the next import.
 
-
-
-
 ### How are different note types handled?
 
-AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed.
-
-Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-type --info`.
+AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-type --info`.
 
 ### How does it work?
 

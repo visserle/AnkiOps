@@ -10,23 +10,17 @@
 
 .inactive-cloze {
     display: inline-block;
-    width: 4.6em;
-    min-width: 4.6em;
-    height: 1em;
-    line-height: 1em;
-    border: 1px solid #999;
-    border-radius: 4px;
-    background-color: #e5e5e5;
+    width: 10ch;
+    min-width: 10ch;
+    height: 0.95em;
+    line-height: 1.0em;
+    border: 1px solid #000000;
+    border-radius: 1px;
+    background-color: #f2df9a;
     box-sizing: border-box;
     overflow: hidden;
-    vertical-align: -0.12em;
+    vertical-align: -0.1em;
     margin: 0 0.1em;
-}
-
-.night-mode .inactive-cloze,
-.mobile .night_mode .inactive-cloze {
-    border-color: #777;
-    background-color: #4a4a4a;
 }
 
 .inactive-cloze.revealed {
