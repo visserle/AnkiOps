@@ -14,7 +14,10 @@ def connect_or_exit() -> AnkiAdapter:
         version = anki.get_version()
         logger.debug(f"Connected to AnkiConnect (version {version})")
     except Exception as error:
-        logger.error(f"Error connecting to AnkiConnect: {error}")
-        logger.error("Make sure Anki is running and AnkiConnect is installed.")
+        logger.error(
+            "Error connecting to AnkiConnect. Make sure Anki is running and "
+            "AnkiConnect is installed."
+        )
+        logger.debug(f"Connection error details: {error}")
         raise SystemExit(1)
     return anki

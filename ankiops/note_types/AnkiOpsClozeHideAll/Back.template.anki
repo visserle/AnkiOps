@@ -2,6 +2,7 @@
 <div id="cloze_rendered" style="display:none;">{{cloze:Text}}</div>
 <div id="hidden_raw" style="display:none;">{{Text}}</div>
 <div id="content_display"></div>
+<div id="cloze_toggle" class="more cloze-toggle" data-state="hidden">Show All</div>
 
 <script>
     (function () {
@@ -154,8 +155,6 @@
         });
     })();
 </script>
-
-<div id="cloze_toggle" class="more cloze-toggle" data-state="hidden">Show All</div>
 
 <hr>
 
