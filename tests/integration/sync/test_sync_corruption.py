@@ -12,12 +12,12 @@ from tests.support.assertions import assert_summary
 def test_corr_db_001_unreadable_db_is_backed_up_and_recreated(world):
     """CORR-DB-001."""
     with world.db_session() as db:
-        db.set_note("corr-001", 1)
+        db.upsert_note_links([("corr-001", 1)])
 
     world.corrupt_db()
 
     with world.db_session() as recovered:
-        assert recovered.get_note_id("corr-001") is None
+        assert recovered.resolve_note_ids(["corr-001"]).get("corr-001") is None
 
     assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
 
@@ -47,14 +47,14 @@ def test_corr_db_003_schema_corruption_is_auto_recovered(tmp_path):
     finally:
         conn.close()
 
-    recovered = SQLiteDbAdapter.load(tmp_path)
+    recovered = SQLiteDbAdapter.open(tmp_path)
     try:
-        recovered.set_note("schema-key", 101)
+        recovered.upsert_note_links([("schema-key", 101)])
     finally:
         recovered.close()
 
-    check_db = SQLiteDbAdapter.load(tmp_path)
+    check_db = SQLiteDbAdapter.open(tmp_path)
     try:
-        assert check_db.get_note_id("schema-key") == 101
+        assert check_db.resolve_note_ids(["schema-key"]).get("schema-key") == 101
     finally:
         check_db.close()

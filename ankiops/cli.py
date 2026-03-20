@@ -101,7 +101,7 @@ def run_am(args):
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     fs = FileSystemAdapter()
-    db = SQLiteDbAdapter.load(collection_dir)
+    db = SQLiteDbAdapter.open(collection_dir)
     note_types_dir = get_note_types_dir()
 
     logger.debug("Starting note export (Anki -> Markdown)")
@@ -164,7 +164,7 @@ def run_ma(args):
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
     fs = FileSystemAdapter()
-    db = SQLiteDbAdapter.load(collection_dir)
+    db = SQLiteDbAdapter.open(collection_dir)
     note_types_dir = get_note_types_dir()
 
     try:
@@ -298,12 +298,21 @@ def run_llm(args):
         return
 
     try:
-        run_task(
+        result = run_task(
             collection_dir=collection_dir,
             task_name=args.task_name,
             model_override=args.model,
             no_auto_commit=args.no_auto_commit,
         )
+        if result.failed:
+            logger.error(
+                "LLM task finished with %d error(s)%s",
+                result.summary.errors,
+                " (atomic policy: no updates persisted)"
+                if not result.persisted and result.summary.updated > 0
+                else "",
+            )
+            raise SystemExit(1)
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error

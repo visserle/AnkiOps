@@ -51,7 +51,7 @@ def _replace_answer(content: str, new_answer: str) -> str:
 def _assert_db_bijection(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute("SELECT note_key, note_id FROM notes").fetchall()
+        rows = conn.execute("SELECT note_key, note_id FROM note_state").fetchall()
     finally:
         conn.close()
 
@@ -109,7 +109,7 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
         anki = AnkiAdapter()
         fs = FileSystemAdapter()
         fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
-        db = SQLiteDbAdapter.load(collection_dir)
+        db = SQLiteDbAdapter.open(collection_dir)
 
         question_idx = 0
 

@@ -36,7 +36,7 @@ def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
 
         keys = world.extract_note_keys("FreshExportDeck")
         assert len(keys) == 1
-        assert db.get_note_key(note_id) == keys[0]
+        assert db.resolve_note_keys([note_id]).get(note_id) == keys[0]
 
 
 def test_exp_run_update_001_updates_existing_markdown_note(world):
@@ -53,7 +53,7 @@ def test_exp_run_update_001_updates_existing_markdown_note(world):
     world.set_note_answer(note_id, "New Anki A")
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
+        db.upsert_note_links([(note_key, note_id)])
 
         result = world.sync_export(db)
 
@@ -61,6 +61,31 @@ def test_exp_run_update_001_updates_existing_markdown_note(world):
             result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
         )
         _assert_deck_contains(world, "UpdateDeck", "A: New Anki A")
+
+
+def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):
+    """EXP-FRESH-CREATE-002."""
+    world.add_qa_note(
+        deck_name="CitationDeck",
+        question="Q Citation",
+        answer=(
+            '<blockquote><p>called. <a href="https://en.wikipedia.org/wiki/Pygmalion'
+            '#cite_note-13">[13]</a><br>aus Pygmalion von George Bernard Shaw'
+            "</p></blockquote>"
+        ),
+    )
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+    _assert_deck_contains(
+        world,
+        "CitationDeck",
+        "Q: Q Citation",
+        "A: > called. [[13]](<https://en.wikipedia.org/wiki/Pygmalion#cite_note-13>)",
+        "> aus Pygmalion von George Bernard Shaw",
+    )
 
 
 def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world):
@@ -90,8 +115,8 @@ def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world
     )
 
     with world.db_session() as db:
-        db.set_note(keep_key, keep_id)
-        db.set_note(drop_key, drop_id)
+        db.upsert_note_links([(keep_key, keep_id)])
+        db.upsert_note_links([(drop_key, drop_id)])
 
         world.remove_note(drop_id)
 
@@ -103,7 +128,7 @@ def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world
         content = world.read_deck("DeleteDeck")
         assert "Keep Q" in content
         assert "Drop Q" not in content
-        assert db.get_note_id(drop_key) is None
+        assert db.resolve_note_ids([drop_key]).get(drop_key) is None
 
 
 def test_exp_run_rename_001_renames_markdown_file_on_deck_rename(world):
@@ -129,7 +154,7 @@ def test_exp_run_rename_001_renames_markdown_file_on_deck_rename(world):
         new_file = world.deck_path("NewDeck")
         assert new_file.exists()
         assert not old_file.exists()
-        assert db.get_deck_id("NewDeck") is not None
+        assert db.resolve_deck_id("NewDeck") is not None
 
 
 def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
@@ -149,7 +174,7 @@ def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
             result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
         )
         _assert_deck_contains(world, "DriftDeck", f"<!-- note_key: {note_key} -->")
-        assert db.get_note_key(note_id) == note_key
+        assert db.resolve_note_keys([note_id]).get(note_id) == note_key
 
 
 def test_exp_corr_drift_001_recovers_from_corrupt_db_and_rebuilds_mapping(world):
@@ -163,7 +188,7 @@ def test_exp_corr_drift_001_recovers_from_corrupt_db_and_rebuilds_mapping(world)
     )
 
     with world.db_session() as db:
-        db.set_note("placeholder", 123)
+        db.upsert_note_links([("placeholder", 123)])
 
     world.corrupt_db()
 
@@ -174,7 +199,7 @@ def test_exp_corr_drift_001_recovers_from_corrupt_db_and_rebuilds_mapping(world)
         assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
 
     with world.db_session() as check_db:
-        assert check_db.get_note_id(note_key) == note_id
+        assert check_db.resolve_note_ids([note_key]).get(note_key) == note_id
 
 
 def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
@@ -211,7 +236,7 @@ def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(world):
     )
 
     with world.db_session() as db:
-        db.set_note(keep_key, keep_id)
+        db.upsert_note_links([(keep_key, keep_id)])
         result = world.sync_export(db)
 
     content = world.read_deck("ProtectDeck")
@@ -293,13 +318,13 @@ def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
         note_key="embedded-good-key",
     )
 
-    db = SQLiteDbAdapter.load(world.root)
+    db = SQLiteDbAdapter.open(world.root)
     try:
-        db.set_note("stale-wrong-key", note_id)
+        db.upsert_note_links([("stale-wrong-key", note_id)])
 
         result = world.sync_export(db)
 
         assert_summary(result.summary, errors=0)
-        assert db.get_note_key(note_id) == "embedded-good-key"
+        assert db.resolve_note_keys([note_id]).get(note_id) == "embedded-good-key"
     finally:
         db.close()

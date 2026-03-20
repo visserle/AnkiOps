@@ -27,7 +27,7 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
             world.mock_anki.notes[note_id]["fields"]["AnkiOps Key"]["value"]
             == note_keys[0]
         )
-        assert db.get_note_id(note_keys[0]) == note_id
+        assert db.resolve_note_ids([note_keys[0]]).get(note_keys[0]) == note_id
 
 
 def test_imp_run_update_001_updates_existing_note(world):
@@ -43,7 +43,7 @@ def test_imp_run_update_001_updates_existing_note(world):
     world.write_qa_deck("RunDeck", [("Original Q", "Updated A", note_key)])
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
+        db.upsert_note_links([(note_key, note_id)])
 
         result = world.sync_import(db)
 
@@ -69,7 +69,7 @@ def test_imp_run_move_001_moves_note_between_decks(world):
     world.write_qa_deck("TargetDeck", [("Move Q", "Move A", note_key)])
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
+        db.upsert_note_links([(note_key, note_id)])
 
         result = world.sync_import(db)
 
@@ -93,7 +93,7 @@ def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
     world.write_qa_deck("DeleteDeck", [])
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
+        db.upsert_note_links([(note_key, note_id)])
 
         result = world.sync_import(db)
 
@@ -120,7 +120,7 @@ def test_imp_run_drift_001_recovers_missing_mapping_from_embedded_key(world):
 
         assert_summary(result.summary, created=0, deleted=0, errors=0)
         assert len(world.mock_anki.notes) == 1
-        assert db.get_note_id(note_key) == note_id
+        assert db.resolve_note_ids([note_key]).get(note_key) == note_id
 
 
 def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
@@ -136,12 +136,12 @@ def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
     world.write_qa_deck("DriftDeck", [("Drift2 Q", "Drift2 A", note_key)])
 
     with world.db_session() as db:
-        db.set_note(note_key, 999999)
+        db.upsert_note_links([(note_key, 999999)])
         result = world.sync_import(db)
 
         assert_summary(result.summary, errors=0)
         assert len(world.mock_anki.notes) == 1
-        assert db.get_note_id(note_key) == real_note_id
+        assert db.resolve_note_ids([note_key]).get(note_key) == real_note_id
 
 
 def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
@@ -169,7 +169,7 @@ def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(wo
     world.write_qa_deck("MismatchDeck", [("Q mismatch", "A mismatch", note_key)])
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
+        db.upsert_note_links([(note_key, note_id)])
         result = world.sync_import(db)
 
         assert len(result.results) == 1
@@ -229,8 +229,8 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
     world.write_qa_deck("NewDeck", [("Rename Q", "Rename A", note_key)])
 
     with world.db_session() as db:
-        db.set_note(note_key, note_id)
-        db.set_deck("OldDeck", world.mock_anki.decks["OldDeck"])
+        db.upsert_note_links([(note_key, note_id)])
+        db.upsert_deck("OldDeck", world.mock_anki.decks["OldDeck"])
 
         result = world.sync_import(db)
 
@@ -238,8 +238,8 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
             result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
         )
         assert all(deck.deck_name != "OldDeck" for deck in result.untracked_decks)
-        assert db.get_deck_id("OldDeck") is None
-        assert db.get_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
+        assert db.resolve_deck_id("OldDeck") is None
+        assert db.resolve_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
 
@@ -271,8 +271,8 @@ def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world):
     )
 
     with world.db_session() as db:
-        db.set_note(moved_note_key, moved_note_id)
-        db.set_note(existing_note_key, existing_note_id)
+        db.upsert_note_links([(moved_note_key, moved_note_id)])
+        db.upsert_note_links([(existing_note_key, existing_note_id)])
 
         result = world.sync_import(db)
 

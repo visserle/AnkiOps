@@ -5,6 +5,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from ankiops.llm.anthropic_models import SONNET
@@ -130,7 +131,7 @@ def test_generate_update_builds_request_and_returns_update(
     ) in caplog.text
     assert (
         "Response for nk-1: message_id=msg_123, stop_reason=end_turn, "
-        "input_tokens=311, output_tokens=37, latency_ms=2172"
+        "input_tokens=311, output_tokens=37, latency_ms=2172, retries=0"
     ) in caplog.text
     assert "Broken" not in caplog.text
     assert "<task>" not in caplog.text
@@ -210,6 +211,90 @@ def test_generate_update_surfaces_unsupported_model_as_fatal(
                 request_options=TaskRequestOptions(),
                 api_model="claude-sonnet-4-6",
             )
+
+
+def test_generate_update_retries_connection_error_once_then_succeeds(
+    client: ClaudeClient,
+    note_payload: NotePayload,
+    caplog,
+):
+    from anthropic import APIConnectionError
+
+    response = _response(
+        blocks=[
+            SimpleNamespace(
+                type="text",
+                text='{"note_key":"nk-1","edits":{"Question":"Fixed"}}',
+            )
+        ]
+    )
+    connection_error = APIConnectionError(
+        message="Connection error.",
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+    )
+    request_options = TaskRequestOptions(
+        retries=1,
+        retry_backoff_seconds=0.2,
+        retry_backoff_jitter=False,
+    )
+
+    with (
+        patch.object(
+            client._client.messages,
+            "create",
+            side_effect=[connection_error, response],
+        ) as create,
+        patch("ankiops.llm.claude.time.sleep") as sleep,
+        caplog.at_level(logging.WARNING, logger="ankiops.llm.claude"),
+    ):
+        update_result = client.generate_update(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=request_options,
+            api_model="claude-sonnet-4-6",
+        )
+
+    assert update_result.retry_count == 1
+    assert update_result.update.edits == {"Question": "Fixed"}
+    assert create.call_count == 2
+    sleep.assert_called_once_with(0.2)
+    assert "Retrying nk-1 after connection error (1/1) in 0.20s" in caplog.text
+
+
+def test_generate_update_fails_after_exhausting_retries(
+    client: ClaudeClient,
+    note_payload: NotePayload,
+):
+    from anthropic import APIStatusError
+
+    error = APIStatusError(
+        message="upstream unavailable",
+        response=MagicMock(status_code=503),
+        body=None,
+    )
+
+    with (
+        patch.object(
+            client._client.messages,
+            "create",
+            side_effect=[error, error],
+        ) as create,
+        patch("ankiops.llm.claude.time.sleep") as sleep,
+    ):
+        with pytest.raises(LlmFatalError, match="Provider returned HTTP 503"):
+            client.generate_update(
+                note_payload=note_payload,
+                task_prompt="Fix grammar",
+                request_options=TaskRequestOptions(
+                    retries=1,
+                    retry_backoff_seconds=0.25,
+                    retry_backoff_jitter=False,
+                ),
+                api_model="claude-sonnet-4-6",
+            )
+
+    assert create.call_count == 2
+    sleep.assert_called_once_with(0.25)
 
 
 def test_missing_api_key_raises_fatal(task_config: TaskConfig, monkeypatch):

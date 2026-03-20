@@ -29,7 +29,7 @@ def test_sync_note_types_uses_cache_when_unchanged(tmp_path):
     anki.fetch_model_names.return_value = ["AnkiOpsQA"]
     anki.fetch_model_states.return_value = {"AnkiOpsQA": {}}
 
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
         first = sync_note_types(anki, fs, tmp_path, db)
         assert first == "1 synced"
@@ -58,7 +58,7 @@ def test_sync_note_types_cache_invalidates_on_local_change(tmp_path):
     anki.fetch_model_names.return_value = ["AnkiOpsQA"]
     anki.fetch_model_states.return_value = {"AnkiOpsQA": {}}
 
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
         first = sync_note_types(anki, fs, tmp_path, db)
         second = sync_note_types(anki, fs, tmp_path, db)

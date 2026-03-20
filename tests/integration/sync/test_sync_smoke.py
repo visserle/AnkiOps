@@ -22,7 +22,7 @@ def _ports(collection_dir, *, preload_configs: bool):
     fs = FileSystemAdapter()
     if preload_configs:
         fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
-    db = SQLiteDbAdapter.load(collection_dir)
+    db = SQLiteDbAdapter.open(collection_dir)
     try:
         yield anki, fs, db
     finally:
@@ -183,10 +183,10 @@ def test_export_existing_keeps_markdown_order(tmp_path, mock_anki, run_ankiops):
         encoding="utf-8",
     )
 
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
-        db.set_note("run-k-1", 1001)
-        db.set_note("run-k-2", 1002)
+        db.upsert_note_links([("run-k-1", 1001)])
+        db.upsert_note_links([("run-k-2", 1002)])
     finally:
         db.close()
 
@@ -254,10 +254,10 @@ def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_a
         encoding="utf-8",
     )
 
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
-        db.set_note("append-k-1", 1001)
-        db.set_note("append-k-2", 1002)
+        db.upsert_note_links([("append-k-1", 1001)])
+        db.upsert_note_links([("append-k-2", 1002)])
     finally:
         db.close()
 
@@ -381,9 +381,9 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
         fields={"Question": "OldQ", "Answer": "OldA", "AnkiOps Key": ""},
     )
 
-    db_setup = SQLiteDbAdapter.load(tmp_path)
+    db_setup = SQLiteDbAdapter.open(tmp_path)
     try:
-        db_setup.set_note(note_key, note_id)
+        db_setup.upsert_note_links([(note_key, note_id)])
     finally:
         db_setup.close()
 
@@ -413,9 +413,9 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
         fields={"Question": "Q1", "Answer": "A1", "AnkiOps Key": existing_note_key},
     )
 
-    db_setup = SQLiteDbAdapter.load(tmp_path)
+    db_setup = SQLiteDbAdapter.open(tmp_path)
     try:
-        assert db_setup.get_note_key(note_id) is None
+        assert db_setup.resolve_note_keys([note_id]).get(note_id) is None
     finally:
         db_setup.close()
 
@@ -426,9 +426,9 @@ def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
     content = md_file.read_text(encoding="utf-8")
     assert f"<!-- note_key: {existing_note_key} -->" in content
 
-    db_check = SQLiteDbAdapter.load(tmp_path)
+    db_check = SQLiteDbAdapter.open(tmp_path)
     try:
-        assert db_check.get_note_key(note_id) == existing_note_key
+        assert db_check.resolve_note_keys([note_id]).get(note_id) == existing_note_key
     finally:
         db_check.close()
 

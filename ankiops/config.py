@@ -125,7 +125,7 @@ def require_collection_dir(active_profile: str) -> Path:
         )
         raise SystemExit(1)
 
-    db = SQLiteDbAdapter.load(collection_dir)
+    db = SQLiteDbAdapter.open(collection_dir)
     expected_profile = db.get_profile_name()
     if expected_profile and expected_profile != active_profile:
         logger.error(

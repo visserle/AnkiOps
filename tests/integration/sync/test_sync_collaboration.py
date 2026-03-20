@@ -29,7 +29,7 @@ def test_collab_import_move_without_db_mapping_moves_existing_note(world):
             deleted=0,
             errors=0,
         )
-        assert db.get_note_id(note_key) == note_id
+        assert db.resolve_note_ids([note_key]).get(note_key) == note_id
 
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "TargetDeck"
@@ -67,8 +67,8 @@ def test_collab_import_recovers_all_keys_without_db(world):
             deleted=0,
             errors=0,
         )
-        assert db.get_note_id(note_key_a) == note_id_a
-        assert db.get_note_id(note_key_b) == note_id_b
+        assert db.resolve_note_ids([note_key_a]).get(note_key_a) == note_id_a
+        assert db.resolve_note_ids([note_key_b]).get(note_key_b) == note_id_b
 
 
 def test_collab_export_recovers_mapping_from_embedded_note_key(world):
@@ -93,5 +93,5 @@ def test_collab_export_recovers_mapping_from_embedded_note_key(world):
             deleted=0,
             errors=0,
         )
-        assert db.get_note_id(note_key) == note_id
+        assert db.resolve_note_ids([note_key]).get(note_key) == note_id
         assert f"<!-- note_key: {note_key} -->" in world.read_deck("ExportDeck")

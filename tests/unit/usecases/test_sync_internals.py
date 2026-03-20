@@ -75,7 +75,7 @@ def test_flush_writes_updates_existing_key_comment(tmp_path):
 def test_sync_deck_records_unknown_note_type_error(tmp_path):
     fs_port = FileSystemAdapter()
     configs = fs_port.load_note_type_configs(get_note_types_dir())
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
         unknown = AnkiNote(
             note_id=123,

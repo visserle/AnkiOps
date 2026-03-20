@@ -155,7 +155,7 @@ def test_export_sets_missing_deck_mapping_across_states(case, world):
 
     with world.db_session(case.state) as db:
         world.sync_export(db)
-        assert db.get_deck_id("DeckMappingDeck") == deck_id
+        assert db.resolve_deck_id("DeckMappingDeck") == deck_id
 
 
 def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
@@ -167,11 +167,11 @@ def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
         note_key="embedded-good-key",
     )
 
-    db = SQLiteDbAdapter.load(world.root)
+    db = SQLiteDbAdapter.open(world.root)
     try:
-        db.set_note("stale-wrong-key", note_id)
+        db.upsert_note_links([("stale-wrong-key", note_id)])
         result = world.sync_export(db)
         assert_summary(result.summary, errors=0)
-        assert db.get_note_key(note_id) == "embedded-good-key"
+        assert db.resolve_note_keys([note_id]).get(note_id) == "embedded-good-key"
     finally:
         db.close()

@@ -158,7 +158,7 @@ class TestMediaSyncIncremental:
         anki_media_dir.mkdir()
         anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             first = sync_media_to_anki(anki, fs, tmp_path, db)
             second = sync_media_to_anki(anki, fs, tmp_path, db)
@@ -183,13 +183,13 @@ class TestMediaSyncIncremental:
         anki_media_dir.mkdir()
         anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             first = sync_media_to_anki(anki, fs, tmp_path, db)
         finally:
             db.close()
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             second = sync_media_to_anki(anki, fs, tmp_path, db)
         finally:
@@ -212,14 +212,14 @@ class TestMediaSyncIncremental:
         anki_media_dir.mkdir()
         anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             sync_media_to_anki(anki, fs, tmp_path, db)
-            assert db.get_markdown_media_cached_paths() == {"DeckA.md", "DeckB.md"}
+            assert db.list_markdown_media_paths() == {"DeckA.md", "DeckB.md"}
 
             deck_a.unlink()
             sync_media_to_anki(anki, fs, tmp_path, db)
-            assert db.get_markdown_media_cached_paths() == {"DeckB.md"}
+            assert db.list_markdown_media_paths() == {"DeckB.md"}
         finally:
             db.close()
 
@@ -237,7 +237,7 @@ class TestMediaSyncIncremental:
         anki_media_dir.mkdir()
         anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             result = sync_media_to_anki(anki, fs, tmp_path, db)
         finally:
@@ -268,7 +268,7 @@ class TestMediaSyncIncremental:
         anki_media_dir.mkdir()
         anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.load(tmp_path)
+        db = SQLiteDbAdapter.open(tmp_path)
         try:
             with caplog.at_level(logging.WARNING):
                 result = sync_media_to_anki(anki, fs, tmp_path, db)

@@ -46,9 +46,6 @@ _MATH_PATTERN = re.compile(
     r"(\\\((?:(?!\\\))[\s\S])+?\\\)|\\\[(?:(?!\\\])[\s\S])+?\\\])",
     re.DOTALL,
 )
-_MARKDOWN_LINK_RE = re.compile(
-    r"(\[[^\]]*\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\))"
-)
 _ESCAPED_RIGHT_BRACKET_RUN_RE = re.compile(r"(\\{2,}\])")
 
 
@@ -159,6 +156,10 @@ def _prepare_custom_tag_placeholders(html: str) -> tuple[str, dict[str, str]]:
         underline.replace_with(token)
 
     for br in soup.find_all("br"):
+        # Keep blockquote <br> tags intact so html_to_markdown can emit
+        # proper continuation quote markers ("> " on each line).
+        if br.find_parent("blockquote") is not None:
+            continue
         token = _token()
         replacements[token] = "\n"
         br.replace_with(token)
@@ -173,14 +174,112 @@ def _restore_custom_tag_placeholders(md: str, replacements: dict[str, str]) -> s
     return md
 
 
+def _parse_link_destination(
+    md: str,
+    start: int,
+) -> tuple[int, str, bool] | None:
+    """Parse markdown link destination starting right after '('.
+
+    Returns a tuple of:
+    - end index (exclusive) right after ')'
+    - destination text without surrounding angle brackets
+    - whether destination was already angle-bracket wrapped
+    """
+    if start >= len(md):
+        return None
+
+    # Already wrapped destination: [text](<url>)
+    if md[start] == "<":
+        i = start + 1
+        backslash_run = 0
+        while i < len(md):
+            char = md[i]
+            is_escaped = (backslash_run % 2) == 1
+            if char == "\n":
+                return None
+            if char == ">" and not is_escaped:
+                if i + 1 < len(md) and md[i + 1] == ")":
+                    return (i + 2, md[start + 1 : i], True)
+                return None
+            if char == "\\":
+                backslash_run += 1
+            else:
+                backslash_run = 0
+            i += 1
+        return None
+
+    # Plain destination: [text](url(with(parens)))
+    paren_depth = 0
+    i = start
+    backslash_run = 0
+    while i < len(md):
+        char = md[i]
+        is_escaped = (backslash_run % 2) == 1
+        if char == "\n":
+            return None
+        if char == "(" and not is_escaped:
+            paren_depth += 1
+        elif char == ")" and not is_escaped:
+            if paren_depth == 0:
+                return (i + 1, md[start:i], False)
+            paren_depth -= 1
+        if char == "\\":
+            backslash_run += 1
+        else:
+            backslash_run = 0
+        i += 1
+    return None
+
+
 def _enforce_link_angle_brackets(md: str) -> str:
     """Ensure markdown links always use angle-bracket destinations."""
+    if "[" not in md or "](" not in md:
+        return md
 
-    def _replace(match: re.Match[str]) -> str:
-        destination = match.group(2) or match.group(3) or ""
-        return f"{match.group(1)}<{destination}>{match.group(4)}"
+    parts: list[str] = []
+    label_stack: list[int] = []
+    cursor = 0
+    i = 0
+    changed = False
+    backslash_run = 0
 
-    return _MARKDOWN_LINK_RE.sub(_replace, md)
+    while i < len(md):
+        char = md[i]
+        is_escaped = (backslash_run % 2) == 1
+
+        if char == "\n":
+            label_stack.clear()
+        elif char == "[" and not is_escaped:
+            label_stack.append(i)
+        elif char == "]" and not is_escaped and label_stack:
+            label_start = label_stack.pop()
+            if i + 1 < len(md) and md[i + 1] == "(":
+                parsed = _parse_link_destination(md, i + 2)
+                if parsed is not None:
+                    link_end, destination, is_wrapped = parsed
+                    parts.append(md[cursor:label_start])
+                    if is_wrapped:
+                        parts.append(md[label_start:link_end])
+                    else:
+                        parts.extend((md[label_start : i + 2], "<", destination, ">)"))
+                        changed = True
+                    cursor = link_end
+                    i = link_end
+                    label_stack.clear()
+                    backslash_run = 0
+                    continue
+
+        if char == "\\":
+            backslash_run += 1
+        else:
+            backslash_run = 0
+        i += 1
+
+    if not changed:
+        return md
+
+    parts.append(md[cursor:])
+    return "".join(parts)
 
 
 class HTMLToMarkdown:

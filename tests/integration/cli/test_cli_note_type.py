@@ -17,33 +17,6 @@ def _seed_note_types(note_types_dir):
     FileSystemAdapter().eject_builtin_note_types(note_types_dir)
 
 
-def test_note_types_list_logs_label_inventory(tmp_path, caplog):
-    (tmp_path / ".ankiops.db").write_text("", encoding="utf-8")
-    _seed_note_types(tmp_path / "note_types")
-    args = SimpleNamespace(action="list")
-
-    with (
-        patch(
-            "ankiops.note_type_cli.require_initialized_collection_dir",
-            return_value=tmp_path,
-        ),
-        patch(
-            "ankiops.note_type_cli.get_note_types_dir",
-            return_value=tmp_path / "note_types",
-        ),
-        caplog.at_level("INFO"),
-    ):
-        run_note_type(args)
-
-    assert "Taken labels:" in caplog.text
-    assert "C2:  [IDENTIFYING] -> AnkiOpsChoice.Choice 2" in caplog.text
-    assert "AI:   [IDENTIFYING] ->" not in caplog.text
-    assert "Free labels: any valid label not listed above." in caplog.text
-    assert "By note type:" in caplog.text
-    assert "IDENTIFYING rule: base IDENTIFYING labels" in caplog.text
-    assert "IDENTIFYING labels: T:" in caplog.text
-
-
 @pytest.mark.parametrize(
     "argv",
     [

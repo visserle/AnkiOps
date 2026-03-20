@@ -255,6 +255,46 @@ def test_html_to_markdown_enforces_brackets(html_to_md):
     md_link_parens = html_to_md.convert(html_link_parens)
     assert "[Link](<https://example.com/(test)>)" in md_link_parens
 
+    # Nested-bracket labels (e.g., citation-style links) should also be normalized.
+    html_citation_link = (
+        '<a href="https://en.wikipedia.org/wiki/Pygmalion#cite_note-13">[13]</a>'
+    )
+    md_citation_link = html_to_md.convert(html_citation_link)
+    assert "[[13]](<https://en.wikipedia.org/wiki/Pygmalion#cite_note-13>)" in (
+        md_citation_link
+    )
+
+
+def test_html_to_markdown_blockquote_br_continuation_preserves_markers(html_to_md):
+    html = "<blockquote><p>line1<br>line2</p></blockquote>"
+    md = html_to_md.convert(html)
+    assert "> line1" in md
+    assert "\n> line2" in md
+
+
+def test_html_to_markdown_blockquote_citation_with_br_regression(html_to_md):
+    html = (
+        '<blockquote><p>called. <a href="https://en.wikipedia.org/wiki/Pygmalion'
+        '#cite_note-13">[13]</a><br>aus Pygmalion von George Bernard Shaw'
+        "</p></blockquote>"
+    )
+    md = html_to_md.convert(html)
+    assert "[[13]](<https://en.wikipedia.org/wiki/Pygmalion#cite_note-13>)" in md
+    assert "> aus Pygmalion von George Bernard Shaw" in md
+
+
+def test_html_to_markdown_math_block_end_is_not_treated_as_link(html_to_md):
+    html = (
+        "<div>\\[\n\\beta=b \\frac{s_x}{s_y}\n\\](bei mehreren Prädiktoren gilt dies "
+        "nur, wenn sie unkorreliert sind, was selten der Fall ist)</div>"
+    )
+    md = html_to_md.convert(html)
+    assert (
+        r"\](bei mehreren Prädiktoren gilt dies nur, wenn sie unkorreliert sind, "
+        r"was selten der Fall ist)"
+    ) in md
+    assert r"\](<bei mehreren Prädiktoren gilt dies nur, wenn sie unkorreliert sind, was selten der Fall ist>)" not in md
+
 
 def test_html_to_markdown_bullet_spans_with_br_and_images(html_to_md):
     """Regression: bullet + <br> HTML should not panic and should preserve layout."""
@@ -336,8 +376,8 @@ class TestBlockquoteRoundTrips:
         html = md_to_html.convert(md)
         assert "<blockquote>" in html
         back = html_to_md.convert(html)
-        assert "Line 1" in back
-        assert "Line 2" in back
+        assert "> Line 1" in back
+        assert "\n> Line 2" in back
 
     def test_blockquote_with_formatting(self, md_to_html, html_to_md):
         md = "> **Bold** quote"

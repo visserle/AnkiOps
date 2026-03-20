@@ -403,7 +403,7 @@ def _sync_deck(
     for old_note in fs.notes:
         if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
-            db_port.remove_note_by_note_key(old_note.note_key)
+            db_port.delete_note_links_by_keys([old_note.note_key])
             result.change_buckets.deletes.append(
                 Change(ChangeType.DELETE, None, old_note.identifier)
             )
@@ -440,19 +440,19 @@ def export_collection(
 ) -> CollectionResult:
     configs = fs_port.load_note_type_configs(note_types_dir)
     config_by_name = {config.name: config for config in configs}
-    with db_port.transaction():
+    with db_port.write_tx():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
 
         all_note_ids = anki_port.fetch_all_note_ids([config.name for config in configs])
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
-        note_keys_by_id = db_port.get_note_keys_bulk(all_note_ids)
+        note_keys_by_id = db_port.resolve_note_keys(all_note_ids)
         pending_note_mappings: list[tuple[str, int]] = []
         note_key_candidates = set(note_keys_by_id.values())
         for anki_note in anki_notes.values():
             embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
             if embedded_note_key:
                 note_key_candidates.add(embedded_note_key)
-        note_fingerprints_by_note_key = db_port.get_note_fingerprints_bulk(
+        note_fingerprints_by_note_key = db_port.resolve_note_hashes(
             note_key_candidates
         )
         pending_fingerprints: list[tuple[str, str, str]] = []
@@ -488,7 +488,7 @@ def export_collection(
             deck_id = deck_ids_by_name[deck_name]
 
             # Rename detection: does this deck_id exist under a different name?
-            old_name = db_port.get_deck_name(deck_id)
+            old_name = db_port.resolve_deck_name(deck_id)
             safe_name = deck_name_to_file_stem(deck_name)
             if old_name and old_name != deck_name:
                 old_safe = deck_name_to_file_stem(old_name)
@@ -515,7 +515,7 @@ def export_collection(
                 note_fingerprints_by_note_key,
                 pending_fingerprints,
             )
-            db_port.set_deck(deck_name, deck_id)
+            db_port.upsert_deck(deck_name, deck_id)
             results.append(sync_result)
             if sync_result.protected_keyless_notes:
                 protected_note_groups.append(
@@ -526,10 +526,9 @@ def export_collection(
                 logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
         if pending_note_mappings:
-            db_port.set_notes_bulk(pending_note_mappings)
+            db_port.upsert_note_links(pending_note_mappings)
         if pending_fingerprints:
-            db_port.set_note_fingerprints_bulk(pending_fingerprints)
-        db_port.prune_orphan_note_fingerprints()
+            db_port.upsert_note_hashes(pending_fingerprints)
 
         extra_changes = []
         active_files = {
@@ -547,22 +546,20 @@ def export_collection(
                     fs_port=fs_port,
                 )
                 if protected_note_count is None:
-                    db_port.remove_deck(deck_name)
+                    db_port.delete_deck(deck_name)
                     continue
                 if protected_note_count:
-                    db_port.remove_deck(deck_name)
+                    db_port.delete_deck(deck_name)
                     protected_note_groups.append(
                         ProtectedNoteGroup(deck_name, protected_note_count)
                     )
                     continue
 
-                db_port.remove_deck(deck_name)
+                db_port.delete_deck(deck_name)
                 md_file.unlink()
                 extra_changes.append(
                     Change(ChangeType.DELETE, None, f"file: {md_file.name}")
                 )
-
-        db_port.save()
         return CollectionResult.for_export(
             results=results,
             extra_changes=extra_changes,

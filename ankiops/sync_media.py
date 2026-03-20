@@ -76,7 +76,7 @@ def _collect_referenced_media(
     pruned = db_port.prune_markdown_media_cache(md_keys)
     if pruned:
         logger.debug(f"Pruned media cache for {pruned} stale markdown path(s)")
-    cached = db_port.get_markdown_media_cache_bulk(md_keys)
+    cached = db_port.resolve_markdown_media_cache(md_keys)
 
     referenced: set[str] = set()
     updates: list[tuple[str, int, int, set[str]]] = []
@@ -102,7 +102,7 @@ def _collect_referenced_media(
         updates.append((md_key, stat.st_mtime_ns, stat.st_size, refs))
 
     if updates:
-        db_port.set_markdown_media_cache_bulk(updates)
+        db_port.upsert_markdown_media_cache(updates)
     logger.debug(
         f"Media refs cache: {cache_hits} hits, {cache_misses} misses "
         f"across {len(md_files)} markdown files"
@@ -139,7 +139,7 @@ def hash_and_update_references(
         and not file_path.name.startswith(".")
         and (file_path.name in referenced or file_path.name.startswith("_"))
     ]
-    cached_fingerprints = db_port.get_media_fingerprints_bulk(cache_candidates)
+    cached_fingerprints = db_port.resolve_media_fingerprints(cache_candidates)
 
     # 2. Hash referenced (or already hashed) files
     for file_path in media_files:
@@ -206,10 +206,9 @@ def hash_and_update_references(
             result.errors.append(str(error))
 
     if fingerprint_updates:
-        db_port.set_media_fingerprints_bulk(fingerprint_updates)
+        db_port.upsert_media_fingerprints(fingerprint_updates)
     if fingerprint_removals:
-        db_port.remove_media_fingerprints_by_names(fingerprint_removals)
-        db_port.remove_media_push_state_by_names(fingerprint_removals)
+        db_port.delete_media_state(fingerprint_removals)
 
     logger.debug(
         f"Media hash cache: {hash_cache_hits} hits, {hash_cache_misses} misses "
@@ -277,8 +276,8 @@ def sync_media_to_anki(
         and (file_path.name in active_refs or file_path.name.startswith("_"))
     ]
     result.checked = len(active_refs)
-    cached_push_state = db_port.get_media_push_state_bulk(push_candidates)
-    cached_fingerprints = db_port.get_media_fingerprints_bulk(push_candidates)
+    cached_push_state = db_port.resolve_media_push_digests(push_candidates)
+    cached_fingerprints = db_port.resolve_media_fingerprints(push_candidates)
 
     push_state_updates: list[tuple[str, str]] = []
     fingerprint_updates: list[tuple[str, int, int, str, str]] = []
@@ -338,13 +337,12 @@ def sync_media_to_anki(
             except Exception as error:
                 result.errors.append(str(error))
 
-    if push_state_updates:
-        db_port.set_media_push_state_bulk(push_state_updates)
     if fingerprint_updates:
-        db_port.set_media_fingerprints_bulk(fingerprint_updates)
+        db_port.upsert_media_fingerprints(fingerprint_updates)
+    if push_state_updates:
+        db_port.upsert_media_push_digests(push_state_updates)
     if removed_names:
-        db_port.remove_media_fingerprints_by_names(removed_names)
-        db_port.remove_media_push_state_by_names(removed_names)
+        db_port.delete_media_state(removed_names)
 
     logger.debug(f"Skipped {skipped_pushes} unchanged media pushes")
     return result

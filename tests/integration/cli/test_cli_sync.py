@@ -43,7 +43,7 @@ def _run_am_with_summary(tmp_path, caplog, summary: CollectionResult):
     with (
         patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
         patch("ankiops.cli.export_collection", return_value=summary),
         patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
         caplog.at_level(logging.WARNING),
@@ -141,7 +141,7 @@ def test_run_ma_auto_commit_runs_before_media_sync(tmp_path):
     with (
         patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
         patch("ankiops.cli.git_snapshot", side_effect=_record_git),
         patch("ankiops.cli.sync_media_to_anki", side_effect=_record_media),
         patch("ankiops.cli.sync_note_types", side_effect=_record_note_types),
@@ -163,7 +163,7 @@ def test_run_ma_logs_media_status_in_normal_mode(tmp_path, caplog):
     with (
         patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
         patch("ankiops.cli.sync_media_to_anki", return_value=media_result),
         patch("ankiops.cli.sync_note_types", return_value=""),
         patch(
@@ -189,7 +189,7 @@ def test_run_am_logs_missing_media_summary(tmp_path, caplog):
     with (
         patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
         patch(
             "ankiops.cli.export_collection",
             return_value=CollectionResult.for_export(results=[], extra_changes=[]),
@@ -215,7 +215,7 @@ def test_run_ma_logs_missing_local_media_summary(tmp_path, caplog):
     with (
         patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
         patch("ankiops.cli.sync_media_to_anki", return_value=media_result),
         patch("ankiops.cli.sync_note_types", return_value=""),
         patch(

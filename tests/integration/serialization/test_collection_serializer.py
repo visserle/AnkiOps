@@ -36,10 +36,9 @@ def collection(tmp_path, fs, monkeypatch):
     """Create a minimal collection with DB, note types, and one deck file."""
     _set_collection_paths(monkeypatch, tmp_path)
 
-    db = SQLiteDbAdapter.load(tmp_path)
+    db = SQLiteDbAdapter.open(tmp_path)
     try:
         db.set_profile_name("test")
-        db.save()
     finally:
         db.close()
 
@@ -208,7 +207,12 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     fs.eject_builtin_note_types(note_types_dst)
     _set_note_type_paths(monkeypatch, note_types_dst)
 
-    deserialize_collection_data(serialized_data, overwrite=True)
+    deserialize_collection_data(
+        serialized_data,
+        root_dir=fresh_dir,
+        note_types_dir=note_types_dst,
+        overwrite=True,
+    )
 
     md_files = list(fresh_dir.glob("*.md"))
     assert len(md_files) == 1

@@ -34,7 +34,7 @@ class SyncWorld:
         self.fs = fs
 
     def open_db(self) -> SQLiteDbAdapter:
-        return SQLiteDbAdapter.load(self.root)
+        return SQLiteDbAdapter.open(self.root)
 
     def db_for_state(
         self,
@@ -47,9 +47,9 @@ class SyncWorld:
 
         if state in {"RUN", "CORR"}:
             for note_key, note_id in (note_map or {}).items():
-                db.set_note(note_key, note_id)
+                db.upsert_note_links([(note_key, note_id)])
             for deck_name, deck_id in (deck_map or {}).items():
-                db.set_deck(deck_name, deck_id)
+                db.upsert_deck(deck_name, deck_id)
 
         if state == "CORR":
             db.close()

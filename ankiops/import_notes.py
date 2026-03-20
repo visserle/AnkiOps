@@ -242,7 +242,7 @@ def _resolve_deck_context(
     if not resolved_id:
         return _DeckContext(deck_name=deck_name, needs_create_deck=True)
 
-    db_port.set_deck(deck_name, resolved_id)
+    db_port.upsert_deck(deck_name, resolved_id)
     return _DeckContext(deck_name=deck_name, needs_create_deck=False)
 
 
@@ -431,7 +431,7 @@ def _collect_orphan_deletes(
     if global_mapped_note_ids:
         orphaned -= global_mapped_note_ids
 
-    orphan_note_keys = db_port.get_note_keys_bulk(orphaned)
+    orphan_note_keys = db_port.resolve_note_keys(orphaned)
     for note_id in sorted(orphaned):
         if note_id:
             note_key = orphan_note_keys.get(note_id)
@@ -504,7 +504,7 @@ def _apply_changes_and_update_state(
         ]
         delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
         if delete_note_keys:
-            db_port.remove_notes_by_note_keys_bulk(delete_note_keys)
+            db_port.delete_note_links_by_keys(delete_note_keys)
             for note_key in delete_note_keys:
                 removed_note_id = note_ids_by_note_key.pop(note_key, None)
                 if note_key in global_note_keys and removed_note_id is not None:
@@ -530,7 +530,7 @@ def _recover_created_deck_mapping(
         new_id = new_deck_ids[deck_context.deck_name]
         deck_ids_by_name[deck_context.deck_name] = new_id
         deck_names_by_id[new_id] = deck_context.deck_name
-        db_port.set_deck(deck_context.deck_name, new_id)
+        db_port.upsert_deck(deck_context.deck_name, new_id)
 
 
 def _sync_file(
@@ -672,12 +672,12 @@ def import_collection(
 
     if duplicates:
         raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
-    note_ids_by_note_key = db_port.get_note_ids_bulk(global_note_keys)
-    note_fingerprints_by_note_key = db_port.get_note_fingerprints_bulk(global_note_keys)
+    note_ids_by_note_key = db_port.resolve_note_ids(global_note_keys)
+    note_fingerprints_by_note_key = db_port.resolve_note_hashes(global_note_keys)
     pending_note_mappings: list[tuple[str, int]] = []
     pending_fingerprints: list[tuple[str, str, str]] = []
 
-    with db_port.transaction():
+    with db_port.write_tx():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
         initial_deck_names = set(deck_ids_by_name)
         deck_names_by_id = {
@@ -762,7 +762,7 @@ def import_collection(
                     and source_deck not in markdown_deck_names
                 ):
                     renamed_from_decks.add(source_deck)
-                    db_port.remove_deck(source_deck)
+                    db_port.delete_deck(source_deck)
                     logger.info(
                         "Deck renamed from markdown file: "
                         f"'{source_deck}' -> '{sync_result.name}'"
@@ -780,13 +780,11 @@ def import_collection(
                 )
 
         if pending_note_mappings:
-            db_port.set_notes_bulk(pending_note_mappings)
+            db_port.upsert_note_links(pending_note_mappings)
         if pending_fingerprints:
-            db_port.set_note_fingerprints_bulk(pending_fingerprints)
-        db_port.prune_orphan_note_fingerprints()
+            db_port.upsert_note_hashes(pending_fingerprints)
 
         _flush_writes(fs_port, pending)
-        db_port.save()
 
         # Keep membership in sync with applied structural changes without a
         # full collection refresh.

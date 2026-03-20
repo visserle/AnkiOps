@@ -23,6 +23,7 @@ def serialize_collection(
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
+    note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Serialize the collection into an in-memory JSON-compatible mapping."""
     db_path = collection_dir / ANKIOPS_DB
@@ -30,7 +31,8 @@ def serialize_collection(
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
 
     fs = FileSystemAdapter()
-    fs.load_note_type_configs(get_note_types_dir())
+    resolved_note_types_dir = note_types_dir or get_note_types_dir()
+    fs.load_note_type_configs(resolved_note_types_dir)
 
     serialized_data: dict[str, Any] = {
         "collection": {
@@ -100,6 +102,7 @@ def serialize_collection_to_json(
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
+    note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Serialize entire collection to JSON format.
 
@@ -116,6 +119,7 @@ def serialize_collection_to_json(
         collection_dir,
         deck=deck,
         no_subdecks=no_subdecks,
+        note_types_dir=note_types_dir,
     )
     total_notes = sum(
         len(deck.get("notes", []))
@@ -151,16 +155,22 @@ def deserialize_collection_from_json(
         data = json.load(input_handle)
 
     logger.debug(f"Importing serialized collection from: {json_file}")
-    deserialize_collection_data(data, overwrite=overwrite)
+    deserialize_collection_data(
+        data,
+        root_dir=get_collection_dir(),
+        note_types_dir=get_note_types_dir(),
+        overwrite=overwrite,
+    )
 
 
 def deserialize_collection_data(
     data: dict[str, Any],
     *,
+    root_dir: Path,
+    note_types_dir: Path,
     overwrite: bool = False,
 ) -> None:
     """Deserialize collection from an in-memory JSON-compatible mapping."""
-    root_dir = get_collection_dir()
     logger.debug(f"Target directory: {root_dir}")
 
     if not isinstance(data, dict):
@@ -179,7 +189,7 @@ def deserialize_collection_data(
             )
 
     fs = FileSystemAdapter()
-    configs = fs.load_note_type_configs(get_note_types_dir())
+    configs = fs.load_note_type_configs(note_types_dir)
     config_by_name = {config.name: config for config in configs}
 
     total_decks = 0

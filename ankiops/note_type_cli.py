@@ -127,10 +127,7 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
             f"{note_type_name}.{field_name}"
             for note_type_name, field_name, _ in entries
         )
-        identifying_marker = " [IDENTIFYING]" if any(
-            is_identifying for _, _, is_identifying in entries
-        ) else ""
-        logger.info(f"  {label:<4}{identifying_marker} -> {owners}")
+        logger.info(f"  {label:<4} -> {owners}")
     logger.info("")
     logger.info("Free labels: any valid label not listed above.")
     logger.info("")

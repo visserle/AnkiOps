@@ -1,9 +1,9 @@
-"""SQLite database adapter for AnkiOps note and media metadata caching."""
+"""SQLite DB adapter for AnkiOps state and cache metadata."""
 
+import json
 import logging
 import secrets
 import sqlite3
-from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class SQLiteDbAdapter:
-    """Bidirectional note_key ↔ note_id mapping using SQLite,
-    plus additional tables for caching note and media metadata."""
+    """SQLite adapter for note/deck identity, sync cache, and media cache state."""
 
     def __init__(self, conn: sqlite3.Connection, db_path: Path):
         self._conn = conn
@@ -23,7 +22,7 @@ class SQLiteDbAdapter:
         self._tx_depth = 0
 
     @classmethod
-    def load(cls, collection_dir: Path) -> "SQLiteDbAdapter":
+    def open(cls, collection_dir: Path) -> "SQLiteDbAdapter":
         db_path = collection_dir / ANKIOPS_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -31,90 +30,98 @@ class SQLiteDbAdapter:
         try:
             conn = sqlite3.connect(db_path)
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+
             with conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS notes (
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS note_state (
                         note_key TEXT PRIMARY KEY,
-                        note_id INTEGER NOT NULL UNIQUE
+                        note_id INTEGER NOT NULL UNIQUE,
+                        md_hash TEXT,
+                        anki_hash TEXT
                     )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS decks (
-                        name TEXT PRIMARY KEY,
-                        deck_id INTEGER NOT NULL UNIQUE
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS deck_map (
+                        deck_id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL UNIQUE
                     )
-                """)
-                conn.execute("""
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS collection_profile (
                         id INTEGER PRIMARY KEY CHECK (id = 1),
                         profile_name TEXT NOT NULL CHECK (profile_name <> '')
                     )
-                """)
-                conn.execute("""
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS note_type_sync_state (
                         id INTEGER PRIMARY KEY CHECK (id = 1),
                         sync_hash TEXT NOT NULL CHECK (sync_hash <> ''),
                         names_signature TEXT NOT NULL
                     )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS note_fingerprints (
-                        note_key TEXT PRIMARY KEY
-                            REFERENCES notes(note_key) ON DELETE CASCADE,
-                        md_hash TEXT NOT NULL,
-                        anki_hash TEXT NOT NULL
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS markdown_media_state (
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS markdown_media_cache (
                         md_path TEXT PRIMARY KEY,
                         md_mtime_ns INTEGER NOT NULL CHECK (md_mtime_ns >= 0),
-                        md_size INTEGER NOT NULL CHECK (md_size >= 0)
+                        md_size INTEGER NOT NULL CHECK (md_size >= 0),
+                        media_names_json TEXT NOT NULL
                     )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS markdown_media_refs (
-                        md_path TEXT NOT NULL
-                            REFERENCES markdown_media_state(md_path)
-                            ON DELETE CASCADE,
-                        media_name TEXT NOT NULL,
-                        PRIMARY KEY (md_path, media_name)
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS media_fingerprints (
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS media_state (
                         name TEXT PRIMARY KEY,
                         mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
                         size INTEGER NOT NULL CHECK (size >= 0),
                         digest TEXT NOT NULL CHECK (digest <> ''),
-                        hashed_name TEXT NOT NULL CHECK (hashed_name <> '')
+                        hashed_name TEXT NOT NULL CHECK (hashed_name <> ''),
+                        pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> '')
                     )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS media_push_state (
-                        name TEXT PRIMARY KEY,
-                        digest TEXT NOT NULL CHECK (digest <> '')
-                    )
-                """)
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_markdown_media_refs_media "
-                    "ON markdown_media_refs(media_name)"
+                    """
                 )
 
-                # Schema validation: ensure note mapping columns exist in 'notes' table.
-                # If not, it will raise OperationalError and trigger recovery.
-                conn.execute("SELECT note_key, note_id FROM notes LIMIT 0")
-                conn.execute("SELECT id, profile_name FROM collection_profile LIMIT 0")
+                # Strict schema validation: if any query fails, recover by
+                # backing up and recreating the DB.
+                conn.execute(
+                    "SELECT note_key, note_id, md_hash, anki_hash "
+                    "FROM note_state LIMIT 0"
+                )
+                conn.execute("SELECT deck_id, name FROM deck_map LIMIT 0")
+                conn.execute(
+                    "SELECT id, profile_name FROM collection_profile LIMIT 0"
+                )
                 conn.execute(
                     "SELECT id, sync_hash, names_signature "
                     "FROM note_type_sync_state LIMIT 0"
+                )
+                conn.execute(
+                    "SELECT md_path, md_mtime_ns, md_size, media_names_json "
+                    "FROM markdown_media_cache LIMIT 0"
+                )
+                conn.execute(
+                    "SELECT name, mtime_ns, size, digest, hashed_name, pushed_digest "
+                    "FROM media_state LIMIT 0"
                 )
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             if conn:
                 conn.close()
             logger.error(
-                f"Database at {db_path} is corrupt. Backing up and recreating."
+                f"Database at {db_path} is invalid or corrupt. "
+                "Backing up and recreating."
             )
             if db_path.exists():
                 try:
@@ -122,19 +129,15 @@ class SQLiteDbAdapter:
                 except OSError as error:
                     logger.error(f"Failed to rename corrupt database: {error}")
 
-            return cls.load(collection_dir)
+            return cls.open(collection_dir)
 
         return cls(conn, db_path)
-
-    def save(self) -> None:
-        """Intentional no-op: transaction boundaries are explicit."""
-        pass
 
     def close(self) -> None:
         self._conn.close()
 
     @contextmanager
-    def transaction(self, *, immediate: bool = True) -> Iterator[None]:
+    def write_tx(self, *, immediate: bool = True) -> Iterator[None]:
         """Run DB writes in a single transaction (supports nesting)."""
         is_outer = self._tx_depth == 0
         if is_outer:
@@ -183,7 +186,23 @@ class SQLiteDbAdapter:
         for start_index in range(0, len(items), chunk_size):
             yield items[start_index : start_index + chunk_size]
 
-    def get_note_ids_bulk(self, note_keys: Iterable[str]) -> dict[str, int]:
+    @staticmethod
+    def _encode_media_names(media_names: set[str]) -> str:
+        return json.dumps(sorted(media_names), separators=(",", ":"), ensure_ascii=True)
+
+    @staticmethod
+    def _decode_media_names(raw: str) -> set[str]:
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            return set()
+        if not isinstance(decoded, list):
+            return set()
+        return {value for value in decoded if isinstance(value, str)}
+
+    # -- Note identity ------------------------------------------------------
+
+    def resolve_note_ids(self, note_keys: Iterable[str]) -> dict[str, int]:
         note_key_list = list(note_keys)
         if not note_key_list:
             return {}
@@ -192,13 +211,14 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT note_key, note_id FROM notes WHERE note_key IN ({placeholders})",
+                "SELECT note_key, note_id FROM note_state "
+                f"WHERE note_key IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update({note_key: note_id for note_key, note_id in rows})
         return out
 
-    def get_note_keys_bulk(self, note_ids: Iterable[int]) -> dict[int, str]:
+    def resolve_note_keys(self, note_ids: Iterable[int]) -> dict[int, str]:
         id_list = list(note_ids)
         if not id_list:
             return {}
@@ -207,14 +227,14 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(id_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                f"SELECT note_id, note_key FROM notes WHERE note_id IN ({placeholders})",
+                "SELECT note_id, note_key FROM note_state "
+                f"WHERE note_id IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update({note_id: note_key for note_id, note_key in rows})
         return out
 
-    def set_notes_bulk(self, mappings: Iterable[tuple[str, int]]) -> None:
-        """Set many note_key->note_id mappings with set_note() semantics."""
+    def upsert_note_links(self, mappings: Iterable[tuple[str, int]]) -> None:
         rows = [(note_key, note_id) for note_key, note_id in mappings]
         if not rows:
             return
@@ -231,22 +251,18 @@ class SQLiteDbAdapter:
             ordered_rows.append((note_key, note_id))
         ordered_rows.reverse()
 
-        ids = [note_id for _, note_id in ordered_rows]
-
-        statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(ids):
-            placeholders = ",".join("?" * len(chunk))
-            statements.append(
-                (f"DELETE FROM notes WHERE note_id IN ({placeholders})", tuple(chunk))
-            )
-        with self.transaction():
-            self._write_many(statements)
+        with self.write_tx():
             self._executemany(
-                "INSERT OR REPLACE INTO notes (note_key, note_id) VALUES (?, ?)",
+                "DELETE FROM note_state WHERE note_id = ? AND note_key <> ?",
+                [(note_id, note_key) for note_key, note_id in ordered_rows],
+            )
+            self._executemany(
+                "INSERT INTO note_state (note_key, note_id) VALUES (?, ?) "
+                "ON CONFLICT(note_key) DO UPDATE SET note_id = excluded.note_id",
                 ordered_rows,
             )
 
-    def remove_notes_by_note_keys_bulk(self, note_keys: Iterable[str]) -> None:
+    def delete_note_links_by_keys(self, note_keys: Iterable[str]) -> None:
         note_key_list = list(note_keys)
         if not note_key_list:
             return
@@ -255,15 +271,18 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM notes WHERE note_key IN ({placeholders})",
+                    f"DELETE FROM note_state WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
 
-    def get_note_fingerprints_bulk(
-        self, note_keys: Iterable[str]
-    ) -> dict[str, tuple[str, str]]:
+    def delete_note_link_by_id(self, note_id: int) -> None:
+        self._write("DELETE FROM note_state WHERE note_id = ?", (note_id,))
+
+    # -- Note fingerprints --------------------------------------------------
+
+    def resolve_note_hashes(self, note_keys: Iterable[str]) -> dict[str, tuple[str, str]]:
         note_key_list = list(note_keys)
         if not note_key_list:
             return {}
@@ -272,19 +291,15 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT note_key, md_hash, anki_hash "
-                f"FROM note_fingerprints WHERE note_key IN ({placeholders})",
+                "SELECT note_key, md_hash, anki_hash FROM note_state "
+                f"WHERE note_key IN ({placeholders}) "
+                "AND md_hash IS NOT NULL AND anki_hash IS NOT NULL",
                 tuple(chunk),
             ).fetchall()
-            out.update(
-                {
-                    note_key: (md_hash, anki_hash)
-                    for note_key, md_hash, anki_hash in rows
-                }
-            )
+            out.update({note_key: (md_hash, anki_hash) for note_key, md_hash, anki_hash in rows})
         return out
 
-    def set_note_fingerprints_bulk(self, rows: Iterable[tuple[str, str, str]]) -> None:
+    def upsert_note_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
         entries = list(rows)
         if not entries:
             return
@@ -298,15 +313,32 @@ class SQLiteDbAdapter:
             deduped.append((note_key, md_hash, anki_hash))
         deduped.reverse()
 
-        self._executemany(
-            "INSERT OR REPLACE INTO note_fingerprints "
-            "(note_key, md_hash, anki_hash) VALUES (?, ?, ?)",
-            deduped,
-        )
+        note_keys = [note_key for note_key, _, _ in deduped]
 
-    def remove_note_fingerprints_by_note_keys_bulk(
-        self, note_keys: Iterable[str]
-    ) -> None:
+        with self.write_tx():
+            known_note_keys: set[str] = set()
+            for chunk in self._chunked(note_keys):
+                placeholders = ",".join("?" * len(chunk))
+                rows = self._conn.execute(
+                    "SELECT note_key FROM note_state "
+                    f"WHERE note_key IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                known_note_keys.update(note_key for (note_key,) in rows)
+
+            missing = sorted(set(note_keys) - known_note_keys)
+            if missing:
+                raise sqlite3.IntegrityError(
+                    f"Unknown note_key(s) for hash update: {', '.join(missing)}"
+                )
+
+            self._executemany(
+                "UPDATE note_state SET md_hash = ?, anki_hash = ? "
+                "WHERE note_key = ?",
+                [(md_hash, anki_hash, note_key) for note_key, md_hash, anki_hash in deduped],
+            )
+
+    def clear_note_hashes(self, note_keys: Iterable[str]) -> None:
         note_key_list = list(note_keys)
         if not note_key_list:
             return
@@ -315,67 +347,67 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM note_fingerprints WHERE note_key IN ({placeholders})",
+                    "UPDATE note_state SET md_hash = NULL, anki_hash = NULL "
+                    f"WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
 
-    def prune_orphan_note_fingerprints(self) -> int:
-        """Delete fingerprint rows that no longer have a mapped note_key.
+    # -- Deck mapping -------------------------------------------------------
 
-        Returns the number of rows removed.
-        """
-        sql = (
-            "DELETE FROM note_fingerprints "
-            "WHERE note_key NOT IN (SELECT note_key FROM notes)"
+    def resolve_deck_id(self, name: str) -> int | None:
+        cursor = self._conn.execute("SELECT deck_id FROM deck_map WHERE name = ?", (name,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def resolve_deck_name(self, deck_id: int) -> str | None:
+        cursor = self._conn.execute(
+            "SELECT name FROM deck_map WHERE deck_id = ?", (deck_id,)
         )
-        if self._tx_depth > 0:
-            cursor = self._conn.execute(sql)
-        else:
-            with self._conn:
-                cursor = self._conn.execute(sql)
-        return max(cursor.rowcount, 0)
+        row = cursor.fetchone()
+        return row[0] if row else None
 
-    def get_markdown_media_cache_bulk(
+    def upsert_deck(self, name: str, deck_id: int) -> None:
+        with self.write_tx():
+            self._write(
+                "DELETE FROM deck_map WHERE name = ? OR deck_id = ?",
+                (name, deck_id),
+            )
+            self._write(
+                "INSERT INTO deck_map (deck_id, name) VALUES (?, ?)",
+                (deck_id, name),
+            )
+
+    def delete_deck(self, name: str) -> None:
+        self._write("DELETE FROM deck_map WHERE name = ?", (name,))
+
+    # -- Markdown media cache ----------------------------------------------
+
+    def resolve_markdown_media_cache(
         self, md_paths: Iterable[str]
     ) -> dict[str, tuple[int, int, set[str]]]:
         path_list = list(md_paths)
         if not path_list:
             return {}
 
-        state_by_path: dict[str, tuple[int, int]] = {}
+        out: dict[str, tuple[int, int, set[str]]] = {}
         for chunk in self._chunked(path_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT md_path, md_mtime_ns, md_size "
-                f"FROM markdown_media_state WHERE md_path IN ({placeholders})",
+                "SELECT md_path, md_mtime_ns, md_size, media_names_json "
+                f"FROM markdown_media_cache WHERE md_path IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
-            state_by_path.update(
+            out.update(
                 {
-                    md_path: (md_mtime_ns, md_size)
-                    for md_path, md_mtime_ns, md_size in rows
+                    md_path: (md_mtime_ns, md_size, self._decode_media_names(raw_names))
+                    for md_path, md_mtime_ns, md_size, raw_names in rows
                 }
             )
-
-        refs_by_path: dict[str, set[str]] = defaultdict(set)
-        for chunk in self._chunked(path_list):
-            placeholders = ",".join("?" * len(chunk))
-            rows = self._conn.execute(
-                "SELECT md_path, media_name "
-                f"FROM markdown_media_refs WHERE md_path IN ({placeholders})",
-                tuple(chunk),
-            ).fetchall()
-            for md_path, media_name in rows:
-                refs_by_path[md_path].add(media_name)
-
-        out: dict[str, tuple[int, int, set[str]]] = {}
-        for md_path, (md_mtime_ns, md_size) in state_by_path.items():
-            out[md_path] = (md_mtime_ns, md_size, refs_by_path.get(md_path, set()))
         return out
 
-    def set_markdown_media_cache_bulk(
+    def upsert_markdown_media_cache(
         self, rows: Iterable[tuple[str, int, int, set[str]]]
     ) -> None:
         entries = [
@@ -394,40 +426,25 @@ class SQLiteDbAdapter:
             deduped.append((md_path, md_mtime_ns, md_size, media_names))
         deduped.reverse()
 
-        state_rows = [
-            (md_path, md_mtime_ns, md_size)
-            for md_path, md_mtime_ns, md_size, _ in deduped
-        ]
-        md_paths = [md_path for md_path, _, _, _ in deduped]
-        ref_rows = [
-            (md_path, media_name)
-            for md_path, _, _, media_names in deduped
-            for media_name in media_names
-        ]
-
-        with self.transaction():
-            self._executemany(
-                "INSERT OR REPLACE INTO markdown_media_state "
-                "(md_path, md_mtime_ns, md_size) VALUES (?, ?, ?)",
-                state_rows,
-            )
-            statements: list[tuple[str, tuple]] = []
-            for chunk in self._chunked(md_paths):
-                placeholders = ",".join("?" * len(chunk))
-                statements.append(
-                    (
-                        f"DELETE FROM markdown_media_refs WHERE md_path IN ({placeholders})",
-                        tuple(chunk),
-                    )
+        self._executemany(
+            "INSERT INTO markdown_media_cache "
+            "(md_path, md_mtime_ns, md_size, media_names_json) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(md_path) DO UPDATE SET "
+            "md_mtime_ns = excluded.md_mtime_ns, "
+            "md_size = excluded.md_size, "
+            "media_names_json = excluded.media_names_json",
+            [
+                (
+                    md_path,
+                    md_mtime_ns,
+                    md_size,
+                    self._encode_media_names(media_names),
                 )
-            self._write_many(statements)
-            self._executemany(
-                "INSERT OR REPLACE INTO markdown_media_refs "
-                "(md_path, media_name) VALUES (?, ?)",
-                ref_rows,
-            )
+                for md_path, md_mtime_ns, md_size, media_names in deduped
+            ],
+        )
 
-    def remove_markdown_media_cache_by_paths(self, md_paths: Iterable[str]) -> None:
+    def delete_markdown_media_cache(self, md_paths: Iterable[str]) -> None:
         path_list = list(md_paths)
         if not path_list:
             return
@@ -436,34 +453,27 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM markdown_media_state WHERE md_path IN ({placeholders})",
-                    tuple(chunk),
-                )
-            )
-            statements.append(
-                (
-                    f"DELETE FROM markdown_media_refs WHERE md_path IN ({placeholders})",
+                    f"DELETE FROM markdown_media_cache WHERE md_path IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
 
-    def get_markdown_media_cached_paths(self) -> set[str]:
-        rows = self._conn.execute(
-            "SELECT md_path FROM markdown_media_state "
-            "UNION SELECT md_path FROM markdown_media_refs"
-        ).fetchall()
+    def list_markdown_media_paths(self) -> set[str]:
+        rows = self._conn.execute("SELECT md_path FROM markdown_media_cache").fetchall()
         return {md_path for (md_path,) in rows}
 
     def prune_markdown_media_cache(self, valid_md_paths: Iterable[str]) -> int:
         valid = set(valid_md_paths)
-        stale = sorted(self.get_markdown_media_cached_paths() - valid)
+        stale = sorted(self.list_markdown_media_paths() - valid)
         if not stale:
             return 0
-        self.remove_markdown_media_cache_by_paths(stale)
+        self.delete_markdown_media_cache(stale)
         return len(stale)
 
-    def get_media_fingerprints_bulk(
+    # -- Media state --------------------------------------------------------
+
+    def resolve_media_fingerprints(
         self, names: Iterable[str]
     ) -> dict[str, tuple[int, int, str, str]]:
         name_list = list(names)
@@ -475,7 +485,7 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT name, mtime_ns, size, digest, hashed_name "
-                f"FROM media_fingerprints WHERE name IN ({placeholders})",
+                f"FROM media_state WHERE name IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update(
@@ -486,7 +496,7 @@ class SQLiteDbAdapter:
             )
         return out
 
-    def set_media_fingerprints_bulk(
+    def upsert_media_fingerprints(
         self, rows: Iterable[tuple[str, int, int, str, str]]
     ) -> None:
         entries = list(rows)
@@ -503,12 +513,18 @@ class SQLiteDbAdapter:
         deduped.reverse()
 
         self._executemany(
-            "INSERT OR REPLACE INTO media_fingerprints "
-            "(name, mtime_ns, size, digest, hashed_name) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO media_state "
+            "(name, mtime_ns, size, digest, hashed_name, pushed_digest) "
+            "VALUES (?, ?, ?, ?, ?, NULL) "
+            "ON CONFLICT(name) DO UPDATE SET "
+            "mtime_ns = excluded.mtime_ns, "
+            "size = excluded.size, "
+            "digest = excluded.digest, "
+            "hashed_name = excluded.hashed_name",
             deduped,
         )
 
-    def remove_media_fingerprints_by_names(self, names: Iterable[str]) -> None:
+    def delete_media_state(self, names: Iterable[str]) -> None:
         name_list = list(names)
         if not name_list:
             return
@@ -517,13 +533,13 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM media_fingerprints WHERE name IN ({placeholders})",
+                    f"DELETE FROM media_state WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
 
-    def get_media_push_state_bulk(self, names: Iterable[str]) -> dict[str, str]:
+    def resolve_media_push_digests(self, names: Iterable[str]) -> dict[str, str]:
         name_list = list(names)
         if not name_list:
             return {}
@@ -532,14 +548,15 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(name_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT name, digest "
-                f"FROM media_push_state WHERE name IN ({placeholders})",
+                "SELECT name, pushed_digest "
+                f"FROM media_state WHERE name IN ({placeholders}) "
+                "AND pushed_digest IS NOT NULL",
                 tuple(chunk),
             ).fetchall()
-            out.update({name: digest for name, digest in rows})
+            out.update({name: pushed_digest for name, pushed_digest in rows})
         return out
 
-    def set_media_push_state_bulk(self, rows: Iterable[tuple[str, str]]) -> None:
+    def upsert_media_push_digests(self, rows: Iterable[tuple[str, str]]) -> None:
         entries = list(rows)
         if not entries:
             return
@@ -553,12 +570,18 @@ class SQLiteDbAdapter:
             deduped.append((name, digest))
         deduped.reverse()
 
-        self._executemany(
-            "INSERT OR REPLACE INTO media_push_state (name, digest) VALUES (?, ?)",
-            deduped,
-        )
+        with self.write_tx():
+            for name, digest in deduped:
+                cursor = self._conn.execute(
+                    "UPDATE media_state SET pushed_digest = ? WHERE name = ?",
+                    (digest, name),
+                )
+                if cursor.rowcount == 0:
+                    raise sqlite3.IntegrityError(
+                        f"Cannot set push digest for unknown media '{name}'"
+                    )
 
-    def remove_media_push_state_by_names(self, names: Iterable[str]) -> None:
+    def clear_media_push_digests(self, names: Iterable[str]) -> None:
         name_list = list(names)
         if not name_list:
             return
@@ -567,11 +590,13 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM media_push_state WHERE name IN ({placeholders})",
+                    f"UPDATE media_state SET pushed_digest = NULL WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
+
+    # -- Singleton metadata -------------------------------------------------
 
     def get_profile_name(self) -> str | None:
         cursor = self._conn.execute(
@@ -602,59 +627,6 @@ class SQLiteDbAdapter:
             "(id, sync_hash, names_signature) VALUES (1, ?, ?)",
             (sync_hash, names_signature),
         )
-
-    def get_note_id(self, note_key: str) -> int | None:
-        cursor = self._conn.execute(
-            "SELECT note_id FROM notes WHERE note_key = ?",
-            (note_key,),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
-
-    def get_note_key(self, note_id: int) -> str | None:
-        cursor = self._conn.execute(
-            "SELECT note_key FROM notes WHERE note_id = ?",
-            (note_id,),
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
-
-    def set_note(self, note_key: str, note_id: int) -> None:
-        self.set_notes_bulk([(note_key, note_id)])
-
-    def remove_note_by_note_key(self, note_key: str) -> None:
-        self.remove_notes_by_note_keys_bulk([note_key])
-
-    def remove_note_by_id(self, note_id: int) -> None:
-        self._write("DELETE FROM notes WHERE note_id = ?", (note_id,))
-
-    # -- Deck mapping (deck_name ↔ deck_id) ----------------------------------
-
-    def get_deck_id(self, name: str) -> int | None:
-        cursor = self._conn.execute("SELECT deck_id FROM decks WHERE name = ?", (name,))
-        row = cursor.fetchone()
-        return row[0] if row else None
-
-    def get_deck_name(self, deck_id: int) -> str | None:
-        cursor = self._conn.execute(
-            "SELECT name FROM decks WHERE deck_id = ?", (deck_id,)
-        )
-        row = cursor.fetchone()
-        return row[0] if row else None
-
-    def set_deck(self, name: str, deck_id: int) -> None:
-        self._write_many(
-            [
-                ("DELETE FROM decks WHERE deck_id = ?", (deck_id,)),
-                (
-                    "INSERT OR REPLACE INTO decks (name, deck_id) VALUES (?, ?)",
-                    (name, deck_id),
-                ),
-            ]
-        )
-
-    def remove_deck(self, name: str) -> None:
-        self._write("DELETE FROM decks WHERE name = ?", (name,))
 
     def generate_note_key(self) -> str:
         return secrets.token_hex(6)
