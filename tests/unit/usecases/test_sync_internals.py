@@ -156,16 +156,48 @@ def test_order_resolved_notes_preserves_existing_and_appends_new():
         ),
     ]
 
-    ordered_existing = _order_resolved_notes(
+    ordered_existing, protected_existing = _order_resolved_notes(
         resolved_notes=resolved_notes,
         existing_notes=existing_notes,
         is_first_export=False,
     )
     assert [note.note_key for note in ordered_existing] == ["k2", "k1", "k3", "k4"]
+    assert protected_existing == 0
 
-    ordered_first = _order_resolved_notes(
+    ordered_first, protected_first = _order_resolved_notes(
         resolved_notes=resolved_notes,
         existing_notes=existing_notes,
         is_first_export=True,
     )
     assert [note.note_key for note in ordered_first] == ["k1", "k2", "k3", "k4"]
+    assert protected_first == 0
+
+
+def test_order_resolved_notes_matches_keyless_note_without_duplication():
+    existing_notes = [
+        Note(
+            note_key=None,
+            note_type="AnkiOpsQA",
+            fields={"Question": "Q1", "Answer": "A1"},
+        )
+    ]
+    resolved_notes = [
+        (
+            "k1",
+            1001,
+            Note(
+                note_key="k1",
+                note_type="AnkiOpsQA",
+                fields={"Question": "Q1", "Answer": "A1"},
+            ),
+        )
+    ]
+
+    ordered, protected = _order_resolved_notes(
+        resolved_notes=resolved_notes,
+        existing_notes=existing_notes,
+        is_first_export=False,
+    )
+
+    assert [note.note_key for note in ordered] == ["k1"]
+    assert protected == 0

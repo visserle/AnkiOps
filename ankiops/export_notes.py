@@ -20,6 +20,7 @@ from ankiops.models import (
     MarkdownFile,
     Note,
     NoteTypeConfig,
+    ProtectedNoteGroup,
     SyncResult,
 )
 
@@ -208,7 +209,7 @@ def _order_resolved_notes(
     resolved_notes: list[_ResolvedDeckNote],
     existing_notes: list[Note],
     is_first_export: bool,
-) -> list[Note]:
+) -> tuple[list[Note], int]:
     if is_first_export:
         return [
             resolved[_RESOLVED_NOTE_VALUE]
@@ -216,22 +217,50 @@ def _order_resolved_notes(
                 resolved_notes,
                 key=lambda resolved_note: resolved_note[_RESOLVED_NOTE_ID],
             )
-        ]
+        ], 0
 
     resolved_by_note_key = {
         resolved[_RESOLVED_NOTE_KEY]: resolved for resolved in resolved_notes
     }
+    resolved_by_fingerprint: dict[str, list[_ResolvedDeckNote]] = {}
+    for resolved in resolved_notes:
+        resolved_note = resolved[_RESOLVED_NOTE_VALUE]
+        resolved_hash = note_fingerprint(resolved_note.note_type, resolved_note.fields)
+        resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved)
+
     consumed_note_keys: set[str] = set()
     ordered_notes: list[Note] = []
+    protected_keyless_count = 0
 
     for existing_note in existing_notes:
-        if not existing_note.note_key:
+        if existing_note.note_key:
+            resolved = resolved_by_note_key.get(existing_note.note_key)
+            if not resolved:
+                continue
+            resolved_key = resolved[_RESOLVED_NOTE_KEY]
+            if resolved_key in consumed_note_keys:
+                continue
+            ordered_notes.append(resolved[_RESOLVED_NOTE_VALUE])
+            consumed_note_keys.add(resolved_key)
             continue
-        resolved = resolved_by_note_key.get(existing_note.note_key)
-        if not resolved:
+
+        existing_hash = note_fingerprint(existing_note.note_type, existing_note.fields)
+        candidates = resolved_by_fingerprint.get(existing_hash, [])
+        matched = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate[_RESOLVED_NOTE_KEY] not in consumed_note_keys
+            ),
+            None,
+        )
+        if matched is not None:
+            ordered_notes.append(matched[_RESOLVED_NOTE_VALUE])
+            consumed_note_keys.add(matched[_RESOLVED_NOTE_KEY])
             continue
-        ordered_notes.append(resolved[_RESOLVED_NOTE_VALUE])
-        consumed_note_keys.add(resolved[_RESOLVED_NOTE_KEY])
+
+        ordered_notes.append(existing_note)
+        protected_keyless_count += 1
 
     remaining = sorted(
         [
@@ -242,14 +271,14 @@ def _order_resolved_notes(
         key=lambda resolved: resolved[_RESOLVED_NOTE_ID],
     )
     ordered_notes.extend(resolved[_RESOLVED_NOTE_VALUE] for resolved in remaining)
-    return ordered_notes
+    return ordered_notes, protected_keyless_count
 
 
 def _can_skip_markdown_rebuild(
     *,
     is_first_export: bool,
     fs: MarkdownFile,
-    resolved_notes: list[_ResolvedDeckNote],
+    final_notes: list[Note],
     result: SyncResult,
     resolve_errors: list[str],
 ) -> bool:
@@ -257,14 +286,11 @@ def _can_skip_markdown_rebuild(
         return False
     if result.change_buckets.creates or result.change_buckets.updates:
         return False
-    if len(resolved_notes) != len(fs.notes):
+    if len(final_notes) != len(fs.notes):
         return False
 
-    for existing_note, resolved in zip(fs.notes, resolved_notes):
-        resolved_note_key = resolved[_RESOLVED_NOTE_KEY]
-        if not existing_note.note_key or existing_note.note_key != resolved_note_key:
-            return False
-        if resolved[_RESOLVED_NOTE_VALUE] is not existing_note:
+    for existing_note, final_note in zip(fs.notes, final_notes):
+        if final_note is not existing_note:
             return False
     return True
 
@@ -344,21 +370,24 @@ def _sync_deck(
         local_notes_by_content=local_notes_by_content,
     )
     result.errors.extend(resolve_errors)
+
+    final_notes, protected_keyless_count = _order_resolved_notes(
+        resolved_notes=resolved_notes,
+        existing_notes=fs.notes,
+        is_first_export=is_first_export,
+    )
+    result.protected_keyless_notes = protected_keyless_count
+
     if _can_skip_markdown_rebuild(
         is_first_export=is_first_export,
         fs=fs,
-        resolved_notes=resolved_notes,
+        final_notes=final_notes,
         result=result,
         resolve_errors=resolve_errors,
     ):
         result.materialize_changes(order=_SYNC_ORDER)
         return result
 
-    final_notes = _order_resolved_notes(
-        resolved_notes=resolved_notes,
-        existing_notes=fs.notes,
-        is_first_export=is_first_export,
-    )
     final_text = _render_notes_to_markdown(
         notes=final_notes,
         config_by_name=config_by_name,
@@ -382,6 +411,24 @@ def _sync_deck(
 
     result.materialize_changes(order=_SYNC_ORDER)
     return result
+
+
+def _count_protected_notes_in_orphan_file(
+    *,
+    md_file: Path,
+    collection_dir: Path,
+    fs_port: FileSystemAdapter,
+) -> int | None:
+    try:
+        file_state = fs_port.read_markdown_file(md_file, context_root=collection_dir)
+    except Exception as error:  # pragma: no cover - defensive fail-safe
+        logger.warning(
+            f"Preserving orphan markdown file '{md_file.name}' because it "
+            f"could not be parsed during export cleanup: {error}"
+        )
+        return None
+
+    return sum(1 for note in file_state.notes if not note.note_key)
 
 
 def export_collection(
@@ -432,6 +479,7 @@ def export_collection(
             file_map_by_name[md_file.stem] = md_file
 
         results = []
+        protected_note_groups: list[ProtectedNoteGroup] = []
 
         for deck_name, notes in notes_by_deck.items():
             if deck_name == "Default":
@@ -469,6 +517,10 @@ def export_collection(
             )
             db_port.set_deck(deck_name, deck_id)
             results.append(sync_result)
+            if sync_result.protected_keyless_notes:
+                protected_note_groups.append(
+                    ProtectedNoteGroup(deck_name, sync_result.protected_keyless_notes)
+                )
             summary = sync_result.summary
             if summary.format() != "no changes":
                 logger.debug(f"Deck '{deck_name}': {summary.format()}")
@@ -488,11 +540,31 @@ def export_collection(
             if not md_file.exists():
                 continue
             if md_file not in active_files:
-                db_port.remove_deck(file_stem_to_deck_name(md_file.stem))
+                deck_name = file_stem_to_deck_name(md_file.stem)
+                protected_note_count = _count_protected_notes_in_orphan_file(
+                    md_file=md_file,
+                    collection_dir=collection_dir,
+                    fs_port=fs_port,
+                )
+                if protected_note_count is None:
+                    db_port.remove_deck(deck_name)
+                    continue
+                if protected_note_count:
+                    db_port.remove_deck(deck_name)
+                    protected_note_groups.append(
+                        ProtectedNoteGroup(deck_name, protected_note_count)
+                    )
+                    continue
+
+                db_port.remove_deck(deck_name)
                 md_file.unlink()
                 extra_changes.append(
                     Change(ChangeType.DELETE, None, f"file: {md_file.name}")
                 )
 
         db_port.save()
-        return CollectionResult.for_export(results=results, extra_changes=extra_changes)
+        return CollectionResult.for_export(
+            results=results,
+            extra_changes=extra_changes,
+            protected_note_groups=protected_note_groups,
+        )

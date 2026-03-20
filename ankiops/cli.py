@@ -124,6 +124,22 @@ def run_am(args):
         if deck_fmt != "no changes" and res.file_path:
             logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
 
+    protected = export_summary.protected_note_groups
+    if protected:
+        protected_total = sum(group.note_count for group in protected)
+        logger.warning(
+            "Protected "
+            f"{protected_total} local markdown note(s) without note_key comments "
+            "during export."
+        )
+        logger.warning(f"Affected deck file(s): {len(protected)}")
+        for group in protected:
+            logger.warning(f"  - {group.deck_name} ({group.note_count} notes)")
+        logger.warning(
+            "These notes were kept and not deleted. Use 'ankiops ma' to "
+            "import them and assign note_key comments."
+        )
+
     # Sync referenced media from Anki to local
     try:
         logger.debug("Starting media pull (Anki -> local)")

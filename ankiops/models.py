@@ -532,6 +532,7 @@ class SyncResult:
     checked: int = 0
     unchanged: int = 0
     missing: int = 0
+    protected_keyless_notes: int = 0
 
     @classmethod
     def for_notes(cls, *, name: str, file_path: Path | None) -> "SyncResult":
@@ -583,9 +584,16 @@ class UntrackedDeck:
 
 
 @dataclass
+class ProtectedNoteGroup:
+    deck_name: str
+    note_count: int
+
+
+@dataclass
 class CollectionResult:
     results: list[SyncResult] = field(default_factory=list)
     untracked_decks: list[UntrackedDeck] = field(default_factory=list)
+    protected_note_groups: list[ProtectedNoteGroup] = field(default_factory=list)
     extra_changes: list[Change] = field(default_factory=list)
     extra_change_types: frozenset[ChangeType] = _MEDIA_REPORTED_CHANGE_TYPES
     include_extra_in_total: bool = False
@@ -605,9 +613,11 @@ class CollectionResult:
         *,
         results: list[SyncResult],
         extra_changes: list[Change],
+        protected_note_groups: list[ProtectedNoteGroup] | None = None,
     ) -> "CollectionResult":
         return cls(
             results=results,
+            protected_note_groups=protected_note_groups or [],
             extra_changes=extra_changes,
             extra_change_types=_MEDIA_REPORTED_CHANGE_TYPES,
             include_extra_in_total=False,

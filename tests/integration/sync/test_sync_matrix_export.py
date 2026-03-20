@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from ankiops.config import ANKIOPS_DB
 from ankiops.db import SQLiteDbAdapter
 from tests.support.assertions import assert_summary
@@ -188,6 +190,98 @@ def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
 
     assert not orphan_file.exists()
     assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
+    assert result.protected_note_groups == []
+
+
+def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(world):
+    """EXP-RUN-PROTECT-001."""
+    keep_key = "exp-protect-active-keep"
+    keep_id = world.add_qa_note(
+        deck_name="ProtectDeck",
+        question="Keep Q",
+        answer="Keep A",
+        note_key=keep_key,
+    )
+    world.write_qa_deck(
+        "ProtectDeck",
+        [
+            ("Keep Q", "Keep A", keep_key),
+            ("Draft Q", "Draft A", None),
+        ],
+    )
+
+    with world.db_session() as db:
+        db.set_note(keep_key, keep_id)
+        result = world.sync_export(db)
+
+    content = world.read_deck("ProtectDeck")
+    assert "Keep Q" in content
+    assert "Draft Q" in content
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+    assert len(result.protected_note_groups) == 1
+    assert result.protected_note_groups[0].deck_name == "ProtectDeck"
+    assert result.protected_note_groups[0].note_count == 1
+
+
+def test_exp_run_protect_002_preserves_keyless_orphan_markdown_file(world):
+    """EXP-RUN-PROTECT-002."""
+    orphan_file = world.write_qa_deck(
+        "ProtectedOrphanDeck",
+        [("Draft orphan Q", "Draft orphan A", None)],
+    )
+    assert orphan_file.exists()
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    assert orphan_file.exists()
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+    assert len(result.protected_note_groups) == 1
+    assert result.protected_note_groups[0].deck_name == "ProtectedOrphanDeck"
+    assert result.protected_note_groups[0].note_count == 1
+
+
+def test_exp_run_protect_003_preserves_malformed_orphan_file(world, caplog):
+    """EXP-RUN-PROTECT-003."""
+    malformed_file = world.deck_path("MalformedOrphanDeck")
+    malformed_file.write_text("UNKNOWN: bad\n", encoding="utf-8")
+
+    with (
+        caplog.at_level(logging.WARNING),
+        world.db_session() as db,
+    ):
+        result = world.sync_export(db)
+
+    assert malformed_file.exists()
+    assert "could not be parsed during export cleanup" in caplog.text
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+    assert result.protected_note_groups == []
+
+
+def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):
+    """EXP-RUN-PROTECT-004."""
+    world.add_qa_note(
+        deck_name="NoDuplicateDeck",
+        question="Shared Q",
+        answer="Shared A",
+        note_key=None,
+    )
+    world.write_qa_deck(
+        "NoDuplicateDeck",
+        [("Shared Q", "Shared A", None)],
+    )
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    content = world.read_deck("NoDuplicateDeck")
+    assert content.count("Q: Shared Q") == 1
+    assert len(world.extract_note_keys("NoDuplicateDeck")) == 1
+    assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+    assert all(
+        deck.deck_name != "NoDuplicateDeck"
+        for deck in result.protected_note_groups
+    )
 
 
 def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):

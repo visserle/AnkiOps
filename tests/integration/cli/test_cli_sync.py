@@ -12,6 +12,7 @@ from ankiops.models import (
     Change,
     ChangeType,
     CollectionResult,
+    ProtectedNoteGroup,
     SyncResult,
     UntrackedDeck,
 )
@@ -33,6 +34,23 @@ def _run_ma_with_summary(tmp_path, caplog, summary: CollectionResult):
         run_ma(args)
 
 
+def _run_am_with_summary(tmp_path, caplog, summary: CollectionResult):
+    fake_anki = MagicMock()
+    fake_anki.get_active_profile.return_value = "TestProfile"
+    args = SimpleNamespace(no_auto_commit=True)
+    media_result = SyncResult.for_media()
+
+    with (
+        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.SQLiteDbAdapter.load", return_value=MagicMock()),
+        patch("ankiops.cli.export_collection", return_value=summary),
+        patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
+        caplog.at_level(logging.WARNING),
+    ):
+        run_am(args)
+
+
 def test_run_ma_warns_for_untracked_decks(tmp_path, caplog):
     summary = CollectionResult.for_import(
         results=[],
@@ -49,6 +67,29 @@ def test_run_ma_has_no_untracked_warning_when_none(tmp_path, caplog):
     _run_ma_with_summary(tmp_path, caplog, summary)
 
     assert "untracked Anki deck(s)" not in caplog.text
+
+
+def test_run_am_warns_for_protected_keyless_notes(tmp_path, caplog):
+    summary = CollectionResult.for_export(
+        results=[],
+        extra_changes=[],
+        protected_note_groups=[ProtectedNoteGroup("DraftDeck", 2)],
+    )
+
+    _run_am_with_summary(tmp_path, caplog, summary)
+
+    assert "Protected 2 local markdown note(s)" in caplog.text
+    assert "Affected deck file(s): 1" in caplog.text
+    assert "DraftDeck" in caplog.text
+    assert "Use 'ankiops ma'" in caplog.text
+
+
+def test_run_am_has_no_protection_warning_when_none(tmp_path, caplog):
+    summary = CollectionResult.for_export(results=[], extra_changes=[])
+
+    _run_am_with_summary(tmp_path, caplog, summary)
+
+    assert "Protected " not in caplog.text
 
 
 def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
