@@ -109,33 +109,62 @@ def _parse_optional_str_list(value: Any, key: str, path: Path) -> list[str]:
     return items
 
 
+def _is_non_bool_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _parse_request_options(value: Any, path: Path) -> TaskRequestOptions:
     if value is None:
         return TaskRequestOptions()
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: request options must be a mapping")
 
-    valid_keys = {"temperature", "max_output_tokens"}
+    valid_keys = {
+        "temperature",
+        "max_output_tokens",
+        "retries",
+        "retry_backoff_seconds",
+        "retry_backoff_jitter",
+    }
     unknown = sorted(set(value.keys()) - valid_keys)
     if unknown:
         raise LlmConfigError(f"{path}: unknown request option(s): {', '.join(unknown)}")
 
     temperature = value.get("temperature")
     if temperature is not None:
-        if not isinstance(temperature, (int, float)):
+        if not _is_non_bool_number(temperature):
             raise LlmConfigError(f"{path}: 'temperature' must be numeric")
         if not 0 <= float(temperature) <= 1:
             raise LlmConfigError(f"{path}: 'temperature' must be between 0 and 1")
 
     max_output_tokens = value.get("max_output_tokens")
     if max_output_tokens is not None and (
-        not isinstance(max_output_tokens, int) or max_output_tokens <= 0
+        not isinstance(max_output_tokens, int)
+        or isinstance(max_output_tokens, bool)
+        or max_output_tokens <= 0
     ):
         raise LlmConfigError(f"{path}: 'max_output_tokens' must be a positive integer")
+
+    retries = value.get("retries", 2)
+    if not isinstance(retries, int) or isinstance(retries, bool) or retries < 0:
+        raise LlmConfigError(f"{path}: 'retries' must be a non-negative integer")
+
+    retry_backoff_seconds = value.get("retry_backoff_seconds", 0.5)
+    if not _is_non_bool_number(retry_backoff_seconds):
+        raise LlmConfigError(f"{path}: 'retry_backoff_seconds' must be numeric")
+    if float(retry_backoff_seconds) <= 0:
+        raise LlmConfigError(f"{path}: 'retry_backoff_seconds' must be > 0")
+
+    retry_backoff_jitter = value.get("retry_backoff_jitter", True)
+    if not isinstance(retry_backoff_jitter, bool):
+        raise LlmConfigError(f"{path}: 'retry_backoff_jitter' must be a boolean")
 
     return TaskRequestOptions(
         temperature=float(temperature) if temperature is not None else None,
         max_output_tokens=max_output_tokens,
+        retries=retries,
+        retry_backoff_seconds=float(retry_backoff_seconds),
+        retry_backoff_jitter=retry_backoff_jitter,
     )
 
 
@@ -281,7 +310,11 @@ def _parse_task(
     prompt = _read_text_file(prompt_file_path, label="prompt")
     api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
     timeout_seconds = mapping.get("timeout_seconds", 60)
-    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or timeout_seconds <= 0
+    ):
         raise LlmConfigError(f"{path}: 'timeout_seconds' must be a positive integer")
     decks = _parse_deck_scope(mapping.get("decks"), path)
     field_exceptions = _parse_field_exceptions(

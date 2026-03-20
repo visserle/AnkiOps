@@ -17,6 +17,11 @@ class FieldAccess(Enum):
     HIDDEN = "hidden"
 
 
+class RunFailurePolicy(Enum):
+    ATOMIC = "atomic"
+    PARTIAL = "partial"
+
+
 @dataclass(frozen=True)
 class DeckScope:
     include: list[str] = field(default_factory=lambda: ["*"])
@@ -73,6 +78,9 @@ class FieldExceptionRule:
 class TaskRequestOptions:
     temperature: float | None = None
     max_output_tokens: int | None = None
+    retries: int = 2
+    retry_backoff_seconds: float = 0.5
+    retry_backoff_jitter: bool = True
 
 
 @dataclass(frozen=True)
@@ -122,6 +130,7 @@ class GenerateUpdateResult:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    retry_count: int = 0
 
 
 @dataclass
@@ -141,6 +150,7 @@ class TaskRunSummary:
     input_tokens: int = 0
     output_tokens: int = 0
     provider_latency_ms_total: int = 0
+    provider_retries: int = 0
 
     @property
     def skipped(self) -> int:
@@ -159,11 +169,13 @@ class TaskRunSummary:
 
     def format_usage(self) -> str:
         request_label = "request" if self.requests == 1 else "requests"
+        retry_label = "retry" if self.provider_retries == 1 else "retries"
         provider_seconds = self.provider_latency_ms_total / 1000
         return (
             f"LLM usage: {self.requests} {request_label}, "
             f"{self.input_tokens} input tokens, "
             f"{self.output_tokens} output tokens, "
+            f"{self.provider_retries} {retry_label}, "
             f"{provider_seconds:.1f}s provider time"
         )
 
@@ -179,3 +191,10 @@ class TaskRunSummary:
 class TaskCatalog:
     tasks_by_name: dict[str, TaskConfig]
     errors: dict[str, str]
+
+
+@dataclass(frozen=True)
+class TaskRunResult:
+    summary: TaskRunSummary
+    failed: bool
+    persisted: bool

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 
 from anthropic import (
@@ -28,6 +29,7 @@ from .structured_output import (
 )
 
 logger = logging.getLogger(__name__)
+_MAX_RETRY_BACKOFF_SECONDS = 30.0
 
 
 class ClaudeClient:
@@ -84,27 +86,75 @@ class ClaudeClient:
             len(note_payload.read_only_fields),
         )
         started_at = time.monotonic()
+        retry_count = 0
         try:
-            response = self._client.messages.create(**kwargs)  # type: ignore[arg-type]
-        except AuthenticationError as error:
-            raise LlmFatalError(
-                f"Provider authentication failed: {error.message}"
-            ) from error
-        except APIConnectionError as error:
-            raise LlmFatalError(f"Failed to connect to provider: {error}") from error
-        except APIStatusError as error:
-            if "does not support output format" in error.message:
-                raise LlmFatalError(
-                    "Configured Anthropic model does not support structured outputs. "
-                    "Use a current supported Claude model."
-                ) from error
-            if error.status_code == 429 or error.status_code >= 500:
-                raise LlmFatalError(
-                    f"Provider returned HTTP {error.status_code}: {error.message}"
-                ) from error
-            raise LlmNoteError(
-                f"Provider returned HTTP {error.status_code}: {error.message}"
-            ) from error
+            while True:
+                try:
+                    response = self._client.messages.create(
+                        **kwargs
+                    )  # type: ignore[call-overload]
+                    break
+                except AuthenticationError as error:
+                    raise LlmFatalError(
+                        f"Provider authentication failed: {error.message}"
+                    ) from error
+                except APIConnectionError as error:
+                    if retry_count >= request_options.retries:
+                        raise LlmFatalError(
+                            "Failed to connect to provider after "
+                            f"{retry_count + 1} attempt(s): {error}"
+                        ) from error
+                    retry_count += 1
+                    delay = _retry_delay_seconds(
+                        base_seconds=request_options.retry_backoff_seconds,
+                        retry_count=retry_count,
+                        jitter=request_options.retry_backoff_jitter,
+                    )
+                    logger.warning(
+                        "Retrying %s after connection error (%d/%d) in %.2fs: %s",
+                        note_payload.note_key,
+                        retry_count,
+                        request_options.retries,
+                        delay,
+                        error,
+                    )
+                    time.sleep(delay)
+                except APIStatusError as error:
+                    if "does not support output format" in error.message:
+                        raise LlmFatalError(
+                            "Configured Anthropic model does not support structured "
+                            "outputs. Use a current supported Claude model."
+                        ) from error
+
+                    if error.status_code == 429 or error.status_code >= 500:
+                        if retry_count >= request_options.retries:
+                            raise LlmFatalError(
+                                f"Provider returned HTTP {error.status_code}: "
+                                f"{error.message}"
+                            ) from error
+                        retry_count += 1
+                        delay = _retry_delay_seconds(
+                            base_seconds=request_options.retry_backoff_seconds,
+                            retry_count=retry_count,
+                            jitter=request_options.retry_backoff_jitter,
+                        )
+                        logger.warning(
+                            "Retrying %s after HTTP %d (%d/%d) in %.2fs: %s",
+                            note_payload.note_key,
+                            error.status_code,
+                            retry_count,
+                            request_options.retries,
+                            delay,
+                            error.message,
+                        )
+                        time.sleep(delay)
+                        continue
+
+                    raise LlmNoteError(
+                        f"Provider returned HTTP {error.status_code}: {error.message}"
+                    ) from error
+        except LlmFatalError:
+            raise
 
         latency_ms = round((time.monotonic() - started_at) * 1000)
         usage = getattr(response, "usage", None)
@@ -112,13 +162,14 @@ class ClaudeClient:
         output_tokens = _usage_value(usage, "output_tokens")
         logger.debug(
             "Response for %s: message_id=%s, stop_reason=%s, input_tokens=%d, "
-            "output_tokens=%d, latency_ms=%d",
+            "output_tokens=%d, latency_ms=%d, retries=%d",
             note_payload.note_key,
             getattr(response, "id", "unknown"),
             getattr(response, "stop_reason", None),
             input_tokens,
             output_tokens,
             latency_ms,
+            retry_count,
         )
 
         raw_text = _extract_text_content(response.content)
@@ -142,6 +193,7 @@ class ClaudeClient:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
+            retry_count=retry_count,
         )
 
 
@@ -161,3 +213,21 @@ def _extract_text_content(blocks: object) -> str:
 def _usage_value(usage: object, name: str) -> int:
     value = getattr(usage, name, 0)
     return value if isinstance(value, int) else 0
+
+
+def _retry_delay_seconds(
+    *,
+    base_seconds: float,
+    retry_count: int,
+    jitter: bool,
+) -> float:
+    delay = min(
+        base_seconds * (2 ** max(retry_count - 1, 0)),
+        _MAX_RETRY_BACKOFF_SECONDS,
+    )
+    if jitter:
+        delay = min(
+            delay * random.uniform(0.5, 1.5),
+            _MAX_RETRY_BACKOFF_SECONDS,
+        )
+    return max(delay, 0.0)

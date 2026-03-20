@@ -24,7 +24,9 @@ from .models import (
     FieldAccess,
     GenerateUpdateResult,
     NotePayload,
+    RunFailurePolicy,
     TaskConfig,
+    TaskRunResult,
     TaskRunSummary,
 )
 
@@ -68,13 +70,14 @@ def _format_serializer_scope(deck: str | None, no_subdecks: bool) -> str:
 def _format_request_defaults(task: TaskConfig) -> str:
     max_tokens = task.request.max_output_tokens or 2048
     temperature = (
-        task.request.temperature
-        if task.request.temperature is not None
-        else "default"
+        task.request.temperature if task.request.temperature is not None else "default"
     )
     return (
         f"timeout={task.timeout_seconds}s "
-        f"max_tokens={max_tokens} temperature={temperature}"
+        f"max_tokens={max_tokens} temperature={temperature} "
+        f"retries={task.request.retries} "
+        f"retry_backoff={task.request.retry_backoff_seconds}s "
+        f"retry_jitter={str(task.request.retry_backoff_jitter).lower()}"
     )
 
 
@@ -87,6 +90,20 @@ def _resolve_model(task: TaskConfig, model_override: str | None):
         supported = format_supported_model_names()
         raise ValueError(f"Model must be one of: {supported}")
     return model
+
+
+def _resolve_failure_policy(
+    value: RunFailurePolicy | str,
+) -> RunFailurePolicy:
+    if isinstance(value, RunFailurePolicy):
+        return value
+
+    normalized = value.strip().lower()
+    for policy in RunFailurePolicy:
+        if policy.value == normalized:
+            return policy
+    supported = ", ".join(policy.value for policy in RunFailurePolicy)
+    raise ValueError(f"Failure policy must be one of: {supported}")
 
 
 def _build_note_payload(
@@ -232,6 +249,7 @@ def _record_provider_result(
     summary.input_tokens += result.input_tokens
     summary.output_tokens += result.output_tokens
     summary.provider_latency_ms_total += result.latency_ms
+    summary.provider_retries += result.retry_count
 
 
 def _process_note(
@@ -336,13 +354,15 @@ def run_task(
     task_name: str,
     model_override: str | None = None,
     no_auto_commit: bool = False,
-) -> TaskRunSummary:
+    failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
+) -> TaskRunResult:
     task, note_type_configs = _load_task(
         collection_dir=collection_dir,
         task_name=task_name,
     )
 
     model = _resolve_model(task, model_override)
+    resolved_failure_policy = _resolve_failure_policy(failure_policy)
 
     provider_client = ClaudeClient(task)
     summary = TaskRunSummary(
@@ -352,12 +372,14 @@ def run_task(
 
     deck, no_subdecks = _resolve_serializer_scope(task)
     logger.debug(
-        "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, deck_scope=%s)",
+        "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
+        "deck_scope=%s, failure_policy=%s)",
         task.name,
         model,
         model.api_id,
         collection_dir,
         _format_deck_scope(task),
+        resolved_failure_policy.value,
     )
     logger.debug("LLM request defaults: %s", _format_request_defaults(task))
     logger.debug(
@@ -375,6 +397,7 @@ def run_task(
         collection_dir,
         deck=deck,
         no_subdecks=no_subdecks,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
 
     for deck_name, notes in _iter_decks(data, summary=summary):
@@ -402,12 +425,29 @@ def run_task(
                 summary=summary,
             )
 
+    persisted = False
     if summary.updated > 0:
-        deserialize_collection_data(data, overwrite=True)
+        if resolved_failure_policy is RunFailurePolicy.ATOMIC and summary.errors:
+            logger.error(
+                "Atomic failure policy prevented persistence: %d update(s) staged, "
+                "%d error(s) observed",
+                summary.updated,
+                summary.errors,
+            )
+        else:
+            deserialize_collection_data(
+                data,
+                root_dir=collection_dir,
+                note_types_dir=collection_dir / NOTE_TYPES_DIR,
+                overwrite=True,
+            )
+            persisted = True
 
     logger.info(summary.format())
     logger.debug(summary.format_usage())
     logger.debug(summary.format_cost())
-    if summary.errors:
-        raise SystemExit(1)
-    return summary
+    return TaskRunResult(
+        summary=summary,
+        failed=summary.errors > 0,
+        persisted=persisted,
+    )

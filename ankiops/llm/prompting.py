@@ -6,6 +6,7 @@ import json
 
 from .models import NotePayload
 
+
 def build_system_prompt(system_prompt: str) -> str:
     """Build the Claude system prompt from task configuration."""
     return system_prompt.strip()
