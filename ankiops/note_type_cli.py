@@ -201,18 +201,16 @@ def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
 
 
 def run(args) -> None:
-    """Show note type label information or copy a note type from Anki."""
-    if args.info and args.name:
-        logger.error("Cannot combine note type name with --info.")
-        raise SystemExit(2)
-    if not args.info and not args.name:
-        logger.error("A note type name is required unless --info is used.")
+    """Handle note-types CLI actions."""
+    action = str(getattr(args, "action", ""))
+    if action not in {"list", "import"}:
+        logger.error(f"Unknown note-types action: {action}")
         raise SystemExit(2)
 
     note_types_dir = get_note_types_dir()
     fs = FileSystemAdapter()
 
-    if args.info:
+    if action == "list":
         require_initialized_collection_dir()
         try:
             note_type_configs = fs.load_note_type_configs(note_types_dir)
@@ -222,12 +220,16 @@ def run(args) -> None:
         _log_note_type_label_info(note_type_configs)
         return
 
+    note_type_name = str(getattr(args, "name", "")).strip()
+    if not note_type_name:
+        logger.error("A note type name is required for 'note-types import'.")
+        raise SystemExit(2)
+
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
 
-    note_type_name = str(args.name)
     destination_dir = note_types_dir / note_type_name
     if destination_dir.exists():
         logger.error(

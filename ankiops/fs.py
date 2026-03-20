@@ -177,8 +177,8 @@ class FileSystemAdapter:
                                     (
                                         f"Unknown field label '{unknown_label}'. "
                                         "Please check your note type labels. "
-                                        "Use `ankiops note-type --info` to list defined"
-                                        " labels."
+                                        "Use `ankiops note-types list` to list "
+                                        "defined labels."
                                     ),
                                     display_path=display_path,
                                     line_number=current_line_number,

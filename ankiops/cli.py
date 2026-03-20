@@ -424,21 +424,31 @@ def main():
     )
     llm_parser.set_defaults(handler=run_llm)
 
-    note_type_parser = subparsers.add_parser(
-        "note-type",
-        help="Show label info or copy an Anki note type into local note_types/",
+    note_types_parser = subparsers.add_parser(
+        "note-types",
+        aliases=["nt"],
+        help="List local note type labels or import a note type from Anki",
     )
-    note_type_parser.add_argument(
-        "name",
-        nargs="?",
-        help="Note type name to copy from Anki",
+    note_types_subparsers = note_types_parser.add_subparsers(
+        dest="action",
+        required=True,
     )
-    note_type_parser.add_argument(
-        "--info",
-        action="store_true",
+
+    note_types_list_parser = note_types_subparsers.add_parser(
+        "list",
         help="Show taken labels and note type label details",
     )
-    note_type_parser.set_defaults(handler=run_note_type)
+    note_types_list_parser.set_defaults(handler=run_note_type, action="list")
+
+    note_types_import_parser = note_types_subparsers.add_parser(
+        "import",
+        help="Copy an Anki note type into local note_types/",
+    )
+    note_types_import_parser.add_argument(
+        "name",
+        help="Note type name to copy from Anki",
+    )
+    note_types_import_parser.set_defaults(handler=run_note_type, action="import")
 
     args = parser.parse_args()
 
@@ -462,7 +472,10 @@ def main():
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
         print("  llm               Run configured LLM tasks on local markdown")
-        print("  note-type         Show label info or copy note types from Anki")
+        print(
+            "  note-types        List note type labels or import note types "
+            "from Anki (alias: nt)"
+        )
         print()
         print("Usage examples:")
         print(
@@ -488,11 +501,10 @@ def main():
             "  ankiops llm                                  # List configured LLM tasks"
         )
         print("  ankiops llm grammar                          # Run the grammar task")
+        print("  ankiops note-types list                      # Show taken labels")
         print(
-            "  ankiops note-type --info                     # Show taken labels"
-        )
-        print(
-            "  ankiops note-type MyCustomType               # Copy note type from Anki"
+            "  ankiops note-types import MyCustomType       "
+            "# Copy note type from Anki"
         )
         print()
         print("For more information:")
