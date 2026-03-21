@@ -650,15 +650,15 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
     assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
     assert (
-        "LLM task 'grammar' (sonnet): 2 notes — "
+        "Task 'grammar' (sonnet): 2 notes — "
         "1 updated, 1 unchanged"
     ) in caplog.text
     assert (
-        "LLM usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
+        "Usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
         "2.0s provider time"
     ) in caplog.text
     assert (
-        "LLM estimated cost: $0.000297 ($0.000102 input + $0.000195 output)"
+        "Cost: $0.00"
     ) in caplog.text
     assert "Broken" not in caplog.text
     assert "<task>" not in caplog.text
@@ -697,15 +697,15 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "Model attempted to update read-only field 'Answer'"
     ) in caplog.text
     assert (
-        "LLM task 'grammar' (sonnet): 2 notes — "
+        "Task 'grammar' (sonnet): 2 notes — "
         "1 unchanged, 1 error"
     ) in caplog.text
     assert (
-        "LLM usage: 2 requests, 22 input tokens, 14 output tokens, "
+        "Usage: 2 requests, 22 input tokens, 14 output tokens, "
         "0 retries, 1.8s provider time"
     ) in caplog.text
     assert (
-        "LLM estimated cost: $0.000276 ($0.000066 input + $0.00021 output)"
+        "Cost: $0.00"
     ) in caplog.text
 
 
@@ -746,7 +746,7 @@ def test_run_task_logs_deck_scope_skips(tmp_path, monkeypatch, caplog):
     assert summary.notes_seen == 2
     assert summary.skipped_deck_scope == 2
     assert "Skipping deck 'TestDeck' (2 notes): outside task scope" in caplog.text
-    assert "LLM task 'grammar' (sonnet): 0 notes — 2 skipped" in caplog.text
+    assert "Task 'grammar' (sonnet): 0 notes — 2 skipped" in caplog.text
 
 
 def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
@@ -797,7 +797,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
         "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): "
         "no editable non-empty fields"
     ) in caplog.text
-    assert "LLM task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
+    assert "Task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
 
 
 def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):

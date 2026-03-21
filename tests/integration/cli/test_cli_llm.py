@@ -76,6 +76,7 @@ def test_cli_llm_dispatches_run(capsys):
     assert run_task.call_args.kwargs["task_name"] == "grammar"
     captured = capsys.readouterr()
     assert "LLM job: 24" in captured.out
+    assert "Actual cost:" in captured.out
 
 
 def test_cli_llm_dispatches_plan(capsys):
@@ -89,8 +90,9 @@ def test_cli_llm_dispatches_plan(capsys):
     plan_task.assert_called_once()
     assert plan_task.call_args.kwargs["task_name"] == "grammar"
     captured = capsys.readouterr()
-    assert "Plan for task 'grammar'" in captured.out
-    assert "Cost cap:" in captured.out
+    assert "Plan: grammar" in captured.out
+    assert "Cost estimate (max):" in captured.out
+    assert "To run this task: ankiops llm grammar --run" in captured.out
 
 
 def test_cli_llm_status_exits_on_invalid_config(tmp_path):
@@ -143,11 +145,11 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path, capsys):
         main()
 
     captured = capsys.readouterr()
-    assert "Config health: OK" in captured.out
-    assert "Available tasks:" in captured.out
+    assert "LLM config: OK" in captured.out
+    assert "Tasks:" in captured.out
     assert "grammar" in captured.out
     assert "Recent jobs:" in captured.out
-    assert "task=grammar" in captured.out
+    assert "#24 grammar (sonnet)" in captured.out
 
 
 def test_cli_llm_show_parses_minus_one_alias(tmp_path):

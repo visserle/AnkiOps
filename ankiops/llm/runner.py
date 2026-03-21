@@ -352,8 +352,8 @@ class LlmTaskExecutor:
             summary = aggregate.summary
             logger.error(str(error))
             logger.info(summary.format())
-            logger.debug(summary.format_usage())
-            logger.debug(summary.format_cost())
+            logger.debug("Usage: %s", summary.format_usage())
+            logger.debug("Cost: %s", summary.format_cost())
             return LlmJobResult(
                 job_id=job_id,
                 status=LlmJobStatus.FAILED.value,
@@ -368,8 +368,8 @@ class LlmTaskExecutor:
 
         summary = aggregate.summary
         logger.info(summary.format())
-        logger.debug(summary.format_usage())
-        logger.debug(summary.format_cost())
+        logger.debug("Usage: %s", summary.format_usage())
+        logger.debug("Cost: %s", summary.format_cost())
 
         return LlmJobResult(
             job_id=job_id,

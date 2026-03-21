@@ -27,6 +27,10 @@ def _format_field_list(fields: list[str]) -> str:
     return ",".join(fields) if fields else "-"
 
 
+def _format_count(value: int) -> str:
+    return f"{value:,}"
+
+
 def _usage_error(message: str) -> None:
     logger.error(message)
     raise SystemExit(2)
@@ -118,11 +122,14 @@ def run_llm(
             raise SystemExit(1)
 
         logger.info(
-            "Job %s  task=%s model=%s api_model=%s status=%s persisted=%s",
+            "Job %s — %s (%s / %s)",
             detail.job_id,
             detail.task_name,
             detail.model_name,
             detail.api_model,
+        )
+        logger.info(
+            "Status: %s (persisted=%s)",
             detail.status.value,
             "yes" if detail.persisted else "no",
         )
@@ -146,12 +153,13 @@ def run_llm(
         )
         if detail.fatal_error:
             logger.error("Fatal error: %s", detail.fatal_error)
+        logger.info("Items:")
         for item in detail.items:
             note = item.note_key or "unknown"
             note_type = item.note_type or "unknown"
             logger.info(
                 "  #%d note=%s deck=%s type=%s candidate=%s final=%s "
-                "attempts=%d tokens=%d/%d latency_ms=%d",
+                "attempts=%d tokens=%s/%s latency=%0.2fs",
                 item.ordinal,
                 note,
                 item.deck_name,
@@ -159,9 +167,9 @@ def run_llm(
                 item.candidate_status.value,
                 item.final_status.value,
                 item.attempts,
-                item.input_tokens,
-                item.output_tokens,
-                item.latency_ms,
+                _format_count(item.input_tokens),
+                _format_count(item.output_tokens),
+                item.latency_ms / 1000,
             )
             if item.changed_fields:
                 logger.info("    changed_fields=%s", ",".join(item.changed_fields))
@@ -182,18 +190,15 @@ def run_llm(
             collection_dir,
             note_type_configs=note_type_configs,
         )
-        logger.info(
-            "Config health: %s",
-            "OK" if not catalog.errors else "INVALID",
-        )
-        logger.info("Available tasks:")
+        logger.info("LLM config: %s", "OK" if not catalog.errors else "INVALID")
+        logger.info("Tasks:")
         tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
         if tasks:
             for task in tasks:
                 include = ",".join(task.decks.include)
                 exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
                 logger.info(
-                    "  %s  model=%s  include=%s  exclude=%s  exceptions=%d",
+                    "  - %s (model=%s, include=%s, exclude=%s, exceptions=%d)",
                     task.name,
                     task.model,
                     include,
@@ -210,7 +215,7 @@ def run_llm(
         else:
             for job in jobs:
                 logger.info(
-                    "  %s  task=%s  model=%s  status=%s  persisted=%s  created_at=%s",
+                    "  - #%s %s (%s) status=%s persisted=%s created=%s",
                     job.job_id,
                     job.task_name,
                     job.model_name,
@@ -244,6 +249,7 @@ def run_llm(
             result.job_id,
         )
         if result.failed:
+            logger.info("Actual cost: %s", result.summary.format_cost())
             logger.error(
                 "LLM job finished with %d error(s)%s",
                 result.summary.errors,
@@ -252,6 +258,7 @@ def run_llm(
                 else "",
             )
             raise SystemExit(1)
+        logger.info("Actual cost: %s", result.summary.format_cost())
         return
 
     try:
@@ -264,11 +271,7 @@ def run_llm(
         logger.error(str(error))
         raise SystemExit(1) from error
 
-    logger.info(
-        "Plan for task '%s' (model=%s)",
-        plan.task_name,
-        plan.model,
-    )
+    logger.info("Plan: %s (model=%s)", plan.task_name, plan.model)
     logger.info("Deck scope: %s", plan.deck_scope)
     logger.info("Serializer scope: %s", plan.serializer_scope)
     logger.info("Request defaults: %s", plan.request_defaults)
@@ -295,7 +298,9 @@ def run_llm(
             )
     else:
         logger.info("  none")
-    logger.info("Request estimate: %d", plan.requests_estimate)
-    logger.info("Input tokens estimate: %d", plan.input_tokens_estimate)
-    logger.info("Output tokens cap: %d", plan.output_tokens_cap)
-    logger.info("Cost cap: %s", plan.format_cost_cap())
+    logger.info("Request estimate: %s", _format_count(plan.requests_estimate))
+    logger.info("Cost estimate (max): %s", plan.format_cost_estimate())
+    run_command = f"ankiops llm {plan.task_name} --run"
+    if model_override:
+        run_command = f"{run_command} --model {model_override}"
+    logger.info("To run this task: %s", run_command)

@@ -6,8 +6,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 _TOKENS_PER_MTOK = Decimal("1000000")
-_USD_DISPLAY_QUANTUM = Decimal("0.000001")
-_MIN_DISPLAY_DECIMALS = 4
+_USD_CENTS_QUANTUM = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -20,11 +19,7 @@ class CostEstimate:
         return self.input_usd + self.output_usd
 
     def format(self) -> str:
-        return (
-            f"LLM estimated cost: {format_usd(self.total_usd)} "
-            f"({format_usd(self.input_usd)} input + "
-            f"{format_usd(self.output_usd)} output)"
-        )
+        return format_usd_cents(self.total_usd)
 
 
 @dataclass(frozen=True)
@@ -88,10 +83,6 @@ def format_supported_model_names() -> str:
     return ", ".join(supported_model_names())
 
 
-def format_usd(amount: Decimal) -> str:
-    quantized = amount.quantize(_USD_DISPLAY_QUANTUM, rounding=ROUND_HALF_UP)
-    whole, fraction = f"{quantized:f}".split(".")
-    fraction = fraction.rstrip("0")
-    if len(fraction) < _MIN_DISPLAY_DECIMALS:
-        fraction = fraction.ljust(_MIN_DISPLAY_DECIMALS, "0")
-    return f"${whole}.{fraction}"
+def format_usd_cents(amount: Decimal) -> str:
+    quantized = amount.quantize(_USD_CENTS_QUANTUM, rounding=ROUND_HALF_UP)
+    return f"${quantized:.2f}"

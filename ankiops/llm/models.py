@@ -214,7 +214,7 @@ class TaskRunSummary:
 
     def format(self) -> str:
         return (
-            f"LLM task '{self.task_name}' ({self.model}): {self.eligible} notes — "
+            f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — "
             + format_changes(
                 updated=self.updated,
                 unchanged=self.unchanged,
@@ -228,7 +228,7 @@ class TaskRunSummary:
         retry_label = "retry" if self.provider_retries == 1 else "retries"
         provider_seconds = self.provider_latency_ms_total / 1000
         return (
-            f"LLM usage: {self.requests} {request_label}, "
+            f"{self.requests} {request_label}, "
             f"{self.input_tokens} input tokens, "
             f"{self.output_tokens} output tokens, "
             f"{self.provider_retries} {retry_label}, "
@@ -280,7 +280,7 @@ class TaskPlanResult:
     input_tokens_estimate: int
     output_tokens_cap: int
 
-    def format_cost_cap(self) -> str:
+    def format_cost_estimate(self) -> str:
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens_estimate,
             output_tokens=self.output_tokens_cap,

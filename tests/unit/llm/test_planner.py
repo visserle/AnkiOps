@@ -86,7 +86,7 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     assert plan.requests_estimate == 2
     assert plan.output_tokens_cap == 4096
     assert plan.input_tokens_estimate > 0
-    assert plan.format_cost_cap().startswith("LLM estimated cost: $")
+    assert plan.format_cost_estimate().startswith("$")
 
     surface_by_type = {surface.note_type: surface for surface in plan.field_surface}
     assert "AnkiOpsQA" in surface_by_type
