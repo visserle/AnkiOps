@@ -413,12 +413,12 @@ def _sync_deck(
     return result
 
 
-def _count_protected_notes_in_orphan_file(
+def _split_orphan_file_notes(
     *,
     md_file: Path,
     collection_dir: Path,
     fs_port: FileSystemAdapter,
-) -> int | None:
+) -> tuple[list[Note], list[Note]] | None:
     try:
         file_state = fs_port.read_markdown_file(md_file, context_root=collection_dir)
     except Exception as error:  # pragma: no cover - defensive fail-safe
@@ -428,7 +428,14 @@ def _count_protected_notes_in_orphan_file(
         )
         return None
 
-    return sum(1 for note in file_state.notes if not note.note_key)
+    keyless_notes: list[Note] = []
+    keyed_notes: list[Note] = []
+    for note in file_state.notes:
+        if note.note_key:
+            keyed_notes.append(note)
+        else:
+            keyless_notes.append(note)
+    return keyless_notes, keyed_notes
 
 
 def export_collection(
@@ -540,19 +547,32 @@ def export_collection(
                 continue
             if md_file not in active_files:
                 deck_name = file_stem_to_deck_name(md_file.stem)
-                protected_note_count = _count_protected_notes_in_orphan_file(
+                orphan_split = _split_orphan_file_notes(
                     md_file=md_file,
                     collection_dir=collection_dir,
                     fs_port=fs_port,
                 )
-                if protected_note_count is None:
+                if orphan_split is None:
                     db_port.delete_deck(deck_name)
                     continue
+                keyless_notes, keyed_notes = orphan_split
+                protected_note_count = len(keyless_notes)
+
                 if protected_note_count:
                     db_port.delete_deck(deck_name)
                     protected_note_groups.append(
                         ProtectedNoteGroup(deck_name, protected_note_count)
                     )
+                    if keyed_notes:
+                        final_text = _render_notes_to_markdown(
+                            notes=keyless_notes,
+                            config_by_name=config_by_name,
+                        )
+                        fs_port.write_markdown_file(md_file, final_text)
+                        extra_changes.extend(
+                            Change(ChangeType.DELETE, None, orphan.identifier)
+                            for orphan in keyed_notes
+                        )
                     continue
 
                 db_port.delete_deck(deck_name)

@@ -100,6 +100,36 @@ def test_rt_run_delete_001_roundtrip_preserves_delete(world):
         assert not world.deck_path("RoundTripDelete").exists()
 
 
+def test_rt_run_orphan_001_mixed_orphan_export_does_not_resurrect_keyed_note(world):
+    """RT-RUN-ORPHAN-001."""
+    world.write_qa_deck(
+        "RoundTripMixedOrphan",
+        [
+            ("Stale orphan Q", "Stale orphan A", "stale-orphan-key"),
+            ("Draft orphan Q", "Draft orphan A", None),
+        ],
+    )
+
+    with world.db_session() as db:
+        export_result = world.sync_export(db)
+        assert_summary(
+            export_result.summary, created=0, updated=0, moved=0, deleted=1, errors=0
+        )
+        assert "Stale orphan Q" not in world.read_deck("RoundTripMixedOrphan")
+        assert "Draft orphan Q" in world.read_deck("RoundTripMixedOrphan")
+
+        import_result = world.sync_import(db)
+        assert_summary(
+            import_result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+
+        assert len(world.mock_anki.notes) == 1
+        created_note = next(iter(world.mock_anki.notes.values()))
+        created_key = created_note["fields"]["AnkiOps Key"]["value"]
+        assert created_key != "stale-orphan-key"
+        assert "stale-orphan-key" not in world.read_deck("RoundTripMixedOrphan")
+
+
 def test_rt_run_move_001_roundtrip_preserves_move(world):
     """RT-RUN-MOVE-001."""
     world.write_qa_deck("RoundTripMoveA", [("Move Q", "Move A", None)])

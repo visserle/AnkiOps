@@ -266,6 +266,31 @@ def test_exp_run_protect_002_preserves_keyless_orphan_markdown_file(world):
     assert result.protected_note_groups[0].note_count == 1
 
 
+def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
+    """EXP-RUN-PROTECT-005."""
+    orphan_file = world.write_qa_deck(
+        "MixedOrphanDeck",
+        [
+            ("Stale orphan Q", "Stale orphan A", "stale-orphan-key"),
+            ("Draft orphan Q", "Draft orphan A", None),
+        ],
+    )
+    assert orphan_file.exists()
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    content = world.read_deck("MixedOrphanDeck")
+    assert orphan_file.exists()
+    assert "Draft orphan Q" in content
+    assert "Stale orphan Q" not in content
+    assert "<!-- note_key: stale-orphan-key -->" not in content
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
+    assert len(result.protected_note_groups) == 1
+    assert result.protected_note_groups[0].deck_name == "MixedOrphanDeck"
+    assert result.protected_note_groups[0].note_count == 1
+
+
 def test_exp_run_protect_003_preserves_malformed_orphan_file(world, caplog):
     """EXP-RUN-PROTECT-003."""
     malformed_file = world.deck_path("MalformedOrphanDeck")
