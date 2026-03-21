@@ -64,6 +64,10 @@ def _prepare_collection(tmp_path: Path) -> Path:
             - hidden: ["AI Notes"]
         request:
           max_output_tokens: 2048
+        execution:
+          mode: online
+          concurrency: 1
+          fail_fast: true
         """,
     )
     return tmp_path

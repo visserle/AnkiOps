@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from importlib import resources
 from pathlib import Path
@@ -11,6 +12,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
 from ankiops.llm.anthropic_models import SONNET
+from ankiops.llm.claude import ProviderBatchState
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.db import LlmDbAdapter
 from ankiops.llm.errors import LlmFatalError
@@ -66,7 +68,15 @@ def _task_config(
     extra: str = "",
 ) -> str:
     suffix = f"\n{dedent(extra).strip()}" if extra.strip() else ""
-    return f"model: {model}\nprompt_file: {prompt_file}{suffix}\n"
+    return (
+        f"model: {model}\n"
+        f"prompt_file: {prompt_file}\n"
+        "execution:\n"
+        "  mode: online\n"
+        "  concurrency: 1\n"
+        "  fail_fast: true"
+        f"{suffix}\n"
+    )
 
 
 def _write_prompt(collection_dir: Path, content: str = DEFAULT_TASK_PROMPT) -> None:
@@ -159,8 +169,109 @@ class _StubClient:
             editable_fields=frozenset(note_payload.editable_fields.keys()),
         )
 
-    def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
+    async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
         return self._results.pop(0)
+
+    async def close(self) -> None:
+        return None
+
+
+class _BatchResultsFatalClient:
+    def prepare_attempt_request(
+        self,
+        *,
+        note_payload,
+        task_prompt,
+        request_options,
+        api_model,
+    ) -> PreparedAttemptRequest:
+        del task_prompt
+        max_tokens = request_options.max_output_tokens or 2048
+        request_params: dict[str, object] = {
+            "model": api_model,
+            "max_tokens": max_tokens,
+            "output_config": {"format": {"type": "json_schema", "schema": {}}},
+        }
+        if request_options.temperature is not None:
+            request_params["temperature"] = request_options.temperature
+        return PreparedAttemptRequest(
+            note_payload=note_payload,
+            system_prompt_text="system",
+            user_message_text="user",
+            request_params=request_params,
+            output_schema={},
+            editable_fields=frozenset(note_payload.editable_fields.keys()),
+        )
+
+    async def create_batch(self, *, requests):
+        del requests
+        return ProviderBatchState(
+            provider_batch_id="msgbatch_123",
+            processing_status="ended",
+            results_url=None,
+            created_at_remote=None,
+            expires_at_remote=None,
+            ended_at_remote=None,
+            archived_at_remote=None,
+            cancel_initiated_at_remote=None,
+            count_processing=0,
+            count_succeeded=0,
+            count_errored=0,
+            count_canceled=0,
+            count_expired=0,
+            request_id=None,
+            rate_limit_headers={},
+        )
+
+    async def retrieve_batch(self, _provider_batch_id: str):
+        raise AssertionError("retrieve_batch should not be called when batch is ended")
+
+    async def get_batch_results(self, **_kwargs):
+        raise LlmFatalError("Provider batch results failed: decoder blew up")
+
+    async def close(self) -> None:
+        return None
+
+
+class _OnlineFailFastClient:
+    def __init__(self) -> None:
+        self._calls = 0
+
+    def prepare_attempt_request(
+        self,
+        *,
+        note_payload,
+        task_prompt,
+        request_options,
+        api_model,
+    ) -> PreparedAttemptRequest:
+        del task_prompt
+        max_tokens = request_options.max_output_tokens or 2048
+        request_params: dict[str, object] = {
+            "model": api_model,
+            "max_tokens": max_tokens,
+            "output_config": {"format": {"type": "json_schema", "schema": {}}},
+        }
+        if request_options.temperature is not None:
+            request_params["temperature"] = request_options.temperature
+        return PreparedAttemptRequest(
+            note_payload=note_payload,
+            system_prompt_text="system",
+            user_message_text="user",
+            request_params=request_params,
+            output_schema={},
+            editable_fields=frozenset(note_payload.editable_fields.keys()),
+        )
+
+    async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
+        self._calls += 1
+        if self._calls == 1:
+            raise LlmFatalError("Provider connection error: boom")
+        await asyncio.sleep(60)
+        return _result("nk-2", {})
+
+    async def close(self) -> None:
+        return None
 
 
 def _result(
@@ -180,6 +291,8 @@ def _result(
         provider_message_id=message_id,
         provider_model=model,
         stop_reason=stop_reason,
+        request_id=None,
+        rate_limit_headers={},
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         latency_ms=latency_ms,
@@ -311,6 +424,27 @@ def test_load_llm_task_catalog_supports_task_specific_system_prompt_file(
     assert task.system_prompt_path == (
         tmp_path / "llm/prompts/custom_system.md"
     ).resolve()
+
+
+def test_load_llm_task_catalog_defaults_execution_when_omitted(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_system_prompt(tmp_path, "System rules")
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_task(
+        tmp_path,
+        content="model: sonnet\nprompt_file: ../prompts/grammar.md\n",
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.execution.mode.value == "online"
+    assert task.execution.concurrency == 8
+    assert task.execution.fail_fast is True
+    assert task.execution.batch_poll_seconds == 15
 
 
 def test_load_llm_task_catalog_requires_system_prompt(
@@ -674,6 +808,90 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
     )
 
 
+def test_run_task_marks_batch_pending_items_as_fatal_on_results_failure(
+    tmp_path,
+    monkeypatch,
+):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: batch\n"
+            "  batch_poll_seconds: 1\n"
+            "  fail_fast: true\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _BatchResultsFatalClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.summary.errors == 2
+    assert result.summary.canceled == 0
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.status is LlmJobStatus.FAILED
+    assert detail.fatal_error == "Provider batch results failed: decoder blew up"
+    assert all(item.final_status is LlmFinalStatus.FATAL_ERROR for item in detail.items)
+    assert all(
+        item.error_message == "Provider batch results failed: decoder blew up"
+        for item in detail.items
+    )
+
+
+def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _OnlineFailFastClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.summary.errors == 1
+    assert result.summary.canceled == 1
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    statuses = [item.final_status for item in detail.items]
+    assert statuses.count(LlmFinalStatus.FATAL_ERROR) == 1
+    assert statuses.count(LlmFinalStatus.CANCELED) == 1
+
+
 def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
@@ -718,7 +936,8 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "
-        "temperature=default retries=2 retry_backoff=0.5s retry_jitter=true"
+        "temperature=default retries=2 retry_backoff=0.5s retry_jitter=true "
+        "mode=online concurrency=1 fail_fast=true"
     ) in caplog.text
     assert "LLM serializer scope: *" in caplog.text
     assert "Auto-commit disabled (--no-auto-commit)" in caplog.text

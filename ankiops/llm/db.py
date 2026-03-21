@@ -1,4 +1,4 @@
-"""SQLite adapter for LLM execution history and batch metadata."""
+"""SQLite adapter for LLM execution history and async batch metadata."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ from typing import Any, Iterator
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
 from .anthropic_models import parse_model
+from .claude import ProviderBatchState
 from .models import (
+    ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -36,6 +38,7 @@ _EXPECTED_TABLES = {
 
 _REQUIRED_INDEXES = {
     "idx_llm_job_created",
+    "idx_llm_job_status",
     "idx_llm_job_item_job",
     "idx_llm_job_item_note_key",
     "idx_llm_attempt_result",
@@ -51,10 +54,13 @@ _EXPECTED_COLUMNS: dict[str, list[str]] = {
         "task_name",
         "model_name",
         "api_model",
+        "execution_mode",
         "failure_policy",
         "status",
         "persisted",
         "fatal_error",
+        "config_snapshot_json",
+        "resume_from_job_id",
         "created_at",
         "started_at",
         "finished_at",
@@ -75,6 +81,7 @@ _EXPECTED_COLUMNS: dict[str, list[str]] = {
         "error_message",
         "changed_fields_json",
         "applied_to_markdown",
+        "resume_source_item_id",
     ],
     "llm_item_attempt": [
         "id",
@@ -83,6 +90,8 @@ _EXPECTED_COLUMNS: dict[str, list[str]] = {
         "provider",
         "provider_message_id",
         "provider_model",
+        "provider_request_id",
+        "provider_execution_mode",
         "stop_reason",
         "result_type",
         "latency_ms",
@@ -91,6 +100,7 @@ _EXPECTED_COLUMNS: dict[str, list[str]] = {
         "retry_count",
         "error_type",
         "error_message",
+        "rate_limit_headers_json",
         "parsed_update_json",
         "created_at",
         "completed_at",
@@ -119,6 +129,10 @@ _EXPECTED_COLUMNS: dict[str, list[str]] = {
         "count_errored",
         "count_canceled",
         "count_expired",
+        "last_request_id",
+        "last_rate_limit_headers_json",
+        "created_at_local",
+        "updated_at_local",
     ],
     "llm_batch_item_map": [
         "provider_batch_id",
@@ -134,21 +148,17 @@ def _enum_check_sql(values: list[str]) -> str:
     return f"({quoted})"
 
 
-def _normalized_sql(sql: str | None) -> str:
-    if not sql:
-        return ""
-    return " ".join(sql.lower().split())
-
-
 @dataclass(frozen=True)
 class LlmJobListItem:
     job_id: int
     task_name: str
     model_name: str
+    execution_mode: ExecutionMode
     status: LlmJobStatus
     persisted: bool
     created_at: str
     finished_at: str | None
+    resume_from_job_id: int | None
 
 
 @dataclass(frozen=True)
@@ -165,6 +175,7 @@ class LlmJobItemDetail:
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    resume_source_item_id: int | None
 
 
 @dataclass(frozen=True)
@@ -173,6 +184,7 @@ class LlmJobDetail:
     task_name: str
     model_name: str
     api_model: str
+    execution_mode: ExecutionMode
     status: LlmJobStatus
     persisted: bool
     failure_policy: RunFailurePolicy
@@ -182,6 +194,7 @@ class LlmJobDetail:
     fatal_error: str | None
     summary: TaskRunSummary
     items: list[LlmJobItemDetail]
+    resume_from_job_id: int | None
 
 
 @dataclass(frozen=True)
@@ -294,6 +307,16 @@ class LlmDbAdapter:
             return []
         return [item for item in decoded if isinstance(item, str)]
 
+    @staticmethod
+    def _parse_json_mapping(raw: str | None) -> dict[str, Any]:
+        if raw is None:
+            return {}
+        try:
+            decoded = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+
     def _ensure_schema(self) -> bool:
         tables = self._user_tables()
         if not tables:
@@ -316,145 +339,113 @@ class LlmDbAdapter:
         rows = self._conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         return [str(row["name"]) for row in rows]
 
-    def _table_sql(self, table_name: str) -> str:
-        row = self._conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,),
-        ).fetchone()
-        return _normalized_sql(str(row["sql"]) if row and row["sql"] else "")
+    def _index_names(self) -> set[str]:
+        rows = self._conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type='index'
+              AND name NOT LIKE 'sqlite_%'
+            """
+        ).fetchall()
+        return {str(row["name"]) for row in rows}
 
     def _schema_matches_expected(self) -> bool:
         tables = self._user_tables()
         if tables != _EXPECTED_TABLES:
             return False
-
-        for table_name, expected_columns in _EXPECTED_COLUMNS.items():
-            if self._table_columns(table_name) != expected_columns:
+        for table_name, columns in _EXPECTED_COLUMNS.items():
+            if self._table_columns(table_name) != columns:
                 return False
-
-        index_rows = self._conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
-        indexes = {str(row["name"]) for row in index_rows}
-        if not _REQUIRED_INDEXES.issubset(indexes):
-            return False
-
-        job_sql = self._table_sql("llm_job")
-        if (
-            "check (status in ('running', 'completed', 'failed'))" not in job_sql
-            or "check (failure_policy in ('atomic', 'partial'))" not in job_sql
-            or "check (persisted in (0, 1))" not in job_sql
-        ):
-            return False
-
-        item_sql = self._table_sql("llm_job_item")
-        if (
-            "check (candidate_status in ('eligible', 'skipped_deck_scope', "
-            "'skipped_no_editable_fields', 'invalid_note'))" not in item_sql
-            or "check (final_status in ('not_attempted', 'succeeded_updated', "
-            "'succeeded_unchanged', 'note_error', 'provider_error', "
-            "'fatal_error', 'canceled', 'expired'))" not in item_sql
-            or "check (applied_to_markdown in (0, 1))" not in item_sql
-        ):
-            return False
-
-        attempt_sql = self._table_sql("llm_item_attempt")
-        if (
-            "check (result_type in ('succeeded', 'errored', "
-            "'canceled', 'expired'))" not in attempt_sql
-        ):
-            return False
-
-        return True
+        indexes = self._index_names()
+        return _REQUIRED_INDEXES.issubset(indexes)
 
     def _create_schema(self) -> None:
-        candidate_values = _enum_check_sql(
+        candidate_status_check = _enum_check_sql(
             [status.value for status in LlmCandidateStatus]
         )
-        final_values = _enum_check_sql([status.value for status in LlmFinalStatus])
-        attempt_values = _enum_check_sql(
-            [status.value for status in LlmAttemptResultType]
+        final_status_check = _enum_check_sql(
+            [status.value for status in LlmFinalStatus]
         )
-        job_values = _enum_check_sql([status.value for status in LlmJobStatus])
-        policy_values = _enum_check_sql([policy.value for policy in RunFailurePolicy])
+        attempt_result_check = _enum_check_sql(
+            [result.value for result in LlmAttemptResultType]
+        )
+        job_status_check = _enum_check_sql([status.value for status in LlmJobStatus])
+        failure_policy_check = _enum_check_sql(
+            [policy.value for policy in RunFailurePolicy]
+        )
+        execution_mode_check = _enum_check_sql(
+            [mode.value for mode in ExecutionMode]
+        )
 
         with self._conn:
-            self._conn.execute(
+            self._conn.executescript(
                 f"""
                 CREATE TABLE llm_job (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_name TEXT NOT NULL,
                     model_name TEXT NOT NULL,
                     api_model TEXT NOT NULL,
-                    failure_policy TEXT NOT NULL
-                        CHECK (failure_policy IN {policy_values}),
-                    status TEXT NOT NULL
-                        CHECK (status IN {job_values}),
-                    persisted INTEGER NOT NULL DEFAULT 0
-                        CHECK (persisted IN (0, 1)),
+                    execution_mode TEXT NOT NULL CHECK (execution_mode IN {execution_mode_check}),
+                    failure_policy TEXT NOT NULL CHECK (failure_policy IN {failure_policy_check}),
+                    status TEXT NOT NULL CHECK (status IN {job_status_check}),
+                    persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
+                    config_snapshot_json TEXT NOT NULL,
+                    resume_from_job_id INTEGER,
                     created_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     finished_at TEXT,
                     decks_seen INTEGER NOT NULL DEFAULT 0,
                     decks_matched INTEGER NOT NULL DEFAULT 0,
-                    notes_seen INTEGER NOT NULL DEFAULT 0
-                )
-                """
-            )
-            self._conn.execute(
-                f"""
+                    notes_seen INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(resume_from_job_id) REFERENCES llm_job(id)
+                );
+
                 CREATE TABLE llm_job_item (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id INTEGER NOT NULL,
                     ordinal INTEGER NOT NULL,
                     note_key TEXT,
                     deck_name TEXT NOT NULL,
                     note_type TEXT,
-                    candidate_status TEXT NOT NULL
-                        CHECK (candidate_status IN {candidate_values}),
+                    candidate_status TEXT NOT NULL CHECK (candidate_status IN {candidate_status_check}),
                     skip_reason TEXT,
-                    final_status TEXT NOT NULL
-                        CHECK (final_status IN {final_values}),
+                    final_status TEXT NOT NULL CHECK (final_status IN {final_status_check}),
                     error_message TEXT,
-                    changed_fields_json TEXT NOT NULL DEFAULT '[]',
-                    applied_to_markdown INTEGER NOT NULL DEFAULT 0
-                        CHECK (applied_to_markdown IN (0, 1)),
+                    changed_fields_json TEXT NOT NULL,
+                    applied_to_markdown INTEGER NOT NULL DEFAULT 0 CHECK (applied_to_markdown IN (0, 1)),
+                    resume_source_item_id INTEGER,
                     UNIQUE(job_id, ordinal),
-                    FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                f"""
+                    FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE,
+                    FOREIGN KEY(resume_source_item_id) REFERENCES llm_job_item(id)
+                );
+
                 CREATE TABLE llm_item_attempt (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_item_id INTEGER NOT NULL,
                     attempt_no INTEGER NOT NULL,
                     provider TEXT NOT NULL,
                     provider_message_id TEXT,
                     provider_model TEXT,
+                    provider_request_id TEXT,
+                    provider_execution_mode TEXT NOT NULL CHECK (provider_execution_mode IN {execution_mode_check}),
                     stop_reason TEXT,
-                    result_type TEXT NOT NULL
-                        CHECK (result_type IN {attempt_values}),
-                    latency_ms INTEGER NOT NULL DEFAULT 0,
-                    input_tokens INTEGER NOT NULL DEFAULT 0,
-                    output_tokens INTEGER NOT NULL DEFAULT 0,
-                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    result_type TEXT NOT NULL CHECK (result_type IN {attempt_result_check}),
+                    latency_ms INTEGER NOT NULL,
+                    input_tokens INTEGER NOT NULL,
+                    output_tokens INTEGER NOT NULL,
+                    retry_count INTEGER NOT NULL,
                     error_type TEXT,
                     error_message TEXT,
+                    rate_limit_headers_json TEXT,
                     parsed_update_json TEXT,
                     created_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL,
                     UNIQUE(job_item_id, attempt_no),
-                    FOREIGN KEY(job_item_id)
-                        REFERENCES llm_job_item(id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
+                    FOREIGN KEY(job_item_id) REFERENCES llm_job_item(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE llm_attempt_payload (
                     attempt_id INTEGER PRIMARY KEY,
                     system_prompt_text TEXT NOT NULL,
@@ -462,16 +453,11 @@ class LlmDbAdapter:
                     request_params_json TEXT NOT NULL,
                     response_raw_text TEXT,
                     response_full_json TEXT,
-                    FOREIGN KEY(attempt_id)
-                        REFERENCES llm_item_attempt(id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
+                    FOREIGN KEY(attempt_id) REFERENCES llm_item_attempt(id) ON DELETE CASCADE
+                );
+
                 CREATE TABLE llm_provider_batch (
-                    id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id INTEGER NOT NULL,
                     provider_batch_id TEXT NOT NULL UNIQUE,
                     processing_status TEXT NOT NULL,
@@ -486,29 +472,29 @@ class LlmDbAdapter:
                     count_errored INTEGER NOT NULL DEFAULT 0,
                     count_canceled INTEGER NOT NULL DEFAULT 0,
                     count_expired INTEGER NOT NULL DEFAULT 0,
+                    last_request_id TEXT,
+                    last_rate_limit_headers_json TEXT,
+                    created_at_local TEXT NOT NULL,
+                    updated_at_local TEXT NOT NULL,
                     FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE
-                )
-                """
-            )
-            self._conn.execute(
-                """
+                );
+
                 CREATE TABLE llm_batch_item_map (
                     provider_batch_id INTEGER NOT NULL,
                     custom_id TEXT NOT NULL,
                     job_item_id INTEGER NOT NULL,
                     attempt_no INTEGER NOT NULL,
                     PRIMARY KEY(provider_batch_id, custom_id),
-                    FOREIGN KEY(provider_batch_id)
-                        REFERENCES llm_provider_batch(id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY(job_item_id)
-                        REFERENCES llm_job_item(id)
-                        ON DELETE CASCADE
-                )
+                    FOREIGN KEY(provider_batch_id) REFERENCES llm_provider_batch(id) ON DELETE CASCADE,
+                    FOREIGN KEY(job_item_id) REFERENCES llm_job_item(id) ON DELETE CASCADE
+                );
                 """
             )
             self._conn.execute(
                 "CREATE INDEX idx_llm_job_created ON llm_job(created_at DESC)"
+            )
+            self._conn.execute(
+                "CREATE INDEX idx_llm_job_status ON llm_job(status)"
             )
             self._conn.execute(
                 "CREATE INDEX idx_llm_job_item_job ON llm_job_item(job_id)"
@@ -544,22 +530,30 @@ class LlmDbAdapter:
         task_name: str,
         model_name: str,
         api_model: str,
+        execution_mode: ExecutionMode,
         failure_policy: RunFailurePolicy,
+        config_snapshot: dict[str, Any],
+        resume_from_job_id: int | None = None,
     ) -> int:
         now = self._utc_now()
         cursor = self._write(
             """
             INSERT INTO llm_job (
-                task_name, model_name, api_model, failure_policy,
-                status, created_at, started_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                task_name, model_name, api_model, execution_mode,
+                failure_policy, status, persisted, fatal_error,
+                config_snapshot_json, resume_from_job_id,
+                created_at, started_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
             """,
             (
                 task_name,
                 model_name,
                 api_model,
+                execution_mode.value,
                 failure_policy.value,
                 LlmJobStatus.RUNNING.value,
+                self._as_json(config_snapshot),
+                resume_from_job_id,
                 now,
                 now,
             ),
@@ -597,14 +591,16 @@ class LlmDbAdapter:
         error_message: str | None = None,
         changed_fields: list[str] | None = None,
         applied_to_markdown: bool = False,
+        resume_source_item_id: int | None = None,
     ) -> int:
         cursor = self._write(
             """
             INSERT INTO llm_job_item (
                 job_id, ordinal, note_key, deck_name, note_type,
                 candidate_status, skip_reason, final_status,
-                error_message, changed_fields_json, applied_to_markdown
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                error_message, changed_fields_json, applied_to_markdown,
+                resume_source_item_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -618,6 +614,7 @@ class LlmDbAdapter:
                 error_message,
                 self._as_json(changed_fields or []),
                 1 if applied_to_markdown else 0,
+                resume_source_item_id,
             ),
         )
         return int(cursor.lastrowid)
@@ -646,6 +643,43 @@ class LlmDbAdapter:
             ),
         )
 
+    def mark_unfinished_items_canceled(self, *, job_id: int) -> int:
+        cursor = self._write(
+            """
+            UPDATE llm_job_item
+            SET final_status = ?
+            WHERE job_id = ? AND final_status = ?
+            """,
+            (
+                LlmFinalStatus.CANCELED.value,
+                job_id,
+                LlmFinalStatus.NOT_ATTEMPTED.value,
+            ),
+        )
+        return int(cursor.rowcount)
+
+    def mark_unfinished_items_fatal(
+        self,
+        *,
+        job_id: int,
+        error_message: str,
+    ) -> int:
+        cursor = self._write(
+            """
+            UPDATE llm_job_item
+            SET final_status = ?,
+                error_message = ?
+            WHERE job_id = ? AND final_status = ?
+            """,
+            (
+                LlmFinalStatus.FATAL_ERROR.value,
+                error_message,
+                job_id,
+                LlmFinalStatus.NOT_ATTEMPTED.value,
+            ),
+        )
+        return int(cursor.rowcount)
+
     def set_applied_for_updated_items(self, *, job_id: int) -> None:
         self._write(
             """
@@ -664,6 +698,8 @@ class LlmDbAdapter:
         provider: str,
         provider_message_id: str | None,
         provider_model: str | None,
+        provider_request_id: str | None,
+        provider_execution_mode: ExecutionMode,
         stop_reason: str | None,
         result_type: LlmAttemptResultType,
         latency_ms: int,
@@ -673,16 +709,19 @@ class LlmDbAdapter:
         error_type: str | None,
         error_message: str | None,
         parsed_update_json: dict[str, Any] | None,
+        rate_limit_headers_json: dict[str, str] | None,
     ) -> int:
         now = self._utc_now()
         cursor = self._write(
             """
             INSERT INTO llm_item_attempt (
                 job_item_id, attempt_no, provider, provider_message_id,
-                provider_model, stop_reason, result_type, latency_ms,
+                provider_model, provider_request_id, provider_execution_mode,
+                stop_reason, result_type, latency_ms,
                 input_tokens, output_tokens, retry_count, error_type,
-                error_message, parsed_update_json, created_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                error_message, rate_limit_headers_json, parsed_update_json,
+                created_at, completed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item_id,
@@ -690,6 +729,8 @@ class LlmDbAdapter:
                 provider,
                 provider_message_id,
                 provider_model,
+                provider_request_id,
+                provider_execution_mode.value,
                 stop_reason,
                 result_type.value,
                 latency_ms,
@@ -698,6 +739,11 @@ class LlmDbAdapter:
                 retry_count,
                 error_type,
                 error_message,
+                (
+                    self._as_json(rate_limit_headers_json)
+                    if rate_limit_headers_json is not None
+                    else None
+                ),
                 (
                     self._as_json(parsed_update_json)
                     if parsed_update_json is not None
@@ -734,6 +780,176 @@ class LlmDbAdapter:
                 response_raw_text,
                 response_full_json,
             ),
+        )
+
+    def upsert_provider_batch(
+        self,
+        *,
+        job_id: int,
+        batch: ProviderBatchState,
+    ) -> int:
+        now = self._utc_now()
+        existing = self._conn.execute(
+            "SELECT id FROM llm_provider_batch WHERE provider_batch_id = ?",
+            (batch.provider_batch_id,),
+        ).fetchone()
+        if existing is None:
+            cursor = self._write(
+                """
+                INSERT INTO llm_provider_batch (
+                    job_id, provider_batch_id, processing_status, results_url,
+                    created_at_remote, expires_at_remote, ended_at_remote,
+                    archived_at_remote, cancel_initiated_at_remote,
+                    count_processing, count_succeeded, count_errored,
+                    count_canceled, count_expired,
+                    last_request_id, last_rate_limit_headers_json,
+                    created_at_local, updated_at_local
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    batch.provider_batch_id,
+                    batch.processing_status,
+                    batch.results_url,
+                    batch.created_at_remote,
+                    batch.expires_at_remote,
+                    batch.ended_at_remote,
+                    batch.archived_at_remote,
+                    batch.cancel_initiated_at_remote,
+                    batch.count_processing,
+                    batch.count_succeeded,
+                    batch.count_errored,
+                    batch.count_canceled,
+                    batch.count_expired,
+                    batch.request_id,
+                    self._as_json(batch.rate_limit_headers),
+                    now,
+                    now,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+        batch_id = int(existing["id"])
+        self._write(
+            """
+            UPDATE llm_provider_batch
+            SET processing_status = ?,
+                results_url = ?,
+                created_at_remote = ?,
+                expires_at_remote = ?,
+                ended_at_remote = ?,
+                archived_at_remote = ?,
+                cancel_initiated_at_remote = ?,
+                count_processing = ?,
+                count_succeeded = ?,
+                count_errored = ?,
+                count_canceled = ?,
+                count_expired = ?,
+                last_request_id = ?,
+                last_rate_limit_headers_json = ?,
+                updated_at_local = ?
+            WHERE id = ?
+            """,
+            (
+                batch.processing_status,
+                batch.results_url,
+                batch.created_at_remote,
+                batch.expires_at_remote,
+                batch.ended_at_remote,
+                batch.archived_at_remote,
+                batch.cancel_initiated_at_remote,
+                batch.count_processing,
+                batch.count_succeeded,
+                batch.count_errored,
+                batch.count_canceled,
+                batch.count_expired,
+                batch.request_id,
+                self._as_json(batch.rate_limit_headers),
+                now,
+                batch_id,
+            ),
+        )
+        return batch_id
+
+    def insert_batch_item_map(
+        self,
+        *,
+        provider_batch_local_id: int,
+        custom_id: str,
+        job_item_id: int,
+        attempt_no: int,
+    ) -> None:
+        self._write(
+            """
+            INSERT OR REPLACE INTO llm_batch_item_map (
+                provider_batch_id, custom_id, job_item_id, attempt_no
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                provider_batch_local_id,
+                custom_id,
+                job_item_id,
+                attempt_no,
+            ),
+        )
+
+    def get_resume_source_items(self, *, job_id: int) -> dict[str, int]:
+        resumable = {
+            LlmFinalStatus.NOT_ATTEMPTED.value,
+            LlmFinalStatus.NOTE_ERROR.value,
+            LlmFinalStatus.PROVIDER_ERROR.value,
+            LlmFinalStatus.FATAL_ERROR.value,
+            LlmFinalStatus.CANCELED.value,
+            LlmFinalStatus.EXPIRED.value,
+        }
+        placeholders = ",".join("?" for _ in resumable)
+        rows = self._conn.execute(
+            f"""
+            SELECT id, note_key
+            FROM llm_job_item
+            WHERE job_id = ?
+              AND note_key IS NOT NULL
+              AND final_status IN ({placeholders})
+            """,
+            (job_id, *sorted(resumable)),
+        ).fetchall()
+        mapping: dict[str, int] = {}
+        for row in rows:
+            note_key = row["note_key"]
+            if isinstance(note_key, str):
+                mapping[note_key] = int(row["id"])
+        return mapping
+
+    def get_job_snapshot(self, *, job_id: int) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT config_snapshot_json FROM llm_job WHERE id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._parse_json_mapping(row["config_snapshot_json"])
+
+    def get_job_execution_metadata(
+        self,
+        *,
+        job_id: int,
+    ) -> tuple[str, str, str, ExecutionMode, RunFailurePolicy] | None:
+        row = self._conn.execute(
+            """
+            SELECT task_name, model_name, api_model, execution_mode, failure_policy
+            FROM llm_job
+            WHERE id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return (
+            str(row["task_name"]),
+            str(row["model_name"]),
+            str(row["api_model"]),
+            self._parse_enum(ExecutionMode, row["execution_mode"]),
+            self._parse_enum(RunFailurePolicy, row["failure_policy"]),
         )
 
     def finalize_job(
@@ -796,37 +1012,14 @@ class LlmDbAdapter:
         item_counts = self._conn.execute(
             """
             SELECT
-                SUM(
-                    CASE WHEN candidate_status = 'eligible' THEN 1 ELSE 0 END
-                ) AS eligible,
-                SUM(
-                    CASE WHEN final_status = 'succeeded_updated' THEN 1 ELSE 0 END
-                ) AS updated,
-                SUM(
-                    CASE WHEN final_status = 'succeeded_unchanged' THEN 1 ELSE 0 END
-                ) AS unchanged,
-                SUM(
-                    CASE
-                        WHEN candidate_status = 'skipped_deck_scope' THEN 1
-                        ELSE 0
-                    END
-                ) AS skipped_deck_scope,
-                SUM(
-                    CASE
-                        WHEN candidate_status = 'skipped_no_editable_fields' THEN 1
-                        ELSE 0
-                    END
-                ) AS skipped_no_editable_fields,
-                SUM(
-                    CASE
-                        WHEN final_status IN (
-                            'note_error',
-                            'provider_error',
-                            'fatal_error'
-                        ) THEN 1
-                        ELSE 0
-                    END
-                ) AS errors
+                SUM(CASE WHEN candidate_status = 'eligible' THEN 1 ELSE 0 END) AS eligible,
+                SUM(CASE WHEN final_status = 'succeeded_updated' THEN 1 ELSE 0 END) AS updated,
+                SUM(CASE WHEN final_status = 'succeeded_unchanged' THEN 1 ELSE 0 END) AS unchanged,
+                SUM(CASE WHEN candidate_status = 'skipped_deck_scope' THEN 1 ELSE 0 END) AS skipped_deck_scope,
+                SUM(CASE WHEN candidate_status = 'skipped_no_editable_fields' THEN 1 ELSE 0 END) AS skipped_no_editable_fields,
+                SUM(CASE WHEN final_status IN ('note_error', 'provider_error', 'fatal_error') THEN 1 ELSE 0 END) AS errors,
+                SUM(CASE WHEN final_status = 'canceled' THEN 1 ELSE 0 END) AS canceled,
+                SUM(CASE WHEN final_status = 'expired' THEN 1 ELSE 0 END) AS expired
             FROM llm_job_item
             WHERE job_id = ?
             """,
@@ -858,6 +1051,8 @@ class LlmDbAdapter:
             item_counts["skipped_no_editable_fields"] or 0
         )
         summary.errors = int(item_counts["errors"] or 0)
+        summary.canceled = int(item_counts["canceled"] or 0)
+        summary.expired = int(item_counts["expired"] or 0)
         summary.requests = int(attempts["requests"] or 0)
         summary.input_tokens = int(attempts["input_tokens"] or 0)
         summary.output_tokens = int(attempts["output_tokens"] or 0)
@@ -909,10 +1104,12 @@ class LlmDbAdapter:
                 id,
                 task_name,
                 model_name,
+                execution_mode,
                 status,
                 persisted,
                 created_at,
-                finished_at
+                finished_at,
+                resume_from_job_id
             FROM llm_job
             ORDER BY created_at DESC
             LIMIT ?
@@ -924,10 +1121,16 @@ class LlmDbAdapter:
                 job_id=int(row["id"]),
                 task_name=str(row["task_name"]),
                 model_name=str(row["model_name"]),
+                execution_mode=self._parse_enum(ExecutionMode, row["execution_mode"]),
                 status=self._parse_enum(LlmJobStatus, row["status"]),
                 persisted=bool(row["persisted"]),
                 created_at=str(row["created_at"]),
                 finished_at=(str(row["finished_at"]) if row["finished_at"] else None),
+                resume_from_job_id=(
+                    int(row["resume_from_job_id"])
+                    if row["resume_from_job_id"] is not None
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -935,8 +1138,20 @@ class LlmDbAdapter:
     def get_job_detail(self, job_id: int) -> LlmJobDetail | None:
         row = self._conn.execute(
             """
-            SELECT id, task_name, model_name, api_model, status, persisted,
-                   failure_policy, created_at, started_at, finished_at, fatal_error
+            SELECT
+                id,
+                task_name,
+                model_name,
+                api_model,
+                execution_mode,
+                status,
+                persisted,
+                failure_policy,
+                created_at,
+                started_at,
+                finished_at,
+                fatal_error,
+                resume_from_job_id
             FROM llm_job
             WHERE id = ?
             """,
@@ -958,6 +1173,7 @@ class LlmDbAdapter:
                 i.final_status,
                 i.error_message,
                 i.changed_fields_json,
+                i.resume_source_item_id,
                 COUNT(a.id) AS attempts,
                 COALESCE(SUM(a.input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(a.output_tokens), 0) AS output_tokens,
@@ -974,7 +1190,8 @@ class LlmDbAdapter:
                 i.candidate_status,
                 i.final_status,
                 i.error_message,
-                i.changed_fields_json
+                i.changed_fields_json,
+                i.resume_source_item_id
             ORDER BY i.ordinal ASC
             """,
             (resolved_job_id,),
@@ -1002,6 +1219,11 @@ class LlmDbAdapter:
                 input_tokens=int(item["input_tokens"] or 0),
                 output_tokens=int(item["output_tokens"] or 0),
                 latency_ms=int(item["latency_ms"] or 0),
+                resume_source_item_id=(
+                    int(item["resume_source_item_id"])
+                    if item["resume_source_item_id"] is not None
+                    else None
+                ),
             )
             for item in item_rows
         ]
@@ -1011,6 +1233,7 @@ class LlmDbAdapter:
             task_name=str(row["task_name"]),
             model_name=str(row["model_name"]),
             api_model=str(row["api_model"]),
+            execution_mode=self._parse_enum(ExecutionMode, row["execution_mode"]),
             status=self._parse_enum(LlmJobStatus, row["status"]),
             persisted=bool(row["persisted"]),
             failure_policy=self._parse_enum(RunFailurePolicy, row["failure_policy"]),
@@ -1020,4 +1243,9 @@ class LlmDbAdapter:
             fatal_error=(str(row["fatal_error"]) if row["fatal_error"] else None),
             summary=aggregate.summary,
             items=items,
+            resume_from_job_id=(
+                int(row["resume_from_job_id"])
+                if row["resume_from_job_id"] is not None
+                else None
+            ),
         )

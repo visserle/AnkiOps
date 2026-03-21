@@ -6,6 +6,7 @@ import pytest
 
 from ankiops.llm.db import LlmDbAdapter
 from ankiops.llm.models import (
+    ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -26,6 +27,54 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
         "SELECT name FROM sqlite_master WHERE type='index'"
     ).fetchall()
     return {name for (name,) in rows}
+
+
+def _start_job(adapter: LlmDbAdapter) -> int:
+    return adapter.start_job(
+        task_name="grammar",
+        model_name="sonnet",
+        api_model="claude-sonnet-4-6",
+        execution_mode=ExecutionMode.ONLINE,
+        failure_policy=RunFailurePolicy.ATOMIC,
+        config_snapshot={"task": "grammar"},
+    )
+
+
+def _insert_attempt(
+    adapter: LlmDbAdapter,
+    *,
+    item_id: int,
+    provider_message_id: str,
+    provider_model: str,
+    stop_reason: str,
+    result_type: LlmAttemptResultType,
+    latency_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    retry_count: int,
+    error_type: str | None,
+    error_message: str | None,
+    parsed_update_json: dict[str, object] | None,
+) -> int:
+    return adapter.insert_attempt(
+        item_id=item_id,
+        attempt_no=1,
+        provider="anthropic",
+        provider_message_id=provider_message_id,
+        provider_model=provider_model,
+        provider_request_id=None,
+        provider_execution_mode=ExecutionMode.ONLINE,
+        stop_reason=stop_reason,
+        result_type=result_type,
+        latency_ms=latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        retry_count=retry_count,
+        error_type=error_type,
+        error_message=error_message,
+        parsed_update_json=parsed_update_json,
+        rate_limit_headers_json=None,
+    )
 
 
 def test_open_creates_schema_and_indexes(tmp_path):
@@ -71,12 +120,7 @@ def test_open_creates_schema_and_indexes(tmp_path):
 def test_roundtrip_job_item_attempt_payload(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        job_id = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        job_id = _start_job(adapter)
         adapter.set_discovery_counts(
             job_id=job_id,
             decks_seen=1,
@@ -93,10 +137,9 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             skip_reason=None,
             final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
-        attempt_id = adapter.insert_attempt(
+        attempt_id = _insert_attempt(
+            adapter,
             item_id=item_id,
-            attempt_no=1,
-            provider="anthropic",
             provider_message_id="msg_123",
             provider_model="claude-sonnet-4-6",
             stop_reason="end_turn",
@@ -196,12 +239,7 @@ def test_open_recreates_invalid_schema(tmp_path):
 def test_enforces_uniqueness_constraints(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        job_id = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        job_id = _start_job(adapter)
         item_id = adapter.insert_job_item(
             job_id=job_id,
             ordinal=1,
@@ -225,10 +263,9 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 final_status=LlmFinalStatus.NOT_ATTEMPTED,
             )
 
-        adapter.insert_attempt(
+        _insert_attempt(
+            adapter,
             item_id=item_id,
-            attempt_no=1,
-            provider="anthropic",
             provider_message_id="msg",
             provider_model="claude-sonnet-4-6",
             stop_reason="end_turn",
@@ -242,10 +279,9 @@ def test_enforces_uniqueness_constraints(tmp_path):
             parsed_update_json=None,
         )
         with pytest.raises(sqlite3.IntegrityError):
-            adapter.insert_attempt(
+            _insert_attempt(
+                adapter,
                 item_id=item_id,
-                attempt_no=1,
-                provider="anthropic",
                 provider_message_id="msg2",
                 provider_model="claude-sonnet-4-6",
                 stop_reason="end_turn",
@@ -269,17 +305,19 @@ def test_enforces_status_constraints(tmp_path):
             adapter._conn.execute(
                 """
                 INSERT INTO llm_job (
-                    task_name, model_name, api_model, failure_policy,
-                    status, persisted, created_at, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    task_name, model_name, api_model, execution_mode, failure_policy,
+                    status, persisted, config_snapshot_json, created_at, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "grammar",
                     "sonnet",
                     "claude-sonnet-4-6",
+                    "online",
                     "atomic",
                     "not_a_status",
                     0,
+                    "{}",
                     "2026-03-21T10:00:00Z",
                     "2026-03-21T10:00:00Z",
                 ),
@@ -291,12 +329,7 @@ def test_enforces_status_constraints(tmp_path):
 def test_resolve_job_id_accepts_numeric_latest_and_minus_one_alias(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        job_id = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        job_id = _start_job(adapter)
         assert adapter.resolve_job_id(str(job_id)) == job_id
         assert adapter.resolve_job_id("latest") == job_id
         assert adapter.resolve_job_id("-1") == job_id
@@ -307,12 +340,7 @@ def test_resolve_job_id_accepts_numeric_latest_and_minus_one_alias(tmp_path):
 def test_resolve_job_id_rejects_non_numeric_lookup(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        _ = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        _ = _start_job(adapter)
         with pytest.raises(ValueError, match="Job ID must be numeric"):
             adapter.resolve_job_id("abc123")
     finally:
@@ -322,12 +350,7 @@ def test_resolve_job_id_rejects_non_numeric_lookup(tmp_path):
 def test_resolve_job_id_returns_none_for_missing_numeric_id(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        _ = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        _ = _start_job(adapter)
         assert adapter.resolve_job_id("999999") is None
     finally:
         adapter.close()
@@ -336,12 +359,7 @@ def test_resolve_job_id_returns_none_for_missing_numeric_id(tmp_path):
 def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
-        job_id = adapter.start_job(
-            task_name="grammar",
-            model_name="sonnet",
-            api_model="claude-sonnet-4-6",
-            failure_policy=RunFailurePolicy.ATOMIC,
-        )
+        job_id = _start_job(adapter)
         item_id = adapter.insert_job_item(
             job_id=job_id,
             ordinal=1,
@@ -355,10 +373,9 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
 
         with pytest.raises(RuntimeError, match="boom"):
             with adapter.write_tx():
-                attempt_id = adapter.insert_attempt(
+                attempt_id = _insert_attempt(
+                    adapter,
                     item_id=item_id,
-                    attempt_no=1,
-                    provider="anthropic",
                     provider_message_id="msg",
                     provider_model="claude-sonnet-4-6",
                     stop_reason="end_turn",
@@ -391,3 +408,68 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
         assert payloads == 0
     finally:
         adapter.close()
+
+
+def test_mark_unfinished_items_fatal_updates_status_and_error_message(tmp_path):
+    adapter = LlmDbAdapter.open(tmp_path)
+    try:
+        job_id = _start_job(adapter)
+        first_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=1,
+            deck_name="Deck",
+            note_key="nk-1",
+            note_type="AnkiOpsQA",
+            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            skip_reason=None,
+            final_status=LlmFinalStatus.NOT_ATTEMPTED,
+        )
+        second_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=2,
+            deck_name="Deck",
+            note_key="nk-2",
+            note_type="AnkiOpsQA",
+            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            skip_reason=None,
+            final_status=LlmFinalStatus.NOT_ATTEMPTED,
+        )
+        stable_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=3,
+            deck_name="Deck",
+            note_key="nk-3",
+            note_type="AnkiOpsQA",
+            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            skip_reason=None,
+            final_status=LlmFinalStatus.SUCCEEDED_UNCHANGED,
+        )
+
+        updated = adapter.mark_unfinished_items_fatal(
+            job_id=job_id,
+            error_message="Provider batch results failed: decoder blew up",
+        )
+        assert updated == 2
+
+        rows = adapter._conn.execute(
+            """
+            SELECT id, final_status, error_message
+            FROM llm_job_item
+            WHERE job_id = ?
+            ORDER BY ordinal ASC
+            """,
+            (job_id,),
+        ).fetchall()
+    finally:
+        adapter.close()
+
+    assert len(rows) == 3
+    assert int(rows[0]["id"]) == first_id
+    assert rows[0]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
+    assert rows[0]["error_message"] == "Provider batch results failed: decoder blew up"
+    assert int(rows[1]["id"]) == second_id
+    assert rows[1]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
+    assert rows[1]["error_message"] == "Provider batch results failed: decoder blew up"
+    assert int(rows[2]["id"]) == stable_id
+    assert rows[2]["final_status"] == LlmFinalStatus.SUCCEEDED_UNCHANGED.value
+    assert rows[2]["error_message"] is None

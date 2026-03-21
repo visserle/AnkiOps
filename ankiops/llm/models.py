@@ -23,6 +23,11 @@ class RunFailurePolicy(Enum):
     PARTIAL = "partial"
 
 
+class ExecutionMode(Enum):
+    ONLINE = "online"
+    BATCH = "batch"
+
+
 class LlmCandidateStatus(Enum):
     ELIGIBLE = "eligible"
     SKIPPED_DECK_SCOPE = "skipped_deck_scope"
@@ -116,6 +121,14 @@ class TaskRequestOptions:
 
 
 @dataclass(frozen=True)
+class TaskExecutionOptions:
+    mode: ExecutionMode = ExecutionMode.ONLINE
+    concurrency: int = 8
+    fail_fast: bool = True
+    batch_poll_seconds: int = 15
+
+
+@dataclass(frozen=True)
 class TaskConfig:
     name: str
     model: AnthropicModel
@@ -130,6 +143,7 @@ class TaskConfig:
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
+    execution: TaskExecutionOptions = field(default_factory=TaskExecutionOptions)
 
     def field_access(self, note_type: str, field_name: str) -> FieldAccess:
         access = FieldAccess.EDIT
@@ -172,6 +186,8 @@ class ProviderAttemptErrorContext:
     provider_message_id: str | None
     provider_model: str | None
     stop_reason: str | None
+    request_id: str | None
+    rate_limit_headers: dict[str, str]
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -186,6 +202,8 @@ class ProviderAttemptOutcome:
     provider_message_id: str | None
     provider_model: str | None
     stop_reason: str | None
+    request_id: str | None
+    rate_limit_headers: dict[str, str]
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -207,6 +225,8 @@ class TaskRunSummary:
     skipped_deck_scope: int = 0
     skipped_no_editable_fields: int = 0
     errors: int = 0
+    canceled: int = 0
+    expired: int = 0
     requests: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -218,15 +238,23 @@ class TaskRunSummary:
         return self.skipped_deck_scope + self.skipped_no_editable_fields
 
     def format(self) -> str:
-        return (
+        base = (
             f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — "
-            + format_changes(
+            f"{format_changes(
                 updated=self.updated,
                 unchanged=self.unchanged,
                 skipped=self.skipped,
                 errors=self.errors,
-            )
+            )}"
         )
+        suffix_parts: list[str] = []
+        if self.canceled:
+            suffix_parts.append(f"{self.canceled} canceled")
+        if self.expired:
+            suffix_parts.append(f"{self.expired} expired")
+        if not suffix_parts:
+            return base
+        return f"{base}, {', '.join(suffix_parts)}"
 
     def format_usage(self) -> str:
         request_label = "request" if self.requests == 1 else "requests"

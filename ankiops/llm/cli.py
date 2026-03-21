@@ -17,7 +17,7 @@ from ankiops.fs import FileSystemAdapter
 from .anthropic_models import supported_model_names
 from .config_loader import load_llm_task_catalog
 from .runner import list_jobs as list_llm_jobs
-from .runner import plan_task, run_task, show_job
+from .runner import plan_task, resume_task, run_task, show_job
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,14 @@ def _normalize_deck_override(value: str | None) -> str | None:
     if any(char in deck_name for char in ("*", "?", "[")):
         _usage_error("--deck must be an exact deck name (wildcards are not supported).")
     return deck_name
+
+
+def _resolve_mode_override(args: argparse.Namespace) -> str | None:
+    if bool(getattr(args, "online", False)):
+        return "online"
+    if bool(getattr(args, "batch", False)):
+        return "batch"
+    return None
 
 
 def _format_table(
@@ -168,15 +176,31 @@ def configure_llm_parser(
         choices=supported_model_names(),
         help="Override model class for this plan/run (opus, sonnet, haiku)",
     )
+    mode_group = llm_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--online",
+        action="store_true",
+        help="Override execution mode to online for this plan/run/resume",
+    )
+    mode_group.add_argument(
+        "--batch",
+        action="store_true",
+        help="Override execution mode to batch for this plan/run/resume",
+    )
     llm_parser.add_argument(
         "--deck",
         help="Override task scope to one exact deck (subdecks excluded by default)",
     )
     llm_parser.add_argument(
+        "--resume",
+        dest="resume_job_id",
+        help="Resume unfinished/error items from a prior LLM job (id, '-1', or 'latest')",
+    )
+    llm_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
-        help="Skip automatic git snapshot (only with <task> --run)",
+        help="Skip automatic git snapshot (with <task> --run or --resume)",
     )
     llm_parser.set_defaults(handler=handler)
 
@@ -192,6 +216,7 @@ def run_llm(
     load_llm_task_catalog_fn: Callable[..., Any] = load_llm_task_catalog,
     plan_task_fn: Callable[..., Any] = plan_task,
     run_task_fn: Callable[..., Any] = run_task,
+    resume_task_fn: Callable[..., Any] = resume_task,
     list_jobs_fn: Callable[..., Any] = list_llm_jobs,
     show_job_fn: Callable[..., Any] = show_job,
 ) -> None:
@@ -203,21 +228,27 @@ def run_llm(
     task_name = getattr(args, "task_name", None)
     run_mode = bool(getattr(args, "run", False))
     job_id = getattr(args, "job_id", None)
+    resume_job_id = getattr(args, "resume_job_id", None)
     model_override = getattr(args, "model", None)
+    mode_override = _resolve_mode_override(args)
     deck_override = _normalize_deck_override(getattr(args, "deck", None))
     no_auto_commit = bool(getattr(args, "no_auto_commit", False))
 
     if job_id is not None:
         if task_name is not None:
             _usage_error("Cannot combine <task> with --job.")
+        if resume_job_id is not None:
+            _usage_error("Cannot combine --resume with --job.")
         if run_mode:
             _usage_error("Cannot combine --run with --job.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
+        if mode_override is not None:
+            _usage_error("--online/--batch requires <task> or --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit:
-            _usage_error("--no-auto-commit requires <task> --run.")
+            _usage_error("--no-auto-commit requires <task> --run or --resume.")
         try:
             detail = show_job_fn(
                 collection_dir=collection_dir,
@@ -231,17 +262,20 @@ def run_llm(
             raise SystemExit(1)
 
         logger.info(
-            "Job %s — %s (%s / %s)",
+            "Job %s — %s (%s / %s / %s)",
             detail.job_id,
             detail.task_name,
             detail.model_name,
             detail.api_model,
+            detail.execution_mode.value,
         )
         logger.info(
             "Status: %s (persisted=%s)",
             detail.status.value,
             "yes" if detail.persisted else "no",
         )
+        if detail.resume_from_job_id is not None:
+            logger.info("Resume source: %s", detail.resume_from_job_id)
         logger.info(
             "Timing: created=%s started=%s finished=%s",
             detail.created_at,
@@ -303,15 +337,60 @@ def run_llm(
                     logger.error("  #%d error=%s", item.ordinal, item.error_message)
         return
 
+    if resume_job_id is not None:
+        if task_name is not None:
+            _usage_error("Cannot combine <task> with --resume.")
+        if run_mode:
+            _usage_error("Cannot combine --run with --resume.")
+        if job_id is not None:
+            _usage_error("Cannot combine --job with --resume.")
+        if deck_override is not None:
+            _usage_error("--deck cannot be used with --resume.")
+        if model_override is not None:
+            _usage_error("--model cannot be used with --resume.")
+        try:
+            result = resume_task_fn(
+                collection_dir=collection_dir,
+                resume_job_id=resume_job_id,
+                mode_override=mode_override,
+                no_auto_commit=no_auto_commit,
+            )
+        except ValueError as error:
+            logger.error(str(error))
+            raise SystemExit(1) from error
+        inspect_command = f"ankiops llm --job {result.job_id}"
+        if result.failed:
+            logger.error(
+                "LLM resume job #%d failed with %d error(s)%s. Cost: %s. Inspect: %s",
+                result.job_id,
+                result.summary.errors,
+                " (atomic policy: no updates persisted)"
+                if not result.persisted and result.summary.updated > 0
+                else "",
+                result.summary.format_cost(),
+                inspect_command,
+            )
+            raise SystemExit(1)
+        logger.info(
+            "LLM resume job #%d completed%s. Cost: %s. Inspect: %s",
+            result.job_id,
+            " (no markdown changes persisted)" if not result.persisted else "",
+            result.summary.format_cost(),
+            inspect_command,
+        )
+        return
+
     if task_name is None:
         if run_mode:
             _usage_error("--run requires <task>.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
+        if mode_override is not None:
+            _usage_error("--online/--batch requires <task> or --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit:
-            _usage_error("--no-auto-commit requires <task> --run.")
+            _usage_error("--no-auto-commit requires <task> --run or --resume.")
 
         note_type_configs = load_note_type_configs_fn(get_note_types_dir_fn())
         catalog = load_llm_task_catalog_fn(
@@ -356,13 +435,14 @@ def run_llm(
                         str(job.job_id),
                         job.task_name,
                         job.model_name,
+                        job.execution_mode.value,
                         job.status.value,
                         "yes" if job.persisted else "no",
                         job.created_at,
                     ]
                 )
             _log_table(
-                ["Job", "Task", "Model", "Status", "Persisted", "Created"],
+                ["Job", "Task", "Model", "Mode", "Status", "Persisted", "Created"],
                 job_rows,
             )
 
@@ -381,6 +461,7 @@ def run_llm(
                 collection_dir=collection_dir,
                 task_name=task_name,
                 model_override=model_override,
+                mode_override=mode_override,
                 deck_override=deck_override,
                 no_auto_commit=no_auto_commit,
             )
@@ -414,6 +495,7 @@ def run_llm(
             collection_dir=collection_dir,
             task_name=task_name,
             model_override=model_override,
+            mode_override=mode_override,
             deck_override=deck_override,
         )
     except ValueError as error:

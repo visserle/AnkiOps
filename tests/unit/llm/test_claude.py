@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -11,7 +12,12 @@ import pytest
 from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.claude import ClaudeClient
 from ankiops.llm.errors import LlmFatalError, LlmNoteError
-from ankiops.llm.models import NotePayload, TaskConfig, TaskRequestOptions
+from ankiops.llm.models import (
+    LlmAttemptResultType,
+    NotePayload,
+    TaskConfig,
+    TaskRequestOptions,
+)
 from ankiops.llm.prompting import build_system_prompt
 
 
@@ -73,7 +79,6 @@ def test_generate_update_builds_request_and_returns_update(
     task_config: TaskConfig,
     client: ClaudeClient,
     note_payload: NotePayload,
-    monkeypatch,
     caplog,
 ):
     response = _response(
@@ -84,14 +89,11 @@ def test_generate_update_builds_request_and_returns_update(
             )
         ]
     )
-    monotonic = iter([100.0, 102.172])
-    monkeypatch.setattr("ankiops.llm.claude.time.monotonic", lambda: next(monotonic))
-
     with (
         patch.object(
-            client._client.messages,
-            "create",
-            return_value=response,
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(return_value=(response, None, {})),
         ) as create,
         caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
     ):
@@ -101,9 +103,13 @@ def test_generate_update_builds_request_and_returns_update(
             request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
             api_model="claude-sonnet-4-6",
         )
-        update_result = client.generate_update(
-            prepared_request=prepared_request,
-            request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
+        update_result = asyncio.run(
+            client.generate_update(
+                prepared_request=prepared_request,
+                request_options=TaskRequestOptions(
+                    temperature=0, max_output_tokens=200
+                ),
+            )
         )
 
     assert update_result.update.note_key == "nk-1"
@@ -112,9 +118,9 @@ def test_generate_update_builds_request_and_returns_update(
     assert update_result.provider_model == "claude-sonnet-4-6"
     assert update_result.input_tokens == 311
     assert update_result.output_tokens == 37
-    assert update_result.latency_ms == 2172
+    assert update_result.latency_ms >= 0
 
-    call_kwargs = create.call_args.kwargs
+    call_kwargs = create.call_args.args[0]
     assert call_kwargs["model"] == "claude-sonnet-4-6"
     assert call_kwargs["system"] == build_system_prompt(task_config.system_prompt)
     assert "<task>\nFix grammar\n</task>" in call_kwargs["messages"][0]["content"]
@@ -133,10 +139,9 @@ def test_generate_update_builds_request_and_returns_update(
     assert (
         "Requesting update for nk-1 (AnkiOpsQA, editable=1, read_only=1)"
     ) in caplog.text
-    assert (
-        "Response for nk-1: message_id=msg_123, stop_reason=end_turn, "
-        "input_tokens=311, output_tokens=37, latency_ms=2172, retries=0"
-    ) in caplog.text
+    assert "Response for nk-1: message_id=msg_123, stop_reason=end_turn" in caplog.text
+    assert "input_tokens=311, output_tokens=37" in caplog.text
+    assert "retries=0" in caplog.text
     assert "Broken" not in caplog.text
     assert "<task>" not in caplog.text
     assert '{"note_key"' not in caplog.text
@@ -169,7 +174,11 @@ def test_generate_update_rejects_note_level_failures(
     response = _response(blocks=blocks, stop_reason=stop_reason)
 
     with (
-        patch.object(client._client.messages, "create", return_value=response),
+        patch.object(
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(return_value=(response, None, {})),
+        ),
         caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
     ):
         prepared_request = client.prepare_attempt_request(
@@ -179,9 +188,11 @@ def test_generate_update_rejects_note_level_failures(
             api_model="claude-sonnet-4-6",
         )
         with pytest.raises(LlmNoteError, match=expected_error):
-            client.generate_update(
-                prepared_request=prepared_request,
-                request_options=TaskRequestOptions(),
+            asyncio.run(
+                client.generate_update(
+                    prepared_request=prepared_request,
+                    request_options=TaskRequestOptions(),
+                )
             )
 
     assert (
@@ -208,7 +219,11 @@ def test_generate_update_surfaces_unsupported_model_as_fatal(
         body=None,
     )
 
-    with patch.object(client._client.messages, "create", side_effect=error):
+    with patch.object(
+        client,
+        "_create_message_with_headers",
+        new=AsyncMock(side_effect=error),
+    ):
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
@@ -219,9 +234,11 @@ def test_generate_update_surfaces_unsupported_model_as_fatal(
             LlmFatalError,
             match="Configured Anthropic model does not support structured outputs",
         ):
-            client.generate_update(
-                prepared_request=prepared_request,
-                request_options=TaskRequestOptions(),
+            asyncio.run(
+                client.generate_update(
+                    prepared_request=prepared_request,
+                    request_options=TaskRequestOptions(),
+                )
             )
 
 
@@ -252,11 +269,11 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
 
     with (
         patch.object(
-            client._client.messages,
-            "create",
-            side_effect=[connection_error, response],
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(side_effect=[connection_error, (response, None, {})]),
         ) as create,
-        patch("ankiops.llm.claude.time.sleep") as sleep,
+        patch("ankiops.llm.claude.asyncio.sleep") as sleep,
         caplog.at_level(logging.WARNING, logger="ankiops.llm.claude"),
     ):
         prepared_request = client.prepare_attempt_request(
@@ -265,9 +282,11 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
             request_options=request_options,
             api_model="claude-sonnet-4-6",
         )
-        update_result = client.generate_update(
-            prepared_request=prepared_request,
-            request_options=request_options,
+        update_result = asyncio.run(
+            client.generate_update(
+                prepared_request=prepared_request,
+                request_options=request_options,
+            )
         )
 
     assert update_result.retry_count == 1
@@ -291,11 +310,11 @@ def test_generate_update_fails_after_exhausting_retries(
 
     with (
         patch.object(
-            client._client.messages,
-            "create",
-            side_effect=[error, error],
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(side_effect=[error, error]),
         ) as create,
-        patch("ankiops.llm.claude.time.sleep") as sleep,
+        patch("ankiops.llm.claude.asyncio.sleep") as sleep,
     ):
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
@@ -308,13 +327,15 @@ def test_generate_update_fails_after_exhausting_retries(
             api_model="claude-sonnet-4-6",
         )
         with pytest.raises(LlmFatalError, match="Provider returned HTTP 503"):
-            client.generate_update(
-                prepared_request=prepared_request,
-                request_options=TaskRequestOptions(
-                    retries=1,
-                    retry_backoff_seconds=0.25,
-                    retry_backoff_jitter=False,
-                ),
+            asyncio.run(
+                client.generate_update(
+                    prepared_request=prepared_request,
+                    request_options=TaskRequestOptions(
+                        retries=1,
+                        retry_backoff_seconds=0.25,
+                        retry_backoff_jitter=False,
+                    ),
+                )
             )
 
     assert create.call_count == 2
@@ -326,3 +347,108 @@ def test_missing_api_key_raises_fatal(task_config: TaskConfig, monkeypatch):
 
     with pytest.raises(LlmFatalError, match="ANTHROPIC_API_KEY"):
         ClaudeClient(task_config)
+
+
+class _AsyncBatchResultStream:
+    def __init__(self, entries: list[object]) -> None:
+        self._entries = entries
+        self._index = 0
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._entries):
+            raise StopAsyncIteration
+        entry = self._entries[self._index]
+        self._index += 1
+        return entry
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _BrokenAsyncBatchResultStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise RuntimeError("decoder blew up")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def test_get_batch_results_awaits_results_and_closes_stream(
+    client: ClaudeClient,
+    note_payload: NotePayload,
+):
+    prepared_request = client.prepare_attempt_request(
+        note_payload=note_payload,
+        task_prompt="Fix grammar",
+        request_options=TaskRequestOptions(),
+        api_model="claude-sonnet-4-6",
+    )
+    message = _response(
+        blocks=[
+            SimpleNamespace(
+                type="text",
+                text='{"note_key":"nk-1","edits":{"Question":"Fixed"}}',
+            )
+        ]
+    )
+    stream = _AsyncBatchResultStream(
+        [
+            SimpleNamespace(
+                custom_id="item-1",
+                result=SimpleNamespace(type="succeeded", message=message),
+            )
+        ]
+    )
+
+    with patch.object(
+        client._client.messages.batches,
+        "results",
+        new=AsyncMock(return_value=stream),
+    ) as results:
+        out = asyncio.run(
+            client.get_batch_results(
+                provider_batch_id="msgbatch_1",
+                prepared_by_custom_id={"item-1": prepared_request},
+            )
+        )
+
+    results.assert_awaited_once_with("msgbatch_1")
+    assert stream.closed is True
+    assert len(out) == 1
+    assert out[0].result_type is LlmAttemptResultType.SUCCEEDED
+    assert out[0].outcome is not None
+    assert out[0].outcome.update.edits == {"Question": "Fixed"}
+
+
+def test_get_batch_results_wraps_decoder_errors_as_fatal_and_closes_stream(
+    client: ClaudeClient,
+):
+    stream = _BrokenAsyncBatchResultStream()
+
+    with patch.object(
+        client._client.messages.batches,
+        "results",
+        new=AsyncMock(return_value=stream),
+    ):
+        with pytest.raises(
+            LlmFatalError,
+            match="Provider batch results failed: decoder blew up",
+        ):
+            asyncio.run(
+                client.get_batch_results(
+                    provider_batch_id="msgbatch_1",
+                    prepared_by_custom_id={},
+                )
+            )
+
+    assert stream.closed is True

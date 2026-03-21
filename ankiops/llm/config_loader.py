@@ -14,9 +14,11 @@ from ankiops.models import NoteTypeConfig
 from .anthropic_models import format_supported_model_names, parse_model
 from .models import (
     DeckScope,
+    ExecutionMode,
     FieldExceptionRule,
     TaskCatalog,
     TaskConfig,
+    TaskExecutionOptions,
     TaskRequestOptions,
 )
 
@@ -165,6 +167,73 @@ def _parse_request_options(value: Any, path: Path) -> TaskRequestOptions:
         retries=retries,
         retry_backoff_seconds=float(retry_backoff_seconds),
         retry_backoff_jitter=retry_backoff_jitter,
+    )
+
+
+def _parse_execution_options(value: Any, path: Path) -> TaskExecutionOptions:
+    if value is None:
+        return TaskExecutionOptions()
+    if not isinstance(value, dict):
+        raise LlmConfigError(f"{path}: 'execution' must be a mapping")
+
+    valid_keys = {
+        "mode",
+        "concurrency",
+        "fail_fast",
+        "batch_poll_seconds",
+    }
+    unknown = sorted(set(value.keys()) - valid_keys)
+    if unknown:
+        raise LlmConfigError(
+            f"{path}: unknown execution option(s): {', '.join(unknown)}"
+        )
+
+    raw_mode = value.get("mode")
+    if not isinstance(raw_mode, str) or not raw_mode.strip():
+        raise LlmConfigError(f"{path}: 'execution.mode' must be a non-empty string")
+    normalized_mode = raw_mode.strip().lower()
+    try:
+        mode = ExecutionMode(normalized_mode)
+    except ValueError as error:
+        supported = ", ".join(execution_mode.value for execution_mode in ExecutionMode)
+        raise LlmConfigError(
+            f"{path}: 'execution.mode' must be one of: {supported}"
+        ) from error
+
+    concurrency = value.get("concurrency", 8)
+    if not isinstance(concurrency, int) or isinstance(concurrency, bool):
+        raise LlmConfigError(f"{path}: 'execution.concurrency' must be an integer")
+    if concurrency <= 0:
+        raise LlmConfigError(f"{path}: 'execution.concurrency' must be > 0")
+
+    fail_fast = value.get("fail_fast", True)
+    if not isinstance(fail_fast, bool):
+        raise LlmConfigError(f"{path}: 'execution.fail_fast' must be a boolean")
+
+    batch_poll_seconds = value.get("batch_poll_seconds", 15)
+    if (
+        not isinstance(batch_poll_seconds, int)
+        or isinstance(batch_poll_seconds, bool)
+        or batch_poll_seconds <= 0
+    ):
+        raise LlmConfigError(
+            f"{path}: 'execution.batch_poll_seconds' must be a positive integer"
+        )
+
+    if mode is ExecutionMode.BATCH and "concurrency" in value:
+        raise LlmConfigError(
+            f"{path}: 'execution.concurrency' is only supported for online mode"
+        )
+    if mode is ExecutionMode.ONLINE and "batch_poll_seconds" in value:
+        raise LlmConfigError(
+            f"{path}: 'execution.batch_poll_seconds' is only supported for batch mode"
+        )
+
+    return TaskExecutionOptions(
+        mode=mode,
+        concurrency=concurrency,
+        fail_fast=fail_fast,
+        batch_poll_seconds=batch_poll_seconds,
     )
 
 
@@ -333,6 +402,7 @@ def _parse_task(
         path=path,
     )
     request = _parse_request_options(mapping.get("request"), path)
+    execution = _parse_execution_options(mapping.get("execution"), path)
 
     unknown = sorted(
         set(mapping.keys())
@@ -345,6 +415,7 @@ def _parse_task(
             "decks",
             "fields",
             "request",
+            "execution",
         }
     )
     if unknown:
@@ -362,6 +433,7 @@ def _parse_task(
         decks=decks,
         field_exceptions=field_exceptions,
         request=request,
+        execution=execution,
     )
 
 
