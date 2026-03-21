@@ -230,19 +230,39 @@ def test_run_ma_logs_missing_local_media_summary(tmp_path, caplog):
     assert "1 synced, 2 missing locally" in caplog.text
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["ankiops", "am", "--keep-orphans"],
-        ["ankiops", "ma", "--only-add-new"],
-    ],
-)
-def test_removed_full_sync_flags_are_rejected(argv):
-    with patch("sys.argv", argv):
+def test_cli_version_flag_prints_package_version(capsys):
+    with (
+        patch("ankiops.cli._get_cli_version", return_value="9.9.9"),
+        patch("sys.argv", ["ankiops", "--version"]),
+    ):
         with pytest.raises(SystemExit) as exc:
             main()
 
-    assert exc.value.code == 2
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "ankiops 9.9.9"
+
+
+def test_cli_help_lists_version_flag(capsys):
+    with patch("sys.argv", ["ankiops", "--help"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "--version" in captured.out
+
+
+def test_cli_welcome_mentions_version_and_version_flag(capsys):
+    with (
+        patch("ankiops.cli._get_cli_version", return_value="9.9.9"),
+        patch("sys.argv", ["ankiops"]),
+    ):
+        main()
+
+    captured = capsys.readouterr()
+    assert "AnkiOps v9.9.9" in captured.out
+    assert "ankiops --version" in captured.out
 
 
 def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):

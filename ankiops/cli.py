@@ -1,5 +1,6 @@
 import argparse
 import logging
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from ankiops.cli_anki import connect_or_exit
@@ -24,7 +25,7 @@ from ankiops.llm.cli import configure_llm_parser
 from ankiops.llm.cli import run_llm as run_llm_impl
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.runner import list_jobs as list_llm_jobs
-from ankiops.llm.runner import plan_task, run_task, show_job
+from ankiops.llm.runner import plan_task, resume_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
@@ -32,6 +33,13 @@ from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
+
+
+def _get_cli_version() -> str:
+    try:
+        return version("ankiops")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _format_media_status(media_result, *, from_anki: bool) -> str:
@@ -286,6 +294,7 @@ def run_llm(args):
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
         run_task_fn=run_task,
+        resume_task_fn=resume_task,
         list_jobs_fn=list_llm_jobs,
         show_job_fn=show_job,
     )
@@ -294,6 +303,12 @@ def run_llm(args):
 def main():
     parser = argparse.ArgumentParser(
         description="AnkiOps – Manage Anki decks as Markdown files.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {_get_cli_version()}",
+        help="Show version and exit",
     )
     parser.add_argument(
         "--debug",
@@ -385,28 +400,19 @@ def main():
 
     note_types_parser = subparsers.add_parser(
         "note-types",
-        aliases=["nt"],
         help="Show note type overview or import a note type from Anki",
         description=(
             "Show note type overview by default. "
-            "Use 'import' to copy a note type from Anki."
+            "Use '--import <name>' to copy a note type from Anki."
         ),
     )
     note_types_parser.set_defaults(handler=run_note_type, action="list")
-    note_types_subparsers = note_types_parser.add_subparsers(
-        dest="note_types_action",
-        required=False,
-    )
-
-    note_types_import_parser = note_types_subparsers.add_parser(
-        "import",
-        help="Copy an Anki note type into local note_types/",
-    )
-    note_types_import_parser.add_argument(
-        "name",
+    note_types_parser.add_argument(
+        "--import",
+        dest="import_name",
+        metavar="NAME",
         help="Note type name to copy from Anki",
     )
-    note_types_import_parser.set_defaults(handler=run_note_type, action="import")
 
     args = parser.parse_args()
 
@@ -417,8 +423,9 @@ def main():
         args.handler(args)
     else:
         # Show welcome screen when no command is provided
+        cli_version = _get_cli_version()
         print("=" * 60)
-        print("AnkiOps – Manage Anki decks as Markdown files")
+        print(f"AnkiOps v{cli_version} – Manage Anki decks as Markdown files")
         print("=" * 60)
         print()
         print("Available commands:")
@@ -434,7 +441,7 @@ def main():
         )
         print(
             "  note-types        List note type labels or import note types "
-            "from Anki (alias: nt)"
+            "from Anki"
         )
         print()
         print("Usage examples:")
@@ -477,11 +484,12 @@ def main():
             "# Show note types and label registry"
         )
         print(
-            "  ankiops note-types import MyCustomType       "
+            "  ankiops note-types --import MyCustomType     "
             "# Copy note type from Anki"
         )
         print()
         print("For more information:")
+        print("  ankiops --version              # Show installed version")
         print("  ankiops --help                 # Show general help")
         print("  ankiops <command> --help       # Show help for a specific command")
         print("=" * 60)

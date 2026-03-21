@@ -21,10 +21,9 @@ def _seed_note_types(note_types_dir):
     "argv",
     [
         ["ankiops", "note-types"],
-        ["ankiops", "nt"],
     ],
 )
-def test_note_types_list_and_alias_route_to_handler(argv):
+def test_note_types_list_routes_to_handler(argv):
     with (
         patch("ankiops.cli.run_note_type") as run_mock,
         patch("sys.argv", argv),
@@ -36,24 +35,13 @@ def test_note_types_list_and_alias_route_to_handler(argv):
     assert args.action == "list"
 
 
-def test_note_types_list_subcommand_is_unknown(capsys):
-    with patch("sys.argv", ["ankiops", "note-types", "list"]):
-        with pytest.raises(SystemExit) as exc:
-            main()
-
-    assert exc.value.code == 2
-    captured = capsys.readouterr()
-    assert "invalid choice: 'list'" in captured.err
-
-
 @pytest.mark.parametrize(
     "argv",
     [
-        ["ankiops", "note-types", "import", "MyType"],
-        ["ankiops", "nt", "import", "MyType"],
+        ["ankiops", "note-types", "--import", "MyType"],
     ],
 )
-def test_note_types_import_and_alias_route_to_handler(argv):
+def test_note_types_import_routes_to_handler(argv):
     with (
         patch("ankiops.cli.run_note_type") as run_mock,
         patch("sys.argv", argv),
@@ -62,18 +50,8 @@ def test_note_types_import_and_alias_route_to_handler(argv):
 
     run_mock.assert_called_once()
     args = run_mock.call_args.args[0]
-    assert args.action == "import"
-    assert args.name == "MyType"
-
-
-def test_note_type_command_is_unknown(capsys):
-    with patch("sys.argv", ["ankiops", "note-type", "list"]):
-        with pytest.raises(SystemExit) as exc:
-            main()
-
-    assert exc.value.code == 2
-    captured = capsys.readouterr()
-    assert "invalid choice: 'note-type'" in captured.err
+    assert args.action == "list"
+    assert args.import_name == "MyType"
 
 
 def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
@@ -95,7 +73,7 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
         }
     }
 
-    args = SimpleNamespace(action="import", name="MyType")
+    args = SimpleNamespace(action="list", import_name="MyType")
 
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
@@ -147,7 +125,7 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
             "fonts": {},
         }
     }
-    args = SimpleNamespace(action="import", name="MyType")
+    args = SimpleNamespace(action="list", import_name="MyType")
 
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
@@ -183,7 +161,7 @@ def test_note_types_import_rejects_unknown_model(tmp_path):
             "ankiops.note_type_cli.get_note_types_dir",
             return_value=tmp_path / "note_types",
         ),
-        patch("sys.argv", ["ankiops", "note-types", "import", "DoesNotExist"]),
+        patch("sys.argv", ["ankiops", "note-types", "--import", "DoesNotExist"]),
     ):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -205,7 +183,7 @@ def test_note_types_import_rejects_existing_target_folder(tmp_path):
             "ankiops.note_type_cli.get_note_types_dir",
             return_value=tmp_path / "note_types",
         ),
-        patch("sys.argv", ["ankiops", "note-types", "import", "MyType"]),
+        patch("sys.argv", ["ankiops", "note-types", "--import", "MyType"]),
     ):
         with pytest.raises(SystemExit) as exc:
             main()

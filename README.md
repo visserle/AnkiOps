@@ -124,6 +124,7 @@ uv run python -m main ma
 
 **Global:**
 - `--debug` - Enable debug logging
+- `--version` - Show installed AnkiOps version
 - `--help` - Show help message
 
 **`init`:**
@@ -147,12 +148,13 @@ uv run python -m main ma
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
 - `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm --resume <job_id|latest|-1> [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
 - `ankiops llm --job <job_id|latest|-1>` - Show one LLM job in detail
 
-**`note-types` / `nt`:**
+**`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
-- `ankiops note-types import <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
+- `ankiops note-types --import <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
 
 ## LLM Integration
 
@@ -180,8 +182,11 @@ Plan, run, and inspect jobs:
 ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
+ankiops llm grammar --run --batch
+ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
 ankiops llm grammar --run --model haiku
+ankiops llm --resume latest
 ankiops llm --job latest
 ```
 ### Task File Format (`llm/tasks/<task-name>.yaml`)
@@ -222,6 +227,17 @@ request:
 - `decks` patterns use shell-style matching (`*`, `?`, character classes); non-wildcard names match exact deck names (and optionally subdecks)
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - `request` tuning defaults: `retries=2`, `retry_backoff_seconds=0.5`, `retry_backoff_jitter=true`, `max_output_tokens=2048`
+- `execution` is optional; defaults are `mode=online`, `concurrency=8`, `fail_fast=true`, `batch_poll_seconds=15`
+- `execution.mode` chooses `online` (concurrent Messages API) or `batch` (Message Batches API)
+- `execution.concurrency` applies to `online` mode; `execution.batch_poll_seconds` applies to `batch` mode
+- `execution.fail_fast=true` cancels pending online work on fatal failures
+- Batch mode example:
+  ```yaml
+  execution:
+    mode: batch
+    batch_poll_seconds: 15
+    fail_fast: true
+  ```
 
 ### Runtime Behavior
 
