@@ -22,6 +22,10 @@ def db(tmp_path):
 def test_load_creates_tables(db, tmp_path):
     db_path = tmp_path / ANKIOPS_DB
     assert db_path.exists()
+    assert db._conn.execute(
+        "SELECT id, profile_name, note_type_sync_hash, note_type_names_signature "
+        "FROM app_state"
+    ).fetchall() == [(1, None, None, None)]
 
 
 def test_load_empty(db):
@@ -66,6 +70,16 @@ def test_note_type_sync_state_mapping(db):
 
     db.set_note_type_sync_state("hash-b", "AnkiOpsQA,AnkiOpsCloze")
     assert db.get_note_type_sync_state() == ("hash-b", "AnkiOpsQA,AnkiOpsCloze")
+
+
+def test_note_type_sync_state_requires_complete_pair(db):
+    with pytest.raises(sqlite3.IntegrityError):
+        db._write(
+            "UPDATE app_state "
+            "SET note_type_sync_hash = ?, note_type_names_signature = NULL "
+            "WHERE id = 1",
+            ("broken",),
+        )
 
 
 def test_note_mapping(db):
@@ -120,6 +134,26 @@ def test_corruption_recovery(tmp_path):
         assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
     finally:
         recovered.close()
+
+
+def test_schema_mismatch_recovery(tmp_path):
+    db_path = tmp_path / ANKIOPS_DB
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("CREATE TABLE legacy_state (id INTEGER PRIMARY KEY)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    recovered = SQLiteDbAdapter.open(tmp_path)
+    try:
+        assert recovered.get_profile_name() is None
+        assert recovered.get_note_type_sync_state() is None
+    finally:
+        recovered.close()
+
+    assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
 
 
 def test_remove_note_by_id(tmp_path):

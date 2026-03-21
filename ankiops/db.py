@@ -12,6 +12,60 @@ from ankiops.config import ANKIOPS_DB
 
 logger = logging.getLogger(__name__)
 
+_SCHEMA_TABLE_SQL: dict[str, str] = {
+    "note_state": """
+CREATE TABLE note_state (
+    note_key TEXT PRIMARY KEY,
+    note_id INTEGER NOT NULL UNIQUE,
+    md_hash TEXT,
+    anki_hash TEXT
+)
+""",
+    "deck_map": """
+CREATE TABLE deck_map (
+    deck_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+)
+""",
+    "app_state": """
+CREATE TABLE app_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    profile_name TEXT CHECK (profile_name IS NULL OR profile_name <> ''),
+    note_type_sync_hash TEXT CHECK (
+        note_type_sync_hash IS NULL OR note_type_sync_hash <> ''
+    ),
+    note_type_names_signature TEXT CHECK (
+        note_type_names_signature IS NULL OR note_type_names_signature <> ''
+    ),
+    CHECK (
+        (note_type_sync_hash IS NULL) = (note_type_names_signature IS NULL)
+    )
+)
+""",
+    "markdown_media_cache": """
+CREATE TABLE markdown_media_cache (
+    md_path TEXT PRIMARY KEY,
+    md_mtime_ns INTEGER NOT NULL CHECK (md_mtime_ns >= 0),
+    md_size INTEGER NOT NULL CHECK (md_size >= 0),
+    media_names_json TEXT NOT NULL
+)
+""",
+    "media_state": """
+CREATE TABLE media_state (
+    name TEXT PRIMARY KEY,
+    mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
+    size INTEGER NOT NULL CHECK (size >= 0),
+    digest TEXT NOT NULL CHECK (digest <> ''),
+    hashed_name TEXT NOT NULL CHECK (hashed_name <> ''),
+    pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> '')
+)
+""",
+}
+
+
+def _normalize_sql(sql: str) -> str:
+    return " ".join(sql.split()).lower()
+
 
 class SQLiteDbAdapter:
     """SQLite adapter for note/deck identity, sync cache, and media cache state."""
@@ -35,62 +89,40 @@ class SQLiteDbAdapter:
             conn.execute("PRAGMA busy_timeout = 5000")
 
             with conn:
+                existing_rows = conn.execute(
+                    "SELECT name, sql "
+                    "FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY name"
+                ).fetchall()
+                existing_schema = {name: sql for name, sql in existing_rows}
+
+                if not existing_schema:
+                    for table_sql in _SCHEMA_TABLE_SQL.values():
+                        conn.execute(table_sql)
+                else:
+                    expected_table_names = set(_SCHEMA_TABLE_SQL)
+                    existing_table_names = set(existing_schema)
+                    if existing_table_names != expected_table_names:
+                        raise sqlite3.DatabaseError(
+                            "Unexpected schema tables. "
+                            f"Expected {sorted(expected_table_names)}, "
+                            f"found {sorted(existing_table_names)}"
+                        )
+
+                    for table_name, expected_sql in _SCHEMA_TABLE_SQL.items():
+                        actual_sql = existing_schema.get(table_name)
+                        if actual_sql is None:
+                            raise sqlite3.DatabaseError(
+                                f"Missing expected table '{table_name}'"
+                            )
+                        if _normalize_sql(actual_sql) != _normalize_sql(expected_sql):
+                            raise sqlite3.DatabaseError(
+                                f"Unexpected schema for table '{table_name}'"
+                            )
+
                 conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS note_state (
-                        note_key TEXT PRIMARY KEY,
-                        note_id INTEGER NOT NULL UNIQUE,
-                        md_hash TEXT,
-                        anki_hash TEXT
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS deck_map (
-                        deck_id INTEGER PRIMARY KEY,
-                        name TEXT NOT NULL UNIQUE
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS collection_profile (
-                        id INTEGER PRIMARY KEY CHECK (id = 1),
-                        profile_name TEXT NOT NULL CHECK (profile_name <> '')
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS note_type_sync_state (
-                        id INTEGER PRIMARY KEY CHECK (id = 1),
-                        sync_hash TEXT NOT NULL CHECK (sync_hash <> ''),
-                        names_signature TEXT NOT NULL
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS markdown_media_cache (
-                        md_path TEXT PRIMARY KEY,
-                        md_mtime_ns INTEGER NOT NULL CHECK (md_mtime_ns >= 0),
-                        md_size INTEGER NOT NULL CHECK (md_size >= 0),
-                        media_names_json TEXT NOT NULL
-                    )
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS media_state (
-                        name TEXT PRIMARY KEY,
-                        mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
-                        size INTEGER NOT NULL CHECK (size >= 0),
-                        digest TEXT NOT NULL CHECK (digest <> ''),
-                        hashed_name TEXT NOT NULL CHECK (hashed_name <> ''),
-                        pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> '')
-                    )
-                    """
+                    "INSERT INTO app_state (id) VALUES (1) ON CONFLICT(id) DO NOTHING"
                 )
 
                 # Strict schema validation: if any query fails, recover by
@@ -101,11 +133,9 @@ class SQLiteDbAdapter:
                 )
                 conn.execute("SELECT deck_id, name FROM deck_map LIMIT 0")
                 conn.execute(
-                    "SELECT id, profile_name FROM collection_profile LIMIT 0"
-                )
-                conn.execute(
-                    "SELECT id, sync_hash, names_signature "
-                    "FROM note_type_sync_state LIMIT 0"
+                    "SELECT id, profile_name, note_type_sync_hash, "
+                    "note_type_names_signature "
+                    "FROM app_state LIMIT 0"
                 )
                 conn.execute(
                     "SELECT md_path, md_mtime_ns, md_size, media_names_json "
@@ -171,6 +201,15 @@ class SQLiteDbAdapter:
             with self._conn:
                 for sql, params in statements:
                     self._conn.execute(sql, params)
+
+    def _write_singleton(self, sql: str, params: tuple = ()) -> None:
+        if self._tx_depth > 0:
+            cursor = self._conn.execute(sql, params)
+        else:
+            with self._conn:
+                cursor = self._conn.execute(sql, params)
+        if cursor.rowcount != 1:
+            raise sqlite3.DatabaseError("Missing singleton app_state row")
 
     def _executemany(self, sql: str, rows: list[tuple]) -> None:
         if not rows:
@@ -282,7 +321,9 @@ class SQLiteDbAdapter:
 
     # -- Note fingerprints --------------------------------------------------
 
-    def resolve_note_hashes(self, note_keys: Iterable[str]) -> dict[str, tuple[str, str]]:
+    def resolve_note_hashes(
+        self, note_keys: Iterable[str]
+    ) -> dict[str, tuple[str, str]]:
         note_key_list = list(note_keys)
         if not note_key_list:
             return {}
@@ -296,7 +337,12 @@ class SQLiteDbAdapter:
                 "AND md_hash IS NOT NULL AND anki_hash IS NOT NULL",
                 tuple(chunk),
             ).fetchall()
-            out.update({note_key: (md_hash, anki_hash) for note_key, md_hash, anki_hash in rows})
+            out.update(
+                {
+                    note_key: (md_hash, anki_hash)
+                    for note_key, md_hash, anki_hash in rows
+                }
+            )
         return out
 
     def upsert_note_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
@@ -333,9 +379,11 @@ class SQLiteDbAdapter:
                 )
 
             self._executemany(
-                "UPDATE note_state SET md_hash = ?, anki_hash = ? "
-                "WHERE note_key = ?",
-                [(md_hash, anki_hash, note_key) for note_key, md_hash, anki_hash in deduped],
+                "UPDATE note_state SET md_hash = ?, anki_hash = ? WHERE note_key = ?",
+                [
+                    (md_hash, anki_hash, note_key)
+                    for note_key, md_hash, anki_hash in deduped
+                ],
             )
 
     def clear_note_hashes(self, note_keys: Iterable[str]) -> None:
@@ -357,7 +405,9 @@ class SQLiteDbAdapter:
     # -- Deck mapping -------------------------------------------------------
 
     def resolve_deck_id(self, name: str) -> int | None:
-        cursor = self._conn.execute("SELECT deck_id FROM deck_map WHERE name = ?", (name,))
+        cursor = self._conn.execute(
+            "SELECT deck_id FROM deck_map WHERE name = ?", (name,)
+        )
         row = cursor.fetchone()
         return row[0] if row else None
 
@@ -599,32 +649,39 @@ class SQLiteDbAdapter:
     # -- Singleton metadata -------------------------------------------------
 
     def get_profile_name(self) -> str | None:
-        cursor = self._conn.execute(
-            "SELECT profile_name FROM collection_profile WHERE id = 1"
-        )
+        cursor = self._conn.execute("SELECT profile_name FROM app_state WHERE id = 1")
         row = cursor.fetchone()
-        return row[0] if row else None
+        if row is None:
+            raise sqlite3.DatabaseError("Missing singleton app_state row")
+        return row[0]
 
     def set_profile_name(self, profile_name: str) -> None:
-        self._write(
-            "INSERT OR REPLACE INTO collection_profile (id, profile_name) "
-            "VALUES (1, ?)",
+        self._write_singleton(
+            "UPDATE app_state SET profile_name = ? WHERE id = 1",
             (profile_name,),
         )
 
     def get_note_type_sync_state(self) -> tuple[str, str] | None:
         cursor = self._conn.execute(
-            "SELECT sync_hash, names_signature FROM note_type_sync_state WHERE id = 1"
+            "SELECT note_type_sync_hash, note_type_names_signature "
+            "FROM app_state WHERE id = 1"
         )
         row = cursor.fetchone()
         if row is None:
+            raise sqlite3.DatabaseError("Missing singleton app_state row")
+        if row[0] is None:
             return None
+        if row[1] is None:
+            raise sqlite3.DatabaseError(
+                "Invalid singleton app_state row: note type sync state is partial"
+            )
         return row[0], row[1]
 
     def set_note_type_sync_state(self, sync_hash: str, names_signature: str) -> None:
-        self._write(
-            "INSERT OR REPLACE INTO note_type_sync_state "
-            "(id, sync_hash, names_signature) VALUES (1, ?, ?)",
+        self._write_singleton(
+            "UPDATE app_state "
+            "SET note_type_sync_hash = ?, note_type_names_signature = ? "
+            "WHERE id = 1",
             (sync_hash, names_signature),
         )
 

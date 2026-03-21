@@ -126,16 +126,24 @@ def require_collection_dir(active_profile: str) -> Path:
         raise SystemExit(1)
 
     db = SQLiteDbAdapter.open(collection_dir)
-    expected_profile = db.get_profile_name()
-    if expected_profile and expected_profile != active_profile:
-        logger.error(
-            f"Profile mismatch: collection in {collection_dir} is linked to "
-            f"'{expected_profile}', but Anki has '{active_profile}' "
-            f"open. Switch profiles in Anki, or re-run "
-            f"'ankiops init' to re-link."
-        )
+    try:
+        expected_profile = db.get_profile_name()
+        if expected_profile is None:
+            logger.error(
+                f"Collection in {collection_dir} has no linked profile. "
+                "Run 'ankiops init' to re-link."
+            )
+            raise SystemExit(1)
+
+        if expected_profile != active_profile:
+            logger.error(
+                f"Profile mismatch: collection in {collection_dir} is linked to "
+                f"'{expected_profile}', but Anki has '{active_profile}' "
+                f"open. Switch profiles in Anki, or re-run "
+                f"'ankiops init' to re-link."
+            )
+            raise SystemExit(1)
+    finally:
         db.close()
-        raise SystemExit(1)
-    db.close()
 
     return collection_dir
