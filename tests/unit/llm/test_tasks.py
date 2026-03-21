@@ -282,8 +282,35 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     assert task.api_key_env == "ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == "Fix grammar from file"
+    assert task.system_prompt_path == (tmp_path / "llm/system_prompt.md").resolve()
+    assert task.prompt_path == (tmp_path / "llm/prompts/grammar.md").resolve()
     assert task.decks.include == ["Parent"]
     assert task.decks.include_subdecks is False
+
+
+def test_load_llm_task_catalog_supports_task_specific_system_prompt_file(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write(tmp_path / "llm/prompts/custom_system.md", "Task-specific system rules")
+    _write(
+        tmp_path / TASK_FILE,
+        _task_config(
+            extra="""
+            system_prompt_file: ../prompts/custom_system.md
+            """
+        ),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.system_prompt == "Task-specific system rules"
+    assert task.system_prompt_path == (
+        tmp_path / "llm/prompts/custom_system.md"
+    ).resolve()
 
 
 def test_load_llm_task_catalog_requires_system_prompt(
@@ -333,6 +360,10 @@ def test_load_llm_task_catalog_requires_system_prompt(
         (
             _task_config(extra="sdk: anthropic"),
             "unknown task key(s): sdk",
+        ),
+        (
+            _task_config(extra="system_prompt_file: ../../../outside.md"),
+            "system_prompt_file",
         ),
         (
             _task_config(extra="timeout_seconds: true"),
@@ -389,6 +420,7 @@ def test_load_llm_task_catalog_requires_system_prompt(
         "invalid-include-subdecks",
         "non-claude-model",
         "legacy-provider-key",
+        "system-prompt-file-outside-llm",
         "invalid-timeout-bool",
         "invalid-temperature-bool",
         "invalid-max-output-bool",
@@ -487,6 +519,50 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     assert "S: grammar book" in content
     assert "AI: hidden content" in content
     assert "A: 1" in content
+
+
+def test_run_task_logs_llm_persistence_summary_without_deserialize_noise(
+    tmp_path,
+    monkeypatch,
+    caplog,
+):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient(
+            [
+                _result(
+                    "nk-1",
+                    {"Question": "This is a fixed question."},
+                    input_tokens=21,
+                    output_tokens=9,
+                    latency_ms=1200,
+                ),
+                _result(
+                    "nk-2",
+                    {},
+                    input_tokens=13,
+                    output_tokens=4,
+                    latency_ms=800,
+                ),
+            ]
+        ),
+    )
+
+    with caplog.at_level(logging.INFO):
+        result = run_task(
+            collection_dir=collection,
+            task_name="grammar",
+            no_auto_commit=True,
+        )
+
+    assert result.persisted
+    assert "Persisted 1 updated note(s) across 1 deck file(s)" in caplog.text
+    assert "Deserialized 1 deck(s), 2 note(s)" not in caplog.text
+    assert "Created FILE" not in caplog.text
 
 
 def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):

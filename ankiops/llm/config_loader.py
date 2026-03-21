@@ -291,7 +291,6 @@ def _parse_task(
     *,
     note_type_configs: list[NoteTypeConfig],
     llm_dir: Path,
-    system_prompt: str,
 ) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
     name = path.stem
@@ -308,6 +307,17 @@ def _parse_task(
         key="prompt_file",
     )
     prompt = _read_text_file(prompt_file_path, label="prompt")
+    system_prompt_file_ref = _optional_str(mapping, "system_prompt_file", path)
+    if system_prompt_file_ref is None:
+        system_prompt_path = (llm_dir / _SYSTEM_PROMPT_FILE_NAME).resolve()
+    else:
+        system_prompt_path = _resolve_relative_file(
+            path,
+            system_prompt_file_ref,
+            llm_dir=llm_dir,
+            key="system_prompt_file",
+        )
+    system_prompt = _read_text_file(system_prompt_path, label="system prompt")
     api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
     timeout_seconds = mapping.get("timeout_seconds", 60)
     if (
@@ -329,6 +339,7 @@ def _parse_task(
         - {
             "model",
             "prompt_file",
+            "system_prompt_file",
             "api_key_env",
             "timeout_seconds",
             "decks",
@@ -344,6 +355,8 @@ def _parse_task(
         model=model,
         system_prompt=system_prompt,
         prompt=prompt,
+        system_prompt_path=system_prompt_path,
+        prompt_path=prompt_file_path,
         api_key_env=api_key_env,
         timeout_seconds=timeout_seconds,
         decks=decks,
@@ -368,13 +381,6 @@ def load_llm_task_catalog(
         )
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
-    system_prompt_path = llm_dir / _SYSTEM_PROMPT_FILE_NAME
-    try:
-        system_prompt = _read_text_file(system_prompt_path, label="system prompt")
-    except LlmConfigError as error:
-        errors[str(system_prompt_path)] = str(error)
-        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
-
     tasks_dir = llm_dir / _TASKS_DIR_NAME
     if not tasks_dir.exists() or not tasks_dir.is_dir():
         errors[str(tasks_dir)] = (
@@ -394,7 +400,6 @@ def load_llm_task_catalog(
                 path,
                 note_type_configs=note_type_configs,
                 llm_dir=llm_dir,
-                system_prompt=system_prompt,
             )
             if task.name in tasks_by_name:
                 raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")

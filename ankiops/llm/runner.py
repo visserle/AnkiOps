@@ -757,9 +757,21 @@ class LlmTaskExecutor:
                     root_dir=self.collection_dir,
                     note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
                     overwrite=True,
+                    quiet=True,
                 )
                 persisted = True
                 db.set_applied_for_updated_items(job_id=job_id)
+                logger.info(
+                    "Persisted %d updated note(s) across %d deck file(s)",
+                    summary.updated,
+                    len(
+                        [
+                            deck
+                            for deck in data.get("decks", [])
+                            if isinstance(deck, dict)
+                        ]
+                    ),
+                )
 
         return persisted
 
@@ -905,6 +917,10 @@ def plan_task(
         model=model,
         deck_scope=_format_deck_scope(task),
         serializer_scope=_format_serializer_scope(deck, no_subdecks),
+        system_prompt_path=str(task.system_prompt_path),
+        prompt_path=str(task.prompt_path),
+        system_prompt=task.system_prompt,
+        task_prompt=task.prompt,
         request_defaults=_format_request_defaults(task),
         summary=summary,
         field_surface=_build_plan_field_surface(

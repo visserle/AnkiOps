@@ -26,6 +26,10 @@ def _plan_result() -> TaskPlanResult:
         model=SONNET,
         deck_scope="*",
         serializer_scope="*",
+        system_prompt_path="/tmp/llm/system_prompt.md",
+        prompt_path="/tmp/llm/prompts/grammar.md",
+        system_prompt="System prompt",
+        task_prompt="Task prompt",
         request_defaults=(
             "timeout=60s max_tokens=2048 temperature=default retries=2 "
             "retry_backoff=0.5s retry_jitter=true"
@@ -119,6 +123,30 @@ def test_cli_llm_dispatches_plan_with_deck_override():
 
     plan_task.assert_called_once()
     assert plan_task.call_args.kwargs["deck_override"] == "Target"
+
+
+def test_run_llm_plan_logs_system_prompt_path_and_full_prompt(tmp_path, caplog):
+    args = SimpleNamespace(
+        task_name="grammar",
+        run=False,
+        job_id=None,
+        model=None,
+        deck=None,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.plan_task", return_value=_plan_result()),
+        caplog.at_level(logging.INFO),
+    ):
+        run_llm(args)
+
+    assert "System prompt file: /tmp/llm/system_prompt.md" in caplog.text
+    assert "Task prompt file: /tmp/llm/prompts/grammar.md" in caplog.text
+    assert "<system>\nSystem prompt\n</system>" in caplog.text
+    assert "<task>\nTask prompt\n</task>" in caplog.text
+
 
 def test_cli_llm_status_exits_on_invalid_config(tmp_path):
     with (
@@ -246,6 +274,36 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
     assert exc.value.code == 1
     show_job.assert_called_once()
     assert show_job.call_args.kwargs["job_id"] == "-1"
+
+
+def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
+    args = SimpleNamespace(
+        task_name="grammar",
+        run=True,
+        job_id=None,
+        model=None,
+        deck=None,
+        no_auto_commit=True,
+    )
+    success_result = LlmJobResult(
+        job_id=24,
+        status="completed",
+        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        failed=False,
+        persisted=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.run_task", return_value=success_result),
+        caplog.at_level(logging.INFO),
+    ):
+        run_llm(args)
+
+    assert (
+        "LLM job #24 completed (no markdown changes persisted). "
+        "Cost: $0.00. Inspect: ankiops llm --job 24"
+    ) in caplog.text
 
 
 @pytest.mark.parametrize(

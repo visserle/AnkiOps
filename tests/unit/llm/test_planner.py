@@ -85,6 +85,11 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     assert plan.summary.notes_seen == 2
     assert plan.summary.eligible == 2
     assert plan.summary.errors == 0
+    assert plan.system_prompt_path == str((collection / SYSTEM_PROMPT_FILE).resolve())
+    assert plan.prompt_path == str((collection / PROMPT_FILE).resolve())
+    assert plan.system_prompt == "You are a strict editor."
+    assert plan.task_prompt == "fix grammar"
+    assert "<system>\nYou are a strict editor.\n</system>" in plan.format_full_prompt()
     assert plan.requests_estimate == 2
     assert plan.output_tokens_cap == 4096
     assert plan.input_tokens_estimate > 0

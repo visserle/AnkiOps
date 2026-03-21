@@ -6,9 +6,6 @@
 
 Editing flashcards in Anki's UI is tedious when you could be using your favorite text editor, AI tools, and Git. **AnkiOps** is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Work in either Anki or your text editor, and let changes flow both ways. This brings LLM assistance, automated batch editing, and version control to your flashcards.
 
-> [!NOTE]
-> Work in progress. This readme might not always reflect the current state of the repo.
-
 ## Features
 
 - Simple CLI interface: after initialization, only two commands (import/export) are needed for daily use
@@ -161,6 +158,9 @@ uv run python -m main ma
 
 AnkiOps includes a LLM pipeline for repeatable task execution. 
 
+> [!NOTE]
+> LLM integration is still experimental and subject to change.
+
 After `ankiops init`, AnkiOps bootstraps:
 
 - `llm/system_prompt.md`
@@ -189,6 +189,7 @@ ankiops llm --job latest
 ```yaml
 model: sonnet
 prompt_file: ../prompts/grammar.md
+system_prompt_file: ../system_prompt.md
 api_key_env: ANTHROPIC_API_KEY
 timeout_seconds: 60
 
@@ -214,6 +215,7 @@ request:
 - Required keys: `model`, `prompt_file`
 - Supported models: `opus`, `sonnet`, `haiku`
 - `prompt_file` is resolved relative to the task file and must stay within `llm/`
+- `system_prompt_file` is optional (defaults to `llm/system_prompt.md`), resolved relative to the task file, and must stay within `llm/`
 - `api_key_env` defaults to `ANTHROPIC_API_KEY` if omitted
 - `decks.include` defaults to `["*"]`, `decks.exclude` defaults to `[]`, and `decks.include_subdecks` defaults to `true`
 - CLI override: `ankiops llm <task> --deck <name>` forces one exact deck with `include_subdecks=false`
@@ -225,6 +227,7 @@ request:
 
 - `ankiops llm` validates all task configs and exits non-zero on errors
 - AnkiOps creates a pre-LLM git snapshot unless `--no-auto-commit` is passed
+- `ankiops llm <task>` prints the resolved system/task prompt file paths and the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning
 - Only notes in scope with at least one editable, non-empty field are sent to the model
 - Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/llm.db` with per-note status, token usage, latency, and errors

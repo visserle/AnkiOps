@@ -169,6 +169,7 @@ def deserialize_collection_data(
     root_dir: Path,
     note_types_dir: Path,
     overwrite: bool = False,
+    quiet: bool = False,
 ) -> None:
     """Deserialize collection from an in-memory JSON-compatible mapping."""
     logger.debug(f"Target directory: {root_dir}")
@@ -259,9 +260,13 @@ def deserialize_collection_data(
         content = "\n".join(lines)
         if overwrite or not output_path.exists():
             output_path.write_text(content, encoding="utf-8")
-            logger.info(
+            created_message = (
                 f"  Created {clickable_path(output_path)} ({written_notes} notes)"
             )
+            if quiet:
+                logger.debug(created_message)
+            else:
+                logger.info(created_message)
         else:
             logger.warning(
                 f"Skipped {clickable_path(output_path)} "
@@ -271,9 +276,13 @@ def deserialize_collection_data(
         total_decks += 1
         total_notes += written_notes
 
-    logger.info(
+    summary_message = (
         f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {root_dir}"
     )
+    if quiet:
+        logger.debug(summary_message)
+    else:
+        logger.info(summary_message)
     if skipped_notes:
         logger.warning(
             f"Skipped {skipped_notes} note(s) due to missing/invalid note type metadata"
@@ -281,6 +290,10 @@ def deserialize_collection_data(
 
     db_path = root_dir / ANKIOPS_DB
     if not db_path.exists():
-        logger.info(
+        init_message = (
             "Run 'ankiops init' to set up this collection with your Anki profile."
         )
+        if quiet:
+            logger.debug(init_message)
+        else:
+            logger.info(init_message)

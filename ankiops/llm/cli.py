@@ -387,21 +387,26 @@ def run_llm(
         except ValueError as error:
             logger.error(str(error))
             raise SystemExit(1) from error
-        logger.info(
-            "LLM job: %d",
-            result.job_id,
-        )
+        inspect_command = f"ankiops llm --job {result.job_id}"
         if result.failed:
-            logger.info("Actual cost: %s", result.summary.format_cost())
             logger.error(
-                "LLM job finished with %d error(s)%s",
+                "LLM job #%d failed with %d error(s)%s. Cost: %s. Inspect: %s",
+                result.job_id,
                 result.summary.errors,
                 " (atomic policy: no updates persisted)"
                 if not result.persisted and result.summary.updated > 0
                 else "",
+                result.summary.format_cost(),
+                inspect_command,
             )
             raise SystemExit(1)
-        logger.info("Actual cost: %s", result.summary.format_cost())
+        logger.info(
+            "LLM job #%d completed%s. Cost: %s. Inspect: %s",
+            result.job_id,
+            " (no markdown changes persisted)" if not result.persisted else "",
+            result.summary.format_cost(),
+            inspect_command,
+        )
         return
 
     try:
@@ -418,6 +423,8 @@ def run_llm(
     logger.info("Plan: %s (model=%s)", plan.task_name, plan.model)
     logger.info("Deck scope: %s", plan.deck_scope)
     logger.info("Serializer scope: %s", plan.serializer_scope)
+    logger.info("System prompt file: %s", plan.system_prompt_path)
+    logger.info("Task prompt file: %s", plan.prompt_path)
     logger.info("Request defaults: %s", plan.request_defaults)
     logger.info(
         "Discovery: decks_seen=%d decks_matched=%d notes_seen=%d "
@@ -449,6 +456,9 @@ def run_llm(
         )
     else:
         logger.info("  none")
+    logger.info("")
+    logger.info("Full prompt:")
+    logger.info("%s", plan.format_full_prompt())
     logger.info("")
     logger.info("Request estimate: %s", _format_count(plan.requests_estimate))
     logger.info("Cost estimate (max): %s", plan.format_cost_estimate())

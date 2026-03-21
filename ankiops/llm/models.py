@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from fnmatch import fnmatchcase
+from pathlib import Path
 
 from ankiops.log import format_changes
 
@@ -120,6 +121,10 @@ class TaskConfig:
     model: AnthropicModel
     system_prompt: str
     prompt: str
+    system_prompt_path: Path = field(
+        default_factory=lambda: Path("llm/system_prompt.md")
+    )
+    prompt_path: Path = field(default_factory=lambda: Path("llm/prompts/unknown.md"))
     api_key_env: str = "ANTHROPIC_API_KEY"
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
@@ -273,6 +278,10 @@ class TaskPlanResult:
     model: AnthropicModel
     deck_scope: str
     serializer_scope: str
+    system_prompt_path: str
+    prompt_path: str
+    system_prompt: str
+    task_prompt: str
     request_defaults: str
     summary: TaskRunSummary
     field_surface: list[PlanFieldSurface]
@@ -286,3 +295,9 @@ class TaskPlanResult:
             output_tokens=self.output_tokens_cap,
         )
         return estimate.format()
+
+    def format_full_prompt(self) -> str:
+        return (
+            f"<system>\n{self.system_prompt.strip()}\n</system>\n\n"
+            f"<task>\n{self.task_prompt.strip()}\n</task>"
+        )
