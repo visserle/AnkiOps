@@ -95,8 +95,7 @@ AnkiOps reads note types exclusively from your local `note_types/` directory. `a
 AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. One AnkiOps folder represents one Anki profile. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
 ### What is the recommended workflow?
 
-We recommend using VS Code. It has excellent AI integration, a great [add-on](https://marketplace.visualstudio.com/items?itemName=shd101wyy.markdown-preview-enhanced) for Markdown previews, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up)
-
+We recommend using VS Code. It has excellent AI integration, a native Markdown previewer, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up).
 
 ### How can I share my AnkiOps collection?
 
