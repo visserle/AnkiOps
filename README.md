@@ -149,8 +149,8 @@ uv run python -m main ma
 
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
-- `ankiops llm <task_name> [--model <opus|sonnet|haiku>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest|-1>` - Show one LLM job in detail
 
 **`note-types` / `nt`:**
@@ -180,6 +180,7 @@ Plan, run, and inspect jobs:
 ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
+ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
 ankiops llm grammar --run --model haiku
 ankiops llm --job latest
 ```
@@ -215,6 +216,7 @@ request:
 - `prompt_file` is resolved relative to the task file and must stay within `llm/`
 - `api_key_env` defaults to `ANTHROPIC_API_KEY` if omitted
 - `decks.include` defaults to `["*"]`, `decks.exclude` defaults to `[]`, and `decks.include_subdecks` defaults to `true`
+- CLI override: `ankiops llm <task> --deck <name>` forces one exact deck with `include_subdecks=false`
 - `decks` patterns use shell-style matching (`*`, `?`, character classes); non-wildcard names match exact deck names (and optionally subdecks)
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - `request` tuning defaults: `retries=2`, `retry_backoff_seconds=0.5`, `retry_backoff_jitter=true`, `max_output_tokens=2048`

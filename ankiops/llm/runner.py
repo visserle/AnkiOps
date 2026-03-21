@@ -75,7 +75,10 @@ def _apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskCon
     if not deck_name:
         raise ValueError("Deck override must be a non-empty deck name")
     if any(char in deck_name for char in ("*", "?", "[")):
-        raise ValueError("Deck override must be an exact deck name (wildcards are not supported)")
+        raise ValueError(
+            "Deck override must be an exact deck name "
+            "(wildcards are not supported)"
+        )
 
     return replace(
         task,

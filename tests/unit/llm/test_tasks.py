@@ -834,7 +834,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("task_content", "expected_scope"),
+    ("task_content", "deck_override", "expected_scope"),
     [
         (
             _task_config(
@@ -846,6 +846,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
                     - read_only: ["Source"]
                 """
             ),
+            None,
             {"deck": TEST_DECK, "no_subdecks": False},
         ),
         (
@@ -859,6 +860,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
                     - read_only: ["Source"]
                 """
             ),
+            None,
             {"deck": TEST_DECK, "no_subdecks": True},
         ),
         (
@@ -871,15 +873,35 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
                     - read_only: ["Source"]
                 """
             ),
+            None,
             {"deck": None, "no_subdecks": False},
         ),
+        (
+            _task_config(
+                extra="""
+                decks:
+                  include: ["Other*"]
+                fields:
+                  exceptions:
+                    - read_only: ["Source"]
+                """
+            ),
+            TEST_DECK,
+            {"deck": TEST_DECK, "no_subdecks": True},
+        ),
     ],
-    ids=["exact-deck", "exact-deck-without-subdecks", "wildcard-deck"],
+    ids=[
+        "exact-deck",
+        "exact-deck-without-subdecks",
+        "wildcard-deck",
+        "deck-override-exact",
+    ],
 )
 def test_run_task_uses_expected_serialize_scope(
     tmp_path: Path,
     monkeypatch,
     task_content: str,
+    deck_override: str | None,
     expected_scope: dict[str, object],
 ):
     collection = _prepare_runner_collection(
@@ -913,6 +935,7 @@ def test_run_task_uses_expected_serialize_scope(
     result = run_task(
         collection_dir=collection,
         task_name="grammar",
+        deck_override=deck_override,
         no_auto_commit=True,
     )
 
@@ -921,6 +944,21 @@ def test_run_task_uses_expected_serialize_scope(
         **expected_scope,
         "note_types_dir": collection / "note_types",
     }
+
+
+def test_run_task_rejects_wildcard_deck_override(tmp_path: Path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+
+    with pytest.raises(
+        ValueError,
+        match="Deck override must be an exact deck name",
+    ):
+        run_task(
+            collection_dir=collection,
+            task_name="grammar",
+            deck_override="Test*",
+            no_auto_commit=True,
+        )
 
 
 def test_run_task_atomic_policy_skips_persistence_when_any_note_fails(

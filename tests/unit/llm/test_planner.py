@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
+import pytest
+
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.db import LlmDbAdapter
@@ -125,3 +127,32 @@ def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
     )
 
     assert plan.summary.eligible == 2
+
+
+def test_plan_task_deck_override_forces_exact_scope(tmp_path: Path):
+    collection = _prepare_collection(tmp_path)
+
+    plan = plan_task(
+        collection_dir=collection,
+        task_name="grammar",
+        deck_override=TEST_DECK,
+    )
+
+    assert plan.deck_scope == (
+        f"include={TEST_DECK} exclude=- include_subdecks=false"
+    )
+    assert plan.serializer_scope == f"exact:{TEST_DECK}"
+
+
+def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
+    collection = _prepare_collection(tmp_path)
+
+    with pytest.raises(
+        ValueError,
+        match="Deck override must be an exact deck name",
+    ):
+        plan_task(
+            collection_dir=collection,
+            task_name="grammar",
+            deck_override="Test*",
+        )
