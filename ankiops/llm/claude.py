@@ -16,13 +16,16 @@ from anthropic import (
 
 from .errors import LlmFatalError, LlmNoteError
 from .models import (
-    GenerateUpdateResult,
     NotePayload,
+    PreparedAttemptRequest,
+    ProviderAttemptErrorContext,
+    ProviderAttemptOutcome,
     TaskConfig,
     TaskRequestOptions,
 )
 from .prompting import build_system_prompt, build_user_message
 from .structured_output import (
+    NoteUpdateContract,
     StructuredOutputError,
     build_note_update_contract,
     parse_note_update_json,
@@ -48,25 +51,20 @@ class ClaudeClient:
             timeout=float(task.timeout_seconds),
         )
 
-    def generate_update(
+    def prepare_attempt_request(
         self,
         *,
         note_payload: NotePayload,
         task_prompt: str,
         request_options: TaskRequestOptions,
         api_model: str,
-    ) -> GenerateUpdateResult:
+    ) -> PreparedAttemptRequest:
         contract = build_note_update_contract(note_payload)
         max_tokens = request_options.max_output_tokens or 2048
-        kwargs: dict[str, object] = {
+        system_prompt_text = build_system_prompt(self._system_prompt)
+        user_message_text = build_user_message(task_prompt, note_payload)
+        request_params: dict[str, object] = {
             "model": api_model,
-            "system": build_system_prompt(self._system_prompt),
-            "messages": [
-                {
-                    "role": "user",
-                    "content": build_user_message(task_prompt, note_payload),
-                }
-            ],
             "max_tokens": max_tokens,
             "output_config": {
                 "format": {
@@ -76,7 +74,36 @@ class ClaudeClient:
             },
         }
         if request_options.temperature is not None:
-            kwargs["temperature"] = request_options.temperature
+            request_params["temperature"] = request_options.temperature
+
+        return PreparedAttemptRequest(
+            note_payload=note_payload,
+            system_prompt_text=system_prompt_text,
+            user_message_text=user_message_text,
+            request_params=request_params,
+            output_schema=contract.schema,
+            editable_fields=contract.editable_fields,
+        )
+
+    def generate_update(
+        self,
+        *,
+        prepared_request: PreparedAttemptRequest,
+        request_options: TaskRequestOptions,
+    ) -> ProviderAttemptOutcome:
+        note_payload = prepared_request.note_payload
+        api_model = str(prepared_request.request_params.get("model") or "")
+        if not api_model:
+            raise LlmFatalError("Prepared request is missing provider model")
+
+        kwargs: dict[str, object] = dict(prepared_request.request_params)
+        kwargs["system"] = prepared_request.system_prompt_text
+        kwargs["messages"] = [
+            {
+                "role": "user",
+                "content": prepared_request.user_message_text,
+            }
+        ]
 
         logger.debug(
             "Requesting update for %s (%s, editable=%d, read_only=%d)",
@@ -172,28 +199,47 @@ class ClaudeClient:
             retry_count,
         )
 
-        raw_text = _extract_text_content(response.content)
-        if response.stop_reason == "refusal":
+        context = _attempt_context_from_response(
+            response,
+            fallback_model=api_model,
+            retry_count=retry_count,
+            latency_ms=latency_ms,
+        )
+        raw_text = context.response_raw_text
+        if context.stop_reason == "refusal":
             message = raw_text or "Model refused to produce a structured response"
-            raise LlmNoteError(f"Provider refused request: {message}")
+            raise LlmNoteError(
+                f"Provider refused request: {message}",
+                attempt_context=context,
+            )
 
         if not raw_text:
-            raise LlmNoteError("Anthropic response contained no JSON text output")
+            raise LlmNoteError(
+                "Anthropic response contained no JSON text output",
+                attempt_context=context,
+            )
+
+        contract = NoteUpdateContract(
+            schema=prepared_request.output_schema,
+            editable_fields=prepared_request.editable_fields,
+        )
 
         try:
             update = parse_note_update_json(raw_text, contract=contract)
         except StructuredOutputError as error:
-            raise LlmNoteError(str(error)) from error
+            raise LlmNoteError(str(error), attempt_context=context) from error
 
-        return GenerateUpdateResult(
+        return ProviderAttemptOutcome(
             update=update,
-            message_id=getattr(response, "id", "unknown"),
-            model=getattr(response, "model", api_model),
-            stop_reason=getattr(response, "stop_reason", None),
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            latency_ms=latency_ms,
-            retry_count=retry_count,
+            provider_message_id=context.provider_message_id,
+            provider_model=context.provider_model,
+            stop_reason=context.stop_reason,
+            input_tokens=context.input_tokens,
+            output_tokens=context.output_tokens,
+            latency_ms=context.latency_ms,
+            retry_count=context.retry_count,
+            response_raw_text=raw_text,
+            response_full_json=context.response_full_json,
         )
 
 
@@ -213,6 +259,56 @@ def _extract_text_content(blocks: object) -> str:
 def _usage_value(usage: object, name: str) -> int:
     value = getattr(usage, name, 0)
     return value if isinstance(value, int) else 0
+
+
+def _response_to_json(response: object) -> str | None:
+    model_dump_json = getattr(response, "model_dump_json", None)
+    if callable(model_dump_json):
+        try:
+            value = model_dump_json()
+            return value if isinstance(value, str) else None
+        except Exception:
+            return None
+
+    to_json = getattr(response, "to_json", None)
+    if callable(to_json):
+        try:
+            value = to_json()
+            return value if isinstance(value, str) else None
+        except Exception:
+            return None
+
+    return None
+
+
+def _attempt_context_from_response(
+    response: object,
+    *,
+    fallback_model: str,
+    retry_count: int,
+    latency_ms: int,
+) -> ProviderAttemptErrorContext:
+    message_id = getattr(response, "id", None)
+    if not isinstance(message_id, str):
+        message_id = None
+
+    model = getattr(response, "model", None)
+    provider_model = model if isinstance(model, str) else fallback_model
+
+    raw_text = _extract_text_content(getattr(response, "content", None)) or None
+
+    usage = getattr(response, "usage", None)
+    return ProviderAttemptErrorContext(
+        provider_message_id=message_id,
+        provider_model=provider_model,
+        stop_reason=getattr(response, "stop_reason", None),
+        input_tokens=_usage_value(usage, "input_tokens"),
+        output_tokens=_usage_value(usage, "output_tokens"),
+        latency_ms=latency_ms,
+        retry_count=retry_count,
+        response_raw_text=raw_text,
+        response_full_json=_response_to_json(response),
+    )
 
 
 def _retry_delay_seconds(

@@ -12,7 +12,15 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
 from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.models import GenerateUpdateResult, NoteUpdate
+from ankiops.llm.db import LlmDbAdapter
+from ankiops.llm.errors import LlmFatalError
+from ankiops.llm.models import (
+    LlmFinalStatus,
+    LlmJobStatus,
+    NoteUpdate,
+    PreparedAttemptRequest,
+    ProviderAttemptOutcome,
+)
 from ankiops.llm.runner import run_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -122,10 +130,36 @@ def _prepare_runner_collection(
 
 
 class _StubClient:
-    def __init__(self, results: list[GenerateUpdateResult]) -> None:
+    def __init__(self, results: list[ProviderAttemptOutcome]) -> None:
         self._results = results
 
-    def generate_update(self, **_kwargs) -> GenerateUpdateResult:
+    def prepare_attempt_request(
+        self,
+        *,
+        note_payload,
+        task_prompt,
+        request_options,
+        api_model,
+    ) -> PreparedAttemptRequest:
+        del task_prompt
+        max_tokens = request_options.max_output_tokens or 2048
+        request_params: dict[str, object] = {
+            "model": api_model,
+            "max_tokens": max_tokens,
+            "output_config": {"format": {"type": "json_schema", "schema": {}}},
+        }
+        if request_options.temperature is not None:
+            request_params["temperature"] = request_options.temperature
+        return PreparedAttemptRequest(
+            note_payload=note_payload,
+            system_prompt_text="system",
+            user_message_text="user",
+            request_params=request_params,
+            output_schema={},
+            editable_fields=frozenset(note_payload.editable_fields.keys()),
+        )
+
+    def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
         return self._results.pop(0)
 
 
@@ -140,16 +174,17 @@ def _result(
     output_tokens: int = 7,
     latency_ms: int = 900,
     retry_count: int = 0,
-) -> GenerateUpdateResult:
-    return GenerateUpdateResult(
+) -> ProviderAttemptOutcome:
+    return ProviderAttemptOutcome(
         update=NoteUpdate(note_key=note_key, edits=edits),
-        message_id=message_id,
-        model=model,
+        provider_message_id=message_id,
+        provider_model=model,
         stop_reason=stop_reason,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         latency_ms=latency_ms,
         retry_count=retry_count,
+        response_raw_text='{"note_key":"%s","edits":{}}' % note_key,
     )
 
 
@@ -183,6 +218,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     assert "prompt_file: ../prompts/grammar.md" in (
         tmp_path / "llm/tasks/grammar.yaml"
     ).read_text(encoding="utf-8")
+    assert (tmp_path / "llm/llm.db").exists()
 
 
 def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
@@ -436,6 +472,115 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     assert "S: grammar book" in content
     assert "AI: hidden content" in content
     assert "A: 1" in content
+
+
+def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient(
+            [
+                _result(
+                    "nk-1",
+                    {"Question": "This is a fixed question."},
+                    input_tokens=21,
+                    output_tokens=9,
+                    latency_ms=1200,
+                ),
+                _result(
+                    "nk-2",
+                    {},
+                    input_tokens=13,
+                    output_tokens=4,
+                    latency_ms=800,
+                ),
+            ]
+        ),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.job_id > 0
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.summary.requests == 2
+    assert detail.summary.input_tokens == 34
+    assert detail.summary.output_tokens == 13
+    assert detail.summary.updated == 1
+    assert detail.summary.unchanged == 1
+    assert len(detail.items) == 2
+    assert detail.items[0].attempts == 1
+    assert detail.items[1].attempts == 1
+    assert detail.status is LlmJobStatus.COMPLETED
+    assert detail.items[0].final_status is LlmFinalStatus.SUCCEEDED_UPDATED
+    assert detail.items[1].final_status is LlmFinalStatus.SUCCEEDED_UNCHANGED
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        payload_rows = db._conn.execute(
+            """
+            SELECT system_prompt_text, user_message_text, request_params_json
+            FROM llm_attempt_payload
+            ORDER BY attempt_id ASC
+            """
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert len(payload_rows) == 2
+    assert payload_rows[0]["system_prompt_text"] == "system"
+    assert payload_rows[0]["user_message_text"] == "user"
+    assert '"model":"claude-sonnet-4-6"' in payload_rows[0]["request_params_json"]
+
+
+def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+
+    class _FailingClient:
+        def __init__(self, _task) -> None:
+            raise LlmFatalError(
+                "Required environment variable 'ANTHROPIC_API_KEY' is not set"
+            )
+
+    monkeypatch.setattr("ankiops.llm.runner.ClaudeClient", _FailingClient)
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.status == "failed"
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.status is LlmJobStatus.FAILED
+    assert (
+        detail.fatal_error
+        == "Required environment variable 'ANTHROPIC_API_KEY' is not set"
+    )
 
 
 def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):

@@ -95,17 +95,21 @@ def test_generate_update_builds_request_and_returns_update(
         ) as create,
         caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
     ):
-        update_result = client.generate_update(
+        prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
             api_model="claude-sonnet-4-6",
         )
+        update_result = client.generate_update(
+            prepared_request=prepared_request,
+            request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
+        )
 
     assert update_result.update.note_key == "nk-1"
     assert update_result.update.edits == {"Question": "Fixed"}
-    assert update_result.message_id == "msg_123"
-    assert update_result.model == "claude-sonnet-4-6"
+    assert update_result.provider_message_id == "msg_123"
+    assert update_result.provider_model == "claude-sonnet-4-6"
     assert update_result.input_tokens == 311
     assert update_result.output_tokens == 37
     assert update_result.latency_ms == 2172
@@ -168,12 +172,16 @@ def test_generate_update_rejects_note_level_failures(
         patch.object(client._client.messages, "create", return_value=response),
         caplog.at_level(logging.DEBUG, logger="ankiops.llm.claude"),
     ):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=TaskRequestOptions(),
+            api_model="claude-sonnet-4-6",
+        )
         with pytest.raises(LlmNoteError, match=expected_error):
             client.generate_update(
-                note_payload=note_payload,
-                task_prompt="Fix grammar",
+                prepared_request=prepared_request,
                 request_options=TaskRequestOptions(),
-                api_model="claude-sonnet-4-6",
             )
 
     assert (
@@ -201,15 +209,19 @@ def test_generate_update_surfaces_unsupported_model_as_fatal(
     )
 
     with patch.object(client._client.messages, "create", side_effect=error):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=TaskRequestOptions(),
+            api_model="claude-sonnet-4-6",
+        )
         with pytest.raises(
             LlmFatalError,
             match="Configured Anthropic model does not support structured outputs",
         ):
             client.generate_update(
-                note_payload=note_payload,
-                task_prompt="Fix grammar",
+                prepared_request=prepared_request,
                 request_options=TaskRequestOptions(),
-                api_model="claude-sonnet-4-6",
             )
 
 
@@ -247,11 +259,15 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
         patch("ankiops.llm.claude.time.sleep") as sleep,
         caplog.at_level(logging.WARNING, logger="ankiops.llm.claude"),
     ):
-        update_result = client.generate_update(
+        prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=request_options,
             api_model="claude-sonnet-4-6",
+        )
+        update_result = client.generate_update(
+            prepared_request=prepared_request,
+            request_options=request_options,
         )
 
     assert update_result.retry_count == 1
@@ -281,16 +297,24 @@ def test_generate_update_fails_after_exhausting_retries(
         ) as create,
         patch("ankiops.llm.claude.time.sleep") as sleep,
     ):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=TaskRequestOptions(
+                retries=1,
+                retry_backoff_seconds=0.25,
+                retry_backoff_jitter=False,
+            ),
+            api_model="claude-sonnet-4-6",
+        )
         with pytest.raises(LlmFatalError, match="Provider returned HTTP 503"):
             client.generate_update(
-                note_payload=note_payload,
-                task_prompt="Fix grammar",
+                prepared_request=prepared_request,
                 request_options=TaskRequestOptions(
                     retries=1,
                     retry_backoff_seconds=0.25,
                     retry_backoff_jitter=False,
                 ),
-                api_model="claude-sonnet-4-6",
             )
 
     assert create.call_count == 2

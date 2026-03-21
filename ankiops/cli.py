@@ -20,10 +20,11 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.llm.anthropic_models import supported_model_names
+from ankiops.llm.cli import configure_llm_parser
+from ankiops.llm.cli import run_llm as run_llm_impl
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.errors import LlmFatalError
-from ankiops.llm.runner import run_task
+from ankiops.llm.runner import list_jobs as list_llm_jobs
+from ankiops.llm.runner import run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
@@ -272,53 +273,21 @@ def run_deserialize(args):
 
 
 def run_llm(args):
-    """List configured LLM tasks or execute one by name."""
-    collection_dir = require_initialized_collection_dir()
-    if args.task_name is None:
-        note_type_configs = FileSystemAdapter().load_note_type_configs(
-            get_note_types_dir()
-        )
-        catalog = load_llm_task_catalog(
-            collection_dir,
-            note_type_configs=note_type_configs,
-        )
-        tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
-        if tasks:
-            for task in tasks:
-                include = ",".join(task.decks.include)
-                exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
-                logger.info(
-                    f"{task.name}  model={task.model}  include={include}  "
-                    f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
-                )
-        if catalog.errors:
-            for message in catalog.errors.values():
-                logger.error(message)
-            raise SystemExit(1)
-        return
-
-    try:
-        result = run_task(
-            collection_dir=collection_dir,
-            task_name=args.task_name,
-            model_override=args.model,
-            no_auto_commit=args.no_auto_commit,
-        )
-        if result.failed:
-            logger.error(
-                "LLM task finished with %d error(s)%s",
-                result.summary.errors,
-                " (atomic policy: no updates persisted)"
-                if not result.persisted and result.summary.updated > 0
-                else "",
+    """Delegates LLM command handling to the LLM CLI module."""
+    run_llm_impl(
+        args,
+        require_initialized_collection_dir_fn=require_initialized_collection_dir,
+        get_note_types_dir_fn=get_note_types_dir,
+        load_note_type_configs_fn=(
+            lambda note_types_dir: FileSystemAdapter().load_note_type_configs(
+                note_types_dir
             )
-            raise SystemExit(1)
-    except ValueError as error:
-        logger.error(str(error))
-        raise SystemExit(1) from error
-    except LlmFatalError as error:
-        logger.error(str(error))
-        raise SystemExit(1) from error
+        ),
+        load_llm_task_catalog_fn=load_llm_task_catalog,
+        run_task_fn=run_task,
+        list_jobs_fn=list_llm_jobs,
+        show_job_fn=show_job,
+    )
 
 
 def main():
@@ -411,27 +380,7 @@ def main():
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
-    llm_parser = subparsers.add_parser(
-        "llm",
-        help="List configured LLM tasks or run one by name",
-    )
-    llm_parser.add_argument(
-        "task_name",
-        nargs="?",
-        help="Task name to run (omit to list configured tasks)",
-    )
-    llm_parser.add_argument(
-        "--model",
-        choices=supported_model_names(),
-        help="Override model class (opus, sonnet, haiku)",
-    )
-    llm_parser.add_argument(
-        "--no-auto-commit",
-        "-n",
-        action="store_true",
-        help="Skip the automatic git commit for this operation",
-    )
-    llm_parser.set_defaults(handler=run_llm)
+    configure_llm_parser(subparsers, handler=run_llm)
 
     note_types_parser = subparsers.add_parser(
         "note-types",
@@ -480,7 +429,10 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
-        print("  llm               Run configured LLM tasks on local markdown")
+        print(
+            "  llm               Run configured LLM tasks and inspect "
+            "LLM job history"
+        )
         print(
             "  note-types        List note type labels or import note types "
             "from Anki (alias: nt)"
@@ -509,7 +461,13 @@ def main():
         print(
             "  ankiops llm                                  # List configured LLM tasks"
         )
-        print("  ankiops llm grammar                          # Run the grammar task")
+        print("  ankiops llm run grammar                      # Run the grammar task")
+        print("  ankiops llm jobs                             # Show recent LLM jobs")
+        print(
+            "  ankiops llm show latest                      "
+            "# Show most recent LLM job"
+        )
+        print("  ankiops llm show <job_id>                    # Show one LLM job")
         print("  ankiops note-types list                      # Show taken labels")
         print(
             "  ankiops note-types import MyCustomType       "

@@ -10,6 +10,7 @@ ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 LLM_DIR = "llm"
+LLM_DB_FILENAME = "llm.db"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 
@@ -96,6 +97,11 @@ def get_note_types_dir() -> Path:
 def get_llm_dir() -> Path:
     """Get the LLM config root directory path."""
     return get_collection_dir() / LLM_DIR
+
+
+def get_llm_db_path() -> Path:
+    """Get the LLM run-history database path."""
+    return get_llm_dir() / LLM_DB_FILENAME
 
 
 def require_initialized_collection_dir() -> Path:

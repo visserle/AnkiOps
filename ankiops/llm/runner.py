@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,18 +20,33 @@ from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 from .anthropic_models import format_supported_model_names, parse_model
 from .claude import ClaudeClient
 from .config_loader import load_llm_task_catalog
+from .db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
 from .errors import LlmFatalError, LlmNoteError
 from .models import (
     FieldAccess,
-    GenerateUpdateResult,
+    LlmAttemptResultType,
+    LlmCandidateStatus,
+    LlmFinalStatus,
+    LlmJobResult,
+    LlmJobStatus,
     NotePayload,
+    PreparedAttemptRequest,
+    ProviderAttemptErrorContext,
+    ProviderAttemptOutcome,
     RunFailurePolicy,
     TaskConfig,
-    TaskRunResult,
-    TaskRunSummary,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _EligibleCandidate:
+    item_id: int
+    deck_name: str
+    payload: NotePayload
+    note_type_config: NoteTypeConfig
+    serialized_note: dict[str, Any]
 
 
 def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
@@ -219,11 +235,7 @@ def _load_task(
     return task, config_by_name
 
 
-def _iter_decks(
-    data: dict[str, Any],
-    *,
-    summary: TaskRunSummary,
-) -> Iterator[tuple[str, list[Any]]]:
+def _iter_decks(data: dict[str, Any]) -> Iterator[tuple[str, list[Any]]]:
     decks = data.get("decks")
     if not isinstance(decks, list):
         raise ValueError("Serialized collection is missing a decks list")
@@ -236,116 +248,566 @@ def _iter_decks(
         if not isinstance(deck_name, str) or not isinstance(notes, list):
             continue
 
-        summary.decks_seen += 1
-        summary.notes_seen += len(notes)
         yield deck_name, notes
 
 
-def _record_provider_result(
-    summary: TaskRunSummary,
-    result: GenerateUpdateResult,
-) -> None:
-    summary.requests += 1
-    summary.input_tokens += result.input_tokens
-    summary.output_tokens += result.output_tokens
-    summary.provider_latency_ms_total += result.latency_ms
-    summary.provider_retries += result.retry_count
-
-
-def _process_note(
+def _error_context_for_attempt(
     *,
-    deck_name: str,
-    note: dict[str, Any],
-    task: TaskConfig,
-    api_model: str,
-    note_type_configs: dict[str, NoteTypeConfig],
-    provider_client: ClaudeClient,
-    summary: TaskRunSummary,
-) -> None:
-    note_key = note.get("note_key")
-    note_type_name = note.get("note_type")
-    note_label = note_key if isinstance(note_key, str) else "unknown"
-    note_type_label = note_type_name if isinstance(note_type_name, str) else "unknown"
+    outcome: ProviderAttemptOutcome | None,
+    error: LlmNoteError | LlmFatalError,
+) -> ProviderAttemptErrorContext | None:
+    if outcome is not None:
+        return ProviderAttemptErrorContext(
+            provider_message_id=outcome.provider_message_id,
+            provider_model=outcome.provider_model,
+            stop_reason=outcome.stop_reason,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            latency_ms=outcome.latency_ms,
+            retry_count=outcome.retry_count,
+            response_raw_text=outcome.response_raw_text,
+            response_full_json=outcome.response_full_json,
+        )
+    if isinstance(error, LlmNoteError):
+        return error.attempt_context
+    return None
 
-    note_type_config = (
-        note_type_configs.get(note_type_name)
-        if isinstance(note_type_name, str)
-        else None
-    )
-    if note_type_config is None:
-        raise ValueError(f"Unknown note type '{note_type_name}' in serialized note")
 
-    note_field_names = {
-        field.name
-        for field in note_type_config.fields
-        if field.name != ANKIOPS_KEY_FIELD.name
-    }
-    payload = _build_note_payload(
-        task,
-        note=note,
-        note_type_field_names=note_field_names,
-    )
-    if payload is None:
-        summary.skipped_no_editable_fields += 1
+class LlmTaskExecutor:
+    """Standalone LLM runtime pipeline with DB-backed state."""
+
+    def __init__(
+        self,
+        *,
+        collection_dir: Path,
+        task_name: str,
+        model_override: str | None,
+        no_auto_commit: bool,
+        failure_policy: RunFailurePolicy | str,
+    ) -> None:
+        self.collection_dir = collection_dir
+        self.task_name = task_name
+        self.model_override = model_override
+        self.no_auto_commit = no_auto_commit
+        self.failure_policy = _resolve_failure_policy(failure_policy)
+
+    def execute(self) -> LlmJobResult:
+        task, note_type_configs = _load_task(
+            collection_dir=self.collection_dir,
+            task_name=self.task_name,
+        )
+
+        model = _resolve_model(task, self.model_override)
+        db = LlmDbAdapter.open(self.collection_dir)
+
+        job_id = db.start_job(
+            task_name=task.name,
+            model_name=model.name,
+            api_model=model.api_id,
+            failure_policy=self.failure_policy,
+        )
+
+        deck, no_subdecks = _resolve_serializer_scope(task)
         logger.debug(
-            "  Skipped %s in '%s' (%s): no editable non-empty fields",
-            note_label,
-            deck_name,
-            note_type_label,
+            "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
+            "deck_scope=%s, failure_policy=%s)",
+            task.name,
+            model,
+            model.api_id,
+            self.collection_dir,
+            _format_deck_scope(task),
+            self.failure_policy.value,
         )
-        return
-
-    summary.eligible += 1
-    try:
-        result = provider_client.generate_update(
-            note_payload=payload,
-            task_prompt=task.prompt,
-            request_options=task.request,
-            api_model=api_model,
-        )
-        _record_provider_result(summary, result)
-
-        update = result.update
-        if update.note_key != payload.note_key:
-            raise LlmNoteError("Model returned mismatched note_key")
-
-        changed_fields = _apply_note_update(
-            serialized_note=note,
-            payload=payload,
-            edits=update.edits,
-            note_type_config=note_type_config,
-        )
-    except LlmFatalError:
-        raise
-    except LlmNoteError as error:
-        summary.errors += 1
-        logger.error(
-            "LLM note error for %s in '%s' (%s): %s",
-            payload.note_key,
-            deck_name,
-            payload.note_type,
-            error,
-        )
-        return
-
-    if changed_fields:
-        summary.updated += 1
+        logger.debug("LLM request defaults: %s", _format_request_defaults(task))
         logger.debug(
-            "  Updated %s in '%s' (%s): fields=%s",
-            payload.note_key,
-            deck_name,
-            payload.note_type,
-            ",".join(changed_fields),
+            "LLM serializer scope: %s",
+            _format_serializer_scope(deck, no_subdecks),
         )
-        return
+        aggregate = None
 
-    summary.unchanged += 1
-    logger.debug(
-        "  Unchanged %s in '%s' (%s)",
-        payload.note_key,
-        deck_name,
-        payload.note_type,
-    )
+        try:
+            provider_client = ClaudeClient(task)
+            if not self.no_auto_commit:
+                logger.debug("Creating pre-LLM git snapshot")
+                git_snapshot(self.collection_dir, f"llm:{task.name}")
+            else:
+                logger.debug("Auto-commit disabled (--no-auto-commit)")
+
+            data = serialize_collection(
+                self.collection_dir,
+                deck=deck,
+                no_subdecks=no_subdecks,
+                note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
+            )
+
+            candidates = self._discover_candidates(
+                db=db,
+                job_id=job_id,
+                data=data,
+                task=task,
+                note_type_configs=note_type_configs,
+            )
+            self._execute_candidates(
+                db=db,
+                task=task,
+                api_model=model.api_id,
+                provider_client=provider_client,
+                candidates=candidates,
+            )
+
+            persisted = self._apply_updates(
+                db=db,
+                job_id=job_id,
+                data=data,
+            )
+
+            aggregate = db.aggregate_job(job_id)
+            status = (
+                LlmJobStatus.FAILED
+                if aggregate.summary.errors > 0
+                else LlmJobStatus.COMPLETED
+            )
+            db.finalize_job(
+                job_id=job_id,
+                status=status,
+                persisted=persisted,
+            )
+            aggregate = db.aggregate_job(job_id)
+        except LlmFatalError as error:
+            db.finalize_job(
+                job_id=job_id,
+                status=LlmJobStatus.FAILED,
+                persisted=False,
+                fatal_error=str(error),
+            )
+            aggregate = db.aggregate_job(job_id)
+            summary = aggregate.summary
+            logger.error(str(error))
+            logger.info(summary.format())
+            logger.debug(summary.format_usage())
+            logger.debug(summary.format_cost())
+            return LlmJobResult(
+                job_id=job_id,
+                status=LlmJobStatus.FAILED.value,
+                summary=summary,
+                failed=True,
+                persisted=False,
+            )
+        finally:
+            db.close()
+        if aggregate is None:
+            raise RuntimeError("LLM job aggregation failed")
+
+        summary = aggregate.summary
+        logger.info(summary.format())
+        logger.debug(summary.format_usage())
+        logger.debug(summary.format_cost())
+
+        return LlmJobResult(
+            job_id=job_id,
+            status=aggregate.status.value,
+            summary=summary,
+            failed=aggregate.failed,
+            persisted=aggregate.persisted,
+        )
+
+    def _discover_candidates(
+        self,
+        *,
+        db: LlmDbAdapter,
+        job_id: int,
+        data: dict[str, Any],
+        task: TaskConfig,
+        note_type_configs: dict[str, NoteTypeConfig],
+    ) -> list[_EligibleCandidate]:
+        candidates: list[_EligibleCandidate] = []
+        decks_seen = 0
+        decks_matched = 0
+        notes_seen = 0
+        ordinal = 0
+
+        for deck_name, notes in _iter_decks(data):
+            decks_seen += 1
+            notes_seen += len(notes)
+            in_scope = task.decks.matches(deck_name)
+            if in_scope:
+                decks_matched += 1
+            else:
+                logger.debug(
+                    "Skipping deck '%s' (%d notes): outside task scope",
+                    deck_name,
+                    len(notes),
+                )
+
+            for note in notes:
+                if not isinstance(note, dict):
+                    continue
+                ordinal += 1
+
+                note_key = note.get("note_key")
+                note_type_name = note.get("note_type")
+                note_label = note_key if isinstance(note_key, str) else "unknown"
+                note_type_label = (
+                    note_type_name if isinstance(note_type_name, str) else "unknown"
+                )
+                note_type_value = (
+                    note_type_name if isinstance(note_type_name, str) else None
+                )
+
+                if not in_scope:
+                    db.insert_job_item(
+                        job_id=job_id,
+                        ordinal=ordinal,
+                        deck_name=deck_name,
+                        note_key=note_key if isinstance(note_key, str) else None,
+                        note_type=note_type_value,
+                        candidate_status=LlmCandidateStatus.SKIPPED_DECK_SCOPE,
+                        skip_reason="outside task scope",
+                        final_status=LlmFinalStatus.NOT_ATTEMPTED,
+                    )
+                    continue
+
+                note_type_config = (
+                    note_type_configs.get(note_type_name)
+                    if isinstance(note_type_name, str)
+                    else None
+                )
+                if note_type_config is None:
+                    message = f"Unknown note type '{note_type_name}' in serialized note"
+                    db.insert_job_item(
+                        job_id=job_id,
+                        ordinal=ordinal,
+                        deck_name=deck_name,
+                        note_key=note_key if isinstance(note_key, str) else None,
+                        note_type=note_type_value,
+                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
+                        skip_reason=None,
+                        final_status=LlmFinalStatus.NOTE_ERROR,
+                        error_message=message,
+                    )
+                    logger.error(
+                        "LLM note error for %s in '%s' (%s): %s",
+                        note_label,
+                        deck_name,
+                        note_type_label,
+                        message,
+                    )
+                    continue
+
+                note_field_names = {
+                    field.name
+                    for field in note_type_config.fields
+                    if field.name != ANKIOPS_KEY_FIELD.name
+                }
+                try:
+                    payload = _build_note_payload(
+                        task,
+                        note=note,
+                        note_type_field_names=note_field_names,
+                    )
+                except ValueError as error:
+                    db.insert_job_item(
+                        job_id=job_id,
+                        ordinal=ordinal,
+                        deck_name=deck_name,
+                        note_key=note_key if isinstance(note_key, str) else None,
+                        note_type=note_type_value,
+                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
+                        skip_reason=None,
+                        final_status=LlmFinalStatus.NOTE_ERROR,
+                        error_message=str(error),
+                    )
+                    logger.error(
+                        "LLM note error for %s in '%s' (%s): %s",
+                        note_label,
+                        deck_name,
+                        note_type_label,
+                        error,
+                    )
+                    continue
+
+                if payload is None:
+                    db.insert_job_item(
+                        job_id=job_id,
+                        ordinal=ordinal,
+                        deck_name=deck_name,
+                        note_key=note_key if isinstance(note_key, str) else None,
+                        note_type=note_type_value,
+                        candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
+                        skip_reason="no editable non-empty fields",
+                        final_status=LlmFinalStatus.NOT_ATTEMPTED,
+                    )
+                    logger.debug(
+                        "  Skipped %s in '%s' (%s): no editable non-empty fields",
+                        note_label,
+                        deck_name,
+                        note_type_label,
+                    )
+                    continue
+
+                item_id = db.insert_job_item(
+                    job_id=job_id,
+                    ordinal=ordinal,
+                    deck_name=deck_name,
+                    note_key=payload.note_key,
+                    note_type=payload.note_type,
+                    candidate_status=LlmCandidateStatus.ELIGIBLE,
+                    skip_reason=None,
+                    final_status=LlmFinalStatus.NOT_ATTEMPTED,
+                )
+                candidates.append(
+                    _EligibleCandidate(
+                        item_id=item_id,
+                        deck_name=deck_name,
+                        payload=payload,
+                        note_type_config=note_type_config,
+                        serialized_note=note,
+                    )
+                )
+
+        db.set_discovery_counts(
+            job_id=job_id,
+            decks_seen=decks_seen,
+            decks_matched=decks_matched,
+            notes_seen=notes_seen,
+        )
+        return candidates
+
+    def _execute_candidates(
+        self,
+        *,
+        db: LlmDbAdapter,
+        task: TaskConfig,
+        api_model: str,
+        provider_client: ClaudeClient,
+        candidates: list[_EligibleCandidate],
+    ) -> None:
+        for candidate in candidates:
+            prepared_request = provider_client.prepare_attempt_request(
+                note_payload=candidate.payload,
+                task_prompt=task.prompt,
+                request_options=task.request,
+                api_model=api_model,
+            )
+            outcome: ProviderAttemptOutcome | None = None
+
+            try:
+                outcome = provider_client.generate_update(
+                    prepared_request=prepared_request,
+                    request_options=task.request,
+                )
+                update = outcome.update
+                if update.note_key != candidate.payload.note_key:
+                    raise LlmNoteError("Model returned mismatched note_key")
+
+                changed_fields = _apply_note_update(
+                    serialized_note=candidate.serialized_note,
+                    payload=candidate.payload,
+                    edits=update.edits,
+                    note_type_config=candidate.note_type_config,
+                )
+            except LlmFatalError as error:
+                with db.write_tx():
+                    self._record_error_attempt(
+                        db=db,
+                        candidate=candidate,
+                        prepared_request=prepared_request,
+                        outcome=outcome,
+                        error=error,
+                        error_type="fatal_error",
+                        final_status=LlmFinalStatus.FATAL_ERROR,
+                    )
+                raise
+            except LlmNoteError as error:
+                provider_error = str(error).startswith("Provider returned HTTP")
+                with db.write_tx():
+                    self._record_error_attempt(
+                        db=db,
+                        candidate=candidate,
+                        prepared_request=prepared_request,
+                        outcome=outcome,
+                        error=error,
+                        error_type="provider_error" if provider_error else "note_error",
+                        final_status=(
+                            LlmFinalStatus.PROVIDER_ERROR
+                            if provider_error
+                            else LlmFinalStatus.NOTE_ERROR
+                        ),
+                    )
+                logger.error(
+                    "LLM note error for %s in '%s' (%s): %s",
+                    candidate.payload.note_key,
+                    candidate.deck_name,
+                    candidate.payload.note_type,
+                    error,
+                )
+                continue
+
+            if changed_fields:
+                with db.write_tx():
+                    self._record_success_attempt(
+                        db=db,
+                        candidate=candidate,
+                        prepared_request=prepared_request,
+                        outcome=outcome,
+                    )
+                    db.update_job_item_result(
+                        item_id=candidate.item_id,
+                        final_status=LlmFinalStatus.SUCCEEDED_UPDATED,
+                        changed_fields=changed_fields,
+                    )
+                logger.debug(
+                    "  Updated %s in '%s' (%s): fields=%s",
+                    candidate.payload.note_key,
+                    candidate.deck_name,
+                    candidate.payload.note_type,
+                    ",".join(changed_fields),
+                )
+                continue
+
+            with db.write_tx():
+                self._record_success_attempt(
+                    db=db,
+                    candidate=candidate,
+                    prepared_request=prepared_request,
+                    outcome=outcome,
+                )
+                db.update_job_item_result(
+                    item_id=candidate.item_id,
+                    final_status=LlmFinalStatus.SUCCEEDED_UNCHANGED,
+                    changed_fields=[],
+                )
+            logger.debug(
+                "  Unchanged %s in '%s' (%s)",
+                candidate.payload.note_key,
+                candidate.deck_name,
+                candidate.payload.note_type,
+            )
+
+    def _record_success_attempt(
+        self,
+        *,
+        db: LlmDbAdapter,
+        candidate: _EligibleCandidate,
+        prepared_request: PreparedAttemptRequest,
+        outcome: ProviderAttemptOutcome | None,
+    ) -> None:
+        if outcome is None:
+            raise RuntimeError("Successful attempt recording requires provider outcome")
+
+        parsed_update = {
+            "note_key": outcome.update.note_key,
+            "edits": outcome.update.edits,
+        }
+        attempt_id = db.insert_attempt(
+            item_id=candidate.item_id,
+            attempt_no=1,
+            provider="anthropic",
+            provider_message_id=outcome.provider_message_id,
+            provider_model=outcome.provider_model,
+            stop_reason=outcome.stop_reason,
+            result_type=LlmAttemptResultType.SUCCEEDED,
+            latency_ms=outcome.latency_ms,
+            input_tokens=outcome.input_tokens,
+            output_tokens=outcome.output_tokens,
+            retry_count=outcome.retry_count,
+            error_type=None,
+            error_message=None,
+            parsed_update_json=parsed_update,
+        )
+        db.insert_attempt_payload(
+            attempt_id=attempt_id,
+            system_prompt_text=prepared_request.system_prompt_text,
+            user_message_text=prepared_request.user_message_text,
+            request_params_json=prepared_request.request_params,
+            response_raw_text=outcome.response_raw_text,
+            response_full_json=outcome.response_full_json,
+        )
+
+    def _record_error_attempt(
+        self,
+        *,
+        db: LlmDbAdapter,
+        candidate: _EligibleCandidate,
+        prepared_request: PreparedAttemptRequest,
+        outcome: ProviderAttemptOutcome | None,
+        error: LlmNoteError | LlmFatalError,
+        error_type: str,
+        final_status: LlmFinalStatus,
+    ) -> None:
+        context = _error_context_for_attempt(outcome=outcome, error=error)
+        parsed_update = None
+        if outcome is not None:
+            parsed_update = {
+                "note_key": outcome.update.note_key,
+                "edits": outcome.update.edits,
+            }
+        attempt_id = db.insert_attempt(
+            item_id=candidate.item_id,
+            attempt_no=1,
+            provider="anthropic",
+            provider_message_id=(
+                context.provider_message_id if context is not None else None
+            ),
+            provider_model=context.provider_model if context is not None else None,
+            stop_reason=context.stop_reason if context is not None else None,
+            result_type=LlmAttemptResultType.ERRORED,
+            latency_ms=context.latency_ms if context is not None else 0,
+            input_tokens=context.input_tokens if context is not None else 0,
+            output_tokens=context.output_tokens if context is not None else 0,
+            retry_count=context.retry_count if context is not None else 0,
+            error_type=error_type,
+            error_message=str(error),
+            parsed_update_json=parsed_update,
+        )
+        db.insert_attempt_payload(
+            attempt_id=attempt_id,
+            system_prompt_text=prepared_request.system_prompt_text,
+            user_message_text=prepared_request.user_message_text,
+            request_params_json=prepared_request.request_params,
+            response_raw_text=(
+                context.response_raw_text if context is not None else None
+            ),
+            response_full_json=(
+                context.response_full_json if context is not None else None
+            ),
+        )
+        db.update_job_item_result(
+            item_id=candidate.item_id,
+            final_status=final_status,
+            error_message=str(error),
+        )
+
+    def _apply_updates(
+        self,
+        *,
+        db: LlmDbAdapter,
+        job_id: int,
+        data: dict[str, Any],
+    ) -> bool:
+        aggregate = db.aggregate_job(job_id)
+        summary = aggregate.summary
+        persisted = False
+
+        if summary.updated > 0:
+            if self.failure_policy is RunFailurePolicy.ATOMIC and summary.errors:
+                logger.error(
+                    "Atomic failure policy prevented persistence: %d update(s) staged, "
+                    "%d error(s) observed",
+                    summary.updated,
+                    summary.errors,
+                )
+            else:
+                deserialize_collection_data(
+                    data,
+                    root_dir=self.collection_dir,
+                    note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
+                    overwrite=True,
+                )
+                persisted = True
+                db.set_applied_for_updated_items(job_id=job_id)
+
+        return persisted
 
 
 def run_task(
@@ -355,99 +817,39 @@ def run_task(
     model_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
-) -> TaskRunResult:
-    task, note_type_configs = _load_task(
+) -> LlmJobResult:
+    executor = LlmTaskExecutor(
         collection_dir=collection_dir,
         task_name=task_name,
+        model_override=model_override,
+        no_auto_commit=no_auto_commit,
+        failure_policy=failure_policy,
     )
+    return executor.execute()
 
-    model = _resolve_model(task, model_override)
-    resolved_failure_policy = _resolve_failure_policy(failure_policy)
 
-    provider_client = ClaudeClient(task)
-    summary = TaskRunSummary(
-        task_name=task.name,
-        model=model,
-    )
+def list_jobs(
+    *,
+    collection_dir: Path,
+    limit: int = 20,
+) -> list[LlmJobListItem]:
+    db = LlmDbAdapter.open(collection_dir)
+    try:
+        return db.list_jobs(limit=limit)
+    finally:
+        db.close()
 
-    deck, no_subdecks = _resolve_serializer_scope(task)
-    logger.debug(
-        "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
-        "deck_scope=%s, failure_policy=%s)",
-        task.name,
-        model,
-        model.api_id,
-        collection_dir,
-        _format_deck_scope(task),
-        resolved_failure_policy.value,
-    )
-    logger.debug("LLM request defaults: %s", _format_request_defaults(task))
-    logger.debug(
-        "LLM serializer scope: %s",
-        _format_serializer_scope(deck, no_subdecks),
-    )
 
-    if not no_auto_commit:
-        logger.debug("Creating pre-LLM git snapshot")
-        git_snapshot(collection_dir, f"llm:{task.name}")
-    else:
-        logger.debug("Auto-commit disabled (--no-auto-commit)")
-
-    data = serialize_collection(
-        collection_dir,
-        deck=deck,
-        no_subdecks=no_subdecks,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-
-    for deck_name, notes in _iter_decks(data, summary=summary):
-        if task.decks.matches(deck_name):
-            summary.decks_matched += 1
-        else:
-            summary.skipped_deck_scope += len(notes)
-            logger.debug(
-                "Skipping deck '%s' (%d notes): outside task scope",
-                deck_name,
-                len(notes),
-            )
-            continue
-
-        for note in notes:
-            if not isinstance(note, dict):
-                continue
-            _process_note(
-                deck_name=deck_name,
-                note=note,
-                task=task,
-                api_model=model.api_id,
-                note_type_configs=note_type_configs,
-                provider_client=provider_client,
-                summary=summary,
-            )
-
-    persisted = False
-    if summary.updated > 0:
-        if resolved_failure_policy is RunFailurePolicy.ATOMIC and summary.errors:
-            logger.error(
-                "Atomic failure policy prevented persistence: %d update(s) staged, "
-                "%d error(s) observed",
-                summary.updated,
-                summary.errors,
-            )
-        else:
-            deserialize_collection_data(
-                data,
-                root_dir=collection_dir,
-                note_types_dir=collection_dir / NOTE_TYPES_DIR,
-                overwrite=True,
-            )
-            persisted = True
-
-    logger.info(summary.format())
-    logger.debug(summary.format_usage())
-    logger.debug(summary.format_cost())
-    return TaskRunResult(
-        summary=summary,
-        failed=summary.errors > 0,
-        persisted=persisted,
-    )
+def show_job(
+    *,
+    collection_dir: Path,
+    job_id: str,
+) -> LlmJobDetail | None:
+    db = LlmDbAdapter.open(collection_dir)
+    try:
+        resolved = db.resolve_job_id(job_id)
+        if resolved is None:
+            return None
+        return db.get_job_detail(int(resolved))
+    finally:
+        db.close()

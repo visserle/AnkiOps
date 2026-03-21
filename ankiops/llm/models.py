@@ -22,6 +22,37 @@ class RunFailurePolicy(Enum):
     PARTIAL = "partial"
 
 
+class LlmCandidateStatus(Enum):
+    ELIGIBLE = "eligible"
+    SKIPPED_DECK_SCOPE = "skipped_deck_scope"
+    SKIPPED_NO_EDITABLE_FIELDS = "skipped_no_editable_fields"
+    INVALID_NOTE = "invalid_note"
+
+
+class LlmFinalStatus(Enum):
+    NOT_ATTEMPTED = "not_attempted"
+    SUCCEEDED_UPDATED = "succeeded_updated"
+    SUCCEEDED_UNCHANGED = "succeeded_unchanged"
+    NOTE_ERROR = "note_error"
+    PROVIDER_ERROR = "provider_error"
+    FATAL_ERROR = "fatal_error"
+    CANCELED = "canceled"
+    EXPIRED = "expired"
+
+
+class LlmAttemptResultType(Enum):
+    SUCCEEDED = "succeeded"
+    ERRORED = "errored"
+    CANCELED = "canceled"
+    EXPIRED = "expired"
+
+
+class LlmJobStatus(Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class DeckScope:
     include: list[str] = field(default_factory=lambda: ["*"])
@@ -122,15 +153,40 @@ class NoteUpdate:
 
 
 @dataclass(frozen=True)
-class GenerateUpdateResult:
-    update: NoteUpdate
-    message_id: str
-    model: str
+class PreparedAttemptRequest:
+    note_payload: NotePayload
+    system_prompt_text: str
+    user_message_text: str
+    request_params: dict[str, object]
+    output_schema: dict[str, object]
+    editable_fields: frozenset[str]
+
+
+@dataclass(frozen=True)
+class ProviderAttemptErrorContext:
+    provider_message_id: str | None
+    provider_model: str | None
     stop_reason: str | None
     input_tokens: int
     output_tokens: int
     latency_ms: int
-    retry_count: int = 0
+    retry_count: int
+    response_raw_text: str | None
+    response_full_json: str | None
+
+
+@dataclass(frozen=True)
+class ProviderAttemptOutcome:
+    update: NoteUpdate
+    provider_message_id: str | None
+    provider_model: str | None
+    stop_reason: str | None
+    input_tokens: int
+    output_tokens: int
+    latency_ms: int
+    retry_count: int
+    response_raw_text: str
+    response_full_json: str | None = None
 
 
 @dataclass
@@ -194,7 +250,9 @@ class TaskCatalog:
 
 
 @dataclass(frozen=True)
-class TaskRunResult:
+class LlmJobResult:
+    job_id: int
+    status: str
     summary: TaskRunSummary
     failed: bool
     persisted: bool

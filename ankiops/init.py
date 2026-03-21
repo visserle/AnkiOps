@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ankiops.config import (
     ANKIOPS_DB,
+    LLM_DB_FILENAME,
     LLM_DIR,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -15,6 +16,7 @@ from ankiops.config import (
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
+from ankiops.llm.db import LlmDbAdapter
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
@@ -33,26 +35,35 @@ def _setup_vscode_settings(collection_dir: Path):
         except (json.JSONDecodeError, ValueError):
             pass
 
+    settings["markdown.preview.breaks"] = True
     settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 
 def _setup_gitignore(collection_dir: Path):
-    """Ensure .ankiops.db is in .gitignore."""
+    """Ensure local database files are in .gitignore."""
     gitignore_path = collection_dir / ".gitignore"
 
     content = ""
     if gitignore_path.exists():
         content = gitignore_path.read_text()
 
-    if ANKIOPS_DB not in content:
+    entries = [
+        ANKIOPS_DB,
+        f"{ANKIOPS_DB}-shm",
+        f"{ANKIOPS_DB}-wal",
+        f"{LLM_DIR}/{LLM_DB_FILENAME}",
+        f"{LLM_DIR}/{LLM_DB_FILENAME}-shm",
+        f"{LLM_DIR}/{LLM_DB_FILENAME}-wal",
+    ]
+    missing = [entry for entry in entries if entry not in content]
+    if missing:
         if content and not content.endswith("\n"):
             content += "\n"
-        content += f"{ANKIOPS_DB}\n"
-        content += f"{ANKIOPS_DB}-shm\n"
-        content += f"{ANKIOPS_DB}-wal\n"
+        for entry in missing:
+            content += f"{entry}\n"
         gitignore_path.write_text(content)
-        logger.debug(f"Added {ANKIOPS_DB} to .gitignore")
+        logger.debug("Added local DB files to .gitignore")
 
 
 def _setup_git(collection_dir: Path):
@@ -131,6 +142,8 @@ def initialize_collection(profile: str) -> Path:
     db = SQLiteDbAdapter.open(collection_dir)
     db.set_profile_name(profile)
     db.close()
+    llm_db = LlmDbAdapter.open(collection_dir)
+    llm_db.close()
 
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
     _setup_vscode_settings(collection_dir)
