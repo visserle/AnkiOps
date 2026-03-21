@@ -77,6 +77,7 @@ def build_task_plan_result(
     summary = TaskRunSummary(
         task_name=task.name,
         model=task.model,
+        execution_mode=task.execution.mode,
         decks_seen=snapshot.counts.decks_seen,
         decks_matched=snapshot.counts.decks_matched,
         notes_seen=snapshot.counts.notes_seen,

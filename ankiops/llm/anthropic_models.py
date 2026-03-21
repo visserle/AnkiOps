@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 _TOKENS_PER_MTOK = Decimal("1000000")
 _USD_CENTS_QUANTUM = Decimal("0.01")
+_BATCH_PRICE_MULTIPLIER = Decimal("0.5")
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,12 @@ class CostEstimate:
     def format(self) -> str:
         return format_usd_cents(self.total_usd)
 
+    def scale(self, multiplier: Decimal) -> "CostEstimate":
+        return CostEstimate(
+            input_usd=self.input_usd * multiplier,
+            output_usd=self.output_usd * multiplier,
+        )
+
 
 @dataclass(frozen=True)
 class AnthropicModel:
@@ -34,8 +41,9 @@ class AnthropicModel:
         *,
         input_tokens: int,
         output_tokens: int,
+        batch: bool = False,
     ) -> CostEstimate:
-        return CostEstimate(
+        estimate = CostEstimate(
             input_usd=(
                 Decimal(input_tokens) * self.input_usd_per_mtok / _TOKENS_PER_MTOK
             ),
@@ -43,6 +51,9 @@ class AnthropicModel:
                 Decimal(output_tokens) * self.output_usd_per_mtok / _TOKENS_PER_MTOK
             ),
         )
+        if batch:
+            return estimate.scale(_BATCH_PRICE_MULTIPLIER)
+        return estimate
 
     def __str__(self) -> str:
         return self.name

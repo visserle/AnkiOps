@@ -8,6 +8,7 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.db import LlmDbAdapter
+from ankiops.llm.models import ExecutionMode
 from ankiops.llm.runner import plan_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -165,3 +166,34 @@ def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
             task_name="grammar",
             deck_override="Test*",
         )
+
+
+def test_plan_task_applies_batch_discount_to_cost_estimate(tmp_path: Path):
+    collection = _prepare_collection(tmp_path)
+    _write(
+        collection / TASK_FILE,
+        """
+        model: sonnet
+        prompt_file: ../prompts/grammar.md
+        fields:
+          exceptions:
+            - read_only: ["Source"]
+            - note_types: ["AnkiOpsChoice"]
+              read_only: ["Answer"]
+            - hidden: ["AI Notes"]
+        request:
+          max_output_tokens: 2048
+        execution:
+          mode: batch
+          batch_poll_seconds: 15
+          fail_fast: true
+        """,
+    )
+
+    plan = plan_task(
+        collection_dir=collection,
+        task_name="grammar",
+    )
+
+    assert plan.summary.execution_mode is ExecutionMode.BATCH
+    assert plan.format_cost_estimate() == "$0.03"

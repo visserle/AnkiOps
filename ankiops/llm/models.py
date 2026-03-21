@@ -216,6 +216,7 @@ class ProviderAttemptOutcome:
 class TaskRunSummary:
     task_name: str
     model: AnthropicModel
+    execution_mode: ExecutionMode = ExecutionMode.ONLINE
     decks_seen: int = 0
     decks_matched: int = 0
     notes_seen: int = 0
@@ -272,6 +273,7 @@ class TaskRunSummary:
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
+            batch=self.execution_mode is ExecutionMode.BATCH,
         )
         return estimate.format()
 
@@ -321,6 +323,7 @@ class TaskPlanResult:
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens_estimate,
             output_tokens=self.output_tokens_cap,
+            batch=self.summary.execution_mode is ExecutionMode.BATCH,
         )
         return estimate.format()
 

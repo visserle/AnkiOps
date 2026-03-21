@@ -808,6 +808,7 @@ class LlmDbAdapter:
             SELECT
                 task_name,
                 model_name,
+                execution_mode,
                 decks_seen,
                 decks_matched,
                 notes_seen,
@@ -824,10 +825,12 @@ class LlmDbAdapter:
         model = parse_model(row["model_name"])
         if model is None:
             raise ValueError(f"Unknown model '{row['model_name']}' in persisted job")
+        execution_mode = self._parse_enum(ExecutionMode, row["execution_mode"])
 
         summary = TaskRunSummary(
             task_name=row["task_name"],
             model=model,
+            execution_mode=execution_mode,
             decks_seen=int(row["decks_seen"]),
             decks_matched=int(row["decks_matched"]),
             notes_seen=int(row["notes_seen"]),
