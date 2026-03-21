@@ -144,6 +144,39 @@ def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
         assert db.resolve_note_ids([note_key]).get(note_key) == real_note_id
 
 
+def test_imp_run_drift_004_stale_existing_mapping_does_not_hijack_wrong_note(world):
+    """IMP-RUN-DRIFT-004."""
+    target_note_key = "imp-run-drift-004"
+    wrong_note_key = "imp-run-drift-004-wrong"
+    wrong_note_id = world.add_qa_note(
+        deck_name="DriftDeck",
+        question="Wrong Q",
+        answer="Wrong A",
+        note_key=wrong_note_key,
+    )
+
+    world.write_qa_deck("DriftDeck", [("Target Q", "Target A", target_note_key)])
+
+    with world.db_session() as db:
+        db.upsert_note_links([(target_note_key, wrong_note_id)])
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=1, errors=0
+        )
+        assert wrong_note_id not in world.mock_anki.notes
+        new_note_id = db.resolve_note_ids([target_note_key]).get(target_note_key)
+        assert new_note_id is not None
+        assert new_note_id != wrong_note_id
+        assert (
+            world.mock_anki.notes[new_note_id]["fields"]["Question"]["value"]
+            == "Target Q"
+        )
+        assert (
+            world.mock_anki.notes[new_note_id]["fields"]["Answer"]["value"] == "Target A"
+        )
+
+
 def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
     """IMP-RUN-CONFLICT-001."""
     duplicate_note_key = "duplicate-key"

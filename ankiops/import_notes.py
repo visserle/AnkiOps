@@ -252,7 +252,6 @@ def _sync_keyed_note(
     cfg: NoteTypeConfig,
     md_hash: str,
     deck_name: str,
-    anki_port: AnkiAdapter,
     fs_port: FileSystemAdapter,
     anki_notes: dict[int, AnkiNote],
     anki_cards: dict[int, dict],
@@ -262,6 +261,7 @@ def _sync_keyed_note(
     cards_to_move: list[int],
     moved_from_decks: set[str],
     queue_note_mapping,
+    clear_note_mapping,
     queue_fingerprint,
 ) -> None:
     note_key = parsed_note.note_key
@@ -269,31 +269,23 @@ def _sync_keyed_note(
         return
 
     note_id = note_ids_by_note_key.get(note_key)
-    if note_id is None:
-        # Recovery
-        found = anki_port.find_notes_by_ankiops_note_key(note_key)
-        if found:
-            note_id = found[0]
-            queue_note_mapping(note_key, note_id)
-
     anki_note = anki_notes.get(note_id) if note_id else None
 
-    # If recovery worked but wasn't in original batch fetch
+    # Keyed import operates on the preloaded managed-note snapshot.
+    # If mapped note_id is missing from that snapshot, treat local mapping as stale.
     if note_id and not anki_note:
-        info = anki_port.fetch_notes_info([note_id])
-        if info:
-            anki_note = info[note_id]
-            anki_notes[note_id] = anki_note
-        else:
-            # Stale note_key->note_id mapping: recover via embedded AnkiOps Key.
-            found = anki_port.find_notes_by_ankiops_note_key(note_key)
-            if found:
-                note_id = found[0]
-                queue_note_mapping(note_key, note_id)
-                info = anki_port.fetch_notes_info([note_id])
-                if info:
-                    anki_note = info[note_id]
-                    anki_notes[note_id] = anki_note
+        clear_note_mapping(note_key)
+        note_id = None
+
+    # Keyed sync trusts a non-empty embedded AnkiOps Key as source of truth.
+    # If mapped note_id points to a different non-empty key, treat mapping as stale.
+    # Empty embedded keys are treated as backfill candidates.
+    if anki_note and note_id:
+        embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+        if embedded_note_key and embedded_note_key != note_key:
+            clear_note_mapping(note_key)
+            note_id = None
+            anki_note = None
 
     if not anki_note:
         html_fields = _to_html(parsed_note, cfg, fs_port)
@@ -567,6 +559,15 @@ def _sync_file(
             global_mapped_note_ids.add(note_id)
         pending_note_mappings.append((note_key, note_id))
 
+    def _clear_note_mapping(note_key: str) -> None:
+        existing_note_id = note_ids_by_note_key.pop(note_key, None)
+        if existing_note_id is None:
+            return
+        if note_key in global_note_keys:
+            global_mapped_note_ids.discard(existing_note_id)
+        note_fingerprints_by_note_key.pop(note_key, None)
+        db_port.delete_note_links_by_keys([note_key])
+
     def _queue_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
         if note_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
             return
@@ -583,7 +584,6 @@ def _sync_file(
                 cfg=cfg,
                 md_hash=md_hash,
                 deck_name=deck_context.deck_name,
-                anki_port=anki_port,
                 fs_port=fs_port,
                 anki_notes=anki_notes,
                 anki_cards=anki_cards,
@@ -593,6 +593,7 @@ def _sync_file(
                 cards_to_move=cards_to_move,
                 moved_from_decks=moved_from_decks,
                 queue_note_mapping=_queue_note_mapping,
+                clear_note_mapping=_clear_note_mapping,
                 queue_fingerprint=_queue_fingerprint,
             )
         else:

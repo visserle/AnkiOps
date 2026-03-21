@@ -211,7 +211,9 @@ def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
     assert orphan_file.exists()
 
     with world.db_session() as db:
+        db.upsert_note_links([("orphan-key", 999001)])
         result = world.sync_export(db)
+        assert db.resolve_note_ids(["orphan-key"]).get("orphan-key") is None
 
     assert not orphan_file.exists()
     assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
@@ -278,7 +280,12 @@ def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
     assert orphan_file.exists()
 
     with world.db_session() as db:
+        db.upsert_note_links([("stale-orphan-key", 999002)])
         result = world.sync_export(db)
+        assert (
+            db.resolve_note_ids(["stale-orphan-key"]).get("stale-orphan-key")
+            is None
+        )
 
     content = world.read_deck("MixedOrphanDeck")
     assert orphan_file.exists()
@@ -289,6 +296,27 @@ def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
     assert len(result.protected_note_groups) == 1
     assert result.protected_note_groups[0].deck_name == "MixedOrphanDeck"
     assert result.protected_note_groups[0].note_count == 1
+
+
+def test_exp_run_protect_006_keeps_link_for_active_key_seen_in_orphan_file(world):
+    """EXP-RUN-PROTECT-006."""
+    active_key = "active-key"
+    note_id = world.add_qa_note(
+        deck_name="ActiveDeck",
+        question="Active Q",
+        answer="Active A",
+        note_key=active_key,
+    )
+    world.write_qa_deck("ActiveDeck", [("Active Q", "Active A", active_key)])
+    world.write_qa_deck("DuplicateOrphanDeck", [("Stale Q", "Stale A", active_key)])
+
+    with world.db_session() as db:
+        db.upsert_note_links([(active_key, note_id)])
+        result = world.sync_export(db)
+        assert db.resolve_note_ids([active_key]).get(active_key) == note_id
+
+    assert not world.deck_path("DuplicateOrphanDeck").exists()
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
 
 
 def test_exp_run_protect_003_preserves_malformed_orphan_file(world, caplog):

@@ -541,6 +541,7 @@ def export_collection(
         active_files = {
             sync_result.file_path for sync_result in results if sync_result.file_path
         }
+        active_note_keys = {note_key for note_key in note_keys_by_id.values() if note_key}
         for md_file in md_files:
             # A prior deck-rename step can move this file already.
             if not md_file.exists():
@@ -556,6 +557,15 @@ def export_collection(
                     db_port.delete_deck(deck_name)
                     continue
                 keyless_notes, keyed_notes = orphan_split
+                stale_orphan_note_keys = sorted(
+                    {
+                        note.note_key
+                        for note in keyed_notes
+                        if note.note_key and note.note_key not in active_note_keys
+                    }
+                )
+                if stale_orphan_note_keys:
+                    db_port.delete_note_links_by_keys(stale_orphan_note_keys)
                 protected_note_count = len(keyless_notes)
 
                 if protected_note_count:
