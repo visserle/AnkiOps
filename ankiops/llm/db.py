@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TypeVar
 
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
@@ -25,122 +25,18 @@ from .models import (
     TaskRunSummary,
 )
 
-logger = logging.getLogger(__name__)
-
-_EXPECTED_TABLES = {
-    "llm_job",
-    "llm_job_item",
-    "llm_item_attempt",
-    "llm_attempt_payload",
-    "llm_provider_batch",
-    "llm_batch_item_map",
-}
-
-_REQUIRED_INDEXES = {
-    "idx_llm_job_created",
-    "idx_llm_job_status",
-    "idx_llm_job_item_job",
-    "idx_llm_job_item_note_key",
-    "idx_llm_attempt_result",
-    "idx_llm_attempt_item",
-    "idx_llm_provider_batch_status",
-}
-
 _DEFAULT_JOB_LIST_LIMIT = 20
 
-_EXPECTED_COLUMNS: dict[str, list[str]] = {
-    "llm_job": [
-        "id",
-        "task_name",
-        "model_name",
-        "api_model",
-        "execution_mode",
-        "failure_policy",
-        "status",
-        "persisted",
-        "fatal_error",
-        "config_snapshot_json",
-        "resume_from_job_id",
-        "created_at",
-        "started_at",
-        "finished_at",
-        "decks_seen",
-        "decks_matched",
-        "notes_seen",
-    ],
-    "llm_job_item": [
-        "id",
-        "job_id",
-        "ordinal",
-        "note_key",
-        "deck_name",
-        "note_type",
-        "candidate_status",
-        "skip_reason",
-        "final_status",
-        "error_message",
-        "changed_fields_json",
-        "applied_to_markdown",
-        "resume_source_item_id",
-    ],
-    "llm_item_attempt": [
-        "id",
-        "job_item_id",
-        "attempt_no",
-        "provider",
-        "provider_message_id",
-        "provider_model",
-        "provider_request_id",
-        "provider_execution_mode",
-        "stop_reason",
-        "result_type",
-        "latency_ms",
-        "input_tokens",
-        "output_tokens",
-        "retry_count",
-        "error_type",
-        "error_message",
-        "rate_limit_headers_json",
-        "parsed_update_json",
-        "created_at",
-        "completed_at",
-    ],
-    "llm_attempt_payload": [
-        "attempt_id",
-        "system_prompt_text",
-        "user_message_text",
-        "request_params_json",
-        "response_raw_text",
-        "response_full_json",
-    ],
-    "llm_provider_batch": [
-        "id",
-        "job_id",
-        "provider_batch_id",
-        "processing_status",
-        "results_url",
-        "created_at_remote",
-        "expires_at_remote",
-        "ended_at_remote",
-        "archived_at_remote",
-        "cancel_initiated_at_remote",
-        "count_processing",
-        "count_succeeded",
-        "count_errored",
-        "count_canceled",
-        "count_expired",
-        "last_request_id",
-        "last_rate_limit_headers_json",
-        "created_at_local",
-        "updated_at_local",
-    ],
-    "llm_batch_item_map": [
-        "provider_batch_id",
-        "custom_id",
-        "job_item_id",
-        "attempt_no",
-    ],
-}
+_RESUMABLE_FINAL_STATUSES = (
+    LlmFinalStatus.NOT_ATTEMPTED.value,
+    LlmFinalStatus.NOTE_ERROR.value,
+    LlmFinalStatus.PROVIDER_ERROR.value,
+    LlmFinalStatus.FATAL_ERROR.value,
+    LlmFinalStatus.CANCELED.value,
+    LlmFinalStatus.EXPIRED.value,
+)
+
+EnumT = TypeVar("EnumT", bound=Enum)
 
 
 def _enum_check_sql(values: list[str]) -> str:
@@ -225,34 +121,29 @@ class LlmDbAdapter:
 
         conn = cls._connect(db_path)
         adapter = cls(conn, db_path)
-        if not adapter._ensure_schema():
-            logger.warning(
-                "LLM DB schema mismatch at %s; recreating database",
-                db_path,
-            )
-            conn.close()
-            cls._delete_db_files(db_path)
-            conn = cls._connect(db_path)
-            adapter = cls(conn, db_path)
+        try:
             adapter._create_schema()
+        except sqlite3.DatabaseError as error:
+            conn.close()
+            raise RuntimeError(
+                "LLM DB schema is incompatible with this build. "
+                f"Delete '{db_path}' to reinitialize."
+            ) from error
         return adapter
-
-    @staticmethod
-    def _delete_db_files(db_path: Path) -> None:
-        for suffix in ("", "-wal", "-shm"):
-            candidate = Path(f"{db_path}{suffix}")
-            if candidate.exists():
-                candidate.unlink()
 
     @staticmethod
     def _connect(db_path: Path) -> sqlite3.Connection:
         conn = sqlite3.connect(db_path)
+        LlmDbAdapter._configure_connection(conn)
+        return conn
+
+    @staticmethod
+    def _configure_connection(conn: sqlite3.Connection) -> None:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
         conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA busy_timeout = 5000")
-        return conn
 
     def close(self) -> None:
         self._conn.close()
@@ -317,49 +208,6 @@ class LlmDbAdapter:
             return {}
         return decoded if isinstance(decoded, dict) else {}
 
-    def _ensure_schema(self) -> bool:
-        tables = self._user_tables()
-        if not tables:
-            self._create_schema()
-            return True
-        return self._schema_matches_expected()
-
-    def _user_tables(self) -> set[str]:
-        rows = self._conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type='table'
-              AND name NOT LIKE 'sqlite_%'
-            """
-        ).fetchall()
-        return {str(row["name"]) for row in rows}
-
-    def _table_columns(self, table_name: str) -> list[str]:
-        rows = self._conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        return [str(row["name"]) for row in rows]
-
-    def _index_names(self) -> set[str]:
-        rows = self._conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type='index'
-              AND name NOT LIKE 'sqlite_%'
-            """
-        ).fetchall()
-        return {str(row["name"]) for row in rows}
-
-    def _schema_matches_expected(self) -> bool:
-        tables = self._user_tables()
-        if tables != _EXPECTED_TABLES:
-            return False
-        for table_name, columns in _EXPECTED_COLUMNS.items():
-            if self._table_columns(table_name) != columns:
-                return False
-        indexes = self._index_names()
-        return _REQUIRED_INDEXES.issubset(indexes)
-
     def _create_schema(self) -> None:
         candidate_status_check = _enum_check_sql(
             [status.value for status in LlmCandidateStatus]
@@ -381,7 +229,7 @@ class LlmDbAdapter:
         with self._conn:
             self._conn.executescript(
                 f"""
-                CREATE TABLE llm_job (
+                CREATE TABLE IF NOT EXISTS llm_job (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_name TEXT NOT NULL,
                     model_name TEXT NOT NULL,
@@ -402,7 +250,7 @@ class LlmDbAdapter:
                     FOREIGN KEY(resume_from_job_id) REFERENCES llm_job(id)
                 );
 
-                CREATE TABLE llm_job_item (
+                CREATE TABLE IF NOT EXISTS llm_job_item (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id INTEGER NOT NULL,
                     ordinal INTEGER NOT NULL,
@@ -421,7 +269,7 @@ class LlmDbAdapter:
                     FOREIGN KEY(resume_source_item_id) REFERENCES llm_job_item(id)
                 );
 
-                CREATE TABLE llm_item_attempt (
+                CREATE TABLE IF NOT EXISTS llm_item_attempt (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_item_id INTEGER NOT NULL,
                     attempt_no INTEGER NOT NULL,
@@ -446,7 +294,7 @@ class LlmDbAdapter:
                     FOREIGN KEY(job_item_id) REFERENCES llm_job_item(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE llm_attempt_payload (
+                CREATE TABLE IF NOT EXISTS llm_attempt_payload (
                     attempt_id INTEGER PRIMARY KEY,
                     system_prompt_text TEXT NOT NULL,
                     user_message_text TEXT NOT NULL,
@@ -456,7 +304,7 @@ class LlmDbAdapter:
                     FOREIGN KEY(attempt_id) REFERENCES llm_item_attempt(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE llm_provider_batch (
+                CREATE TABLE IF NOT EXISTS llm_provider_batch (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id INTEGER NOT NULL,
                     provider_batch_id TEXT NOT NULL UNIQUE,
@@ -479,7 +327,7 @@ class LlmDbAdapter:
                     FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE llm_batch_item_map (
+                CREATE TABLE IF NOT EXISTS llm_batch_item_map (
                     provider_batch_id INTEGER NOT NULL,
                     custom_id TEXT NOT NULL,
                     job_item_id INTEGER NOT NULL,
@@ -491,30 +339,35 @@ class LlmDbAdapter:
                 """
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_job_created ON llm_job(created_at DESC)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_job_created "
+                "ON llm_job(created_at DESC)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_job_status ON llm_job(status)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_job_status ON llm_job(status)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_job_item_job ON llm_job_item(job_id)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_job_item_job "
+                "ON llm_job_item(job_id)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_job_item_note_key ON llm_job_item(note_key)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_job_item_note_key "
+                "ON llm_job_item(note_key)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_attempt_result ON llm_item_attempt(result_type)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_attempt_result "
+                "ON llm_item_attempt(result_type)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_attempt_item ON llm_item_attempt(job_item_id)"
+                "CREATE INDEX IF NOT EXISTS idx_llm_attempt_item "
+                "ON llm_item_attempt(job_item_id)"
             )
             self._conn.execute(
-                "CREATE INDEX idx_llm_provider_batch_status "
+                "CREATE INDEX IF NOT EXISTS idx_llm_provider_batch_status "
                 "ON llm_provider_batch(processing_status)"
             )
 
     @staticmethod
-    def _parse_enum(enum_type, raw_value: object):
+    def _parse_enum(enum_type: type[EnumT], raw_value: object) -> EnumT:
         if not isinstance(raw_value, str):
             raise ValueError(f"Expected string value for enum {enum_type.__name__}")
         try:
@@ -648,11 +501,12 @@ class LlmDbAdapter:
             """
             UPDATE llm_job_item
             SET final_status = ?
-            WHERE job_id = ? AND final_status = ?
+            WHERE job_id = ? AND candidate_status = ? AND final_status = ?
             """,
             (
                 LlmFinalStatus.CANCELED.value,
                 job_id,
+                LlmCandidateStatus.ELIGIBLE.value,
                 LlmFinalStatus.NOT_ATTEMPTED.value,
             ),
         )
@@ -669,12 +523,13 @@ class LlmDbAdapter:
             UPDATE llm_job_item
             SET final_status = ?,
                 error_message = ?
-            WHERE job_id = ? AND final_status = ?
+            WHERE job_id = ? AND candidate_status = ? AND final_status = ?
             """,
             (
                 LlmFinalStatus.FATAL_ERROR.value,
                 error_message,
                 job_id,
+                LlmCandidateStatus.ELIGIBLE.value,
                 LlmFinalStatus.NOT_ATTEMPTED.value,
             ),
         )
@@ -894,15 +749,7 @@ class LlmDbAdapter:
         )
 
     def get_resume_source_items(self, *, job_id: int) -> dict[str, int]:
-        resumable = {
-            LlmFinalStatus.NOT_ATTEMPTED.value,
-            LlmFinalStatus.NOTE_ERROR.value,
-            LlmFinalStatus.PROVIDER_ERROR.value,
-            LlmFinalStatus.FATAL_ERROR.value,
-            LlmFinalStatus.CANCELED.value,
-            LlmFinalStatus.EXPIRED.value,
-        }
-        placeholders = ",".join("?" for _ in resumable)
+        placeholders = ",".join("?" for _ in _RESUMABLE_FINAL_STATUSES)
         rows = self._conn.execute(
             f"""
             SELECT id, note_key
@@ -911,7 +758,7 @@ class LlmDbAdapter:
               AND note_key IS NOT NULL
               AND final_status IN ({placeholders})
             """,
-            (job_id, *sorted(resumable)),
+            (job_id, *_RESUMABLE_FINAL_STATUSES),
         ).fetchall()
         mapping: dict[str, int] = {}
         for row in rows:
@@ -928,29 +775,6 @@ class LlmDbAdapter:
         if row is None:
             return None
         return self._parse_json_mapping(row["config_snapshot_json"])
-
-    def get_job_execution_metadata(
-        self,
-        *,
-        job_id: int,
-    ) -> tuple[str, str, str, ExecutionMode, RunFailurePolicy] | None:
-        row = self._conn.execute(
-            """
-            SELECT task_name, model_name, api_model, execution_mode, failure_policy
-            FROM llm_job
-            WHERE id = ?
-            """,
-            (job_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return (
-            str(row["task_name"]),
-            str(row["model_name"]),
-            str(row["api_model"]),
-            self._parse_enum(ExecutionMode, row["execution_mode"]),
-            self._parse_enum(RunFailurePolicy, row["failure_policy"]),
-        )
 
     def finalize_job(
         self,

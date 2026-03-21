@@ -214,7 +214,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
         reopened.close()
 
 
-def test_open_recreates_invalid_schema(tmp_path):
+def test_open_fails_for_incompatible_schema(tmp_path):
     llm_dir = tmp_path / "llm"
     llm_dir.mkdir(parents=True, exist_ok=True)
     legacy_path = llm_dir / "llm.db"
@@ -226,14 +226,11 @@ def test_open_recreates_invalid_schema(tmp_path):
     finally:
         conn.close()
 
-    adapter = LlmDbAdapter.open(tmp_path)
-    try:
-        tables = _table_names(adapter._conn)
-        assert "llm_job_item" in tables
-        assert "llm_schema_meta" not in tables
-        assert adapter.list_jobs() == []
-    finally:
-        adapter.close()
+    with pytest.raises(
+        RuntimeError,
+        match="LLM DB schema is incompatible with this build",
+    ):
+        _ = LlmDbAdapter.open(tmp_path)
 
 
 def test_enforces_uniqueness_constraints(tmp_path):
@@ -434,9 +431,19 @@ def test_mark_unfinished_items_fatal_updates_status_and_error_message(tmp_path):
             skip_reason=None,
             final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
-        stable_id = adapter.insert_job_item(
+        skipped_id = adapter.insert_job_item(
             job_id=job_id,
             ordinal=3,
+            deck_name="Deck",
+            note_key="nk-skip",
+            note_type="AnkiOpsChoice",
+            candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
+            skip_reason="No editable non-empty fields",
+            final_status=LlmFinalStatus.NOT_ATTEMPTED,
+        )
+        stable_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=4,
             deck_name="Deck",
             note_key="nk-3",
             note_type="AnkiOpsQA",
@@ -453,7 +460,79 @@ def test_mark_unfinished_items_fatal_updates_status_and_error_message(tmp_path):
 
         rows = adapter._conn.execute(
             """
-            SELECT id, final_status, error_message
+            SELECT id, candidate_status, final_status, error_message
+            FROM llm_job_item
+            WHERE job_id = ?
+            ORDER BY ordinal ASC
+            """,
+            (job_id,),
+        ).fetchall()
+    finally:
+        adapter.close()
+
+    assert len(rows) == 4
+    assert int(rows[0]["id"]) == first_id
+    assert rows[0]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
+    assert rows[0]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
+    assert rows[0]["error_message"] == "Provider batch results failed: decoder blew up"
+    assert int(rows[1]["id"]) == second_id
+    assert rows[1]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
+    assert rows[1]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
+    assert rows[1]["error_message"] == "Provider batch results failed: decoder blew up"
+    assert int(rows[2]["id"]) == skipped_id
+    skipped_candidate_status = LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS.value
+    assert (
+        rows[2]["candidate_status"] == skipped_candidate_status
+    )
+    assert rows[2]["final_status"] == LlmFinalStatus.NOT_ATTEMPTED.value
+    assert rows[2]["error_message"] is None
+    assert int(rows[3]["id"]) == stable_id
+    assert rows[3]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
+    assert rows[3]["final_status"] == LlmFinalStatus.SUCCEEDED_UNCHANGED.value
+    assert rows[3]["error_message"] is None
+
+
+def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
+    adapter = LlmDbAdapter.open(tmp_path)
+    try:
+        job_id = _start_job(adapter)
+        pending_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=1,
+            deck_name="Deck",
+            note_key="nk-1",
+            note_type="AnkiOpsQA",
+            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            skip_reason=None,
+            final_status=LlmFinalStatus.NOT_ATTEMPTED,
+        )
+        skipped_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=2,
+            deck_name="Deck",
+            note_key="nk-skip",
+            note_type="AnkiOpsChoice",
+            candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
+            skip_reason="No editable non-empty fields",
+            final_status=LlmFinalStatus.NOT_ATTEMPTED,
+        )
+        settled_id = adapter.insert_job_item(
+            job_id=job_id,
+            ordinal=3,
+            deck_name="Deck",
+            note_key="nk-3",
+            note_type="AnkiOpsQA",
+            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            skip_reason=None,
+            final_status=LlmFinalStatus.SUCCEEDED_UNCHANGED,
+        )
+
+        updated = adapter.mark_unfinished_items_canceled(job_id=job_id)
+        assert updated == 1
+
+        rows = adapter._conn.execute(
+            """
+            SELECT id, candidate_status, final_status
             FROM llm_job_item
             WHERE job_id = ?
             ORDER BY ordinal ASC
@@ -464,12 +543,15 @@ def test_mark_unfinished_items_fatal_updates_status_and_error_message(tmp_path):
         adapter.close()
 
     assert len(rows) == 3
-    assert int(rows[0]["id"]) == first_id
-    assert rows[0]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
-    assert rows[0]["error_message"] == "Provider batch results failed: decoder blew up"
-    assert int(rows[1]["id"]) == second_id
-    assert rows[1]["final_status"] == LlmFinalStatus.FATAL_ERROR.value
-    assert rows[1]["error_message"] == "Provider batch results failed: decoder blew up"
-    assert int(rows[2]["id"]) == stable_id
+    assert int(rows[0]["id"]) == pending_id
+    assert rows[0]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
+    assert rows[0]["final_status"] == LlmFinalStatus.CANCELED.value
+    assert int(rows[1]["id"]) == skipped_id
+    skipped_candidate_status = LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS.value
+    assert (
+        rows[1]["candidate_status"] == skipped_candidate_status
+    )
+    assert rows[1]["final_status"] == LlmFinalStatus.NOT_ATTEMPTED.value
+    assert int(rows[2]["id"]) == settled_id
+    assert rows[2]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
     assert rows[2]["final_status"] == LlmFinalStatus.SUCCEEDED_UNCHANGED.value
-    assert rows[2]["error_message"] is None

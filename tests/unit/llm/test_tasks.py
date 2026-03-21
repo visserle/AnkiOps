@@ -12,11 +12,12 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
 from ankiops.llm.anthropic_models import SONNET
-from ankiops.llm.claude import ProviderBatchState
+from ankiops.llm.claude import ProviderBatchResult, ProviderBatchState
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.db import LlmDbAdapter
 from ankiops.llm.errors import LlmFatalError
 from ankiops.llm.models import (
+    LlmAttemptResultType,
     LlmFinalStatus,
     LlmJobStatus,
     NoteUpdate,
@@ -272,6 +273,62 @@ class _OnlineFailFastClient:
 
     async def close(self) -> None:
         return None
+
+
+class _OnlineUnexpectedErrorClient(_OnlineFailFastClient):
+    def __init__(self, *, second_delay_seconds: float = 0.0) -> None:
+        super().__init__()
+        self._second_delay_seconds = second_delay_seconds
+
+    async def generate_update(
+        self,
+        *,
+        prepared_request: PreparedAttemptRequest,
+        **_kwargs,
+    ) -> ProviderAttemptOutcome:
+        self._calls += 1
+        if self._calls == 1:
+            raise RuntimeError("boom runtime")
+        if self._second_delay_seconds > 0:
+            await asyncio.sleep(self._second_delay_seconds)
+        note_key = prepared_request.note_payload.note_key
+        return _result(note_key, {})
+
+
+class _BatchNoteErrorClient(_BatchResultsFatalClient):
+    async def get_batch_results(
+        self,
+        *,
+        provider_batch_id: str,
+        prepared_by_custom_id: dict[str, PreparedAttemptRequest],
+    ):
+        del provider_batch_id
+        custom_id = next(iter(prepared_by_custom_id))
+        return [
+            ProviderBatchResult(
+                custom_id=custom_id,
+                result_type=LlmAttemptResultType.ERRORED,
+                outcome=None,
+                error_type="note_error",
+                error_message="Schema mismatch in model output",
+                response_raw_text='{"oops":true}',
+                response_full_json='{"content":[]}',
+                request_id="req_123",
+                rate_limit_headers={},
+            )
+        ]
+
+
+class _BatchMissingResultsClient(_BatchResultsFatalClient):
+    async def get_batch_results(
+        self,
+        *,
+        provider_batch_id: str,
+        prepared_by_custom_id: dict[str, PreparedAttemptRequest],
+    ):
+        del provider_batch_id
+        del prepared_by_custom_id
+        return []
 
 
 def _result(
@@ -859,6 +916,57 @@ def test_run_task_marks_batch_pending_items_as_fatal_on_results_failure(
     )
 
 
+def test_run_task_batch_fatal_cleanup_preserves_skipped_items(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: batch\n"
+            "  batch_poll_seconds: 1\n"
+            "  fail_fast: true\n"
+            "fields:\n"
+            "  exceptions:\n"
+            "    - note_types: ['AnkiOpsChoice']\n"
+            "      hidden: ['Question', 'Choice 1', 'Choice 2', 'Answer']\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _BatchResultsFatalClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.summary.errors == 1
+    assert result.summary.skipped == 1
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.status is LlmJobStatus.FAILED
+    statuses = [item.final_status for item in detail.items]
+    candidate_statuses = [item.candidate_status.value for item in detail.items]
+    assert statuses.count(LlmFinalStatus.FATAL_ERROR) == 1
+    assert statuses.count(LlmFinalStatus.NOT_ATTEMPTED) == 1
+    assert "skipped_no_editable_fields" in candidate_statuses
+
+
 def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
@@ -890,6 +998,219 @@ def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkey
     statuses = [item.final_status for item in detail.items]
     assert statuses.count(LlmFinalStatus.FATAL_ERROR) == 1
     assert statuses.count(LlmFinalStatus.CANCELED) == 1
+
+
+def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
+    tmp_path,
+    monkeypatch,
+):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: online\n"
+            "  concurrency: 2\n"
+            "  fail_fast: true\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _OnlineUnexpectedErrorClient(second_delay_seconds=60),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.status == "failed"
+    assert result.summary.errors == 1
+    assert result.summary.canceled == 1
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.status is LlmJobStatus.FAILED
+    assert detail.fatal_error == "Unexpected online execution error: boom runtime"
+
+
+def test_run_task_online_non_fail_fast_wraps_unexpected_worker_exception_as_fatal(
+    tmp_path,
+    monkeypatch,
+):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: online\n"
+            "  concurrency: 2\n"
+            "  fail_fast: false\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _OnlineUnexpectedErrorClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert not result.persisted
+    assert result.status == "failed"
+    assert result.summary.errors == 1
+    assert result.summary.canceled == 0
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert detail.status is LlmJobStatus.FAILED
+    assert detail.fatal_error == "Unexpected online execution error: boom runtime"
+
+
+def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: batch\n"
+            "  batch_poll_seconds: 1\n"
+            "  fail_fast: true\n"
+            "fields:\n"
+            "  exceptions:\n"
+            "    - note_types: ['AnkiOpsChoice']\n"
+            "      hidden: ['Question', 'Choice 1', 'Choice 2', 'Answer']\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _BatchNoteErrorClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert result.failed
+    assert result.summary.errors == 1
+    assert result.summary.skipped == 1
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+        attempt_rows = db._conn.execute(
+            """
+            SELECT error_type, result_type
+            FROM llm_item_attempt
+            ORDER BY id ASC
+            """
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert detail is not None
+    statuses = [item.final_status for item in detail.items]
+    assert statuses.count(LlmFinalStatus.NOTE_ERROR) == 1
+    assert statuses.count(LlmFinalStatus.NOT_ATTEMPTED) == 1
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0]["error_type"] == "note_error"
+    assert attempt_rows[0]["result_type"] == LlmAttemptResultType.ERRORED.value
+
+
+def test_run_task_batch_missing_results_records_attempts(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(
+        tmp_path,
+        monkeypatch,
+        task_content=(
+            "model: sonnet\n"
+            "prompt_file: ../prompts/grammar.md\n"
+            "execution:\n"
+            "  mode: batch\n"
+            "  batch_poll_seconds: 1\n"
+            "  fail_fast: true\n"
+        ),
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _BatchMissingResultsClient(),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert not result.failed
+    assert result.summary.errors == 0
+    assert result.summary.canceled == 2
+    assert result.summary.requests == 2
+
+    db = LlmDbAdapter.open(collection)
+    try:
+        detail = db.get_job_detail(result.job_id)
+        attempt_rows = db._conn.execute(
+            """
+            SELECT result_type, error_type, error_message
+            FROM llm_item_attempt
+            ORDER BY id ASC
+            """
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert all(item.final_status is LlmFinalStatus.CANCELED for item in detail.items)
+    assert all(item.attempts == 1 for item in detail.items)
+    assert len(attempt_rows) == 2
+    assert all(
+        row["result_type"] == LlmAttemptResultType.CANCELED.value for row in attempt_rows
+    )
+    assert all(
+        row["error_type"] == LlmAttemptResultType.CANCELED.value
+        for row in attempt_rows
+    )
+    assert all(
+        row["error_message"] == "Batch result missing from provider response"
+        for row in attempt_rows
+    )
 
 
 def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
