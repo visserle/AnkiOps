@@ -1,5 +1,5 @@
 model: sonnet
-prompt_file: ../prompts/grammar.md
+prompt_file: ../prompts/translate.md
 
 decks:
   include: ["*"]

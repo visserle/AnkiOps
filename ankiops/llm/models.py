@@ -256,3 +256,33 @@ class LlmJobResult:
     summary: TaskRunSummary
     failed: bool
     persisted: bool
+
+
+@dataclass(frozen=True)
+class PlanFieldSurface:
+    note_type: str
+    candidate_notes: int
+    editable_fields: list[str]
+    read_only_fields: list[str]
+    hidden_fields: list[str]
+
+
+@dataclass(frozen=True)
+class TaskPlanResult:
+    task_name: str
+    model: AnthropicModel
+    deck_scope: str
+    serializer_scope: str
+    request_defaults: str
+    summary: TaskRunSummary
+    field_surface: list[PlanFieldSurface]
+    requests_estimate: int
+    input_tokens_estimate: int
+    output_tokens_cap: int
+
+    def format_cost_cap(self) -> str:
+        estimate = self.model.estimate_cost(
+            input_tokens=self.input_tokens_estimate,
+            output_tokens=self.output_tokens_cap,
+        )
+        return estimate.format()

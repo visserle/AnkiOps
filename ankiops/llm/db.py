@@ -43,6 +43,8 @@ _REQUIRED_INDEXES = {
     "idx_llm_provider_batch_status",
 }
 
+_DEFAULT_JOB_LIST_LIMIT = 20
+
 _EXPECTED_COLUMNS: dict[str, list[str]] = {
     "llm_job": [
         "id",
@@ -878,7 +880,7 @@ class LlmDbAdapter:
         token = identifier.strip()
         if not token:
             return None
-        if token.lower() in {"latest", "last"}:
+        if token == "-1" or token.lower() == "latest":
             latest = self._conn.execute(
                 """
                 SELECT id
@@ -891,7 +893,7 @@ class LlmDbAdapter:
                 return None
             return int(latest["id"])
         if not token.isdigit():
-            raise ValueError("Job ID must be numeric, or use 'latest'.")
+            raise ValueError("Job ID must be numeric, '-1', or use 'latest'.")
         row = self._conn.execute(
             "SELECT id FROM llm_job WHERE id = ?",
             (int(token),),
@@ -900,7 +902,7 @@ class LlmDbAdapter:
             return None
         return int(row["id"])
 
-    def list_jobs(self, *, limit: int = 20) -> list[LlmJobListItem]:
+    def list_jobs(self) -> list[LlmJobListItem]:
         rows = self._conn.execute(
             """
             SELECT
@@ -915,7 +917,7 @@ class LlmDbAdapter:
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (limit,),
+            (_DEFAULT_JOB_LIST_LIMIT,),
         ).fetchall()
         return [
             LlmJobListItem(

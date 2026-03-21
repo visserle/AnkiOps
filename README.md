@@ -46,6 +46,83 @@ ankiops ma # markdown to anki (import)
 ankiops am # anki to markdown (export)
 ```
 
+## LLM Tasks
+
+AnkiOps includes a collection-local LLM pipeline for repeatable batch edits.
+
+After `ankiops init`, AnkiOps bootstraps:
+
+- `llm/system_prompt.md`
+- `llm/tasks/grammar.yaml`
+- `llm/prompts/grammar.md`
+- `llm/llm.db` (job history, auto-added to `.gitignore`)
+
+Set your Anthropic key before running tasks:
+
+```bash
+export ANTHROPIC_API_KEY="your-key-here"
+```
+
+Plan, run, and inspect jobs:
+
+```bash
+ankiops llm                         # strict status dashboard (tasks + recent jobs)
+ankiops llm grammar                 # dry-run plan
+ankiops llm grammar --run           # run task job
+ankiops llm grammar --run --model haiku
+ankiops llm --job latest
+ankiops llm --job -1
+ankiops llm --job 42
+```
+
+Breaking change: old `ankiops llm` subcommands (`list`, `run`, `jobs`, `show`) were removed.
+Breaking change: `ankiops llm <task> --apply` became `ankiops llm <task> --run`, and `ankiops llm --run <id>` became `ankiops llm --job <id>`.
+
+### Task File Format (`llm/tasks/<task-name>.yaml`)
+
+```yaml
+model: sonnet
+prompt_file: ../prompts/grammar.md
+api_key_env: ANTHROPIC_API_KEY
+timeout_seconds: 60
+
+decks:
+  include: ["*"]
+  exclude: []
+  include_subdecks: true
+
+fields:
+  exceptions:
+    - hidden: ["AI Notes"]
+    - note_types: ["AnkiOpsChoice"]
+      read_only: ["Answer"]
+
+request:
+  temperature: 0
+  max_output_tokens: 2048
+  retries: 2
+  retry_backoff_seconds: 0.5
+  retry_backoff_jitter: true
+```
+
+- Required keys: `model`, `prompt_file`
+- Supported models: `opus`, `sonnet`, `haiku`
+- `prompt_file` is resolved relative to the task file and must stay within `llm/`
+- `api_key_env` defaults to `ANTHROPIC_API_KEY` if omitted
+- `decks.include` defaults to `["*"]`, `decks.exclude` defaults to `[]`, and `decks.include_subdecks` defaults to `true`
+- `decks` patterns use shell-style matching (`*`, `?`, character classes); non-wildcard names match exact deck names (and optionally subdecks)
+- `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
+- `request` tuning defaults: `retries=2`, `retry_backoff_seconds=0.5`, `retry_backoff_jitter=true`, `max_output_tokens=2048`
+
+### Runtime Behavior
+
+- `ankiops llm` validates all task configs in strict mode and exits non-zero on errors
+- AnkiOps creates a pre-LLM git snapshot unless `--no-auto-commit` is passed
+- Only notes in scope with at least one editable, non-empty field are sent to the model
+- Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
+- Every job is recorded in `llm/llm.db` with per-note status, token usage, latency, and errors
+- Use `ankiops llm --job <job_id|latest|-1>` for one job's history and diagnostics
+
 ## FAQ
 
 ### How is this different from other Markdown or Obsidian tools?
@@ -146,6 +223,12 @@ uv run python -m main ma
 **`deserialize`:**
 - `--input`, `-i` - Input file path (default: `<collection-name>.json`)
 - `--overwrite` - Overwrite existing markdown files
+
+**`llm`:**
+- `ankiops llm` - Show strict LLM status dashboard (tasks + recent jobs)
+- `ankiops llm <task_name> [--model <opus|sonnet|haiku>]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm --job <job_id|latest|-1>` - Show one LLM job in detail
 
 **`note-types` / `nt`:**
 - `ankiops note-types list` - Show taken labels and per-note-type label details

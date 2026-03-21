@@ -14,7 +14,7 @@ from ankiops.fs import FileSystemAdapter
 from .anthropic_models import supported_model_names
 from .config_loader import load_llm_task_catalog
 from .runner import list_jobs as list_llm_jobs
-from .runner import run_task, show_job
+from .runner import plan_task, run_task, show_job
 
 logger = logging.getLogger(__name__)
 
@@ -23,70 +23,51 @@ def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
     return FileSystemAdapter().load_note_type_configs(note_types_dir)
 
 
+def _format_field_list(fields: list[str]) -> str:
+    return ",".join(fields) if fields else "-"
+
+
+def _usage_error(message: str) -> None:
+    logger.error(message)
+    raise SystemExit(2)
+
+
 def configure_llm_parser(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     *,
     handler: Callable[[argparse.Namespace], None],
 ) -> None:
-    """Register the ``ankiops llm`` command tree."""
+    """Register the ``ankiops llm`` command."""
     llm_parser = subparsers.add_parser(
         "llm",
-        help="List and run configured LLM tasks, inspect LLM job history",
+        help="Plan/run LLM jobs and inspect LLM job history",
     )
-    llm_subparsers = llm_parser.add_subparsers(
-        dest="llm_action",
-        required=False,
-    )
-
-    llm_list_parser = llm_subparsers.add_parser(
-        "list",
-        help="List configured LLM tasks",
-    )
-    llm_list_parser.set_defaults(handler=handler, llm_action="list")
-
-    llm_run_parser = llm_subparsers.add_parser(
-        "run",
-        help="Run one configured LLM task",
-    )
-    llm_run_parser.add_argument(
+    llm_parser.add_argument(
         "task_name",
-        help="Task name to run",
+        nargs="?",
+        help="Task name to plan/run",
     )
-    llm_run_parser.add_argument(
+    llm_parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Run task job (default with task is dry-run plan)",
+    )
+    llm_parser.add_argument(
+        "--job",
+        dest="job_id",
+        help="Show one LLM job (numeric id, '-1', or 'latest')",
+    )
+    llm_parser.add_argument(
         "--model",
         choices=supported_model_names(),
-        help="Override model class (opus, sonnet, haiku)",
+        help="Override model class for this plan/run (opus, sonnet, haiku)",
     )
-    llm_run_parser.add_argument(
+    llm_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
-        help="Skip the automatic git commit for this operation",
+        help="Skip automatic git snapshot (only with <task> --run)",
     )
-    llm_run_parser.set_defaults(handler=handler, llm_action="run")
-
-    llm_jobs_parser = llm_subparsers.add_parser(
-        "jobs",
-        help="Show recent LLM job runs",
-    )
-    llm_jobs_parser.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="Maximum number of jobs to show (default: 20)",
-    )
-    llm_jobs_parser.set_defaults(handler=handler, llm_action="jobs")
-
-    llm_show_parser = llm_subparsers.add_parser(
-        "show",
-        help="Show details for one LLM job",
-    )
-    llm_show_parser.add_argument(
-        "job_id",
-        help="Job ID from 'ankiops llm jobs' (numeric id or 'latest')",
-    )
-    llm_show_parser.set_defaults(handler=handler, llm_action="show")
-
     llm_parser.set_defaults(handler=handler)
 
 
@@ -99,95 +80,41 @@ def run_llm(
     get_note_types_dir_fn: Callable[[], Path] = get_note_types_dir,
     load_note_type_configs_fn: Callable[[Path], list[Any]] | None = None,
     load_llm_task_catalog_fn: Callable[..., Any] = load_llm_task_catalog,
+    plan_task_fn: Callable[..., Any] = plan_task,
     run_task_fn: Callable[..., Any] = run_task,
     list_jobs_fn: Callable[..., Any] = list_llm_jobs,
     show_job_fn: Callable[..., Any] = show_job,
 ) -> None:
-    """List/run LLM tasks and inspect LLM job history."""
+    """Status/plan/run/show for LLM jobs."""
     if load_note_type_configs_fn is None:
         load_note_type_configs_fn = _load_note_type_configs
 
     collection_dir = require_initialized_collection_dir_fn()
-    action = getattr(args, "llm_action", None) or "list"
+    task_name = getattr(args, "task_name", None)
+    run_mode = bool(getattr(args, "run", False))
+    job_id = getattr(args, "job_id", None)
+    model_override = getattr(args, "model", None)
+    no_auto_commit = bool(getattr(args, "no_auto_commit", False))
 
-    if action == "list":
-        note_type_configs = load_note_type_configs_fn(get_note_types_dir_fn())
-        catalog = load_llm_task_catalog_fn(
-            collection_dir,
-            note_type_configs=note_type_configs,
-        )
-        tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
-        if tasks:
-            for task in tasks:
-                include = ",".join(task.decks.include)
-                exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
-                logger.info(
-                    f"{task.name}  model={task.model}  include={include}  "
-                    f"exclude={exclude}  exceptions={len(task.field_exceptions)}"
-                )
-        if catalog.errors:
-            for message in catalog.errors.values():
-                logger.error(message)
-            raise SystemExit(1)
-        return
-
-    if action == "run":
-        if not getattr(args, "task_name", None):
-            logger.error("Task name is required (usage: ankiops llm run <task>)")
-            raise SystemExit(2)
-        try:
-            result = run_task_fn(
-                collection_dir=collection_dir,
-                task_name=args.task_name,
-                model_override=args.model,
-                no_auto_commit=args.no_auto_commit,
-            )
-        except ValueError as error:
-            logger.error(str(error))
-            raise SystemExit(1) from error
-        logger.info(
-            "LLM job: %d",
-            result.job_id,
-        )
-        if result.failed:
-            logger.error(
-                "LLM task finished with %d error(s)%s",
-                result.summary.errors,
-                " (atomic policy: no updates persisted)"
-                if not result.persisted and result.summary.updated > 0
-                else "",
-            )
-            raise SystemExit(1)
-        return
-
-    if action == "jobs":
-        jobs = list_jobs_fn(collection_dir=collection_dir, limit=args.limit)
-        if not jobs:
-            logger.info("No LLM jobs found.")
-            return
-        for job in jobs:
-            logger.info(
-                "%s  task=%s  model=%s  status=%s  persisted=%s  created_at=%s",
-                job.job_id,
-                job.task_name,
-                job.model_name,
-                job.status.value,
-                "yes" if job.persisted else "no",
-                job.created_at,
-            )
-        return
-
-    if action == "show":
+    if job_id is not None:
+        if task_name is not None:
+            _usage_error("Cannot combine <task> with --job.")
+        if run_mode:
+            _usage_error("Cannot combine --run with --job.")
+        if model_override is not None:
+            _usage_error("--model requires <task>.")
+        if no_auto_commit:
+            _usage_error("--no-auto-commit requires <task> --run.")
         try:
             detail = show_job_fn(
                 collection_dir=collection_dir,
-                job_id=args.job_id,
+                job_id=job_id,
             )
         except ValueError as error:
             logger.error(str(error))
             raise SystemExit(1) from error
         if detail is None:
-            logger.error(f"Unknown LLM job '{args.job_id}'")
+            logger.error(f"Unknown LLM job '{job_id}'")
             raise SystemExit(1)
 
         logger.info(
@@ -242,5 +169,133 @@ def run_llm(
                 logger.error("    error=%s", item.error_message)
         return
 
-    logger.error(f"Unknown llm action '{action}'")
-    raise SystemExit(2)
+    if task_name is None:
+        if run_mode:
+            _usage_error("--run requires <task>.")
+        if model_override is not None:
+            _usage_error("--model requires <task>.")
+        if no_auto_commit:
+            _usage_error("--no-auto-commit requires <task> --run.")
+
+        note_type_configs = load_note_type_configs_fn(get_note_types_dir_fn())
+        catalog = load_llm_task_catalog_fn(
+            collection_dir,
+            note_type_configs=note_type_configs,
+        )
+        logger.info(
+            "Config health: %s",
+            "OK" if not catalog.errors else "INVALID",
+        )
+        logger.info("Available tasks:")
+        tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
+        if tasks:
+            for task in tasks:
+                include = ",".join(task.decks.include)
+                exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
+                logger.info(
+                    "  %s  model=%s  include=%s  exclude=%s  exceptions=%d",
+                    task.name,
+                    task.model,
+                    include,
+                    exclude,
+                    len(task.field_exceptions),
+                )
+        else:
+            logger.info("  none")
+
+        logger.info("Recent jobs:")
+        jobs = list_jobs_fn(collection_dir=collection_dir)
+        if not jobs:
+            logger.info("  none")
+        else:
+            for job in jobs:
+                logger.info(
+                    "  %s  task=%s  model=%s  status=%s  persisted=%s  created_at=%s",
+                    job.job_id,
+                    job.task_name,
+                    job.model_name,
+                    job.status.value,
+                    "yes" if job.persisted else "no",
+                    job.created_at,
+                )
+
+        if catalog.errors:
+            for message in catalog.errors.values():
+                logger.error(message)
+            raise SystemExit(1)
+        return
+
+    if no_auto_commit and not run_mode:
+        _usage_error("--no-auto-commit requires --run.")
+
+    if run_mode:
+        try:
+            result = run_task_fn(
+                collection_dir=collection_dir,
+                task_name=task_name,
+                model_override=model_override,
+                no_auto_commit=no_auto_commit,
+            )
+        except ValueError as error:
+            logger.error(str(error))
+            raise SystemExit(1) from error
+        logger.info(
+            "LLM job: %d",
+            result.job_id,
+        )
+        if result.failed:
+            logger.error(
+                "LLM job finished with %d error(s)%s",
+                result.summary.errors,
+                " (atomic policy: no updates persisted)"
+                if not result.persisted and result.summary.updated > 0
+                else "",
+            )
+            raise SystemExit(1)
+        return
+
+    try:
+        plan = plan_task_fn(
+            collection_dir=collection_dir,
+            task_name=task_name,
+            model_override=model_override,
+        )
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+
+    logger.info(
+        "Plan for task '%s' (model=%s)",
+        plan.task_name,
+        plan.model,
+    )
+    logger.info("Deck scope: %s", plan.deck_scope)
+    logger.info("Serializer scope: %s", plan.serializer_scope)
+    logger.info("Request defaults: %s", plan.request_defaults)
+    logger.info(
+        "Discovery: decks_seen=%d decks_matched=%d notes_seen=%d "
+        "eligible=%d skipped=%d errors=%d",
+        plan.summary.decks_seen,
+        plan.summary.decks_matched,
+        plan.summary.notes_seen,
+        plan.summary.eligible,
+        plan.summary.skipped,
+        plan.summary.errors,
+    )
+    logger.info("Field surface:")
+    if plan.field_surface:
+        for surface in plan.field_surface:
+            logger.info(
+                "  %s  candidates=%d  editable=%s  read_only=%s  hidden=%s",
+                surface.note_type,
+                surface.candidate_notes,
+                _format_field_list(surface.editable_fields),
+                _format_field_list(surface.read_only_fields),
+                _format_field_list(surface.hidden_fields),
+            )
+    else:
+        logger.info("  none")
+    logger.info("Request estimate: %d", plan.requests_estimate)
+    logger.info("Input tokens estimate: %d", plan.input_tokens_estimate)
+    logger.info("Output tokens cap: %d", plan.output_tokens_cap)
+    logger.info("Cost cap: %s", plan.format_cost_cap())

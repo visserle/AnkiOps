@@ -24,7 +24,7 @@ from ankiops.llm.cli import configure_llm_parser
 from ankiops.llm.cli import run_llm as run_llm_impl
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.runner import list_jobs as list_llm_jobs
-from ankiops.llm.runner import run_task, show_job
+from ankiops.llm.runner import plan_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
@@ -284,6 +284,7 @@ def run_llm(args):
             )
         ),
         load_llm_task_catalog_fn=load_llm_task_catalog,
+        plan_task_fn=plan_task,
         run_task_fn=run_task,
         list_jobs_fn=list_llm_jobs,
         show_job_fn=show_job,
@@ -430,8 +431,7 @@ def main():
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
         print(
-            "  llm               Run configured LLM tasks and inspect "
-            "LLM job history"
+            "  llm               Status/plan/run LLM jobs and inspect one LLM job"
         )
         print(
             "  note-types        List note type labels or import note types "
@@ -459,15 +459,20 @@ def main():
             "# Deserialize file, then run init"
         )
         print(
-            "  ankiops llm                                  # List configured LLM tasks"
+            "  ankiops llm                                  "
+            "# Show LLM status dashboard (strict)"
         )
-        print("  ankiops llm run grammar                      # Run the grammar task")
-        print("  ankiops llm jobs                             # Show recent LLM jobs")
+        print("  ankiops llm grammar                          # Dry-run plan")
+        print("  ankiops llm grammar --run                    # Run task job")
         print(
-            "  ankiops llm show latest                      "
+            "  ankiops llm --job latest                     "
             "# Show most recent LLM job"
         )
-        print("  ankiops llm show <job_id>                    # Show one LLM job")
+        print(
+            "  ankiops llm --job -1                         "
+            "# Alias for most recent LLM job"
+        )
+        print("  ankiops llm --job <job_id>                   # Show one LLM job")
         print("  ankiops note-types list                      # Show taken labels")
         print(
             "  ankiops note-types import MyCustomType       "

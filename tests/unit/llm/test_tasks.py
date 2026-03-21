@@ -207,17 +207,32 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     ejected_tasks = sorted(
         path.name for path in (tmp_path / "llm/tasks").glob("*.yaml")
     )
+    packaged_prompts = sorted(
+        resource.name
+        for resource in resources.files("ankiops.llm").joinpath("prompts").iterdir()
+        if resource.is_file() and resource.suffix == ".md"
+    )
+    ejected_prompts = sorted(
+        path.name for path in (tmp_path / "llm/prompts").glob("*.md")
+    )
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
+    assert ejected_prompts == packaged_prompts
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
-    assert (tmp_path / PROMPT_FILE).exists()
-    assert "model: sonnet" in (
-        tmp_path / "llm/tasks/grammar.yaml"
-    ).read_text(encoding="utf-8")
-    assert "prompt_file: ../prompts/grammar.md" in (
-        tmp_path / "llm/tasks/grammar.yaml"
-    ).read_text(encoding="utf-8")
+    for task_path in (tmp_path / "llm/tasks").glob("*.yaml"):
+        content = task_path.read_text(encoding="utf-8")
+        assert "model: sonnet" in content
+        prompt_line = next(
+            (
+                line
+                for line in content.splitlines()
+                if line.strip().startswith("prompt_file:")
+            ),
+            "",
+        )
+        prompt_ref = prompt_line.split(":", 1)[1].strip()
+        assert prompt_ref.startswith("../prompts/")
     assert (tmp_path / "llm/llm.db").exists()
 
 
@@ -783,6 +798,39 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
         "no editable non-empty fields"
     ) in caplog.text
     assert "LLM task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
+
+
+def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    _write(
+        collection / "llm/tasks/translate.yaml",
+        """
+        model: sonnet
+        prompt_file: ../prompts/grammar.md
+        sdk: anthropic
+        """,
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ClaudeClient",
+        lambda _task: _StubClient(
+            [
+                _result("nk-1", {"Question": "This is a fixed question."}),
+                _result("nk-2", {}),
+            ]
+        ),
+    )
+
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+    )
+
+    assert not result.failed
+    assert result.persisted
 
 
 @pytest.mark.parametrize(

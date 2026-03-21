@@ -100,7 +100,7 @@ def get_llm_dir() -> Path:
 
 
 def get_llm_db_path() -> Path:
-    """Get the LLM run-history database path."""
+    """Get the LLM job-history database path."""
     return get_llm_dir() / LLM_DB_FILENAME
 
 

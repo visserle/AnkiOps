@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,20 +20,23 @@ from .anthropic_models import format_supported_model_names, parse_model
 from .claude import ClaudeClient
 from .config_loader import load_llm_task_catalog
 from .db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
+from .discovery import discover_candidates
 from .errors import LlmFatalError, LlmNoteError
 from .models import (
-    FieldAccess,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
     LlmJobResult,
     LlmJobStatus,
     NotePayload,
+    PlanFieldSurface,
     PreparedAttemptRequest,
     ProviderAttemptErrorContext,
     ProviderAttemptOutcome,
     RunFailurePolicy,
     TaskConfig,
+    TaskPlanResult,
+    TaskRunSummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,52 +124,6 @@ def _resolve_failure_policy(
     raise ValueError(f"Failure policy must be one of: {supported}")
 
 
-def _build_note_payload(
-    task: TaskConfig,
-    *,
-    note: dict[str, Any],
-    note_type_field_names: set[str],
-) -> NotePayload | None:
-    note_key = note.get("note_key")
-    note_type = note.get("note_type")
-    fields = note.get("fields")
-    if (
-        not isinstance(note_key, str)
-        or not isinstance(note_type, str)
-        or not isinstance(fields, dict)
-    ):
-        raise ValueError("Serialized note is missing note_key, note_type, or fields")
-
-    editable_fields: dict[str, str] = {}
-    read_only_fields: dict[str, str] = {}
-
-    for field_name, raw_value in fields.items():
-        if field_name == ANKIOPS_KEY_FIELD.name:
-            continue
-        if field_name not in note_type_field_names:
-            continue
-        if not isinstance(raw_value, str) or not raw_value:
-            continue
-
-        access = task.field_access(note_type, field_name)
-        if access is FieldAccess.HIDDEN:
-            continue
-        if access is FieldAccess.READ_ONLY:
-            read_only_fields[field_name] = raw_value
-        else:
-            editable_fields[field_name] = raw_value
-
-    if not editable_fields:
-        return None
-
-    return NotePayload(
-        note_key=note_key,
-        note_type=note_type,
-        editable_fields=editable_fields,
-        read_only_fields=read_only_fields,
-    )
-
-
 def _apply_note_update(
     *,
     serialized_note: dict[str, Any],
@@ -224,31 +180,43 @@ def _load_task(
         collection_dir,
         note_type_configs=note_type_configs,
     )
-    if catalog.errors:
-        joined_errors = "\n".join(catalog.errors.values())
-        raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
     task = catalog.tasks_by_name.get(task_name)
     if task is None:
-        raise ValueError(f"Unknown or invalid task '{task_name}'")
+        task_errors = [
+            message
+            for path, message in catalog.errors.items()
+            if _is_task_file_for_name(path, task_name)
+        ]
+        if task_errors:
+            joined_errors = "\n".join(task_errors)
+            raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
+
+        shared_errors = [
+            message
+            for path, message in catalog.errors.items()
+            if not _is_task_file(path)
+        ]
+        if shared_errors:
+            joined_errors = "\n".join(shared_errors)
+            raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
+
+        raise ValueError(f"Unknown task '{task_name}'")
 
     config_by_name = {config.name: config for config in note_type_configs}
     return task, config_by_name
 
 
-def _iter_decks(data: dict[str, Any]) -> Iterator[tuple[str, list[Any]]]:
-    decks = data.get("decks")
-    if not isinstance(decks, list):
-        raise ValueError("Serialized collection is missing a decks list")
+def _is_task_file(path: str) -> bool:
+    path_obj = Path(path)
+    return path_obj.suffix in {".yaml", ".yml"} and path_obj.parent.name == "tasks"
 
-    for deck in decks:
-        if not isinstance(deck, dict):
-            continue
-        deck_name = deck.get("name")
-        notes = deck.get("notes")
-        if not isinstance(deck_name, str) or not isinstance(notes, list):
-            continue
 
-        yield deck_name, notes
+def _is_task_file_for_name(path: str, task_name: str) -> bool:
+    path_obj = Path(path)
+    return (
+        _is_task_file(path)
+        and path_obj.stem == task_name
+    )
 
 
 def _error_context_for_attempt(
@@ -420,156 +388,115 @@ class LlmTaskExecutor:
         task: TaskConfig,
         note_type_configs: dict[str, NoteTypeConfig],
     ) -> list[_EligibleCandidate]:
+        snapshot = discover_candidates(
+            data=data,
+            task=task,
+            note_type_configs=note_type_configs,
+        )
         candidates: list[_EligibleCandidate] = []
-        decks_seen = 0
-        decks_matched = 0
-        notes_seen = 0
-        ordinal = 0
+        skipped_deck_counts: dict[str, int] = {}
+        for item in snapshot.items:
+            if item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE:
+                continue
+            skipped_deck_counts[item.deck_name] = (
+                skipped_deck_counts.get(item.deck_name, 0) + 1
+            )
+        for deck_name, skipped_count in skipped_deck_counts.items():
+            logger.debug(
+                "Skipping deck '%s' (%d notes): outside task scope",
+                deck_name,
+                skipped_count,
+            )
 
-        for deck_name, notes in _iter_decks(data):
-            decks_seen += 1
-            notes_seen += len(notes)
-            in_scope = task.decks.matches(deck_name)
-            if in_scope:
-                decks_matched += 1
-            else:
+        for item in snapshot.items:
+            if item.candidate_status is LlmCandidateStatus.SKIPPED_DECK_SCOPE:
+                db.insert_job_item(
+                    job_id=job_id,
+                    ordinal=item.ordinal,
+                    deck_name=item.deck_name,
+                    note_key=item.note_key,
+                    note_type=item.note_type,
+                    candidate_status=item.candidate_status,
+                    skip_reason=item.skip_reason,
+                    final_status=LlmFinalStatus.NOT_ATTEMPTED,
+                )
+                continue
+
+            note_label = item.note_key or "unknown"
+            note_type_label = item.note_type or "unknown"
+
+            if item.candidate_status is LlmCandidateStatus.INVALID_NOTE:
+                message = item.error_message or "Invalid note"
+                db.insert_job_item(
+                    job_id=job_id,
+                    ordinal=item.ordinal,
+                    deck_name=item.deck_name,
+                    note_key=item.note_key,
+                    note_type=item.note_type,
+                    candidate_status=item.candidate_status,
+                    skip_reason=None,
+                    final_status=LlmFinalStatus.NOTE_ERROR,
+                    error_message=message,
+                )
+                logger.error(
+                    "LLM note error for %s in '%s' (%s): %s",
+                    note_label,
+                    item.deck_name,
+                    note_type_label,
+                    message,
+                )
+                continue
+
+            if item.candidate_status is LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS:
+                db.insert_job_item(
+                    job_id=job_id,
+                    ordinal=item.ordinal,
+                    deck_name=item.deck_name,
+                    note_key=item.note_key,
+                    note_type=item.note_type,
+                    candidate_status=item.candidate_status,
+                    skip_reason=item.skip_reason,
+                    final_status=LlmFinalStatus.NOT_ATTEMPTED,
+                )
                 logger.debug(
-                    "Skipping deck '%s' (%d notes): outside task scope",
-                    deck_name,
-                    len(notes),
+                    "  Skipped %s in '%s' (%s): no editable non-empty fields",
+                    note_label,
+                    item.deck_name,
+                    note_type_label,
                 )
+                continue
 
-            for note in notes:
-                if not isinstance(note, dict):
-                    continue
-                ordinal += 1
-
-                note_key = note.get("note_key")
-                note_type_name = note.get("note_type")
-                note_label = note_key if isinstance(note_key, str) else "unknown"
-                note_type_label = (
-                    note_type_name if isinstance(note_type_name, str) else "unknown"
-                )
-                note_type_value = (
-                    note_type_name if isinstance(note_type_name, str) else None
-                )
-
-                if not in_scope:
-                    db.insert_job_item(
-                        job_id=job_id,
-                        ordinal=ordinal,
-                        deck_name=deck_name,
-                        note_key=note_key if isinstance(note_key, str) else None,
-                        note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.SKIPPED_DECK_SCOPE,
-                        skip_reason="outside task scope",
-                        final_status=LlmFinalStatus.NOT_ATTEMPTED,
-                    )
-                    continue
-
-                note_type_config = (
-                    note_type_configs.get(note_type_name)
-                    if isinstance(note_type_name, str)
-                    else None
-                )
-                if note_type_config is None:
-                    message = f"Unknown note type '{note_type_name}' in serialized note"
-                    db.insert_job_item(
-                        job_id=job_id,
-                        ordinal=ordinal,
-                        deck_name=deck_name,
-                        note_key=note_key if isinstance(note_key, str) else None,
-                        note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
-                        skip_reason=None,
-                        final_status=LlmFinalStatus.NOTE_ERROR,
-                        error_message=message,
-                    )
-                    logger.error(
-                        "LLM note error for %s in '%s' (%s): %s",
-                        note_label,
-                        deck_name,
-                        note_type_label,
-                        message,
-                    )
-                    continue
-
-                note_field_names = {
-                    field.name
-                    for field in note_type_config.fields
-                    if field.name != ANKIOPS_KEY_FIELD.name
-                }
-                try:
-                    payload = _build_note_payload(
-                        task,
-                        note=note,
-                        note_type_field_names=note_field_names,
-                    )
-                except ValueError as error:
-                    db.insert_job_item(
-                        job_id=job_id,
-                        ordinal=ordinal,
-                        deck_name=deck_name,
-                        note_key=note_key if isinstance(note_key, str) else None,
-                        note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
-                        skip_reason=None,
-                        final_status=LlmFinalStatus.NOTE_ERROR,
-                        error_message=str(error),
-                    )
-                    logger.error(
-                        "LLM note error for %s in '%s' (%s): %s",
-                        note_label,
-                        deck_name,
-                        note_type_label,
-                        error,
-                    )
-                    continue
-
-                if payload is None:
-                    db.insert_job_item(
-                        job_id=job_id,
-                        ordinal=ordinal,
-                        deck_name=deck_name,
-                        note_key=note_key if isinstance(note_key, str) else None,
-                        note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
-                        skip_reason="no editable non-empty fields",
-                        final_status=LlmFinalStatus.NOT_ATTEMPTED,
-                    )
-                    logger.debug(
-                        "  Skipped %s in '%s' (%s): no editable non-empty fields",
-                        note_label,
-                        deck_name,
-                        note_type_label,
-                    )
-                    continue
-
+            if (
+                item.candidate_status is LlmCandidateStatus.ELIGIBLE
+                and item.payload is not None
+                and item.note_type_config is not None
+                and item.serialized_note is not None
+            ):
                 item_id = db.insert_job_item(
                     job_id=job_id,
-                    ordinal=ordinal,
-                    deck_name=deck_name,
-                    note_key=payload.note_key,
-                    note_type=payload.note_type,
-                    candidate_status=LlmCandidateStatus.ELIGIBLE,
+                    ordinal=item.ordinal,
+                    deck_name=item.deck_name,
+                    note_key=item.payload.note_key,
+                    note_type=item.payload.note_type,
+                    candidate_status=item.candidate_status,
                     skip_reason=None,
                     final_status=LlmFinalStatus.NOT_ATTEMPTED,
                 )
                 candidates.append(
                     _EligibleCandidate(
                         item_id=item_id,
-                        deck_name=deck_name,
-                        payload=payload,
-                        note_type_config=note_type_config,
-                        serialized_note=note,
+                        deck_name=item.deck_name,
+                        payload=item.payload,
+                        note_type_config=item.note_type_config,
+                        serialized_note=item.serialized_note,
                     )
                 )
 
         db.set_discovery_counts(
             job_id=job_id,
-            decks_seen=decks_seen,
-            decks_matched=decks_matched,
-            notes_seen=notes_seen,
+            decks_seen=snapshot.counts.decks_seen,
+            decks_matched=snapshot.counts.decks_matched,
+            notes_seen=snapshot.counts.notes_seen,
         )
         return candidates
 
@@ -810,6 +737,158 @@ class LlmTaskExecutor:
         return persisted
 
 
+def _estimate_tokens(text: str) -> int:
+    value = text.strip()
+    if not value:
+        return 0
+    return max(1, (len(value) + 3) // 4)
+
+
+def _estimate_note_input_tokens(task: TaskConfig, payload: NotePayload) -> int:
+    parts = [
+        task.system_prompt,
+        task.prompt,
+        payload.note_key,
+        payload.note_type,
+    ]
+    for name, value in sorted(payload.editable_fields.items()):
+        parts.append(name)
+        parts.append(value)
+    for name, value in sorted(payload.read_only_fields.items()):
+        parts.append(name)
+        parts.append(value)
+    return _estimate_tokens("\n".join(parts))
+
+
+def _build_plan_field_surface(
+    *,
+    task: TaskConfig,
+    note_type_configs: dict[str, NoteTypeConfig],
+    snapshot_items: list[Any],
+) -> list[PlanFieldSurface]:
+    observed_note_types = {
+        item.note_type
+        for item in snapshot_items
+        if item.note_type is not None
+        and item.note_type_config is not None
+        and item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE
+    }
+    field_surface: list[PlanFieldSurface] = []
+    for note_type in sorted(observed_note_types):
+        config = note_type_configs.get(note_type)
+        if config is None:
+            continue
+        editable_fields: list[str] = []
+        read_only_fields: list[str] = []
+        hidden_fields: list[str] = []
+        for field in config.fields:
+            if field.name == ANKIOPS_KEY_FIELD.name:
+                continue
+            access = task.field_access(note_type, field.name)
+            if access.value == "edit":
+                editable_fields.append(field.name)
+            elif access.value == "read_only":
+                read_only_fields.append(field.name)
+            else:
+                hidden_fields.append(field.name)
+        candidate_notes = sum(
+            1
+            for item in snapshot_items
+            if item.candidate_status is LlmCandidateStatus.ELIGIBLE
+            and item.note_type == note_type
+        )
+        field_surface.append(
+            PlanFieldSurface(
+                note_type=note_type,
+                candidate_notes=candidate_notes,
+                editable_fields=editable_fields,
+                read_only_fields=read_only_fields,
+                hidden_fields=hidden_fields,
+            )
+        )
+    return field_surface
+
+
+def plan_task(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None = None,
+) -> TaskPlanResult:
+    task, note_type_configs = _load_task(
+        collection_dir=collection_dir,
+        task_name=task_name,
+    )
+    model = _resolve_model(task, model_override)
+    deck, no_subdecks = _resolve_serializer_scope(task)
+    data = serialize_collection(
+        collection_dir,
+        deck=deck,
+        no_subdecks=no_subdecks,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    snapshot = discover_candidates(
+        data=data,
+        task=task,
+        note_type_configs=note_type_configs,
+    )
+    eligible_items = [
+        item
+        for item in snapshot.items
+        if item.candidate_status is LlmCandidateStatus.ELIGIBLE
+        and item.payload is not None
+    ]
+    eligible = len(eligible_items)
+    skipped_deck_scope = sum(
+        1
+        for item in snapshot.items
+        if item.candidate_status is LlmCandidateStatus.SKIPPED_DECK_SCOPE
+    )
+    skipped_no_editable_fields = sum(
+        1
+        for item in snapshot.items
+        if item.candidate_status is LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS
+    )
+    errors = sum(
+        1
+        for item in snapshot.items
+        if item.candidate_status is LlmCandidateStatus.INVALID_NOTE
+    )
+    input_tokens_estimate = sum(
+        _estimate_note_input_tokens(task, item.payload) for item in eligible_items
+    )
+    max_output_tokens = task.request.max_output_tokens or 2048
+    output_tokens_cap = eligible * max_output_tokens
+    summary = TaskRunSummary(
+        task_name=task.name,
+        model=model,
+        decks_seen=snapshot.counts.decks_seen,
+        decks_matched=snapshot.counts.decks_matched,
+        notes_seen=snapshot.counts.notes_seen,
+        eligible=eligible,
+        skipped_deck_scope=skipped_deck_scope,
+        skipped_no_editable_fields=skipped_no_editable_fields,
+        errors=errors,
+        requests=eligible,
+    )
+    return TaskPlanResult(
+        task_name=task.name,
+        model=model,
+        deck_scope=_format_deck_scope(task),
+        serializer_scope=_format_serializer_scope(deck, no_subdecks),
+        request_defaults=_format_request_defaults(task),
+        summary=summary,
+        field_surface=_build_plan_field_surface(
+            task=task,
+            note_type_configs=note_type_configs,
+            snapshot_items=snapshot.items,
+        ),
+        requests_estimate=eligible,
+        input_tokens_estimate=input_tokens_estimate,
+        output_tokens_cap=output_tokens_cap,
+    )
+
+
 def run_task(
     *,
     collection_dir: Path,
@@ -831,11 +910,10 @@ def run_task(
 def list_jobs(
     *,
     collection_dir: Path,
-    limit: int = 20,
 ) -> list[LlmJobListItem]:
     db = LlmDbAdapter.open(collection_dir)
     try:
-        return db.list_jobs(limit=limit)
+        return db.list_jobs()
     finally:
         db.close()
 

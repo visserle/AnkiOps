@@ -288,7 +288,7 @@ def test_enforces_status_constraints(tmp_path):
         adapter.close()
 
 
-def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
+def test_resolve_job_id_accepts_numeric_latest_and_minus_one_alias(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
         job_id = adapter.start_job(
@@ -299,6 +299,7 @@ def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
         )
         assert adapter.resolve_job_id(str(job_id)) == job_id
         assert adapter.resolve_job_id("latest") == job_id
+        assert adapter.resolve_job_id("-1") == job_id
     finally:
         adapter.close()
 
