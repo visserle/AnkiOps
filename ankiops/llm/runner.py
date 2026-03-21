@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from .db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
 from .discovery import discover_candidates
 from .errors import LlmFatalError, LlmNoteError
 from .models import (
+    DeckScope,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -64,6 +65,26 @@ def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
         return None, False
 
     return deck_name, not task.decks.include_subdecks
+
+
+def _apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConfig:
+    if deck_override is None:
+        return task
+
+    deck_name = deck_override.strip()
+    if not deck_name:
+        raise ValueError("Deck override must be a non-empty deck name")
+    if any(char in deck_name for char in ("*", "?", "[")):
+        raise ValueError("Deck override must be an exact deck name (wildcards are not supported)")
+
+    return replace(
+        task,
+        decks=DeckScope(
+            include=[deck_name],
+            exclude=[],
+            include_subdecks=False,
+        ),
+    )
 
 
 def _format_deck_scope(task: TaskConfig) -> str:
@@ -250,12 +271,14 @@ class LlmTaskExecutor:
         collection_dir: Path,
         task_name: str,
         model_override: str | None,
+        deck_override: str | None,
         no_auto_commit: bool,
         failure_policy: RunFailurePolicy | str,
     ) -> None:
         self.collection_dir = collection_dir
         self.task_name = task_name
         self.model_override = model_override
+        self.deck_override = deck_override
         self.no_auto_commit = no_auto_commit
         self.failure_policy = _resolve_failure_policy(failure_policy)
 
@@ -264,6 +287,7 @@ class LlmTaskExecutor:
             collection_dir=self.collection_dir,
             task_name=self.task_name,
         )
+        task = _apply_deck_override(task, self.deck_override)
 
         model = _resolve_model(task, self.model_override)
         db = LlmDbAdapter.open(self.collection_dir)
@@ -814,11 +838,13 @@ def plan_task(
     collection_dir: Path,
     task_name: str,
     model_override: str | None = None,
+    deck_override: str | None = None,
 ) -> TaskPlanResult:
     task, note_type_configs = _load_task(
         collection_dir=collection_dir,
         task_name=task_name,
     )
+    task = _apply_deck_override(task, deck_override)
     model = _resolve_model(task, model_override)
     deck, no_subdecks = _resolve_serializer_scope(task)
     data = serialize_collection(
@@ -894,6 +920,7 @@ def run_task(
     collection_dir: Path,
     task_name: str,
     model_override: str | None = None,
+    deck_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
@@ -901,6 +928,7 @@ def run_task(
         collection_dir=collection_dir,
         task_name=task_name,
         model_override=model_override,
+        deck_override=deck_override,
         no_auto_commit=no_auto_commit,
         failure_policy=failure_policy,
     )

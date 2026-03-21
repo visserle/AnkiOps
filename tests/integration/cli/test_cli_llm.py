@@ -74,6 +74,28 @@ def test_cli_llm_dispatches_run():
 
     run_task.assert_called_once()
     assert run_task.call_args.kwargs["task_name"] == "grammar"
+    assert run_task.call_args.kwargs["deck_override"] is None
+
+
+def test_cli_llm_dispatches_run_with_deck_override():
+    success_result = LlmJobResult(
+        job_id=24,
+        status="completed",
+        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        failed=False,
+        persisted=False,
+    )
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir"),
+        patch("ankiops.cli.run_task", return_value=success_result) as run_task,
+        patch("sys.argv", ["ankiops", "llm", "grammar", "--run", "--deck", "Target"]),
+    ):
+        main()
+
+    run_task.assert_called_once()
+    assert run_task.call_args.kwargs["deck_override"] == "Target"
+
+
 def test_cli_llm_dispatches_plan():
     with (
         patch("ankiops.cli.require_initialized_collection_dir"),
@@ -84,6 +106,19 @@ def test_cli_llm_dispatches_plan():
 
     plan_task.assert_called_once()
     assert plan_task.call_args.kwargs["task_name"] == "grammar"
+    assert plan_task.call_args.kwargs["deck_override"] is None
+
+
+def test_cli_llm_dispatches_plan_with_deck_override():
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir"),
+        patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
+        patch("sys.argv", ["ankiops", "llm", "grammar", "--deck", "Target"]),
+    ):
+        main()
+
+    plan_task.assert_called_once()
+    assert plan_task.call_args.kwargs["deck_override"] == "Target"
 
 def test_cli_llm_status_exits_on_invalid_config(tmp_path):
     with (
@@ -221,6 +256,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=True,
             job_id=None,
             model=None,
+            deck=None,
             no_auto_commit=False,
         ),
         SimpleNamespace(
@@ -228,6 +264,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=False,
             job_id=None,
             model="haiku",
+            deck=None,
             no_auto_commit=False,
         ),
         SimpleNamespace(
@@ -235,6 +272,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=False,
             job_id=None,
             model=None,
+            deck=None,
             no_auto_commit=True,
         ),
         SimpleNamespace(
@@ -242,6 +280,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=False,
             job_id="latest",
             model=None,
+            deck=None,
             no_auto_commit=False,
         ),
         SimpleNamespace(
@@ -249,6 +288,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=True,
             job_id="latest",
             model=None,
+            deck=None,
             no_auto_commit=False,
         ),
         SimpleNamespace(
@@ -256,7 +296,32 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
             run=False,
             job_id=None,
             model=None,
+            deck=None,
             no_auto_commit=True,
+        ),
+        SimpleNamespace(
+            task_name=None,
+            run=False,
+            job_id=None,
+            model=None,
+            deck="Target",
+            no_auto_commit=False,
+        ),
+        SimpleNamespace(
+            task_name=None,
+            run=False,
+            job_id="latest",
+            model=None,
+            deck="Target",
+            no_auto_commit=False,
+        ),
+        SimpleNamespace(
+            task_name="grammar",
+            run=False,
+            job_id=None,
+            model=None,
+            deck="Target*",
+            no_auto_commit=False,
         ),
     ],
 )

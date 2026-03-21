@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shlex
 import shutil
 import textwrap
 from collections.abc import Callable
@@ -36,6 +37,18 @@ def _format_count(value: int) -> str:
 def _usage_error(message: str) -> None:
     logger.error(message)
     raise SystemExit(2)
+
+
+def _normalize_deck_override(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    deck_name = value.strip()
+    if not deck_name:
+        _usage_error("--deck requires a non-empty deck name.")
+    if any(char in deck_name for char in ("*", "?", "[")):
+        _usage_error("--deck must be an exact deck name (wildcards are not supported).")
+    return deck_name
 
 
 def _format_table(
@@ -156,6 +169,10 @@ def configure_llm_parser(
         help="Override model class for this plan/run (opus, sonnet, haiku)",
     )
     llm_parser.add_argument(
+        "--deck",
+        help="Override task scope to one exact deck (subdecks excluded by default)",
+    )
+    llm_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
@@ -187,6 +204,7 @@ def run_llm(
     run_mode = bool(getattr(args, "run", False))
     job_id = getattr(args, "job_id", None)
     model_override = getattr(args, "model", None)
+    deck_override = _normalize_deck_override(getattr(args, "deck", None))
     no_auto_commit = bool(getattr(args, "no_auto_commit", False))
 
     if job_id is not None:
@@ -196,6 +214,8 @@ def run_llm(
             _usage_error("Cannot combine --run with --job.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
+        if deck_override is not None:
+            _usage_error("--deck requires <task>.")
         if no_auto_commit:
             _usage_error("--no-auto-commit requires <task> --run.")
         try:
@@ -288,6 +308,8 @@ def run_llm(
             _usage_error("--run requires <task>.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
+        if deck_override is not None:
+            _usage_error("--deck requires <task>.")
         if no_auto_commit:
             _usage_error("--no-auto-commit requires <task> --run.")
 
@@ -359,6 +381,7 @@ def run_llm(
                 collection_dir=collection_dir,
                 task_name=task_name,
                 model_override=model_override,
+                deck_override=deck_override,
                 no_auto_commit=no_auto_commit,
             )
         except ValueError as error:
@@ -386,6 +409,7 @@ def run_llm(
             collection_dir=collection_dir,
             task_name=task_name,
             model_override=model_override,
+            deck_override=deck_override,
         )
     except ValueError as error:
         logger.error(str(error))
@@ -431,4 +455,6 @@ def run_llm(
     run_command = f"ankiops llm {plan.task_name} --run"
     if model_override:
         run_command = f"{run_command} --model {model_override}"
+    if deck_override is not None:
+        run_command = f"{run_command} --deck {shlex.quote(deck_override)}"
     logger.info("To run this task: %s", run_command)
