@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
+import textwrap
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,7 @@ def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
 
 
 def _format_field_list(fields: list[str]) -> str:
-    return ",".join(fields) if fields else "-"
+    return ", ".join(fields) if fields else "-"
 
 
 def _format_count(value: int) -> str:
@@ -34,6 +36,93 @@ def _format_count(value: int) -> str:
 def _usage_error(message: str) -> None:
     logger.error(message)
     raise SystemExit(2)
+
+
+def _format_table(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    max_width: int | None = None,
+) -> list[str]:
+    if not headers:
+        return []
+
+    if max_width is None:
+        max_width = shutil.get_terminal_size(fallback=(120, 24)).columns
+    max_width = max(max_width, 40)
+
+    separator_width = 2 * (len(headers) - 1)
+    max_cell_lengths = [len(header) for header in headers]
+    for row in rows:
+        for index, cell in enumerate(row):
+            max_cell_lengths[index] = max(max_cell_lengths[index], len(cell))
+
+    widths = [len(header) for header in headers]
+    available = max(0, max_width - separator_width - sum(widths))
+    expansion_needs = [
+        max_cell_lengths[index] - widths[index] for index in range(len(headers))
+    ]
+    while available > 0:
+        grew = False
+        for index, need in enumerate(expansion_needs):
+            if available == 0:
+                break
+            if need <= 0:
+                continue
+            widths[index] += 1
+            expansion_needs[index] -= 1
+            available -= 1
+            grew = True
+        if not grew:
+            break
+
+    def _wrap_cell(value: str, width: int) -> list[str]:
+        wrapped = textwrap.wrap(
+            value,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        if wrapped:
+            return wrapped
+        if not value:
+            return [""]
+        return textwrap.wrap(
+            value,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=True,
+        )
+
+    def _render_row(values: list[str]) -> list[str]:
+        wrapped_cells = [
+            _wrap_cell(values[index], widths[index]) for index in range(len(values))
+        ]
+        row_height = max(len(lines) for lines in wrapped_cells)
+        rendered: list[str] = []
+        for line_index in range(row_height):
+            rendered.append(
+                "  ".join(
+                    (
+                        wrapped_cells[column_index][line_index]
+                        if line_index < len(wrapped_cells[column_index])
+                        else ""
+                    ).ljust(widths[column_index])
+                    for column_index in range(len(values))
+                ).rstrip()
+            )
+        return rendered
+
+    separator = ["-" * width for width in widths]
+    rendered_lines = [*(_render_row(headers)), *(_render_row(separator))]
+    for row in rows:
+        rendered_lines.extend(_render_row(row))
+    return rendered_lines
+
+
+def _log_table(headers: list[str], rows: list[list[str]]) -> None:
+    for line in _format_table(headers, rows):
+        logger.info(line)
 
 
 def configure_llm_parser(
@@ -153,28 +242,45 @@ def run_llm(
         )
         if detail.fatal_error:
             logger.error("Fatal error: %s", detail.fatal_error)
+        logger.info("")
         logger.info("Items:")
-        for item in detail.items:
-            note = item.note_key or "unknown"
-            note_type = item.note_type or "unknown"
-            logger.info(
-                "  #%d note=%s deck=%s type=%s candidate=%s final=%s "
-                "attempts=%d tokens=%s/%s latency=%0.2fs",
-                item.ordinal,
-                note,
-                item.deck_name,
-                note_type,
-                item.candidate_status.value,
-                item.final_status.value,
-                item.attempts,
-                _format_count(item.input_tokens),
-                _format_count(item.output_tokens),
-                item.latency_ms / 1000,
+        if not detail.items:
+            logger.info("  none")
+        else:
+            item_rows: list[list[str]] = []
+            for item in detail.items:
+                item_rows.append(
+                    [
+                        str(item.ordinal),
+                        item.note_key or "unknown",
+                        item.deck_name,
+                        item.note_type or "unknown",
+                        item.final_status.value,
+                        str(item.attempts),
+                        f"{_format_count(item.input_tokens)}/{_format_count(item.output_tokens)}",
+                        f"{item.latency_ms / 1000:.2f}s",
+                        _format_field_list(item.changed_fields),
+                    ]
+                )
+
+            _log_table(
+                [
+                    "#",
+                    "Note",
+                    "Deck",
+                    "Type",
+                    "Final",
+                    "Attempts",
+                    "Tokens",
+                    "Latency",
+                    "Changed",
+                ],
+                item_rows,
             )
-            if item.changed_fields:
-                logger.info("    changed_fields=%s", ",".join(item.changed_fields))
-            if item.error_message:
-                logger.error("    error=%s", item.error_message)
+
+            for item in detail.items:
+                if item.error_message:
+                    logger.error("  #%d error=%s", item.ordinal, item.error_message)
         return
 
     if task_name is None:
@@ -191,38 +297,52 @@ def run_llm(
             note_type_configs=note_type_configs,
         )
         logger.info("LLM config: %s", "OK" if not catalog.errors else "INVALID")
+        logger.info("")
         logger.info("Tasks:")
         tasks = sorted(catalog.tasks_by_name.values(), key=lambda task: task.name)
         if tasks:
+            task_rows: list[list[str]] = []
             for task in tasks:
-                include = ",".join(task.decks.include)
-                exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
-                logger.info(
-                    "  - %s (model=%s, include=%s, exclude=%s, exceptions=%d)",
-                    task.name,
-                    task.model,
-                    include,
-                    exclude,
-                    len(task.field_exceptions),
+                include = _format_field_list(task.decks.include)
+                exclude = _format_field_list(task.decks.exclude)
+                task_rows.append(
+                    [
+                        task.name,
+                        str(task.model),
+                        include,
+                        exclude,
+                        str(len(task.field_exceptions)),
+                    ]
                 )
+            _log_table(
+                ["Name", "Model", "Include", "Exclude", "Exceptions"],
+                task_rows,
+            )
         else:
             logger.info("  none")
 
+        logger.info("")
         logger.info("Recent jobs:")
         jobs = list_jobs_fn(collection_dir=collection_dir)
         if not jobs:
             logger.info("  none")
         else:
+            job_rows: list[list[str]] = []
             for job in jobs:
-                logger.info(
-                    "  - #%s %s (%s) status=%s persisted=%s created=%s",
-                    job.job_id,
-                    job.task_name,
-                    job.model_name,
-                    job.status.value,
-                    "yes" if job.persisted else "no",
-                    job.created_at,
+                job_rows.append(
+                    [
+                        str(job.job_id),
+                        job.task_name,
+                        job.model_name,
+                        job.status.value,
+                        "yes" if job.persisted else "no",
+                        job.created_at,
+                    ]
                 )
+            _log_table(
+                ["Job", "Task", "Model", "Status", "Persisted", "Created"],
+                job_rows,
+            )
 
         if catalog.errors:
             for message in catalog.errors.values():
@@ -285,19 +405,27 @@ def run_llm(
         plan.summary.skipped,
         plan.summary.errors,
     )
+    logger.info("")
     logger.info("Field surface:")
     if plan.field_surface:
+        surface_rows: list[list[str]] = []
         for surface in plan.field_surface:
-            logger.info(
-                "  %s  candidates=%d  editable=%s  read_only=%s  hidden=%s",
-                surface.note_type,
-                surface.candidate_notes,
-                _format_field_list(surface.editable_fields),
-                _format_field_list(surface.read_only_fields),
-                _format_field_list(surface.hidden_fields),
+            surface_rows.append(
+                [
+                    surface.note_type,
+                    str(surface.candidate_notes),
+                    _format_field_list(surface.editable_fields),
+                    _format_field_list(surface.read_only_fields),
+                    _format_field_list(surface.hidden_fields),
+                ]
             )
+        _log_table(
+            ["Type", "Candidates", "Editable", "Read-only", "Hidden"],
+            surface_rows,
+        )
     else:
         logger.info("  none")
+    logger.info("")
     logger.info("Request estimate: %s", _format_count(plan.requests_estimate))
     logger.info("Cost estimate (max): %s", plan.format_cost_estimate())
     run_command = f"ankiops llm {plan.task_name} --run"

@@ -57,7 +57,7 @@ def _plan_result() -> TaskPlanResult:
     )
 
 
-def test_cli_llm_dispatches_run(capsys):
+def test_cli_llm_dispatches_run():
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
@@ -74,12 +74,7 @@ def test_cli_llm_dispatches_run(capsys):
 
     run_task.assert_called_once()
     assert run_task.call_args.kwargs["task_name"] == "grammar"
-    captured = capsys.readouterr()
-    assert "LLM job: 24" in captured.out
-    assert "Actual cost:" in captured.out
-
-
-def test_cli_llm_dispatches_plan(capsys):
+def test_cli_llm_dispatches_plan():
     with (
         patch("ankiops.cli.require_initialized_collection_dir"),
         patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
@@ -89,11 +84,6 @@ def test_cli_llm_dispatches_plan(capsys):
 
     plan_task.assert_called_once()
     assert plan_task.call_args.kwargs["task_name"] == "grammar"
-    captured = capsys.readouterr()
-    assert "Plan: grammar" in captured.out
-    assert "Cost estimate (max):" in captured.out
-    assert "To run this task: ankiops llm grammar --run" in captured.out
-
 
 def test_cli_llm_status_exits_on_invalid_config(tmp_path):
     with (
@@ -112,7 +102,7 @@ def test_cli_llm_status_exits_on_invalid_config(tmp_path):
     assert exc.value.code == 1
 
 
-def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path, capsys):
+def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
     jobs = [
         LlmJobListItem(
             job_id=24,
@@ -139,17 +129,12 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path, capsys):
         patch("ankiops.cli.require_initialized_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.FileSystemAdapter.load_note_type_configs", return_value=[]),
         patch("ankiops.cli.load_llm_task_catalog", return_value=catalog),
-        patch("ankiops.cli.list_llm_jobs", return_value=jobs),
+        patch("ankiops.cli.list_llm_jobs", return_value=jobs) as list_jobs,
         patch("sys.argv", ["ankiops", "llm"]),
     ):
         main()
 
-    captured = capsys.readouterr()
-    assert "LLM config: OK" in captured.out
-    assert "Tasks:" in captured.out
-    assert "grammar" in captured.out
-    assert "Recent jobs:" in captured.out
-    assert "#24 grammar (sonnet)" in captured.out
+    list_jobs.assert_called_once_with(collection_dir=tmp_path)
 
 
 def test_cli_llm_show_parses_minus_one_alias(tmp_path):

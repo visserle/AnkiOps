@@ -152,7 +152,7 @@ def _format_table(
                         else ""
                     ).ljust(widths[column_index])
                     for column_index in range(len(values))
-                )
+                ).rstrip()
             )
         return rendered
 
@@ -234,9 +234,7 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
 
         note_type_rows.append([config.name, labels_rendered, identifying_rendered])
 
-    logger.info("Note Types")
-    logger.info("==========")
-    logger.info("----------")
+    logger.info("Note types:")
     for line in _format_table(
         headers=["Note type", "Labels", "Identifying"],
         rows=note_type_rows,
@@ -275,9 +273,7 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
             ]
         )
 
-    logger.info("Label Registry")
-    logger.info("==============")
-    logger.info("--------------")
+    logger.info("Label registry:")
     for line in _format_table(
         headers=[
             "Label",
