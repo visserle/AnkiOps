@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
+import textwrap
 
 import yaml
 
@@ -69,6 +71,98 @@ def _is_choice_field(field_name: str) -> bool:
     return "choice" in field_name.lower()
 
 
+def _render_bool_values(values: set[bool]) -> str:
+    if values == {True}:
+        return "yes"
+    if values == {False}:
+        return "no"
+    return "mixed"
+
+
+def _format_table(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    max_width: int | None = None,
+) -> list[str]:
+    if not headers:
+        return []
+
+    if max_width is None:
+        max_width = shutil.get_terminal_size(fallback=(120, 24)).columns
+
+    max_width = max(max_width, 40)
+    separator_width = 2 * (len(headers) - 1)
+    max_cell_lengths = [len(header) for header in headers]
+    for row in rows:
+        for index, cell in enumerate(row):
+            max_cell_lengths[index] = max(max_cell_lengths[index], len(cell))
+
+    widths = [len(header) for header in headers]
+    available = max(0, max_width - separator_width - sum(widths))
+    expansion_needs = [
+        max_cell_lengths[index] - widths[index] for index in range(len(headers))
+    ]
+    # Distribute extra width fairly across columns so one very long column
+    # does not starve the others and force awkward wraps in short labels/fields.
+    while available > 0:
+        grew = False
+        for index, need in enumerate(expansion_needs):
+            if available == 0:
+                break
+            if need <= 0:
+                continue
+            widths[index] += 1
+            expansion_needs[index] -= 1
+            available -= 1
+            grew = True
+        if not grew:
+            break
+
+    def _wrap_cell(value: str, width: int) -> list[str]:
+        wrapped = textwrap.wrap(
+            value,
+            width=width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        if wrapped:
+            return wrapped
+        if not value:
+            return [""]
+        return textwrap.wrap(
+            value,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=True,
+        )
+
+    def _render_row(values: list[str]) -> list[str]:
+        wrapped_cells = [
+            _wrap_cell(values[index], widths[index]) for index in range(len(values))
+        ]
+        row_height = max(len(lines) for lines in wrapped_cells)
+        rendered: list[str] = []
+        for line_index in range(row_height):
+            rendered.append(
+                "  ".join(
+                    (
+                        wrapped_cells[column_index][line_index]
+                        if line_index < len(wrapped_cells[column_index])
+                        else ""
+                    ).ljust(widths[column_index])
+                    for column_index in range(len(values))
+                )
+            )
+        return rendered
+
+    separator = ["-" * width for width in widths]
+    rendered_lines = [*(_render_row(headers)), *(_render_row(separator))]
+    for row in rows:
+        rendered_lines.extend(_render_row(row))
+    return rendered_lines
+
+
 def _build_global_label_constraints(
     note_type_configs: list[NoteTypeConfig],
 ) -> tuple[dict[str, str], dict[str, bool]]:
@@ -106,6 +200,51 @@ def _validate_global_label_reuse(
 
 
 def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
+    sorted_configs = sorted(note_type_configs, key=lambda config_item: config_item.name)
+
+    note_type_rows: list[list[str]] = []
+    for config in sorted_configs:
+        labels: list[str] = []
+        identifying_labels: list[str] = []
+        identifying_base_labels: list[str] = []
+        identifying_choice_labels: list[str] = []
+
+        for field_config in config.fields:
+            if field_config.label is None:
+                continue
+            labels.append(field_config.label)
+            if not field_config.identifying:
+                continue
+
+            identifying_labels.append(field_config.label)
+            if config.is_choice and _is_choice_field(field_config.name):
+                identifying_choice_labels.append(field_config.label)
+            else:
+                identifying_base_labels.append(field_config.label)
+
+        labels_rendered = ", ".join(labels) or "(none)"
+        if config.is_choice:
+            base_rendered = ", ".join(identifying_base_labels) or "(none)"
+            choice_rendered = ", ".join(identifying_choice_labels) or "(none)"
+            identifying_rendered = (
+                f"{base_rendered} + any one choice label ({choice_rendered})"
+            )
+        else:
+            identifying_rendered = ", ".join(identifying_labels) or "(none)"
+
+        note_type_rows.append([config.name, labels_rendered, identifying_rendered])
+
+    logger.info("Note Types")
+    logger.info("==========")
+    logger.info("----------")
+    for line in _format_table(
+        headers=["Note type", "Labels", "Identifying"],
+        rows=note_type_rows,
+    ):
+        logger.info(line)
+
+    logger.info("")
+
     label_index: dict[str, list[tuple[str, str, bool]]] = {}
     for config in sorted(note_type_configs, key=lambda config_item: config_item.name):
         for field_config in config.fields:
@@ -120,42 +259,35 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
                 )
             )
 
-    logger.info("Taken labels:")
+    registry_rows: list[list[str]] = []
     for label in sorted(label_index):
         entries = sorted(label_index[label], key=lambda entry: (entry[0], entry[1]))
-        owners = ", ".join(
-            f"{note_type_name}.{field_name}"
-            for note_type_name, field_name, _ in entries
-        )
-        logger.info(f"  {label:<4} -> {owners}")
-    logger.info("")
-    logger.info("Free labels: any valid label not listed above.")
-    logger.info("")
+        field_names = sorted({field_name for _, field_name, _ in entries})
+        note_type_names = sorted({note_type_name for note_type_name, _, _ in entries})
+        identifying_values = {identifying for _, _, identifying in entries}
 
-    logger.info("By note type:")
-    sorted_configs = sorted(note_type_configs, key=lambda config_item: config_item.name)
-    for config_index, config in enumerate(sorted_configs):
-        label_parts = []
-        base_identifying_labels = []
-        for field_config in config.fields:
-            if field_config.label is None:
-                continue
-            is_choice_field = config.is_choice and _is_choice_field(field_config.name)
-            label_parts.append(field_config.label)
-            if field_config.identifying and not is_choice_field:
-                base_identifying_labels.append(field_config.label)
-        logger.info(f"  {config.name}: {', '.join(label_parts)}")
-        if config.is_choice:
-            base_identifying = ", ".join(base_identifying_labels) or "(none)"
-            logger.info(
-                "    IDENTIFYING rule: base IDENTIFYING labels "
-                f"({base_identifying}) + any one Choice n label"
-            )
-        else:
-            identifying_rendered = ", ".join(base_identifying_labels) or "(none)"
-            logger.info(f"    IDENTIFYING labels: {identifying_rendered}")
-        if config_index < len(sorted_configs) - 1:
-            logger.info("")
+        registry_rows.append(
+            [
+                label,
+                ", ".join(field_names),
+                _render_bool_values(identifying_values),
+                ", ".join(note_type_names),
+            ]
+        )
+
+    logger.info("Label Registry")
+    logger.info("==============")
+    logger.info("--------------")
+    for line in _format_table(
+        headers=[
+            "Label",
+            "Field",
+            "Identifying",
+            "Used by",
+        ],
+        rows=registry_rows,
+    ):
+        logger.info(line)
 
 
 def _build_template_output_files(
@@ -199,7 +331,8 @@ def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
 
 def run(args) -> None:
     """Handle note-types CLI actions."""
-    action = str(getattr(args, "action", ""))
+    action_value = getattr(args, "action", "list")
+    action = "list" if action_value in {None, ""} else str(action_value)
     if action not in {"list", "import"}:
         logger.error(f"Unknown note-types action: {action}")
         raise SystemExit(2)

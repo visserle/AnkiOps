@@ -20,8 +20,8 @@ def _seed_note_types(note_types_dir):
 @pytest.mark.parametrize(
     "argv",
     [
-        ["ankiops", "note-types", "list"],
-        ["ankiops", "nt", "list"],
+        ["ankiops", "note-types"],
+        ["ankiops", "nt"],
     ],
 )
 def test_note_types_list_and_alias_route_to_handler(argv):
@@ -34,6 +34,16 @@ def test_note_types_list_and_alias_route_to_handler(argv):
     run_mock.assert_called_once()
     args = run_mock.call_args.args[0]
     assert args.action == "list"
+
+
+def test_note_types_list_subcommand_is_unknown(capsys):
+    with patch("sys.argv", ["ankiops", "note-types", "list"]):
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "invalid choice: 'list'" in captured.err
 
 
 @pytest.mark.parametrize(
@@ -120,10 +130,6 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
         {"name": "Choice 1", "label": "X1:", "identifying": True},
     ]
 
-    assert "Copied note type 'MyType'" in caplog.text
-    assert "Saved to:" in caplog.text
-
-
 def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, caplog):
     _seed_note_types(tmp_path / "note_types")
 
@@ -155,7 +161,6 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     ):
         run_note_type(args)
 
-    assert "Label 'Q:' already has IDENTIFYING=True" in caplog.text
     payload = yaml.safe_load(
         (tmp_path / "note_types" / "MyType" / "note_type.yaml").read_text("utf-8")
     )

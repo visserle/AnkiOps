@@ -10,7 +10,6 @@ from urllib.parse import unquote
 import yaml
 from blake3 import blake3
 
-from ankiops import anki
 from ankiops.config import LOCAL_MEDIA_DIR, NOTE_SEPARATOR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
@@ -177,7 +176,7 @@ class FileSystemAdapter:
                                     (
                                         f"Unknown field label '{unknown_label}'. "
                                         "Please check your note type labels. "
-                                        "Use `ankiops note-types list` to list "
+                                        "Use `ankiops note-types` to list "
                                         "defined labels."
                                     ),
                                     display_path=display_path,

@@ -386,18 +386,17 @@ def main():
     note_types_parser = subparsers.add_parser(
         "note-types",
         aliases=["nt"],
-        help="List local note type labels or import a note type from Anki",
+        help="Show note type overview or import a note type from Anki",
+        description=(
+            "Show note type overview by default. "
+            "Use 'import' to copy a note type from Anki."
+        ),
     )
+    note_types_parser.set_defaults(handler=run_note_type, action="list")
     note_types_subparsers = note_types_parser.add_subparsers(
-        dest="action",
-        required=True,
+        dest="note_types_action",
+        required=False,
     )
-
-    note_types_list_parser = note_types_subparsers.add_parser(
-        "list",
-        help="Show taken labels and note type label details",
-    )
-    note_types_list_parser.set_defaults(handler=run_note_type, action="list")
 
     note_types_import_parser = note_types_subparsers.add_parser(
         "import",
@@ -473,7 +472,10 @@ def main():
             "# Alias for most recent LLM job"
         )
         print("  ankiops llm --job <job_id>                   # Show one LLM job")
-        print("  ankiops note-types list                      # Show taken labels")
+        print(
+            "  ankiops note-types                           "
+            "# Show note types and label registry"
+        )
         print(
             "  ankiops note-types import MyCustomType       "
             "# Copy note type from Anki"

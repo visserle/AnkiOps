@@ -165,7 +165,7 @@ In this example, the last note is a new note which will get a `note_key` comment
 
 ### How are different note types handled?
 
-AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-types list`.
+AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-types`.
 
 ### How does it work?
 
@@ -231,5 +231,5 @@ uv run python -m main ma
 - `ankiops llm --job <job_id|latest|-1>` - Show one LLM job in detail
 
 **`note-types` / `nt`:**
-- `ankiops note-types list` - Show taken labels and per-note-type label details
+- `ankiops note-types` - Show note types, identifying labels, and the label registry
 - `ankiops note-types import <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
