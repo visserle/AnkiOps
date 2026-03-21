@@ -721,7 +721,7 @@ def import_collection(
             file_stem_to_deck_name(markdown_file.file_path.stem)
             for markdown_file in fs_docs
         }
-        renamed_from_decks: set[str] = set()
+        rename_candidates: set[tuple[str, str]] = set()
 
         for markdown_file in fs_docs:
             # Determine actual anki_deck_note_ids for this specific file
@@ -749,8 +749,8 @@ def import_collection(
                 file_anki_note_ids,
             )
 
-            # Track filename-based deck renames to avoid stale DB deck mappings
-            # and false-positive "untracked" warnings for the old deck.
+            # Track filename-based deck rename candidates, but defer applying
+            # mapping cleanup until deck membership is refreshed.
             if (
                 sync_result.name
                 and sync_result.name not in initial_deck_names
@@ -761,12 +761,7 @@ def import_collection(
                     source_deck != sync_result.name
                     and source_deck not in markdown_deck_names
                 ):
-                    renamed_from_decks.add(source_deck)
-                    db_port.delete_deck(source_deck)
-                    logger.info(
-                        "Deck renamed from markdown file: "
-                        f"'{source_deck}' -> '{sync_result.name}'"
-                    )
+                    rename_candidates.add((source_deck, sync_result.name))
 
             if sync_result.name and sync_result.name in deck_ids_by_name:
                 md_deck_ids.add(deck_ids_by_name[sync_result.name])
@@ -795,10 +790,19 @@ def import_collection(
             note_ids_by_deck_name=note_ids_by_deck_name,
         )
 
+        # Finalize deferred rename candidates only when the source deck is
+        # fully drained after moves/deletes.
+        for source_deck, target_deck in sorted(rename_candidates):
+            if source_deck in note_ids_by_deck_name:
+                continue
+            db_port.delete_deck(source_deck)
+            logger.info(
+                "Deck renamed from markdown file: "
+                f"'{source_deck}' -> '{target_deck}'"
+            )
+
         untracked = []
         for deck_name, note_ids in note_ids_by_deck_name.items():
-            if deck_name in renamed_from_decks:
-                continue
             deck_id = deck_ids_by_name.get(deck_name)
             if deck_id is None or deck_id in md_deck_ids:
                 continue

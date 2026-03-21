@@ -244,6 +244,57 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
 
 
+def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(world):
+    """IMP-RUN-RENAME-002."""
+    moved_note_key = "imp-run-rename-002-moved"
+    leftover_note_key = "imp-run-rename-002-leftover"
+
+    moved_note_id = world.add_qa_note(
+        deck_name="OldDeck",
+        question="Moved Q",
+        answer="Moved A",
+        note_key=moved_note_key,
+    )
+    leftover_note_id = world.add_qa_note(
+        deck_name="OldDeck",
+        question="Leftover Q",
+        answer="Leftover A",
+        note_key=leftover_note_key,
+    )
+
+    world.write_qa_deck("NewDeck", [("Moved Q", "Moved A", moved_note_key)])
+
+    with world.db_session() as db:
+        old_deck_id = world.mock_anki.decks["OldDeck"]
+        db.upsert_note_links(
+            [(moved_note_key, moved_note_id), (leftover_note_key, leftover_note_id)]
+        )
+        db.upsert_deck("OldDeck", old_deck_id)
+
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+        )
+        old_untracked = next(
+            (
+                deck
+                for deck in result.untracked_decks
+                if deck.deck_name == "OldDeck"
+            ),
+            None,
+        )
+        assert old_untracked is not None
+        assert moved_note_id not in old_untracked.note_ids
+        assert leftover_note_id in old_untracked.note_ids
+
+        assert db.resolve_deck_id("OldDeck") == old_deck_id
+        assert db.resolve_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
+
+        moved_card_id = world.mock_anki.notes[moved_note_id]["cards"][0]
+        assert world.mock_anki.cards[moved_card_id]["deckName"] == "NewDeck"
+
+
 def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world):
     """IMP-RUN-MOVE-002."""
     moved_note_key = "imp-run-move-002-moved"
