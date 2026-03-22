@@ -4,7 +4,7 @@
 
 **Anki ↔ Markdown, with bidirectional sync and LLM integration**
 
-Editing flashcards in Anki's UI is tedious. **AnkiOps** is a bidirectional Anki-Markdown bridge. Each deck becomes a Markdown file you can edit in your favourite text editor, version with Git, and enhance with LLMs. Changes sync both ways.
+Editing flashcards in Anki's UI is tedious. **AnkiOps** is a bidirectional Anki-Markdown bridge. Each deck becomes a Markdown file you can edit in your favourite text editor, version with Git, and enhance with LLMs. AnkiOps handles syncing, note type management, media, and more, so you can focus on your content.
 
 ## Features
 
@@ -16,7 +16,7 @@ Editing flashcards in Anki's UI is tedious. **AnkiOps** is a bidirectional Anki-
 - High-performance processing using hashing: handles thousands of cards across hundreds of decks in mere seconds
 - Serialize entire collections to JSON format for automated AI processing
 
-## Getting Started
+## How to Get Started
 
 
 1. **Install AnkiOps via [pipx](https://github.com/pypa/pipx)**: Pipx will make AnkiOps globally available in your terminal.
@@ -34,13 +34,13 @@ ankiops init --tutorial
 3. **Execute AnkiOps**: Import the tutorial deck into Anki using:
 
 ```bash
-ankiops ma # markdown to anki (import)
+ankiops ma # alias for markdown-to-anki (import)
 ```
 
 4. **Keep everything in sync**: When editing your Markdown files, sync Markdown → Anki (and vice versa), as each sync makes one side match the other. After reviewing and editing your cards in Anki, you can sync Anki → Markdown using the following command:
 
 ```bash
-ankiops am # anki to markdown (export)
+ankiops am # alias for anki-to-markdown (export)
 ```
 
 ## FAQ
