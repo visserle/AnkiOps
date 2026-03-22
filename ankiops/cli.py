@@ -212,6 +212,21 @@ def run_ma(args):
     if note_summary.errors:
         _log_import_errors(import_summary)
 
+    protected = import_summary.protected_note_groups
+    if protected:
+        protected_total = sum(group.note_count for group in protected)
+        logger.warning(
+            f"Protected {protected_total} keyless Anki note(s) during import."
+        )
+        logger.warning(f"Affected deck(s): {len(protected)}")
+        for group in protected:
+            logger.warning(f"  - {group.deck_name} ({group.note_count} notes)")
+        logger.warning(
+            "These notes were kept and not deleted because they do not have "
+            "an AnkiOps Key. Add note_key comments in markdown and re-import "
+            "to bring them under sync management."
+        )
+
     if untracked:
         logger.warning(
             f"Found {len(untracked)} untracked Anki deck(s) with AnkiOps notes "
@@ -436,12 +451,9 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Export collection to a portable JSON/ZIP file")
         print("  deserialize       Import markdown/media from JSON/ZIP")
+        print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
         print(
-            "  llm               Status/plan/run LLM jobs and inspect one LLM job"
-        )
-        print(
-            "  note-types        List note type labels or import note types "
-            "from Anki"
+            "  note-types        List note type labels or import note types from Anki"
         )
         print()
         print("Usage examples:")
@@ -471,8 +483,7 @@ def main():
         print("  ankiops llm grammar                          # Dry-run plan")
         print("  ankiops llm grammar --run                    # Run task job")
         print(
-            "  ankiops llm --job latest                     "
-            "# Show most recent LLM job"
+            "  ankiops llm --job latest                     # Show most recent LLM job"
         )
         print(
             "  ankiops llm --job -1                         "
@@ -484,8 +495,7 @@ def main():
             "# Show note types and label registry"
         )
         print(
-            "  ankiops note-types --import MyCustomType     "
-            "# Copy note type from Anki"
+            "  ankiops note-types --import MyCustomType     # Copy note type from Anki"
         )
         print()
         print("For more information:")

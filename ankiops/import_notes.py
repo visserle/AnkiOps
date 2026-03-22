@@ -18,6 +18,7 @@ from ankiops.models import (
     MarkdownFile,
     Note,
     NoteTypeConfig,
+    ProtectedNoteGroup,
     SyncResult,
     UntrackedDeck,
 )
@@ -408,6 +409,7 @@ def _collect_orphan_deletes(
     note_ids_by_note_key: dict[str, int],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
+    anki_notes: dict[int, AnkiNote],
     db_port: SQLiteDbAdapter,
     result: SyncResult,
 ) -> None:
@@ -426,6 +428,25 @@ def _collect_orphan_deletes(
     orphan_note_keys = db_port.resolve_note_keys(orphaned)
     for note_id in sorted(orphaned):
         if note_id:
+            orphan_note = anki_notes.get(note_id)
+            embedded_note_key = ""
+            if orphan_note is not None:
+                embedded_note_key = orphan_note.fields.get("AnkiOps Key", "").strip()
+
+            # Protect unmanaged legacy notes from deletion on import.
+            if not embedded_note_key:
+                result.protected_keyless_notes += 1
+                result.change_buckets.skips.append(
+                    Change(
+                        ChangeType.SKIP,
+                        note_id,
+                        f"note_id: {note_id}",
+                        {"protected_keyless": True},
+                    )
+                )
+                logger.debug(f"  Protect keyless note_id: {note_id}")
+                continue
+
             note_key = orphan_note_keys.get(note_id)
             delete_repr = f"note_key: {note_key}" if note_key else f"note_id: {note_id}"
             result.change_buckets.deletes.append(
@@ -611,6 +632,7 @@ def _sync_file(
         note_ids_by_note_key=note_ids_by_note_key,
         global_mapped_note_ids=global_mapped_note_ids,
         all_anki_note_ids=all_anki_note_ids,
+        anki_notes=anki_notes,
         db_port=db_port,
         result=result,
     )
@@ -798,8 +820,7 @@ def import_collection(
                 continue
             db_port.delete_deck(source_deck)
             logger.info(
-                "Deck renamed from markdown file: "
-                f"'{source_deck}' -> '{target_deck}'"
+                f"Deck renamed from markdown file: '{source_deck}' -> '{target_deck}'"
             )
 
         untracked = []
@@ -809,4 +830,14 @@ def import_collection(
                 continue
             untracked.append(UntrackedDeck(deck_name, deck_id, list(note_ids)))
 
-    return CollectionResult.for_import(results=results, untracked_decks=untracked)
+    protected_note_groups = [
+        ProtectedNoteGroup(sync_result.name or "", sync_result.protected_keyless_notes)
+        for sync_result in results
+        if sync_result.protected_keyless_notes and sync_result.name
+    ]
+
+    return CollectionResult.for_import(
+        results=results,
+        untracked_decks=untracked,
+        protected_note_groups=protected_note_groups,
+    )

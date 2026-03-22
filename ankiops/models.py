@@ -113,9 +113,7 @@ class NoteTypeConfig:
                         )
                     label_to_field_name[field_config.label] = field_config.name
 
-                    existing_identifying = label_to_identifying.get(
-                        field_config.label
-                    )
+                    existing_identifying = label_to_identifying.get(field_config.label)
                     if (
                         existing_identifying is not None
                         and existing_identifying != field_config.identifying
@@ -124,9 +122,7 @@ class NoteTypeConfig:
                             f"Label '{field_config.label}' has conflicting "
                             "identifying flag across note types."
                         )
-                    label_to_identifying[field_config.label] = (
-                        field_config.identifying
-                    )
+                    label_to_identifying[field_config.label] = field_config.identifying
 
                     if "choice" in field_config.name.lower():
                         has_choice_field = True
@@ -604,8 +600,13 @@ class CollectionResult:
         *,
         results: list[SyncResult],
         untracked_decks: list[UntrackedDeck],
+        protected_note_groups: list[ProtectedNoteGroup] | None = None,
     ) -> "CollectionResult":
-        return cls(results=results, untracked_decks=untracked_decks)
+        return cls(
+            results=results,
+            untracked_decks=untracked_decks,
+            protected_note_groups=protected_note_groups or [],
+        )
 
     @classmethod
     def for_export(

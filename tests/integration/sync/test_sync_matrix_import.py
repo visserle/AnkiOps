@@ -103,6 +103,34 @@ def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
         assert note_id not in world.mock_anki.notes
 
 
+def test_imp_run_protect_001_keeps_keyless_orphaned_anki_note(world):
+    """IMP-RUN-PROTECT-001."""
+    note_id = world.add_qa_note(
+        deck_name="ProtectDeck",
+        question="Protected Q",
+        answer="Protected A",
+        note_key=None,
+    )
+
+    world.write_qa_deck("ProtectDeck", [])
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=0, deleted=0, errors=0
+        )
+        assert note_id in world.mock_anki.notes
+        assert len(result.protected_note_groups) == 1
+        assert result.protected_note_groups[0].deck_name == "ProtectDeck"
+        assert result.protected_note_groups[0].note_count == 1
+
+        sync_result = next(
+            sync for sync in result.results if sync.name == "ProtectDeck"
+        )
+        assert sync_result.protected_keyless_notes == 1
+
+
 def test_imp_run_drift_001_recovers_missing_mapping_from_embedded_key(world):
     """IMP-RUN-DRIFT-001."""
     note_key = "imp-run-drift-001"
@@ -173,7 +201,8 @@ def test_imp_run_drift_004_stale_existing_mapping_does_not_hijack_wrong_note(wor
             == "Target Q"
         )
         assert (
-            world.mock_anki.notes[new_note_id]["fields"]["Answer"]["value"] == "Target A"
+            world.mock_anki.notes[new_note_id]["fields"]["Answer"]["value"]
+            == "Target A"
         )
 
 
@@ -310,11 +339,7 @@ def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(w
             result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
         )
         old_untracked = next(
-            (
-                deck
-                for deck in result.untracked_decks
-                if deck.deck_name == "OldDeck"
-            ),
+            (deck for deck in result.untracked_decks if deck.deck_name == "OldDeck"),
             None,
         )
         assert old_untracked is not None

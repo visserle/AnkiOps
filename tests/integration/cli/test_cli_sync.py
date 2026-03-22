@@ -69,6 +69,19 @@ def test_run_ma_has_no_untracked_warning_when_none(tmp_path, caplog):
     assert "untracked Anki deck(s)" not in caplog.text
 
 
+def test_run_ma_warns_for_protected_keyless_anki_notes(tmp_path, caplog):
+    summary = CollectionResult.for_import(
+        results=[],
+        untracked_decks=[],
+        protected_note_groups=[ProtectedNoteGroup("ProtectDeck", 1)],
+    )
+    _run_ma_with_summary(tmp_path, caplog, summary)
+
+    assert "Protected 1 keyless Anki note(s) during import." in caplog.text
+    assert "Affected deck(s): 1" in caplog.text
+    assert "ProtectDeck" in caplog.text
+
+
 def test_run_am_warns_for_protected_keyless_notes(tmp_path, caplog):
     summary = CollectionResult.for_export(
         results=[],
