@@ -485,10 +485,6 @@ def main():
         print(
             "  ankiops llm --job latest                     # Show most recent LLM job"
         )
-        print(
-            "  ankiops llm --job -1                         "
-            "# Alias for most recent LLM job"
-        )
         print("  ankiops llm --job <job_id>                   # Show one LLM job")
         print(
             "  ankiops note-types                           "

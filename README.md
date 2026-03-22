@@ -8,7 +8,7 @@ AnkiOps is a bidirectional Anki-Markdown bridge. Each deck becomes a Markdown fi
 
 ## Features
 
-- Simple CLI interface: after initialization, only two commands (import/export) are needed for daily use
+- Simple CLI interface: `ankiops init`, `ankiops markdown-to-anki`, `ankiops anki-to-markdown`, `ankiops note-types`, `ankiops llm`
 - Fully round-trip sync that handles notes (creation, deletion, movements across decks, conflicts), note types, and media
 - Markdown rendering with nearly all features (including syntax-highlighted code blocks for desktop and mobile)
 - Support for custom note types following Infrastructure as Code (IaC) principles
@@ -149,8 +149,8 @@ uv run python -m main ma
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
 - `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
 - `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
-- `ankiops llm --resume <job_id|latest|-1> [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
-- `ankiops llm --job <job_id|latest|-1>` - Show one LLM job in detail
+- `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
+- `ankiops llm --job <job_id|latest> --resume [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
 **`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
@@ -186,8 +186,8 @@ ankiops llm grammar --run --batch
 ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
 ankiops llm grammar --run --model haiku
-ankiops llm --resume latest
 ankiops llm --job latest
+ankiops llm --job latest --resume
 ```
 ### Task File Format (`llm/tasks/<task-name>.yaml`)
 
@@ -247,4 +247,4 @@ request:
 - Only notes in scope with at least one editable, non-empty field are sent to the model
 - Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/llm.db` with per-note status, token usage, latency, and errors
-- Use `ankiops llm --job <job_id|latest|-1>` for one job's history and diagnostics
+- Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics

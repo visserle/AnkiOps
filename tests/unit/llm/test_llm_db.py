@@ -16,16 +16,12 @@ from ankiops.llm.models import (
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     return {name for (name,) in rows}
 
 
 def _index_names(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'"
-    ).fetchall()
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     return {name for (name,) in rows}
 
 
@@ -323,13 +319,12 @@ def test_enforces_status_constraints(tmp_path):
         adapter.close()
 
 
-def test_resolve_job_id_accepts_numeric_latest_and_minus_one_alias(tmp_path):
+def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
     adapter = LlmDbAdapter.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         assert adapter.resolve_job_id(str(job_id)) == job_id
         assert adapter.resolve_job_id("latest") == job_id
-        assert adapter.resolve_job_id("-1") == job_id
     finally:
         adapter.close()
 
@@ -481,9 +476,7 @@ def test_mark_unfinished_items_fatal_updates_status_and_error_message(tmp_path):
     assert rows[1]["error_message"] == "Provider batch results failed: decoder blew up"
     assert int(rows[2]["id"]) == skipped_id
     skipped_candidate_status = LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS.value
-    assert (
-        rows[2]["candidate_status"] == skipped_candidate_status
-    )
+    assert rows[2]["candidate_status"] == skipped_candidate_status
     assert rows[2]["final_status"] == LlmFinalStatus.NOT_ATTEMPTED.value
     assert rows[2]["error_message"] is None
     assert int(rows[3]["id"]) == stable_id
@@ -548,9 +541,7 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
     assert rows[0]["final_status"] == LlmFinalStatus.CANCELED.value
     assert int(rows[1]["id"]) == skipped_id
     skipped_candidate_status = LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS.value
-    assert (
-        rows[1]["candidate_status"] == skipped_candidate_status
-    )
+    assert rows[1]["candidate_status"] == skipped_candidate_status
     assert rows[1]["final_status"] == LlmFinalStatus.NOT_ATTEMPTED.value
     assert int(rows[2]["id"]) == settled_id
     assert rows[2]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value

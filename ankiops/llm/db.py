@@ -222,9 +222,7 @@ class LlmDbAdapter:
         failure_policy_check = _enum_check_sql(
             [policy.value for policy in RunFailurePolicy]
         )
-        execution_mode_check = _enum_check_sql(
-            [mode.value for mode in ExecutionMode]
-        )
+        execution_mode_check = _enum_check_sql([mode.value for mode in ExecutionMode])
 
         with self._conn:
             self._conn.executescript(
@@ -902,7 +900,7 @@ class LlmDbAdapter:
         token = identifier.strip()
         if not token:
             return None
-        if token == "-1" or token.lower() == "latest":
+        if token.lower() == "latest":
             latest = self._conn.execute(
                 """
                 SELECT id
@@ -915,7 +913,7 @@ class LlmDbAdapter:
                 return None
             return int(latest["id"])
         if not token.isdigit():
-            raise ValueError("Job ID must be numeric, '-1', or use 'latest'.")
+            raise ValueError("Job ID must be numeric or use 'latest'.")
         row = self._conn.execute(
             "SELECT id FROM llm_job WHERE id = ?",
             (int(token),),

@@ -235,18 +235,37 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
     list_jobs.assert_called_once_with(collection_dir=tmp_path)
 
 
-def test_cli_llm_show_parses_minus_one_alias(tmp_path):
+def test_cli_llm_show_parses_latest_alias(tmp_path):
     with (
         patch("ankiops.cli.require_initialized_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.show_job", return_value=None) as show_job,
-        patch("sys.argv", ["ankiops", "llm", "--job", "-1"]),
+        patch("sys.argv", ["ankiops", "llm", "--job", "latest"]),
     ):
         with pytest.raises(SystemExit) as exc:
             main()
 
     assert exc.value.code == 1
     show_job.assert_called_once()
-    assert show_job.call_args.kwargs["job_id"] == "-1"
+    assert show_job.call_args.kwargs["job_id"] == "latest"
+
+
+def test_cli_llm_dispatches_resume_with_job_selector(tmp_path):
+    success_result = LlmJobResult(
+        job_id=25,
+        status="completed",
+        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        failed=False,
+        persisted=True,
+    )
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.resume_task", return_value=success_result) as resume_task,
+        patch("sys.argv", ["ankiops", "llm", "--job", "latest", "--resume"]),
+    ):
+        main()
+
+    resume_task.assert_called_once()
+    assert resume_task.call_args.kwargs["resume_job_id"] == "latest"
 
 
 def test_run_llm_run_exits_cleanly_on_fatal_provider_error(tmp_path, caplog):
@@ -291,11 +310,11 @@ def test_run_llm_show_exits_when_job_not_found(tmp_path):
     assert exc.value.code == 1
 
 
-def test_run_llm_show_accepts_minus_one_alias(tmp_path):
+def test_run_llm_show_accepts_latest_alias(tmp_path):
     args = SimpleNamespace(
         task_name=None,
         run=False,
-        job_id="-1",
+        job_id="latest",
         model=None,
         no_auto_commit=False,
     )
@@ -308,7 +327,7 @@ def test_run_llm_show_accepts_minus_one_alias(tmp_path):
 
     assert exc.value.code == 1
     show_job.assert_called_once()
-    assert show_job.call_args.kwargs["job_id"] == "-1"
+    assert show_job.call_args.kwargs["job_id"] == "latest"
 
 
 def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
@@ -369,6 +388,15 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
             no_auto_commit=True,
         ),
         SimpleNamespace(
+            task_name=None,
+            run=False,
+            job_id=None,
+            model=None,
+            deck=None,
+            no_auto_commit=False,
+            resume=True,
+        ),
+        SimpleNamespace(
             task_name="grammar",
             run=False,
             job_id="latest",
@@ -383,6 +411,15 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
             model=None,
             deck=None,
             no_auto_commit=False,
+        ),
+        SimpleNamespace(
+            task_name=None,
+            run=False,
+            job_id="latest",
+            model=None,
+            deck=None,
+            no_auto_commit=True,
+            resume=False,
         ),
         SimpleNamespace(
             task_name="grammar",
