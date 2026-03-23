@@ -4,7 +4,7 @@
 
 **Anki ↔ Markdown, with bidirectional sync and LLM integration**
 
-AnkiOps is a bidirectional Anki-Markdown bridge. Each deck becomes a Markdown file you can edit in your favourite text editor, version with Git, and enhance with automated LLM tasks. AnkiOps handles syncing, note type management, media, and more, so you can focus on your content. 
+AnkiOps is a bidirectional Anki-Markdown bridge. Each Anki deck becomes a Markdown file you can edit in your favourite text editor, version with Git, and enhance with automated LLM tasks. AnkiOps handles syncing, note type management, media, and more, enabling you to manage your entire Anki collection from the file system.
 
 ## Features
 
