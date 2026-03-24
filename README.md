@@ -2,9 +2,9 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-**Anki ↔ Markdown, with bidirectional sync and LLM integration**
+**Anki ↔ Markdown, with bidirectional sync, custom note types, and LLM integration**
 
-AnkiOps is a bidirectional Anki-Markdown bridge. Each Anki deck becomes a Markdown file you can edit in your favourite text editor, version with Git, and enhance with automated LLM tasks. AnkiOps handles syncing, note type management, media, and more, enabling you to manage your entire Anki collection from the file system.
+**AnkiOps** is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file you can edit directly, track with Git, and enhance with automated LLM tasks. With two-way sync, media support, and custom note types, AnkiOps lets you manage your entire collection from your favorite editor.
 
 ## Features
 
