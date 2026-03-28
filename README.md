@@ -2,22 +2,19 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps lets you manage your Anki collection like code. 
-
-Edit decks in Markdown, version with Git, enhance with LLMs, and sync changes both ways. 
+A bidirectional Anki-Markdown bridge. 
+Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
 
 ## Features:
 
-<!-- With bidirectional sync, media support, and custom note types, AnkiOps lets you manage and share your entire collection from your favorite editor. -->
-
-- **Simple CLI interface**: after initialization, only two commands are needed for importing and exporting between Anki and the filesystem
-- **Full Anki support**: safe, highly performant syncing of notes, custom note types, decks, subdecks, and media files
-- **Markdown-first**: designed for an easy user experience on the file system side, with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
-- **Collaboration**: stable note keys allow for sharing and collaborating on collections using Github with integrated Git commands
-- **Automization**: serialize your collection to JSON for batch processing, and use LLMs for executing tasks such as reviewing, grammar fixes, or translations
+- **Full Anki support**: Safe, performant bidirectional syncing of notes, custom note types, decks, subdecks, and media files
+- **Markdown-first**: Manage decks from your favourite editor with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
+- **Simple CLI interface**: After initialization, just two commands are needed for importing and exporting between Anki and your filesystem 
+- **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands
+- **LLM-ready**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations
 
 > [!NOTE]
-> AnkiOps only modifies notes defined within the `note_types/` folder. Add note types using `ankiops note-types --import <name>`.
+> AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using `ankiops note-types --add <name>`.
 
 <!-- ## Example
 
