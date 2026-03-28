@@ -2,12 +2,14 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-**AnkiOps** is a bidirectional bridge between Anki and your filesystem. Each deck becomes a **Markdown** file you can edit freely, track with **Git**, and enhance with automated **LLM** tasks. With two-way sync, media support, and custom note types, AnkiOps lets you manage your entire collection from your favorite editor.
+**AnkiOps** lets you manage your Anki collection like code: edit decks in **Markdown**, version with **Git**, enhance with **LLMs**, and sync changes **both ways**.
 
+<!-- With bidirectional sync, media support, and custom note types, AnkiOps lets you manage and share your entire collection from your favorite editor. -->
 
 ## Features
 
 - **Simple CLI interface**: after initialization, only two commands are needed for importing and exporting between Anki and the filesystem
+- **Full Anki support**: handles notes, media, and custom note types with any number of fields and cards, including cloze deletions and multiple-choice questions
 - **User-friendliness**: designed for readability and writability, with clear conventions for note separation, field labels, and media embedding.
 - **Markdown-first**: Markdown rendering is supported with nearly all features, including syntax-highlighted code blocks for desktop and mobile
 - **Customizations**: define your own note types with custom fields and card templates, following Infrastructure as Code (IaC) principles
