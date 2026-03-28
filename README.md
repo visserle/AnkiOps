@@ -2,14 +2,18 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps lets you manage your Anki collection like code. Edit decks in Markdown, version with Git, enhance with LLMs, and sync changes both ways. Features:
+AnkiOps lets you manage your Anki collection like code. 
+
+Edit decks in Markdown, version with Git, enhance with LLMs, and sync changes both ways. 
+
+## Features:
 
 <!-- With bidirectional sync, media support, and custom note types, AnkiOps lets you manage and share your entire collection from your favorite editor. -->
 
 - **Simple CLI interface**: after initialization, only two commands are needed for importing and exporting between Anki and the filesystem
 - **Full Anki support**: safe, highly performant syncing of notes, custom note types, decks, subdecks, and media files
 - **Markdown-first**: designed for an easy user experience on the file system side, with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
-- **Collaboration**: stable note keys allow for sharing and collaborating on collections using Github with integrated git commands
+- **Collaboration**: stable note keys allow for sharing and collaborating on collections using Github with integrated Git commands
 - **Automization**: serialize your collection to JSON for batch processing, and use LLMs for executing tasks such as reviewing, grammar fixes, or translations
 
 > [!NOTE]
