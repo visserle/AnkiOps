@@ -2,21 +2,18 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-**AnkiOps** lets you manage your Anki collection like code: edit decks in **Markdown**, version with **Git**, enhance with **LLMs**, and sync changes **both ways**.
+AnkiOps lets you manage your Anki collection like code. Edit decks in Markdown, version with Git, enhance with LLMs, and sync changes both ways. Features:
 
 <!-- With bidirectional sync, media support, and custom note types, AnkiOps lets you manage and share your entire collection from your favorite editor. -->
 
-## Features
-
 - **Simple CLI interface**: after initialization, only two commands are needed for importing and exporting between Anki and the filesystem
-- **Full Anki support**: handles notes, media, and custom note types with any number of fields and cards, including cloze deletions and multiple-choice questions
-- **User-friendliness**: designed for readability and writability, with clear conventions for note separation, field labels, and media embedding.
-- **Markdown-first**: Markdown rendering is supported with nearly all features, including syntax-highlighted code blocks for desktop and mobile
-- **Customizations**: define your own note types with custom fields and card templates, following Infrastructure as Code (IaC) principles
-- **Safety**: AnkiOps automatically creates a Git commit before every sync, fully tested round-trip sync that handles notes, note types, and media files. AnkiOps only modifies notes defined within the `note_types/` folder.
-- **Performance**: uses hashing to detect changes, so it can handle thousands of cards across hundreds of decks in mere seconds.
-- **Collaboration**: cards are identified by keys that are stable across Anki profiles and independent of Anki's internal IDs, so you can safely share collections and collaborate with others using Git.
-- **Automization**: serialize your collection to JSON for AI processing, and use customizeable LLM tasks for grammar fixes, translation, reviewing, and more.
+- **Full Anki support**: safe, highly performant syncing of notes, custom note types, decks, subdecks, and media files
+- **Markdown-first**: designed for an easy user experience on the file system side, with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
+- **Collaboration**: stable note keys allow for sharing and collaborating on collections using Github with integrated git commands
+- **Automization**: serialize your collection to JSON for batch processing, and use LLMs for executing tasks such as reviewing, grammar fixes, or translations
+
+> [!NOTE]
+> AnkiOps only modifies notes defined within the `note_types/` folder. Add note types using `ankiops note-types --import <name>`.
 
 <!-- ## Example
 
@@ -162,8 +159,8 @@ uv run python -m main ma
 
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
-- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>|--collection]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>|--collection] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
 - `ankiops llm --job <job_id|latest> --resume [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
@@ -200,6 +197,7 @@ ankiops llm grammar --run           # run task job
 ankiops llm grammar --run --batch
 ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
+ankiops llm grammar --collection    # full collection override
 ankiops llm grammar --run --model haiku
 ankiops llm --job latest
 ankiops llm --job latest --resume
@@ -238,7 +236,7 @@ request:
 - `system_prompt_file` is optional (defaults to `llm/system_prompt.md`), resolved relative to the task file, and must stay within `llm/`
 - `api_key_env` defaults to `ANTHROPIC_API_KEY` if omitted
 - `decks.include` defaults to `["*"]`, `decks.exclude` defaults to `[]`, and `decks.include_subdecks` defaults to `true`
-- CLI override: `ankiops llm <task> --deck <name>` forces one exact deck with `include_subdecks=false`
+- CLI overrides: `ankiops llm <task> --deck <name>` forces one exact deck with `include_subdecks=false`; `--collection` forces `decks.include=["*"]`
 - `decks` patterns use shell-style matching (`*`, `?`, character classes); non-wildcard names match exact deck names (and optionally subdecks)
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - `request` tuning defaults: `retries=2`, `retry_backoff_seconds=0.5`, `retry_backoff_jitter=true`, `max_output_tokens=2048`
