@@ -327,13 +327,13 @@ def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
 
 def run(args) -> None:
     """Handle note-types CLI actions."""
-    import_name = str(getattr(args, "import_name", "")).strip()
+    add_name = str(getattr(args, "add_name", "")).strip()
     action_value = getattr(args, "action", "list")
-    if import_name:
-        action = "import"
+    if add_name:
+        action = "add"
     else:
         action = "list" if action_value in {None, ""} else str(action_value)
-    if action not in {"list", "import"}:
+    if action not in {"list", "add"}:
         logger.error(f"Unknown note-types action: {action}")
         raise SystemExit(2)
 
@@ -350,9 +350,9 @@ def run(args) -> None:
         _log_note_type_label_info(note_type_configs)
         return
 
-    note_type_name = import_name or str(getattr(args, "name", "")).strip()
+    note_type_name = add_name or str(getattr(args, "name", "")).strip()
     if not note_type_name:
-        logger.error("A note type name is required for 'note-types --import'.")
+        logger.error("A note type name is required for 'note-types --add'.")
         raise SystemExit(2)
 
     anki = connect_or_exit()

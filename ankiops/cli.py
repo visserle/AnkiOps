@@ -415,16 +415,16 @@ def main():
 
     note_types_parser = subparsers.add_parser(
         "note-types",
-        help="Show note type overview or import a note type from Anki",
+        help="Show note type overview or add a note type from Anki",
         description=(
             "Show note type overview by default. "
-            "Use '--import <name>' to copy a note type from Anki."
+            "Use '--add <name>' to copy a note type from Anki."
         ),
     )
     note_types_parser.set_defaults(handler=run_note_type, action="list")
     note_types_parser.add_argument(
-        "--import",
-        dest="import_name",
+        "--add",
+        dest="add_name",
         metavar="NAME",
         help="Note type name to copy from Anki",
     )
@@ -474,7 +474,7 @@ def main():
         )
         print(
             "  ankiops deserialize -i my-deck.json          "
-            "# Deserialize file, then run init"
+            "# Deserialize file to markdown"
         )
         print(
             "  ankiops llm                                  "
@@ -490,9 +490,7 @@ def main():
             "  ankiops note-types                           "
             "# Show note types and label registry"
         )
-        print(
-            "  ankiops note-types --import MyCustomType     # Copy note type from Anki"
-        )
+        print("  ankiops note-types --add MyNoteType     # Copy note type from Anki")
         print()
         print("For more information:")
         print("  ankiops --version              # Show installed version")
