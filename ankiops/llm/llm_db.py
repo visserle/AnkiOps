@@ -15,7 +15,7 @@ from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
 from .anthropic_models import parse_model
 from .claude import ProviderBatchState
-from .models import (
+from .llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,

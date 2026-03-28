@@ -17,8 +17,8 @@ from anthropic import (
     AuthenticationError,
 )
 
-from .errors import LlmFatalError, LlmNoteError
-from .models import (
+from .llm_errors import LlmFatalError, LlmNoteError
+from .llm_models import (
     LlmAttemptResultType,
     PreparedAttemptRequest,
     ProviderAttemptErrorContext,
@@ -159,9 +159,11 @@ class ClaudeClient:
         try:
             while True:
                 try:
-                    response, request_id, rate_limit_headers = (
-                        await self._create_message_with_headers(kwargs)
-                    )
+                    (
+                        response,
+                        request_id,
+                        rate_limit_headers,
+                    ) = await self._create_message_with_headers(kwargs)
                     break
                 except AuthenticationError as error:
                     raise LlmFatalError(
@@ -276,9 +278,11 @@ class ClaudeClient:
                     "params": request_params,
                 }
             )
-        response, request_id, rate_limit_headers = await self._create_batch_with_headers(
-            payload
-        )
+        (
+            response,
+            request_id,
+            rate_limit_headers,
+        ) = await self._create_batch_with_headers(payload)
         return _batch_state_from_response(
             response,
             request_id=request_id,
@@ -286,9 +290,11 @@ class ClaudeClient:
         )
 
     async def retrieve_batch(self, provider_batch_id: str) -> ProviderBatchState:
-        response, request_id, rate_limit_headers = await self._retrieve_batch_with_headers(
-            provider_batch_id
-        )
+        (
+            response,
+            request_id,
+            rate_limit_headers,
+        ) = await self._retrieve_batch_with_headers(provider_batch_id)
         return _batch_state_from_response(
             response,
             request_id=request_id,
@@ -296,9 +302,11 @@ class ClaudeClient:
         )
 
     async def cancel_batch(self, provider_batch_id: str) -> ProviderBatchState:
-        response, request_id, rate_limit_headers = await self._cancel_batch_with_headers(
-            provider_batch_id
-        )
+        (
+            response,
+            request_id,
+            rate_limit_headers,
+        ) = await self._cancel_batch_with_headers(provider_batch_id)
         return _batch_state_from_response(
             response,
             request_id=request_id,
@@ -488,9 +496,7 @@ class ClaudeClient:
             request_id = _extract_request_id(response=response, headers=headers)
             return response, request_id, _extract_rate_limit_headers(headers)
 
-        response = await self._client.messages.create(
-            **kwargs
-        )  # type: ignore[call-overload]
+        response = await self._client.messages.create(**kwargs)  # type: ignore[call-overload]
         request_id = _extract_request_id(response=response, headers={})
         return response, request_id, {}
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import ProviderAttemptErrorContext
+    from .llm_models import ProviderAttemptErrorContext
 
 
 class LlmFatalError(RuntimeError):

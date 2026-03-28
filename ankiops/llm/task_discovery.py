@@ -7,9 +7,9 @@ from typing import Any
 
 from ankiops.models import NoteTypeConfig
 
-from .db import LlmDbAdapter
 from .discovery import DiscoveryItem, DiscoverySnapshot, discover_candidates
-from .models import LlmCandidateStatus, LlmFinalStatus, TaskConfig
+from .llm_db import LlmDbAdapter
+from .llm_models import LlmCandidateStatus, LlmFinalStatus, TaskConfig
 from .task_runtime_types import EligibleCandidate
 
 

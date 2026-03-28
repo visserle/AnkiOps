@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .models import NotePayload, NoteUpdate
+from .llm_models import NotePayload, NoteUpdate
 
 
 @dataclass(frozen=True)

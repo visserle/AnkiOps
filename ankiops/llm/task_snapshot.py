@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .anthropic_models import parse_model
-from .models import (
+from .llm_models import (
     DeckScope,
     ExecutionMode,
     FieldExceptionRule,

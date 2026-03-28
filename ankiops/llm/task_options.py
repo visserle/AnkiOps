@@ -9,7 +9,7 @@ from .anthropic_models import (
     format_supported_model_names,
     parse_model,
 )
-from .models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
+from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
 
 
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
@@ -36,8 +36,7 @@ def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConf
         raise ValueError("Deck override must be a non-empty deck name")
     if any(char in deck_name for char in ("*", "?", "[")):
         raise ValueError(
-            "Deck override must be an exact deck name "
-            "(wildcards are not supported)"
+            "Deck override must be an exact deck name (wildcards are not supported)"
         )
 
     return replace(

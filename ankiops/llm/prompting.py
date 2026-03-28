@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .models import NotePayload
+from .llm_models import NotePayload
 
 
 def build_system_prompt(system_prompt: str) -> str:

@@ -12,7 +12,7 @@ from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
 from .anthropic_models import format_supported_model_names, parse_model
-from .models import (
+from .llm_models import (
     DeckScope,
     ExecutionMode,
     FieldExceptionRule,

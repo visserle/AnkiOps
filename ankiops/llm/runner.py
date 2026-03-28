@@ -20,9 +20,9 @@ from ankiops.models import Note, NoteTypeConfig
 
 from .claude import ClaudeClient, ProviderBatchResult
 from .config_loader import load_llm_task_catalog
-from .db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
-from .errors import LlmFatalError, LlmNoteError
-from .models import (
+from .llm_db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
+from .llm_errors import LlmFatalError, LlmNoteError
+from .llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
     LlmFinalStatus,
