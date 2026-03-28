@@ -2,10 +2,7 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-A bidirectional Anki-Markdown bridge. 
-Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
-
-## Features:
+A bidirectional Anki-Markdown bridge. Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. Features:
 
 - **Full Anki support**: Safe, performant bidirectional syncing of notes, custom note types, decks, subdecks, and media files
 - **Markdown-first**: Manage decks from your favourite editor with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
