@@ -249,17 +249,17 @@ def test_transaction_rolls_back_on_error(tmp_path):
         adapter.close()
 
 
-def test_bulk_note_fingerprints_roundtrip(tmp_path):
+def test_bulk_import_note_fingerprints_roundtrip(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102)])
-        adapter.upsert_note_hashes(
+        adapter.upsert_import_hashes(
             [
                 ("k1", "md1", "a1"),
                 ("k2", "md2", "a2"),
             ]
         )
-        assert adapter.resolve_note_hashes(["k1", "k2", "missing"]) == {
+        assert adapter.resolve_import_hashes(["k1", "k2", "missing"]) == {
             "k1": ("md1", "a1"),
             "k2": ("md2", "a2"),
         }
@@ -267,50 +267,113 @@ def test_bulk_note_fingerprints_roundtrip(tmp_path):
         adapter.close()
 
 
-def test_bulk_note_fingerprints_last_write_wins(tmp_path):
+def test_bulk_export_note_fingerprints_roundtrip(tmp_path):
+    adapter = SQLiteDbAdapter.open(tmp_path)
+    try:
+        adapter.upsert_note_links([("k1", 101), ("k2", 102)])
+        adapter.upsert_export_hashes(
+            [
+                ("k1", "md1", "a1"),
+                ("k2", "md2", "a2"),
+            ]
+        )
+        assert adapter.resolve_export_hashes(["k1", "k2", "missing"]) == {
+            "k1": ("md1", "a1"),
+            "k2": ("md2", "a2"),
+        }
+    finally:
+        adapter.close()
+
+
+def test_import_note_fingerprints_last_write_wins(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_note_hashes(
+        adapter.upsert_import_hashes(
             [
                 ("k1", "old-md", "old-a"),
                 ("k1", "new-md", "new-a"),
             ]
         )
-        assert adapter.resolve_note_hashes(["k1"]) == {"k1": ("new-md", "new-a")}
+        assert adapter.resolve_import_hashes(["k1"]) == {"k1": ("new-md", "new-a")}
     finally:
         adapter.close()
 
 
-def test_remove_note_by_note_key_removes_fingerprint(tmp_path):
+def test_export_note_fingerprints_last_write_wins(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_note_hashes([("k1", "md", "a")])
+        adapter.upsert_export_hashes(
+            [
+                ("k1", "old-md", "old-a"),
+                ("k1", "new-md", "new-a"),
+            ]
+        )
+        assert adapter.resolve_export_hashes(["k1"]) == {"k1": ("new-md", "new-a")}
+    finally:
+        adapter.close()
+
+
+def test_remove_note_by_note_key_removes_directional_fingerprints(tmp_path):
+    adapter = SQLiteDbAdapter.open(tmp_path)
+    try:
+        adapter.upsert_note_links([("k1", 101)])
+        adapter.upsert_import_hashes([("k1", "imd", "ia")])
+        adapter.upsert_export_hashes([("k1", "emd", "ea")])
         adapter.delete_note_links_by_keys(["k1"])
 
         assert adapter.resolve_note_ids(["k1"]).get("k1") is None
-        assert adapter.resolve_note_hashes(["k1"]) == {}
+        assert adapter.resolve_import_hashes(["k1"]) == {}
+        assert adapter.resolve_export_hashes(["k1"]) == {}
     finally:
         adapter.close()
 
 
-def test_unknown_note_key_fingerprint_is_rejected(tmp_path):
+def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
-            adapter.upsert_note_hashes([("stale", "md2", "a2")])
+            adapter.upsert_import_hashes([("stale", "md2", "a2")])
     finally:
         adapter.close()
 
 
-def test_clear_note_hashes(tmp_path):
+def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
+    adapter = SQLiteDbAdapter.open(tmp_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            adapter.upsert_export_hashes([("stale", "md2", "a2")])
+    finally:
+        adapter.close()
+
+
+def test_clear_import_hashes_does_not_clear_export_hashes(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_note_hashes([("k1", "md1", "a1")])
-        adapter.clear_note_hashes(["k1"])
-        assert adapter.resolve_note_hashes(["k1"]) == {}
+        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
+        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
+
+        adapter.clear_import_hashes(["k1"])
+
+        assert adapter.resolve_import_hashes(["k1"]) == {}
+        assert adapter.resolve_export_hashes(["k1"]) == {"k1": ("emd1", "ea1")}
+    finally:
+        adapter.close()
+
+
+def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
+    adapter = SQLiteDbAdapter.open(tmp_path)
+    try:
+        adapter.upsert_note_links([("k1", 101)])
+        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
+        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
+
+        adapter.clear_export_hashes(["k1"])
+
+        assert adapter.resolve_import_hashes(["k1"]) == {"k1": ("imd1", "ia1")}
+        assert adapter.resolve_export_hashes(["k1"]) == {}
     finally:
         adapter.close()
 

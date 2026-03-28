@@ -318,6 +318,7 @@ def test_html_to_markdown_bullet_spans_with_br_and_images(html_to_md):
         # Structural: Typing these in Anki should "upgrade" to Markdown elements
         ("> Quote", "<blockquote>\nQuote</blockquote>\n", "> Quote"),
         ("- Item", "<ul>\n<li>Item</li>\n</ul>\n", "- Item"),
+        ("==Important==", "<mark>Important</mark>", "==Important=="),
         # Literal: Typing these in Anki should stay literal markers
         ("+ Literal Plus", "+ Literal Plus", r"\+ Literal Plus"),
         ("# Literal Hash", "# Literal Hash", r"\# Literal Hash"),

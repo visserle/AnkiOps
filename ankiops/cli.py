@@ -317,7 +317,7 @@ def run_llm(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AnkiOps – Manage Anki decks as Markdown files.",
+        description="AnkiOps – A bridge between Anki and your filesystem..",
     )
     parser.add_argument(
         "--version",
@@ -440,7 +440,7 @@ def main():
         # Show welcome screen when no command is provided
         cli_version = _get_cli_version()
         print("=" * 60)
-        print(f"AnkiOps v{cli_version} – Manage Anki decks as Markdown files")
+        print(f"AnkiOps v{cli_version} – A bridge between Anki and your filesystem.")
         print("=" * 60)
         print()
         print("Available commands:")

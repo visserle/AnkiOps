@@ -93,8 +93,8 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
             db_port=db,
             note_keys_by_id={},
             pending_note_mappings=[],
-            note_fingerprints_by_note_key={},
-            pending_fingerprints=[],
+            note_export_fingerprints_by_note_key={},
+            pending_export_fingerprints=[],
         )
 
         assert len(result.errors) == 1

@@ -257,13 +257,13 @@ def _sync_keyed_note(
     anki_notes: dict[int, AnkiNote],
     anki_cards: dict[int, dict],
     note_ids_by_note_key: dict[str, int],
-    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
     result: SyncResult,
     cards_to_move: list[int],
     moved_from_decks: set[str],
     queue_note_mapping,
     clear_note_mapping,
-    queue_fingerprint,
+    queue_import_fingerprint,
 ) -> None:
     note_key = parsed_note.note_key
     if note_key is None:
@@ -301,11 +301,16 @@ def _sync_keyed_note(
                     "html_fields": html_fields,
                     "note_key": note_key,
                     "md_hash": md_hash,
-                    "anki_hash": note_fingerprint(parsed_note.note_type, html_fields),
+                    "import_anki_hash": note_fingerprint(
+                        parsed_note.note_type, html_fields
+                    ),
                 },
             )
         )
-        logger.debug(f"  Create {parsed_note.identifier}")
+        logger.debug(
+            "  Create Anki note for existing note_key=%s (no mapped note_id found)",
+            note_key,
+        )
         return
 
     cards_to_move_for_note = []
@@ -338,12 +343,12 @@ def _sync_keyed_note(
         return
 
     current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
-    cached = note_fingerprints_by_note_key.get(note_key)
+    cached = note_import_fingerprints_by_note_key.get(note_key)
     if cached == (md_hash, current_anki_hash):
         result.change_buckets.skips.append(
             Change(ChangeType.SKIP, note_id, parsed_note.identifier)
         )
-        queue_fingerprint(note_key, md_hash, current_anki_hash)
+        queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
     html_fields = _to_html(parsed_note, cfg, fs_port)
@@ -354,7 +359,7 @@ def _sync_keyed_note(
         result.change_buckets.skips.append(
             Change(ChangeType.SKIP, note_id, parsed_note.identifier)
         )
-        queue_fingerprint(note_key, md_hash, current_anki_hash)
+        queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
     target_anki_hash = note_fingerprint(parsed_note.note_type, html_fields)
@@ -367,11 +372,15 @@ def _sync_keyed_note(
                 "html_fields": html_fields,
                 "note_key": note_key,
                 "md_hash": md_hash,
-                "anki_hash": target_anki_hash,
+                "import_anki_hash": target_anki_hash,
             },
         )
     )
-    logger.debug(f"  Update {parsed_note.identifier}")
+    logger.debug(
+        "  Update Anki note fields for note_key=%s (note_id=%s)",
+        note_key,
+        note_id,
+    )
 
 
 def _sync_new_note(
@@ -396,11 +405,16 @@ def _sync_new_note(
                 "html_fields": html_fields,
                 "note_key": new_note_key,
                 "md_hash": md_hash,
-                "anki_hash": note_fingerprint(parsed_note.note_type, html_fields),
+                "import_anki_hash": note_fingerprint(
+                    parsed_note.note_type, html_fields
+                ),
             },
         )
     )
-    logger.debug(f"  Create (new) {parsed_note.identifier}")
+    logger.debug(
+        "  Create Anki note and assign new note_key=%s from unkeyed markdown note",
+        new_note_key,
+    )
 
 
 def _collect_orphan_deletes(
@@ -444,7 +458,10 @@ def _collect_orphan_deletes(
                         {"protected_keyless": True},
                     )
                 )
-                logger.debug(f"  Protect keyless note_id: {note_id}")
+                logger.debug(
+                    "  Skip delete for unmanaged note_id=%s (missing AnkiOps Key)",
+                    note_id,
+                )
                 continue
 
             note_key = orphan_note_keys.get(note_id)
@@ -457,7 +474,17 @@ def _collect_orphan_deletes(
                     {"note_key": note_key} if note_key else {},
                 )
             )
-            logger.debug(f"  Delete {delete_repr}")
+            if note_key:
+                logger.debug(
+                    "  Delete orphan managed Anki note note_id=%s (note_key=%s)",
+                    note_id,
+                    note_key,
+                )
+            else:
+                logger.debug(
+                    "  Delete orphan managed Anki note note_id=%s (note_key unknown)",
+                    note_id,
+                )
 
 
 def _apply_changes_and_update_state(
@@ -470,9 +497,9 @@ def _apply_changes_and_update_state(
     note_ids_by_note_key: dict[str, int],
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
-    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
     queue_note_mapping,
-    queue_fingerprint,
+    queue_import_fingerprint,
 ) -> list[tuple[Note, str]]:
     if not deck_context.deck_name:
         return []
@@ -494,19 +521,19 @@ def _apply_changes_and_update_state(
     for note_id, create_change in zip(created_ids, result.change_buckets.creates):
         note_key = create_change.context["note_key"]
         queue_note_mapping(note_key, note_id)
-        queue_fingerprint(
+        queue_import_fingerprint(
             note_key,
             create_change.context["md_hash"],
-            create_change.context["anki_hash"],
+            create_change.context["import_anki_hash"],
         )
         create_change.entity_id = note_id
         note_key_assignments.append((create_change.context["note"], note_key))
 
     for update_change in result.change_buckets.updates:
-        queue_fingerprint(
+        queue_import_fingerprint(
             update_change.context["note_key"],
             update_change.context["md_hash"],
-            update_change.context["anki_hash"],
+            update_change.context["import_anki_hash"],
         )
 
     if result.change_buckets.deletes and not delete_failed:
@@ -517,12 +544,13 @@ def _apply_changes_and_update_state(
         ]
         delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
         if delete_note_keys:
+            # note_state row deletion also clears export-direction fingerprints.
             db_port.delete_note_links_by_keys(delete_note_keys)
             for note_key in delete_note_keys:
                 removed_note_id = note_ids_by_note_key.pop(note_key, None)
                 if note_key in global_note_keys and removed_note_id is not None:
                     global_mapped_note_ids.discard(removed_note_id)
-                note_fingerprints_by_note_key.pop(note_key, None)
+                note_import_fingerprints_by_note_key.pop(note_key, None)
 
     return note_key_assignments
 
@@ -558,8 +586,8 @@ def _sync_file(
     anki_cards: dict[int, dict],
     note_ids_by_note_key: dict[str, int],
     pending_note_mappings: list[tuple[str, int]],
-    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
-    pending_fingerprints: list[tuple[str, str, str]],
+    note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    pending_import_fingerprints: list[tuple[str, str, str]],
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
@@ -586,14 +614,15 @@ def _sync_file(
             return
         if note_key in global_note_keys:
             global_mapped_note_ids.discard(existing_note_id)
-        note_fingerprints_by_note_key.pop(note_key, None)
+        note_import_fingerprints_by_note_key.pop(note_key, None)
+        # note_state row deletion also clears export-direction fingerprints.
         db_port.delete_note_links_by_keys([note_key])
 
-    def _queue_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
-        if note_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
+    def _queue_import_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
+        if note_import_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
             return
-        note_fingerprints_by_note_key[note_key] = (md_hash, anki_hash)
-        pending_fingerprints.append((note_key, md_hash, anki_hash))
+        note_import_fingerprints_by_note_key[note_key] = (md_hash, anki_hash)
+        pending_import_fingerprints.append((note_key, md_hash, anki_hash))
 
     for parsed_note in fs.notes:
         cfg = config_by_name[parsed_note.note_type]
@@ -609,13 +638,13 @@ def _sync_file(
                 anki_notes=anki_notes,
                 anki_cards=anki_cards,
                 note_ids_by_note_key=note_ids_by_note_key,
-                note_fingerprints_by_note_key=note_fingerprints_by_note_key,
+                note_import_fingerprints_by_note_key=note_import_fingerprints_by_note_key,
                 result=result,
                 cards_to_move=cards_to_move,
                 moved_from_decks=moved_from_decks,
                 queue_note_mapping=_queue_note_mapping,
                 clear_note_mapping=_clear_note_mapping,
-                queue_fingerprint=_queue_fingerprint,
+                queue_import_fingerprint=_queue_import_fingerprint,
             )
         else:
             _sync_new_note(
@@ -646,9 +675,9 @@ def _sync_file(
         note_ids_by_note_key=note_ids_by_note_key,
         global_note_keys=global_note_keys,
         global_mapped_note_ids=global_mapped_note_ids,
-        note_fingerprints_by_note_key=note_fingerprints_by_note_key,
+        note_import_fingerprints_by_note_key=note_import_fingerprints_by_note_key,
         queue_note_mapping=_queue_note_mapping,
-        queue_fingerprint=_queue_fingerprint,
+        queue_import_fingerprint=_queue_import_fingerprint,
     )
 
     _recover_created_deck_mapping(
@@ -696,9 +725,11 @@ def import_collection(
     if duplicates:
         raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
     note_ids_by_note_key = db_port.resolve_note_ids(global_note_keys)
-    note_fingerprints_by_note_key = db_port.resolve_note_hashes(global_note_keys)
+    note_import_fingerprints_by_note_key = db_port.resolve_import_hashes(
+        global_note_keys
+    )
     pending_note_mappings: list[tuple[str, int]] = []
-    pending_fingerprints: list[tuple[str, str, str]] = []
+    pending_import_fingerprints: list[tuple[str, str, str]] = []
 
     with db_port.write_tx():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
@@ -765,8 +796,8 @@ def import_collection(
                 anki_cards,
                 note_ids_by_note_key,
                 pending_note_mappings,
-                note_fingerprints_by_note_key,
-                pending_fingerprints,
+                note_import_fingerprints_by_note_key,
+                pending_import_fingerprints,
                 global_note_keys,
                 global_mapped_note_ids,
                 file_anki_note_ids,
@@ -799,8 +830,8 @@ def import_collection(
 
         if pending_note_mappings:
             db_port.upsert_note_links(pending_note_mappings)
-        if pending_fingerprints:
-            db_port.upsert_note_hashes(pending_fingerprints)
+        if pending_import_fingerprints:
+            db_port.upsert_import_hashes(pending_import_fingerprints)
 
         _flush_writes(fs_port, pending)
 

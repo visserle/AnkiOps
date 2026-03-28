@@ -102,8 +102,8 @@ def _resolve_deck_notes(
     result: SyncResult,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
-    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
-    pending_fingerprints: list[tuple[str, str, str]],
+    note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    pending_export_fingerprints: list[tuple[str, str, str]],
     local_notes_by_note_key: dict[str, Note],
     local_notes_by_content: dict[str, Note],
 ) -> tuple[list[_ResolvedDeckNote], list[str]]:
@@ -117,16 +117,16 @@ def _resolve_deck_notes(
         note_keys_by_id[note_id] = note_key
         pending_note_mappings.append((note_key, note_id))
 
-    def _queue_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
-        if note_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
+    def _queue_export_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
+        if note_export_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
             return
-        note_fingerprints_by_note_key[note_key] = (md_hash, anki_hash)
-        pending_fingerprints.append((note_key, md_hash, anki_hash))
+        note_export_fingerprints_by_note_key[note_key] = (md_hash, anki_hash)
+        pending_export_fingerprints.append((note_key, md_hash, anki_hash))
 
     for anki_note in anki_notes:
         note_key = note_keys_by_id.get(anki_note.note_id)
         embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
-        current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
+        observed_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
 
         # Stale note_id->note_key mapping: prefer embedded note_key from Anki note.
         if note_key and embedded_note_key and note_key != embedded_note_key:
@@ -139,13 +139,13 @@ def _resolve_deck_notes(
         local_match = local_notes_by_note_key.get(note_key) if note_key else None
         if note_key and local_match:
             local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
-            cached = note_fingerprints_by_note_key.get(note_key)
-            if cached == (local_md_hash, current_anki_hash):
+            cached = note_export_fingerprints_by_note_key.get(note_key)
+            if cached == (local_md_hash, observed_anki_hash):
                 bucketed_changes.skips.append(
                     Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
                 )
                 resolved_notes.append((note_key, anki_note.note_id, local_match))
-                _queue_fingerprint(note_key, local_md_hash, current_anki_hash)
+                _queue_export_fingerprint(note_key, local_md_hash, observed_anki_hash)
                 continue
 
         cfg = config_by_name.get(anki_note.note_type)
@@ -176,7 +176,7 @@ def _resolve_deck_notes(
             )
             resolved_notes.append((note_key, anki_note.note_id, local_match))
             md_hash = note_fingerprint(local_match.note_type, local_match.fields)
-            _queue_fingerprint(note_key, md_hash, current_anki_hash)
+            _queue_export_fingerprint(note_key, md_hash, observed_anki_hash)
             continue
 
         if not local_match:
@@ -187,7 +187,11 @@ def _resolve_deck_notes(
                     domain_note.identifier,
                 )
             )
-            logger.debug(f"  Created {domain_note.identifier}")
+            logger.debug(
+                "  Create markdown note from Anki note_id=%s (note_key=%s)",
+                anki_note.note_id,
+                note_key,
+            )
         else:
             bucketed_changes.updates.append(
                 Change(
@@ -196,11 +200,15 @@ def _resolve_deck_notes(
                     domain_note.identifier,
                 )
             )
-            logger.debug(f"  Updated {domain_note.identifier}")
+            logger.debug(
+                "  Update markdown note from Anki note_id=%s (note_key=%s)",
+                anki_note.note_id,
+                note_key,
+            )
 
         resolved_notes.append((note_key, anki_note.note_id, domain_note))
         md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
-        _queue_fingerprint(note_key, md_hash, current_anki_hash)
+        _queue_export_fingerprint(note_key, md_hash, observed_anki_hash)
 
     return resolved_notes, errors
 
@@ -333,8 +341,8 @@ def _sync_deck(
     db_port: SQLiteDbAdapter,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
-    note_fingerprints_by_note_key: dict[str, tuple[str, str]],
-    pending_fingerprints: list[tuple[str, str, str]],
+    note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
+    pending_export_fingerprints: list[tuple[str, str, str]],
 ) -> SyncResult:
     result = SyncResult.for_notes(name=deck_name, file_path=existing_file_path)
     file_path, fs, is_first_export = _load_deck_markdown_state(
@@ -364,8 +372,8 @@ def _sync_deck(
         result=result,
         note_keys_by_id=note_keys_by_id,
         pending_note_mappings=pending_note_mappings,
-        note_fingerprints_by_note_key=note_fingerprints_by_note_key,
-        pending_fingerprints=pending_fingerprints,
+        note_export_fingerprints_by_note_key=note_export_fingerprints_by_note_key,
+        pending_export_fingerprints=pending_export_fingerprints,
         local_notes_by_note_key=local_notes_by_note_key,
         local_notes_by_content=local_notes_by_content,
     )
@@ -407,7 +415,10 @@ def _sync_deck(
             result.change_buckets.deletes.append(
                 Change(ChangeType.DELETE, None, old_note.identifier)
             )
-            logger.debug(f"  Deleted {old_note.identifier}")
+            logger.debug(
+                "  Delete markdown note for removed Anki note (note_key=%s)",
+                old_note.note_key,
+            )
 
     result.materialize_changes(order=_SYNC_ORDER)
     return result
@@ -459,10 +470,10 @@ def export_collection(
             embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
             if embedded_note_key:
                 note_key_candidates.add(embedded_note_key)
-        note_fingerprints_by_note_key = db_port.resolve_note_hashes(
+        note_export_fingerprints_by_note_key = db_port.resolve_export_hashes(
             note_key_candidates
         )
-        pending_fingerprints: list[tuple[str, str, str]] = []
+        pending_export_fingerprints: list[tuple[str, str, str]] = []
 
         # Fetch cards info to map notes to decks
         all_card_ids = []
@@ -519,8 +530,8 @@ def export_collection(
                 db_port,
                 note_keys_by_id,
                 pending_note_mappings,
-                note_fingerprints_by_note_key,
-                pending_fingerprints,
+                note_export_fingerprints_by_note_key,
+                pending_export_fingerprints,
             )
             db_port.upsert_deck(deck_name, deck_id)
             results.append(sync_result)
@@ -534,8 +545,8 @@ def export_collection(
 
         if pending_note_mappings:
             db_port.upsert_note_links(pending_note_mappings)
-        if pending_fingerprints:
-            db_port.upsert_note_hashes(pending_fingerprints)
+        if pending_export_fingerprints:
+            db_port.upsert_export_hashes(pending_export_fingerprints)
 
         extra_changes = []
         active_files = {

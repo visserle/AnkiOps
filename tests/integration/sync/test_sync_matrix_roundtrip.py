@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ankiops.config import ANKIOPS_DB
+from ankiops.fingerprints import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
@@ -57,6 +58,89 @@ def test_rt_run_update_001_anki_change_then_export_then_import_noops(world):
             world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
             == "Run A Modified In Anki"
         )
+
+
+def test_rt_run_update_002_anki_literal_highlight_roundtrip_rehydrates_mark_html(world):
+    """RT-RUN-UPDATE-002."""
+    world.write_qa_deck("RoundTripHighlight", [("Run Q", "Run A", None)])
+
+    with world.db_session() as db:
+        world.sync_import(db)
+
+        note_id = next(iter(world.mock_anki.notes.keys()))
+        world.mock_anki.notes[note_id]["fields"]["Answer"] = {
+            "value": "<div>Run A with ==highlight==</div>"
+        }
+
+        export_result = world.sync_export(db)
+        assert_summary(
+            export_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert "A: Run A with ==highlight==" in world.read_deck("RoundTripHighlight")
+
+        import_result = world.sync_import(db)
+        assert_summary(
+            import_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert (
+            "<mark>highlight</mark>"
+            in world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
+        )
+
+        export_again = world.sync_export(db)
+        assert_summary(
+            export_again.summary, created=0, updated=0, moved=0, deleted=0, errors=0
+        )
+        assert "A: Run A with ==highlight==" in world.read_deck("RoundTripHighlight")
+
+
+def test_rt_run_update_003_directional_cache_isolation(world):
+    """RT-RUN-UPDATE-003."""
+    world.write_qa_deck("RoundTripCacheIso", [("Iso Q", "Iso A0", None)])
+
+    with world.db_session() as db:
+        world.sync_import(db)
+        note_id = next(iter(world.mock_anki.notes.keys()))
+        note = world.mock_anki.notes[note_id]
+        note_key = note["fields"]["AnkiOps Key"]["value"]
+        deck_path = world.deck_path("RoundTripCacheIso")
+
+        # Export should ignore import cache and use only export cache.
+        world.set_note_answer(note_id, "Iso A1")
+        local_md_note = world.fs.read_markdown_file(deck_path).notes[0]
+        local_md_hash = note_fingerprint(local_md_note.note_type, local_md_note.fields)
+        observed_anki_fields = {
+            name: field_data["value"]
+            for name, field_data in world.mock_anki.notes[note_id]["fields"].items()
+        }
+        observed_anki_hash = note_fingerprint(note["modelName"], observed_anki_fields)
+        db.upsert_import_hashes([(note_key, local_md_hash, observed_anki_hash)])
+        db.upsert_export_hashes([(note_key, "stale-md", "stale-anki")])
+
+        export_result = world.sync_export(db)
+        assert_summary(
+            export_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert "A: Iso A1" in world.read_deck("RoundTripCacheIso")
+
+        # Import should ignore export cache and use only import cache.
+        updated_md = world.read_deck("RoundTripCacheIso").replace("Iso A1", "Iso A2")
+        deck_path.write_text(updated_md, encoding="utf-8")
+        edited_md_note = world.fs.read_markdown_file(deck_path).notes[0]
+        edited_md_hash = note_fingerprint(edited_md_note.note_type, edited_md_note.fields)
+        current_anki_fields = {
+            name: field_data["value"]
+            for name, field_data in world.mock_anki.notes[note_id]["fields"].items()
+        }
+        current_anki_hash = note_fingerprint(note["modelName"], current_anki_fields)
+        db.upsert_import_hashes([(note_key, "stale-md", "stale-anki")])
+        db.upsert_export_hashes([(note_key, edited_md_hash, current_anki_hash)])
+
+        import_result = world.sync_import(db)
+        assert_summary(
+            import_result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Iso A2"
 
 
 def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_cleanly(world):

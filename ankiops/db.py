@@ -17,8 +17,16 @@ _SCHEMA_TABLE_SQL: dict[str, str] = {
 CREATE TABLE note_state (
     note_key TEXT PRIMARY KEY,
     note_id INTEGER NOT NULL UNIQUE,
-    md_hash TEXT,
-    anki_hash TEXT
+    import_md_hash TEXT,
+    import_anki_hash TEXT,
+    export_md_hash TEXT,
+    export_anki_hash TEXT,
+    CHECK (
+        (import_md_hash IS NULL) = (import_anki_hash IS NULL)
+    ),
+    CHECK (
+        (export_md_hash IS NULL) = (export_anki_hash IS NULL)
+    )
 )
 """,
     "deck_map": """
@@ -128,8 +136,8 @@ class SQLiteDbAdapter:
                 # Strict schema validation: if any query fails, recover by
                 # backing up and recreating the DB.
                 conn.execute(
-                    "SELECT note_key, note_id, md_hash, anki_hash "
-                    "FROM note_state LIMIT 0"
+                    "SELECT note_key, note_id, import_md_hash, import_anki_hash, "
+                    "export_md_hash, export_anki_hash FROM note_state LIMIT 0"
                 )
                 conn.execute("SELECT deck_id, name FROM deck_map LIMIT 0")
                 conn.execute(
@@ -321,8 +329,12 @@ class SQLiteDbAdapter:
 
     # -- Note fingerprints --------------------------------------------------
 
-    def resolve_note_hashes(
-        self, note_keys: Iterable[str]
+    def _resolve_directional_hashes(
+        self,
+        note_keys: Iterable[str],
+        *,
+        md_column: str,
+        anki_column: str,
     ) -> dict[str, tuple[str, str]]:
         note_key_list = list(note_keys)
         if not note_key_list:
@@ -332,9 +344,9 @@ class SQLiteDbAdapter:
         for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT note_key, md_hash, anki_hash FROM note_state "
+                f"SELECT note_key, {md_column}, {anki_column} FROM note_state "
                 f"WHERE note_key IN ({placeholders}) "
-                "AND md_hash IS NOT NULL AND anki_hash IS NOT NULL",
+                f"AND {md_column} IS NOT NULL AND {anki_column} IS NOT NULL",
                 tuple(chunk),
             ).fetchall()
             out.update(
@@ -345,7 +357,13 @@ class SQLiteDbAdapter:
             )
         return out
 
-    def upsert_note_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
+    def _upsert_directional_hashes(
+        self,
+        rows: Iterable[tuple[str, str, str]],
+        *,
+        md_column: str,
+        anki_column: str,
+    ) -> None:
         entries = list(rows)
         if not entries:
             return
@@ -379,14 +397,21 @@ class SQLiteDbAdapter:
                 )
 
             self._executemany(
-                "UPDATE note_state SET md_hash = ?, anki_hash = ? WHERE note_key = ?",
+                f"UPDATE note_state SET {md_column} = ?, {anki_column} = ? "
+                "WHERE note_key = ?",
                 [
                     (md_hash, anki_hash, note_key)
                     for note_key, md_hash, anki_hash in deduped
                 ],
             )
 
-    def clear_note_hashes(self, note_keys: Iterable[str]) -> None:
+    def _clear_directional_hashes(
+        self,
+        note_keys: Iterable[str],
+        *,
+        md_column: str,
+        anki_column: str,
+    ) -> None:
         note_key_list = list(note_keys)
         if not note_key_list:
             return
@@ -395,12 +420,59 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    "UPDATE note_state SET md_hash = NULL, anki_hash = NULL "
+                    f"UPDATE note_state SET {md_column} = NULL, "
+                    f"{anki_column} = NULL "
                     f"WHERE note_key IN ({placeholders})",
                     tuple(chunk),
                 )
             )
         self._write_many(statements)
+
+    def resolve_import_hashes(
+        self, note_keys: Iterable[str]
+    ) -> dict[str, tuple[str, str]]:
+        return self._resolve_directional_hashes(
+            note_keys,
+            md_column="import_md_hash",
+            anki_column="import_anki_hash",
+        )
+
+    def resolve_export_hashes(
+        self, note_keys: Iterable[str]
+    ) -> dict[str, tuple[str, str]]:
+        return self._resolve_directional_hashes(
+            note_keys,
+            md_column="export_md_hash",
+            anki_column="export_anki_hash",
+        )
+
+    def upsert_import_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
+        self._upsert_directional_hashes(
+            rows,
+            md_column="import_md_hash",
+            anki_column="import_anki_hash",
+        )
+
+    def upsert_export_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
+        self._upsert_directional_hashes(
+            rows,
+            md_column="export_md_hash",
+            anki_column="export_anki_hash",
+        )
+
+    def clear_import_hashes(self, note_keys: Iterable[str]) -> None:
+        self._clear_directional_hashes(
+            note_keys,
+            md_column="import_md_hash",
+            anki_column="import_anki_hash",
+        )
+
+    def clear_export_hashes(self, note_keys: Iterable[str]) -> None:
+        self._clear_directional_hashes(
+            note_keys,
+            md_column="export_md_hash",
+            anki_column="export_anki_hash",
+        )
 
     # -- Deck mapping -------------------------------------------------------
 
