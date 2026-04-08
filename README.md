@@ -2,13 +2,15 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-A bidirectional Anki-Markdown bridge. Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. Features:
+AnkiOps is a bi-directional Anki ↔ Markdown bridge. Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
+
+## Features
 
 - **Full Anki support**: Safe, performant bidirectional syncing of notes, custom note types, decks, subdecks, and media files
 - **Markdown-first**: Manage decks from your favourite editor with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
 - **Simple CLI interface**: After initialization, just two commands are needed for importing and exporting between Anki and your filesystem 
-- **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands
-- **LLM-ready**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations
+- **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands (nyi)
+- **LLM-ready**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations (wip)
 
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using `ankiops note-types --add <name>`.
@@ -95,7 +97,7 @@ In this example, the last note is a new note which will get a `note_key` comment
 
 ### How are different note types handled?
 
-AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. For an overview of the current configuration, use `ankiops note-types`.
+AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. The set operations of each unique note type are defined by the `identifying` fields in the yamls. For an overview of the current configuration, use `ankiops note-types`.
 
 ### How does it work?
 
@@ -110,13 +112,18 @@ TODO
 
 ### How can I migrate my existing notes into AnkiOps?
 
-For standard note types, migration is straightforward:
+There are three ways to migrate your existing collection.
+You can create new note types configuration files in the `note_types/` folder that match your existing note types in Anki by hand, use the `ankiops note-types --add <name>` command to copy note types from Anki, or convert your existing notes to the default AnkiOps note types using `Change Note Type…` in the Anki browser.
+
+For the last option specifically, the recommended workflow is:
 
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
 2. Export your notes from Anki to Markdown using `ankiops am`.
 3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
 
-If your existing note format doesn't map cleanly to the AnkiOps format (e.g., notes with additional or custom fields), you'll need to adapt the code accordingly. This should be fairly simple for most cases: define your note type with unique field labels (and unique field names within that note type) for automatic note type detection, and add your card's templates to `ankiops/note_types`.
+### How do I upgrade AnkiOps to the latest version?
+
+Use `pipx upgrade ankiops` to upgrade AnkiOps to the latest version. Delete all local AnkiOps files (except for your Markdown decks), re-initialize AnkiOps in the same folder using `ankiops init`, and sync from Anki via `ankiops am`. Since all files are git-tracked, you can easily spot any changes and roll back if needed.
 
 ### How can I develop AnkiOps locally?
 
@@ -129,6 +136,10 @@ uv sync
 uv run python -m main init --tutorial
 uv run python -m main ma
 ```
+
+### Are Pull Requests welcome?
+
+Yes! We welcome contributions of all kinds, including bug fixes, new features, documentation improvements, and more. Please open an issue or submit a pull request if you'd like to contribute.
 
 ### What commands and flags are available in the CLI?
 
@@ -164,9 +175,9 @@ uv run python -m main ma
 
 **`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
-- `ankiops note-types --import <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
+- `ankiops note-types --add <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
 
-## LLM Integration
+## LLM Integration (wip, experimental)
 
 AnkiOps includes a LLM pipeline for repeatable task execution. 
 
