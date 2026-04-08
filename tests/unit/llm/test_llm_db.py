@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from ankiops.llm.db import LlmDbAdapter
-from ankiops.llm.models import (
+from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,

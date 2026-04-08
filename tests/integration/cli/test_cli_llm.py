@@ -8,8 +8,8 @@ import pytest
 
 from ankiops.cli import main, run_llm
 from ankiops.llm.anthropic_models import SONNET
-from ankiops.llm.db import LlmJobListItem
-from ankiops.llm.models import (
+from ankiops.llm.llm_db import LlmJobListItem
+from ankiops.llm.llm_models import (
     ExecutionMode,
     LlmJobResult,
     LlmJobStatus,

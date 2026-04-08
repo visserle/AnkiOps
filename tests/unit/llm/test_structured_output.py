@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import pytest
 
-from ankiops.llm.models import NotePayload, NoteUpdate
+from ankiops.llm.llm_models import NotePayload, NoteUpdate
 from ankiops.llm.structured_output import (
     NoteUpdateContract,
     StructuredOutputError,

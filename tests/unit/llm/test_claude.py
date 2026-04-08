@@ -11,8 +11,8 @@ import pytest
 
 from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.claude import ClaudeClient
-from ankiops.llm.errors import LlmFatalError, LlmNoteError
-from ankiops.llm.models import (
+from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError
+from ankiops.llm.llm_models import (
     LlmAttemptResultType,
     NotePayload,
     TaskConfig,

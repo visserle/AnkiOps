@@ -14,9 +14,9 @@ from ankiops.init import initialize_collection
 from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.claude import ProviderBatchResult, ProviderBatchState
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.db import LlmDbAdapter
-from ankiops.llm.errors import LlmFatalError
-from ankiops.llm.models import (
+from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_errors import LlmFatalError
+from ankiops.llm.llm_models import (
     LlmAttemptResultType,
     LlmFinalStatus,
     LlmJobStatus,

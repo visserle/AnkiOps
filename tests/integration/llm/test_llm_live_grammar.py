@@ -9,8 +9,8 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.db import LlmDbAdapter
-from ankiops.llm.models import LlmFinalStatus
+from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_models import LlmFinalStatus
 from ankiops.llm.runner import run_task
 
 LIVE_DECK_NAME = "LiveGrammarDeck"

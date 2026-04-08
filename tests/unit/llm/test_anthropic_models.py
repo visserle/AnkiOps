@@ -7,7 +7,7 @@ from ankiops.llm.anthropic_models import (
     parse_model,
     supported_model_names,
 )
-from ankiops.llm.models import ExecutionMode, TaskRunSummary
+from ankiops.llm.llm_models import ExecutionMode, TaskRunSummary
 
 
 def test_parse_model_returns_supported_model_class():

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from ankiops.llm.anthropic_models import SONNET
-from ankiops.llm.models import (
+from ankiops.llm.llm_models import (
     DeckScope,
     ExecutionMode,
     FieldExceptionRule,

@@ -7,8 +7,8 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.db import LlmDbAdapter
-from ankiops.llm.models import ExecutionMode
+from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_models import ExecutionMode
 from ankiops.llm.runner import plan_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
