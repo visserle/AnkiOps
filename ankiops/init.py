@@ -16,7 +16,7 @@ from ankiops.config import (
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDbAdapter
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)

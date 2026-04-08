@@ -21,9 +21,9 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
-from ankiops.llm.cli import configure_llm_parser
-from ankiops.llm.cli import run_llm as run_llm_impl
 from ankiops.llm.config_loader import load_llm_task_catalog
+from ankiops.llm.llm_cli import configure_llm_parser
+from ankiops.llm.llm_cli import run_llm as run_llm_impl
 from ankiops.llm.runner import list_jobs as list_llm_jobs
 from ankiops.llm.runner import plan_task, resume_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
@@ -440,7 +440,7 @@ def main():
         # Show welcome screen when no command is provided
         cli_version = _get_cli_version()
         print("=" * 60)
-        print(f"AnkiOps v{cli_version} – A bridge between Anki and your filesystem.")
+        print(f"AnkiOps v{cli_version} – A bi-directional Anki-Markdown bridge")
         print("=" * 60)
         print()
         print("Available commands:")
@@ -449,12 +449,10 @@ def main():
         )
         print("  anki-to-markdown  Export Anki decks to Markdown files (alias: am)")
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
-        print("  serialize         Export collection to a portable JSON/ZIP file")
-        print("  deserialize       Import markdown/media from JSON/ZIP")
+        print("  serialize         Serialize Markdown decks to JSON format")
+        print("  deserialize       Deserialize JSON file to Markdown decks")
         print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
-        print(
-            "  note-types        List note type labels or import note types from Anki"
-        )
+        print("  note-types        List note type labels or add note types from Anki")
         print()
         print("Usage examples:")
         print(
