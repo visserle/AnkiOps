@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps is a bi-directional Anki ↔ Markdown bridge. Edit decks in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
+AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file: Edit in plain text, version with Git, enhance with LLMs, sync changes both ways. 
 
 ## Features
 
