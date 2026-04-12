@@ -8,7 +8,7 @@ from pathlib import Path
 
 DEFAULT_QUIET_LOGGERS = (
     "urllib3.connectionpool",
-    "anthropic",
+    "openai",
     "httpx",
     "httpcore",
 )

@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: Education",
 ]
 dependencies = [
-    "anthropic>=0.84.0",
+    "openai>=1.59.0",
     "beautifulsoup4>=4.12.0",
     "blake3>=1.0.0",
     "colorama>=0.4.4",
@@ -80,7 +80,7 @@ unfixable = ["F401"] # do not auto-remove unused imports
 convention = "pep257"
 
 [tool.pytest.ini_options]
-markers = ["live_llm: opt-in tests that call real Anthropic models"]
+markers = ["live_llm: opt-in tests that call real external LLM models"]
 
 [tool.mypy]
 python_version = "3.10"

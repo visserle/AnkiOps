@@ -14,8 +14,8 @@ from typing import Any
 from ankiops.config import get_note_types_dir, require_initialized_collection_dir
 from ankiops.fs import FileSystemAdapter
 
-from .anthropic_models import supported_model_names
 from .config_loader import load_llm_task_catalog
+from .model_registry import supported_model_names
 from .runner import list_jobs as list_llm_jobs
 from .runner import plan_task, resume_task, run_task, show_job
 
@@ -54,8 +54,6 @@ def _normalize_deck_override(value: str | None) -> str | None:
 def _resolve_mode_override(args: argparse.Namespace) -> str | None:
     if bool(getattr(args, "online", False)):
         return "online"
-    if bool(getattr(args, "batch", False)):
-        return "batch"
     return None
 
 
@@ -174,18 +172,12 @@ def configure_llm_parser(
     llm_parser.add_argument(
         "--model",
         choices=supported_model_names(),
-        help="Override model class for this plan/run (opus, sonnet, haiku)",
+        help="Override model for this plan/run (full model id)",
     )
-    mode_group = llm_parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
+    llm_parser.add_argument(
         "--online",
         action="store_true",
         help="Override execution mode to online for this plan/run/resume",
-    )
-    mode_group.add_argument(
-        "--batch",
-        action="store_true",
-        help="Override execution mode to batch for this plan/run/resume",
     )
     llm_parser.add_argument(
         "--deck",
@@ -242,7 +234,7 @@ def run_llm(
         if model_override is not None:
             _usage_error("--model requires <task>.")
         if mode_override is not None and not resume_requested:
-            _usage_error("--online/--batch requires <task> or --job with --resume.")
+            _usage_error("--online requires <task> or --job with --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit and not resume_requested:
@@ -380,7 +372,7 @@ def run_llm(
         if model_override is not None:
             _usage_error("--model requires <task>.")
         if mode_override is not None:
-            _usage_error("--online/--batch requires <task> or --job with --resume.")
+            _usage_error("--online requires <task> or --job with --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit:

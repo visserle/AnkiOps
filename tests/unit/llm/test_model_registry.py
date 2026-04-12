@@ -1,29 +1,41 @@
 from decimal import Decimal
 
-from ankiops.llm.anthropic_models import (
-    SONNET,
+from ankiops.llm.llm_models import TaskRunSummary
+from ankiops.llm.model_registry import (
+    CLAUDE_SONNET_4_6,
     format_supported_model_names,
     format_usd_cents,
     parse_model,
     supported_model_names,
 )
-from ankiops.llm.llm_models import ExecutionMode, TaskRunSummary
 
 
 def test_parse_model_returns_supported_model_class():
-    model = parse_model("Sonnet")
+    model = parse_model("claude-sonnet-4-6")
 
-    assert model == SONNET
+    assert model == CLAUDE_SONNET_4_6
     assert model.api_id == "claude-sonnet-4-6"
 
 
 def test_supported_model_names_are_stable():
-    assert supported_model_names() == ("opus", "sonnet", "haiku")
-    assert format_supported_model_names() == "opus, sonnet, haiku"
+    model_names = supported_model_names()
+    claude_model_names = tuple(
+        name for name in model_names if name.startswith("claude-")
+    )
+
+    assert claude_model_names == (
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    )
+    rendered = format_supported_model_names()
+    assert "claude-opus-4-6" in rendered
+    assert "claude-sonnet-4-6" in rendered
+    assert "claude-haiku-4-5" in rendered
 
 
 def test_model_estimate_cost_uses_current_rates():
-    estimate = SONNET.estimate_cost(
+    estimate = CLAUDE_SONNET_4_6.estimate_cost(
         input_tokens=2573,
         output_tokens=238,
     )
@@ -34,34 +46,20 @@ def test_model_estimate_cost_uses_current_rates():
     assert estimate.format() == "$0.01"
 
 
-def test_model_estimate_cost_halves_batch_pricing():
-    estimate = SONNET.estimate_cost(
-        input_tokens=2573,
-        output_tokens=238,
-        batch=True,
-    )
-
-    assert estimate.input_usd == Decimal("0.0038595")
-    assert estimate.output_usd == Decimal("0.001785")
-    assert estimate.total_usd == Decimal("0.0056445")
-    assert estimate.format() == "$0.01"
-
-
-def test_task_run_summary_format_cost_applies_batch_discount():
+def test_task_run_summary_format_cost_reports_priced_model():
     summary = TaskRunSummary(
         task_name="grammar",
-        model=SONNET,
-        execution_mode=ExecutionMode.BATCH,
+        model=CLAUDE_SONNET_4_6,
         input_tokens=1_000_000,
         output_tokens=1_000_000,
     )
 
-    assert summary.format_cost() == "$9.00"
+    assert summary.format_cost() == "$18.00"
 
 
 def test_parse_model_rejects_unknown_values():
-    assert parse_model("claude-sonnet-4-6") is None
-    assert parse_model("gpt-5") is None
+    assert parse_model("sonnet") is None
+    assert parse_model("unknown-model") is None
 
 
 def test_format_usd_cents_rounds_to_currency_cents():

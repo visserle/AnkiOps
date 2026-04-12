@@ -1,4 +1,4 @@
-"""Shared error types for Claude task execution."""
+"""Shared error types for LLM task execution."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ if TYPE_CHECKING:
 
 
 class LlmFatalError(RuntimeError):
-    """Raised for fatal Claude API failures that should abort the run."""
+    """Raised for fatal provider API failures that should abort the run."""
 
 
 class LlmNoteError(RuntimeError):
-    """Raised for note-scoped Claude failures."""
+    """Raised for note-scoped provider failures."""
 
     def __init__(
         self,

@@ -1,4 +1,4 @@
-"""Typed models for the AnkiOps Claude task pipeline."""
+"""Typed models for the AnkiOps LLM task pipeline."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ankiops.log import format_changes
 
-from .anthropic_models import AnthropicModel
+from .model_registry import ProviderModel
 
 
 class FieldAccess(Enum):
@@ -25,7 +25,6 @@ class RunFailurePolicy(Enum):
 
 class ExecutionMode(Enum):
     ONLINE = "online"
-    BATCH = "batch"
 
 
 class LlmCandidateStatus(Enum):
@@ -94,20 +93,19 @@ class TaskRequestOptions:
 class TaskExecutionOptions:
     mode: ExecutionMode = ExecutionMode.ONLINE
     concurrency: int = 8
-    batch_poll_seconds: int = 15
 
 
 @dataclass(frozen=True)
 class TaskConfig:
     name: str
-    model: AnthropicModel
+    model: ProviderModel
     system_prompt: str
     prompt: str
     system_prompt_path: Path = field(
         default_factory=lambda: Path("llm/system_prompt.md")
     )
     prompt_path: Path = field(default_factory=lambda: Path("llm/prompts/unknown.md"))
-    api_key_env: str = "ANTHROPIC_API_KEY"
+    api_key_env: str = "OPENAI_API_KEY"
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
@@ -184,7 +182,7 @@ class ProviderAttemptOutcome:
 @dataclass
 class TaskRunSummary:
     task_name: str
-    model: AnthropicModel
+    model: ProviderModel
     execution_mode: ExecutionMode = ExecutionMode.ONLINE
     decks_seen: int = 0
     decks_matched: int = 0
@@ -244,8 +242,9 @@ class TaskRunSummary:
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens,
             output_tokens=self.output_tokens,
-            batch=self.execution_mode is ExecutionMode.BATCH,
         )
+        if estimate is None:
+            return "n/a"
         return estimate.format()
 
 
@@ -276,7 +275,7 @@ class PlanFieldSurface:
 @dataclass(frozen=True)
 class TaskPlanResult:
     task_name: str
-    model: AnthropicModel
+    model: ProviderModel
     deck_scope: str
     serializer_scope: str
     system_prompt_path: str
@@ -294,8 +293,9 @@ class TaskPlanResult:
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens_estimate,
             output_tokens=self.output_tokens_cap,
-            batch=self.summary.execution_mode is ExecutionMode.BATCH,
         )
+        if estimate is None:
+            return "n/a"
         return estimate.format()
 
     def format_full_prompt(self) -> str:

@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from ankiops.cli import main, run_llm
-from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.llm_db import LlmJobListItem
 from ankiops.llm.llm_models import (
     ExecutionMode,
@@ -19,12 +18,13 @@ from ankiops.llm.llm_models import (
     TaskPlanResult,
     TaskRunSummary,
 )
+from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
 
 
 def _plan_result() -> TaskPlanResult:
     return TaskPlanResult(
         task_name="grammar",
-        model=SONNET,
+        model=CLAUDE_SONNET_4_6,
         deck_scope="*",
         serializer_scope="collection",
         system_prompt_path="/tmp/llm/system_prompt.md",
@@ -38,7 +38,7 @@ def _plan_result() -> TaskPlanResult:
         ),
         summary=TaskRunSummary(
             task_name="grammar",
-            model=SONNET,
+            model=CLAUDE_SONNET_4_6,
             decks_seen=1,
             decks_matched=1,
             notes_seen=2,
@@ -67,7 +67,7 @@ def test_cli_llm_dispatches_run():
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
         failed=False,
         persisted=False,
     )
@@ -87,7 +87,7 @@ def test_cli_llm_dispatches_run_with_deck_override():
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
         failed=False,
         persisted=False,
     )
@@ -100,25 +100,6 @@ def test_cli_llm_dispatches_run_with_deck_override():
 
     run_task.assert_called_once()
     assert run_task.call_args.kwargs["deck_override"] == "Target"
-
-
-def test_cli_llm_dispatches_run_with_batch_override():
-    success_result = LlmJobResult(
-        job_id=24,
-        status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=SONNET),
-        failed=False,
-        persisted=False,
-    )
-    with (
-        patch("ankiops.cli.require_initialized_collection_dir"),
-        patch("ankiops.cli.run_task", return_value=success_result) as run_task,
-        patch("sys.argv", ["ankiops", "llm", "grammar", "--run", "--batch"]),
-    ):
-        main()
-
-    run_task.assert_called_once()
-    assert run_task.call_args.kwargs["mode_override"] == "batch"
 
 
 def test_cli_llm_dispatches_plan():
@@ -203,7 +184,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
         LlmJobListItem(
             job_id=24,
             task_name="grammar",
-            model_name="sonnet",
+            model_name="claude-sonnet-4-6",
             execution_mode=ExecutionMode.ONLINE,
             status=LlmJobStatus.COMPLETED,
             persisted=True,
@@ -216,7 +197,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
         {
             "grammar": TaskConfig(
                 name="grammar",
-                model=SONNET,
+                model=CLAUDE_SONNET_4_6,
                 system_prompt="system",
                 prompt="prompt",
             )
@@ -253,7 +234,7 @@ def test_cli_llm_dispatches_resume_with_job_selector(tmp_path):
     success_result = LlmJobResult(
         job_id=25,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
         failed=False,
         persisted=True,
     )
@@ -342,7 +323,7 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=SONNET),
+        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
         failed=False,
         persisted=False,
     )
@@ -375,7 +356,7 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
             task_name=None,
             run=False,
             job_id=None,
-            model="haiku",
+            model="claude-haiku-4-5",
             deck=None,
             no_auto_commit=False,
         ),

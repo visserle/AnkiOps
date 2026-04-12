@@ -1,4 +1,4 @@
-"""Execution of collection-local Claude tasks."""
+"""Execution of collection-local LLM tasks."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import Note, NoteTypeConfig
 
-from .claude import ClaudeClient, ProviderBatchResult
 from .config_loader import load_llm_task_catalog
 from .llm_db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
 from .llm_errors import LlmFatalError, LlmNoteError
@@ -33,6 +32,7 @@ from .llm_models import (
     TaskPlanResult,
     TaskRunSummary,
 )
+from .provider_client import ProviderClient
 from .task_attempts import AttemptRecorder
 from .task_discovery import discover_and_record_candidates
 from .task_options import (
@@ -56,8 +56,8 @@ CollectionDeserializer = Callable[..., None]
 Snapshotter = Callable[[Path, str], bool]
 
 
-def _default_provider_client_factory(task: TaskConfig) -> ClaudeClient:
-    return ClaudeClient(task)
+def _default_provider_client_factory(task: TaskConfig) -> ProviderClient:
+    return ProviderClient(task)
 
 
 @contextmanager
@@ -248,7 +248,7 @@ class LlmTaskExecutor:
         )
         aggregate = None
         provider_client = None
-        attempt_recorder = AttemptRecorder(db=db)
+        attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
 
         try:
             provider_client = self.provider_client_factory(task)
@@ -274,26 +274,15 @@ class LlmTaskExecutor:
                 resume_source_items=self.resume_source_items,
                 logger=logger,
             )
-            if task.execution.mode is ExecutionMode.ONLINE:
-                await self._execute_candidates_online(
-                    db=db,
-                    job_id=job_id,
-                    task=task,
-                    api_model=model.api_id,
-                    provider_client=provider_client,
-                    candidates=candidates,
-                    attempt_recorder=attempt_recorder,
-                )
-            else:
-                await self._execute_candidates_batch(
-                    db=db,
-                    job_id=job_id,
-                    task=task,
-                    api_model=model.api_id,
-                    provider_client=provider_client,
-                    candidates=candidates,
-                    attempt_recorder=attempt_recorder,
-                )
+            await self._execute_candidates_online(
+                db=db,
+                job_id=job_id,
+                task=task,
+                api_model=model.api_id,
+                provider_client=provider_client,
+                candidates=candidates,
+                attempt_recorder=attempt_recorder,
+            )
 
             persisted = self._apply_updates(
                 db=db,
@@ -314,24 +303,12 @@ class LlmTaskExecutor:
             )
             aggregate = db.aggregate_job(job_id)
         except LlmFatalError as error:
-            if task.execution.mode is ExecutionMode.BATCH:
-                fatal_marked = db.mark_unfinished_items_fatal(
-                    job_id=job_id,
-                    error_message=str(error),
+            canceled = db.mark_unfinished_items_canceled(job_id=job_id)
+            if canceled:
+                logger.warning(
+                    "Marked %d pending item(s) as canceled due to fatal error",
+                    canceled,
                 )
-                if fatal_marked:
-                    logger.warning(
-                        "Marked %d pending batch item(s) as fatal_error due to fatal "
-                        "error",
-                        fatal_marked,
-                    )
-            else:
-                canceled = db.mark_unfinished_items_canceled(job_id=job_id)
-                if canceled:
-                    logger.warning(
-                        "Marked %d pending item(s) as canceled due to fatal error",
-                        canceled,
-                    )
             db.finalize_job(
                 job_id=job_id,
                 status=LlmJobStatus.FAILED,
@@ -563,213 +540,6 @@ class LlmTaskExecutor:
             candidate.deck_name,
             candidate.payload.note_type,
         )
-
-    async def _execute_candidates_batch(
-        self,
-        *,
-        db: LlmDbAdapter,
-        job_id: int,
-        task: TaskConfig,
-        api_model: str,
-        provider_client,
-        candidates: list[EligibleCandidate],
-        attempt_recorder: AttemptRecorder,
-    ) -> None:
-        if not candidates:
-            return
-
-        prepared_by_custom_id: dict[str, Any] = {}
-        candidate_by_custom_id: dict[str, EligibleCandidate] = {}
-        batch_requests: list[tuple[str, Any]] = []
-        for candidate in candidates:
-            prepared_request = provider_client.prepare_attempt_request(
-                note_payload=candidate.payload,
-                task_prompt=task.prompt,
-                request_options=task.request,
-                api_model=api_model,
-            )
-            custom_id = f"item-{candidate.item_id}"
-            prepared_by_custom_id[custom_id] = prepared_request
-            candidate_by_custom_id[custom_id] = candidate
-            batch_requests.append((custom_id, prepared_request))
-
-        try:
-            batch_state = await provider_client.create_batch(requests=batch_requests)
-        except LlmFatalError:
-            raise
-        except Exception as error:
-            raise LlmFatalError(f"Provider batch submission failed: {error}") from error
-        batch_local_id = db.upsert_provider_batch(job_id=job_id, batch=batch_state)
-
-        for custom_id, candidate in candidate_by_custom_id.items():
-            db.insert_batch_item_map(
-                provider_batch_local_id=batch_local_id,
-                custom_id=custom_id,
-                job_item_id=candidate.item_id,
-                attempt_no=1,
-            )
-
-        terminal_states = {"ended"}
-        polling_states = {"in_progress", "canceling"}
-        try:
-            while batch_state.processing_status not in terminal_states:
-                if batch_state.processing_status not in polling_states:
-                    raise LlmFatalError(
-                        "Provider batch entered unexpected processing status "
-                        f"'{batch_state.processing_status}'"
-                    )
-                await asyncio.sleep(task.execution.batch_poll_seconds)
-                batch_state = await provider_client.retrieve_batch(
-                    batch_state.provider_batch_id
-                )
-                db.upsert_provider_batch(job_id=job_id, batch=batch_state)
-        except LlmFatalError:
-            raise
-        except Exception as error:
-            raise LlmFatalError(f"Provider batch polling failed: {error}") from error
-
-        try:
-            batch_results = await provider_client.get_batch_results(
-                provider_batch_id=batch_state.provider_batch_id,
-                prepared_by_custom_id=prepared_by_custom_id,
-            )
-        except LlmFatalError:
-            raise
-        except Exception as error:
-            raise LlmFatalError(f"Provider batch results failed: {error}") from error
-
-        seen_custom_ids: set[str] = set()
-        for batch_result in batch_results:
-            seen_custom_ids.add(batch_result.custom_id)
-            candidate = candidate_by_custom_id.get(batch_result.custom_id)
-            prepared_request = prepared_by_custom_id.get(batch_result.custom_id)
-            if candidate is None or prepared_request is None:
-                continue
-
-            await self._apply_batch_result(
-                db=db,
-                candidate=candidate,
-                prepared_request=prepared_request,
-                batch_result=batch_result,
-                attempt_recorder=attempt_recorder,
-            )
-
-        missing = set(candidate_by_custom_id) - seen_custom_ids
-        for custom_id in sorted(missing):
-            candidate = candidate_by_custom_id[custom_id]
-            prepared_request = prepared_by_custom_id.get(custom_id)
-            if prepared_request is None:
-                continue
-            with db.write_tx():
-                attempt_recorder.record_terminal(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    execution_mode=ExecutionMode.BATCH,
-                    result_type=LlmAttemptResultType.CANCELED,
-                    final_status=LlmFinalStatus.CANCELED,
-                    error_message="Batch result missing from provider response",
-                )
-
-    async def _apply_batch_result(
-        self,
-        *,
-        db: LlmDbAdapter,
-        candidate: EligibleCandidate,
-        prepared_request,
-        batch_result: ProviderBatchResult,
-        attempt_recorder: AttemptRecorder,
-    ) -> None:
-        if (
-            batch_result.result_type is LlmAttemptResultType.SUCCEEDED
-            and batch_result.outcome is not None
-        ):
-            outcome = batch_result.outcome
-            try:
-                if outcome.update.note_key != candidate.payload.note_key:
-                    raise LlmNoteError("Model returned mismatched note_key")
-                changed_fields = _apply_note_update(
-                    serialized_note=candidate.serialized_note,
-                    payload=candidate.payload,
-                    edits=outcome.update.edits,
-                    note_type_config=candidate.note_type_config,
-                )
-            except LlmNoteError as error:
-                with db.write_tx():
-                    attempt_recorder.record_error(
-                        candidate=candidate,
-                        prepared_request=prepared_request,
-                        outcome=outcome,
-                        error=error,
-                        error_type="note_error",
-                        final_status=LlmFinalStatus.NOTE_ERROR,
-                        result_type=LlmAttemptResultType.ERRORED,
-                        execution_mode=ExecutionMode.BATCH,
-                    )
-                return
-
-            with db.write_tx():
-                attempt_recorder.record_success(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    outcome=outcome,
-                    execution_mode=ExecutionMode.BATCH,
-                )
-                db.update_job_item_result(
-                    item_id=candidate.item_id,
-                    final_status=(
-                        LlmFinalStatus.SUCCEEDED_UPDATED
-                        if changed_fields
-                        else LlmFinalStatus.SUCCEEDED_UNCHANGED
-                    ),
-                    changed_fields=changed_fields,
-                )
-            return
-
-        if batch_result.result_type is LlmAttemptResultType.ERRORED:
-            error = LlmNoteError(
-                batch_result.error_message or "Provider batch request failed"
-            )
-            error_type = batch_result.error_type or "provider_error"
-            final_status = (
-                LlmFinalStatus.NOTE_ERROR
-                if error_type == "note_error"
-                else LlmFinalStatus.PROVIDER_ERROR
-            )
-            with db.write_tx():
-                attempt_recorder.record_error(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    outcome=batch_result.outcome,
-                    error=error,
-                    error_type=error_type,
-                    final_status=final_status,
-                    result_type=LlmAttemptResultType.ERRORED,
-                    execution_mode=ExecutionMode.BATCH,
-                )
-            return
-
-        if batch_result.result_type is LlmAttemptResultType.CANCELED:
-            with db.write_tx():
-                attempt_recorder.record_terminal(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    execution_mode=ExecutionMode.BATCH,
-                    result_type=LlmAttemptResultType.CANCELED,
-                    final_status=LlmFinalStatus.CANCELED,
-                    error_message=batch_result.error_message,
-                )
-            return
-
-        if batch_result.result_type is LlmAttemptResultType.EXPIRED:
-            with db.write_tx():
-                attempt_recorder.record_terminal(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    execution_mode=ExecutionMode.BATCH,
-                    result_type=LlmAttemptResultType.EXPIRED,
-                    final_status=LlmFinalStatus.EXPIRED,
-                    error_message=batch_result.error_message,
-                )
 
     def _apply_updates(
         self,

@@ -11,12 +11,12 @@ import yaml
 from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
-from .anthropic_models import format_supported_model_names, parse_model
 from .llm_models import FieldExceptionRule, TaskCatalog, TaskConfig
+from .model_registry import format_supported_model_names, parse_model
 
 
 class LlmConfigError(ValueError):
-    """Raised when a Claude task config is invalid."""
+    """Raised when an LLM task config is invalid."""
 
 
 _SYSTEM_PROMPT_FILE_NAME = "system_prompt.md"
@@ -237,6 +237,7 @@ def _parse_task(
         prompt=prompt,
         system_prompt_path=system_prompt_path,
         prompt_path=prompt_file_path,
+        api_key_env=model.api_key_env,
         field_exceptions=field_exceptions,
     )
 

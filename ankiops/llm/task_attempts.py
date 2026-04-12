@@ -22,7 +22,7 @@ class AttemptRecorder:
         self,
         *,
         db: LlmDbAdapter,
-        provider: str = "anthropic",
+        provider: str = "openai",
         initial_attempt_no: int = 1,
     ) -> None:
         self._db = db

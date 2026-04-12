@@ -1,4 +1,4 @@
-"""Prompt helpers for Claude task requests."""
+"""Prompt helpers for LLM task requests."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from .llm_models import NotePayload
 
 
 def build_system_prompt(system_prompt: str) -> str:
-    """Build the Claude system prompt from task configuration."""
+    """Build the system prompt from task configuration."""
     return system_prompt.strip()
 
 

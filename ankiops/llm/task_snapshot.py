@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .anthropic_models import parse_model
 from .llm_models import (
     DeckScope,
     ExecutionMode,
@@ -14,10 +13,10 @@ from .llm_models import (
     TaskExecutionOptions,
     TaskRequestOptions,
 )
+from .model_registry import parse_model
 
 _DEFAULT_REQUEST_OPTIONS = TaskRequestOptions()
 _DEFAULT_EXECUTION_OPTIONS = TaskExecutionOptions()
-_DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
 _DEFAULT_TIMEOUT_SECONDS = 60
 
 
@@ -52,7 +51,6 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
         "execution": {
             "mode": task.execution.mode.value,
             "concurrency": task.execution.concurrency,
-            "batch_poll_seconds": task.execution.batch_poll_seconds,
         },
     }
 
@@ -109,7 +107,7 @@ def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
         prompt=str(snapshot.get("prompt") or ""),
         system_prompt_path=Path(str(snapshot.get("system_prompt_path") or "")),
         prompt_path=Path(str(snapshot.get("prompt_path") or "")),
-        api_key_env=str(snapshot.get("api_key_env") or _DEFAULT_API_KEY_ENV),
+        api_key_env=str(snapshot.get("api_key_env") or model.api_key_env),
         timeout_seconds=int(
             snapshot.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         ),
@@ -144,12 +142,6 @@ def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
             mode=ExecutionMode(mode_raw),
             concurrency=int(
                 execution.get("concurrency", _DEFAULT_EXECUTION_OPTIONS.concurrency)
-            ),
-            batch_poll_seconds=int(
-                execution.get(
-                    "batch_poll_seconds",
-                    _DEFAULT_EXECUTION_OPTIONS.batch_poll_seconds,
-                )
             ),
         ),
     )

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from ankiops.llm.anthropic_models import SONNET
 from ankiops.llm.llm_models import (
     DeckScope,
     ExecutionMode,
@@ -13,13 +12,14 @@ from ankiops.llm.llm_models import (
     TaskExecutionOptions,
     TaskRequestOptions,
 )
+from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
 from ankiops.llm.task_snapshot import task_from_snapshot, task_to_snapshot
 
 
 def test_task_snapshot_roundtrip_preserves_core_fields():
     task = TaskConfig(
         name="grammar",
-        model=SONNET,
+        model=CLAUDE_SONNET_4_6,
         system_prompt="system prompt",
         prompt="task prompt",
         system_prompt_path=Path("llm/system_prompt.md"),
@@ -42,9 +42,8 @@ def test_task_snapshot_roundtrip_preserves_core_fields():
             retry_backoff_jitter=False,
         ),
         execution=TaskExecutionOptions(
-            mode=ExecutionMode.BATCH,
+            mode=ExecutionMode.ONLINE,
             concurrency=4,
-            batch_poll_seconds=30,
         ),
     )
 
@@ -79,7 +78,7 @@ def test_task_from_snapshot_requires_execution_mapping():
     with pytest.raises(ValueError, match="missing execution options"):
         task_from_snapshot(
             {
-                "model": "sonnet",
+                "model": "claude-sonnet-4-6",
                 "decks": {"deck_root": None},
                 "request": {},
             }

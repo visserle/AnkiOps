@@ -41,7 +41,7 @@ def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
 
 def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
     stream = io.StringIO()
-    quiet_logger_names = ("anthropic", "httpx", "httpcore", "urllib3.connectionpool")
+    quiet_logger_names = ("openai", "httpx", "httpcore", "urllib3.connectionpool")
     original_levels = {
         name: logging.getLogger(name).level for name in quiet_logger_names
     }
@@ -51,12 +51,12 @@ def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
         configure_logging(stream_level=logging.DEBUG)
 
         logging.getLogger("ankiops.llm.runner").debug("runner debug")
-        logging.getLogger("anthropic._base_client").debug("sdk debug")
+        logging.getLogger("openai._base_client").debug("sdk debug")
 
         rendered = stream.getvalue()
         assert "runner debug" in rendered
         assert "sdk debug" not in rendered
-        assert logging.getLogger("anthropic").level == logging.WARNING
+        assert logging.getLogger("openai").level == logging.WARNING
         assert logging.getLogger("httpx").level == logging.WARNING
         assert logging.getLogger("httpcore").level == logging.WARNING
         assert logging.getLogger("urllib3.connectionpool").level == logging.WARNING

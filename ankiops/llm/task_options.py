@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .anthropic_models import (
-    AnthropicModel,
+from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
+from .model_registry import (
+    ProviderModel,
     format_supported_model_names,
     parse_model,
 )
-from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
 
 
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
@@ -64,11 +64,7 @@ def format_request_defaults(task: TaskConfig) -> str:
     temperature = (
         task.request.temperature if task.request.temperature is not None else "default"
     )
-    execution = task.execution
-    if execution.mode is ExecutionMode.ONLINE:
-        execution_text = f"mode=online concurrency={execution.concurrency}"
-    else:
-        execution_text = f"mode=batch poll={execution.batch_poll_seconds}s"
+    execution_text = f"mode=online concurrency={task.execution.concurrency}"
 
     return (
         f"timeout={task.timeout_seconds}s "
@@ -83,7 +79,7 @@ def format_request_defaults(task: TaskConfig) -> str:
 def resolve_model(
     task: TaskConfig,
     model_override: str | None,
-) -> AnthropicModel:
+) -> ProviderModel:
     if model_override is None:
         return task.model
 

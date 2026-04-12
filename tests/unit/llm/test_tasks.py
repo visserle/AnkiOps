@@ -11,19 +11,17 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
-from ankiops.llm.anthropic_models import SONNET
-from ankiops.llm.claude import ProviderBatchResult, ProviderBatchState
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.llm_db import LlmDbAdapter
 from ankiops.llm.llm_errors import LlmFatalError
 from ankiops.llm.llm_models import (
-    LlmAttemptResultType,
     LlmFinalStatus,
     LlmJobStatus,
     NoteUpdate,
     PreparedAttemptRequest,
     ProviderAttemptOutcome,
 )
+from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
 from ankiops.llm.runner import run_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -64,7 +62,7 @@ def _write(path: Path, content: str) -> None:
 
 def _task_config(
     *,
-    model: str = "sonnet",
+    model: str = "claude-sonnet-4-6",
     prompt_file: str = "../prompts/grammar.md",
     extra: str = "",
 ) -> str:
@@ -169,63 +167,6 @@ class _StubClient:
         return None
 
 
-class _BatchResultsFatalClient:
-    def prepare_attempt_request(
-        self,
-        *,
-        note_payload,
-        task_prompt,
-        request_options,
-        api_model,
-    ) -> PreparedAttemptRequest:
-        del task_prompt
-        max_tokens = request_options.max_output_tokens or 2048
-        request_params: dict[str, object] = {
-            "model": api_model,
-            "max_tokens": max_tokens,
-            "output_config": {"format": {"type": "json_schema", "schema": {}}},
-        }
-        if request_options.temperature is not None:
-            request_params["temperature"] = request_options.temperature
-        return PreparedAttemptRequest(
-            note_payload=note_payload,
-            system_prompt_text="system",
-            user_message_text="user",
-            request_params=request_params,
-            output_schema={},
-            editable_fields=frozenset(note_payload.editable_fields.keys()),
-        )
-
-    async def create_batch(self, *, requests):
-        del requests
-        return ProviderBatchState(
-            provider_batch_id="msgbatch_123",
-            processing_status="ended",
-            results_url=None,
-            created_at_remote=None,
-            expires_at_remote=None,
-            ended_at_remote=None,
-            archived_at_remote=None,
-            cancel_initiated_at_remote=None,
-            count_processing=0,
-            count_succeeded=0,
-            count_errored=0,
-            count_canceled=0,
-            count_expired=0,
-            request_id=None,
-            rate_limit_headers={},
-        )
-
-    async def retrieve_batch(self, _provider_batch_id: str):
-        raise AssertionError("retrieve_batch should not be called when batch is ended")
-
-    async def get_batch_results(self, **_kwargs):
-        raise LlmFatalError("Provider batch results failed: decoder blew up")
-
-    async def close(self) -> None:
-        return None
-
-
 class _OnlineFailFastClient:
     def __init__(self) -> None:
         self._calls = 0
@@ -285,42 +226,6 @@ class _OnlineUnexpectedErrorClient(_OnlineFailFastClient):
             await asyncio.sleep(self._second_delay_seconds)
         note_key = prepared_request.note_payload.note_key
         return _result(note_key, {})
-
-
-class _BatchNoteErrorClient(_BatchResultsFatalClient):
-    async def get_batch_results(
-        self,
-        *,
-        provider_batch_id: str,
-        prepared_by_custom_id: dict[str, PreparedAttemptRequest],
-    ):
-        del provider_batch_id
-        custom_id = next(iter(prepared_by_custom_id))
-        return [
-            ProviderBatchResult(
-                custom_id=custom_id,
-                result_type=LlmAttemptResultType.ERRORED,
-                outcome=None,
-                error_type="note_error",
-                error_message="Schema mismatch in model output",
-                response_raw_text='{"oops":true}',
-                response_full_json='{"content":[]}',
-                request_id="req_123",
-                rate_limit_headers={},
-            )
-        ]
-
-
-class _BatchMissingResultsClient(_BatchResultsFatalClient):
-    async def get_batch_results(
-        self,
-        *,
-        provider_batch_id: str,
-        prepared_by_custom_id: dict[str, PreparedAttemptRequest],
-    ):
-        del provider_batch_id
-        del prepared_by_custom_id
-        return []
 
 
 def _result(
@@ -384,7 +289,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
     for task_path in (tmp_path / "llm/tasks").glob("*.yaml"):
         content = task_path.read_text(encoding="utf-8")
-        assert "model: sonnet" in content
+        assert "model: claude-sonnet-4-6" in content
         prompt_line = next(
             (
                 line
@@ -405,14 +310,14 @@ def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
     existing_task = tmp_path / TASK_FILE
     existing_task.parent.mkdir(parents=True, exist_ok=True)
     existing_task.write_text(
-        "model: sonnet\nprompt_file: ../prompts/custom.md\n",
+        "model: claude-sonnet-4-6\nprompt_file: ../prompts/custom.md\n",
         encoding="utf-8",
     )
 
     initialize_collection("TestProfile")
 
     assert existing_task.read_text(encoding="utf-8") == (
-        "model: sonnet\nprompt_file: ../prompts/custom.md\n"
+        "model: claude-sonnet-4-6\nprompt_file: ../prompts/custom.md\n"
     )
 
 
@@ -437,7 +342,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model == SONNET
+    assert task.model == CLAUDE_SONNET_4_6
     assert task.api_key_env == "ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == "Fix grammar from file"
@@ -477,7 +382,7 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
     _write_prompt(tmp_path, "Fix grammar from file")
     _write_task(
         tmp_path,
-        content="model: sonnet\nprompt_file: ../prompts/grammar.md\n",
+        content="model: claude-sonnet-4-6\nprompt_file: ../prompts/grammar.md\n",
     )
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
@@ -486,7 +391,6 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
     task = catalog.tasks_by_name["grammar"]
     assert task.execution.mode.value == "online"
     assert task.execution.concurrency == 8
-    assert task.execution.batch_poll_seconds == 15
 
 
 def test_load_llm_task_catalog_requires_system_prompt(
@@ -520,8 +424,8 @@ def test_load_llm_task_catalog_requires_system_prompt(
             "DoesNotExist",
         ),
         (
-            _task_config(model="gpt-5"),
-            "must be one of: opus, sonnet, haiku",
+            _task_config(model="unknown-model"),
+            "must be one of: claude-opus-4-6",
         ),
         (
             _task_config(extra="sdk: anthropic"),
@@ -604,7 +508,7 @@ def test_load_llm_task_catalog_ignores_non_task_dirs(
         tmp_path / "llm/providers/anthropic.yaml",
         """
         name: anthropic
-        model: sonnet
+        model: claude-sonnet-4-6
         """,
     )
 
@@ -620,7 +524,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result(
@@ -652,7 +556,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 
     assert not result.failed
     assert result.persisted
-    assert summary.model == SONNET
+    assert summary.model == CLAUDE_SONNET_4_6
     assert summary.requests == 2
     assert summary.input_tokens == 34
     assert summary.output_tokens == 13
@@ -676,7 +580,7 @@ def test_run_task_logs_llm_persistence_summary_without_deserialize_noise(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result(
@@ -716,7 +620,7 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result(
@@ -793,7 +697,7 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
                 "Required environment variable 'ANTHROPIC_API_KEY' is not set"
             )
 
-    monkeypatch.setattr("ankiops.llm.runner.ClaudeClient", _FailingClient)
+    monkeypatch.setattr("ankiops.llm.runner.ProviderClient", _FailingClient)
 
     result = run_task(
         collection_dir=collection,
@@ -819,93 +723,16 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
     )
 
 
-def test_run_task_marks_batch_pending_items_as_fatal_on_results_failure(
-    tmp_path,
-    monkeypatch,
-):
+def test_run_task_rejects_batch_mode_override(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _BatchResultsFatalClient(),
-    )
 
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        mode_override="batch",
-        no_auto_commit=True,
-    )
-
-    assert result.failed
-    assert not result.persisted
-    assert result.summary.errors == 2
-    assert result.summary.canceled == 0
-
-    db = LlmDbAdapter.open(collection)
-    try:
-        detail = db.get_job_detail(result.job_id)
-    finally:
-        db.close()
-
-    assert detail is not None
-    assert detail.status is LlmJobStatus.FAILED
-    assert detail.fatal_error == "Provider batch results failed: decoder blew up"
-    assert all(item.final_status is LlmFinalStatus.FATAL_ERROR for item in detail.items)
-    assert all(
-        item.error_message == "Provider batch results failed: decoder blew up"
-        for item in detail.items
-    )
-
-
-def test_run_task_batch_fatal_cleanup_preserves_skipped_items(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "fields:\n"
-            "  exceptions:\n"
-            "    - note_types: ['AnkiOpsChoice']\n"
-            "      hidden: ['Question', 'Choice 1', 'Choice 2', 'Answer']\n"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _BatchResultsFatalClient(),
-    )
-
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        mode_override="batch",
-        no_auto_commit=True,
-    )
-
-    assert result.failed
-    assert not result.persisted
-    assert result.summary.errors == 1
-    assert result.summary.skipped == 1
-
-    db = LlmDbAdapter.open(collection)
-    try:
-        detail = db.get_job_detail(result.job_id)
-    finally:
-        db.close()
-
-    assert detail is not None
-    assert detail.status is LlmJobStatus.FAILED
-    statuses = [item.final_status for item in detail.items]
-    candidate_statuses = [item.candidate_status.value for item in detail.items]
-    assert statuses.count(LlmFinalStatus.FATAL_ERROR) == 1
-    assert statuses.count(LlmFinalStatus.NOT_ATTEMPTED) == 1
-    assert "skipped_no_editable_fields" in candidate_statuses
+    with pytest.raises(ValueError, match="Execution mode must be one of: online"):
+        run_task(
+            collection_dir=collection,
+            task_name="grammar",
+            mode_override="batch",
+            no_auto_commit=True,
+        )
 
 
 def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkeypatch):
@@ -914,7 +741,7 @@ def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkey
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _OnlineFailFastClient(),
     )
 
@@ -950,7 +777,7 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _OnlineUnexpectedErrorClient(second_delay_seconds=60),
     )
 
@@ -977,119 +804,13 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
     assert detail.fatal_error == "Unexpected online execution error: boom runtime"
 
 
-def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "fields:\n"
-            "  exceptions:\n"
-            "    - note_types: ['AnkiOpsChoice']\n"
-            "      hidden: ['Question', 'Choice 1', 'Choice 2', 'Answer']\n"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _BatchNoteErrorClient(),
-    )
-
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        mode_override="batch",
-        no_auto_commit=True,
-    )
-
-    assert result.failed
-    assert result.summary.errors == 1
-    assert result.summary.skipped == 1
-
-    db = LlmDbAdapter.open(collection)
-    try:
-        detail = db.get_job_detail(result.job_id)
-        attempt_rows = db._conn.execute(
-            """
-            SELECT error_type, result_type
-            FROM llm_item_attempt
-            ORDER BY id ASC
-            """
-        ).fetchall()
-    finally:
-        db.close()
-
-    assert detail is not None
-    statuses = [item.final_status for item in detail.items]
-    assert statuses.count(LlmFinalStatus.NOTE_ERROR) == 1
-    assert statuses.count(LlmFinalStatus.NOT_ATTEMPTED) == 1
-    assert len(attempt_rows) == 1
-    assert attempt_rows[0]["error_type"] == "note_error"
-    assert attempt_rows[0]["result_type"] == LlmAttemptResultType.ERRORED.value
-
-
-def test_run_task_batch_missing_results_records_attempts(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _BatchMissingResultsClient(),
-    )
-
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        mode_override="batch",
-        no_auto_commit=True,
-    )
-
-    assert not result.failed
-    assert result.summary.errors == 0
-    assert result.summary.canceled == 2
-    assert result.summary.requests == 2
-
-    db = LlmDbAdapter.open(collection)
-    try:
-        detail = db.get_job_detail(result.job_id)
-        attempt_rows = db._conn.execute(
-            """
-            SELECT result_type, error_type, error_message
-            FROM llm_item_attempt
-            ORDER BY id ASC
-            """
-        ).fetchall()
-    finally:
-        db.close()
-
-    assert detail is not None
-    assert all(item.final_status is LlmFinalStatus.CANCELED for item in detail.items)
-    assert all(item.attempts == 1 for item in detail.items)
-    assert len(attempt_rows) == 2
-    assert all(
-        row["result_type"] == LlmAttemptResultType.CANCELED.value
-        for row in attempt_rows
-    )
-    assert all(
-        row["error_type"] == LlmAttemptResultType.CANCELED.value for row in attempt_rows
-    )
-    assert all(
-        row["error_message"] == "Batch result missing from provider response"
-        for row in attempt_rows
-    )
-
-
 def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result(
@@ -1122,7 +843,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=sonnet, api_model=claude-sonnet-4-6"
+        "Starting LLM task 'grammar' (model=claude-sonnet-4-6, api_model=claude-sonnet-4-6"
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "
@@ -1134,7 +855,9 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert "Serialized 1 deck(s), 2 note(s) in memory" in caplog.text
     assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
     assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
-    assert ("Task 'grammar' (sonnet): 2 notes — 1 updated, 1 unchanged") in caplog.text
+    assert (
+        "Task 'grammar' (claude-sonnet-4-6): 2 notes — 1 updated, 1 unchanged"
+    ) in caplog.text
     assert (
         "Usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
         "2.0s provider time"
@@ -1151,7 +874,7 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {}),
@@ -1176,7 +899,9 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "LLM note error for nk-2 in 'TestDeck' (AnkiOpsChoice): "
         "Model attempted to update read-only field 'Answer'"
     ) in caplog.text
-    assert ("Task 'grammar' (sonnet): 2 notes — 1 unchanged, 1 error") in caplog.text
+    assert (
+        "Task 'grammar' (claude-sonnet-4-6): 2 notes — 1 unchanged, 1 error"
+    ) in caplog.text
     assert (
         "Usage: 2 requests, 22 input tokens, 14 output tokens, "
         "0 retries, 1.8s provider time"
@@ -1212,7 +937,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
 
     monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient([]),
     )
 
@@ -1231,7 +956,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
     assert (
         "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): no editable non-empty fields"
     ) in caplog.text
-    assert "Task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
+    assert "Task 'grammar' (claude-sonnet-4-6): 0 notes — 1 skipped" in caplog.text
 
 
 def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
@@ -1239,7 +964,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
     _write(
         collection / "llm/tasks/translate.yaml",
         """
-        model: sonnet
+        model: claude-sonnet-4-6
         prompt_file: ../prompts/grammar.md
         sdk: anthropic
         """,
@@ -1248,7 +973,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "This is a fixed question."}),
@@ -1310,7 +1035,7 @@ def test_run_task_uses_expected_serialize_scope(
 
     monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient([]),
     )
 
@@ -1354,7 +1079,7 @@ def test_run_task_atomic_policy_skips_persistence_when_any_note_fails(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "This should not persist."}),
@@ -1399,7 +1124,7 @@ def test_run_task_writes_to_explicit_collection_dir(tmp_path: Path, monkeypatch)
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
+        "ankiops.llm.runner.ProviderClient",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "Path-correct update."}),

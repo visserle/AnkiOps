@@ -1,4 +1,4 @@
-"""SQLite adapter for LLM execution history and async batch metadata."""
+"""SQLite adapter for LLM execution history."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from typing import Any, Iterator, TypeVar
 
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
-from .anthropic_models import parse_model
-from .claude import ProviderBatchState
+from .model_registry import parse_model
 from .llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
@@ -301,39 +300,6 @@ class LlmDbAdapter:
                     response_full_json TEXT,
                     FOREIGN KEY(attempt_id) REFERENCES llm_item_attempt(id) ON DELETE CASCADE
                 );
-
-                CREATE TABLE IF NOT EXISTS llm_provider_batch (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id INTEGER NOT NULL,
-                    provider_batch_id TEXT NOT NULL UNIQUE,
-                    processing_status TEXT NOT NULL,
-                    results_url TEXT,
-                    created_at_remote TEXT,
-                    expires_at_remote TEXT,
-                    ended_at_remote TEXT,
-                    archived_at_remote TEXT,
-                    cancel_initiated_at_remote TEXT,
-                    count_processing INTEGER NOT NULL DEFAULT 0,
-                    count_succeeded INTEGER NOT NULL DEFAULT 0,
-                    count_errored INTEGER NOT NULL DEFAULT 0,
-                    count_canceled INTEGER NOT NULL DEFAULT 0,
-                    count_expired INTEGER NOT NULL DEFAULT 0,
-                    last_request_id TEXT,
-                    last_rate_limit_headers_json TEXT,
-                    created_at_local TEXT NOT NULL,
-                    updated_at_local TEXT NOT NULL,
-                    FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE
-                );
-
-                CREATE TABLE IF NOT EXISTS llm_batch_item_map (
-                    provider_batch_id INTEGER NOT NULL,
-                    custom_id TEXT NOT NULL,
-                    job_item_id INTEGER NOT NULL,
-                    attempt_no INTEGER NOT NULL,
-                    PRIMARY KEY(provider_batch_id, custom_id),
-                    FOREIGN KEY(provider_batch_id) REFERENCES llm_provider_batch(id) ON DELETE CASCADE,
-                    FOREIGN KEY(job_item_id) REFERENCES llm_job_item(id) ON DELETE CASCADE
-                );
                 """
             )
             self._conn.execute(
@@ -358,10 +324,6 @@ class LlmDbAdapter:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_llm_attempt_item "
                 "ON llm_item_attempt(job_item_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_llm_provider_batch_status "
-                "ON llm_provider_batch(processing_status)"
             )
 
     @staticmethod
@@ -510,29 +472,6 @@ class LlmDbAdapter:
         )
         return int(cursor.rowcount)
 
-    def mark_unfinished_items_fatal(
-        self,
-        *,
-        job_id: int,
-        error_message: str,
-    ) -> int:
-        cursor = self._write(
-            """
-            UPDATE llm_job_item
-            SET final_status = ?,
-                error_message = ?
-            WHERE job_id = ? AND candidate_status = ? AND final_status = ?
-            """,
-            (
-                LlmFinalStatus.FATAL_ERROR.value,
-                error_message,
-                job_id,
-                LlmCandidateStatus.ELIGIBLE.value,
-                LlmFinalStatus.NOT_ATTEMPTED.value,
-            ),
-        )
-        return int(cursor.rowcount)
-
     def set_applied_for_updated_items(self, *, job_id: int) -> None:
         self._write(
             """
@@ -632,117 +571,6 @@ class LlmDbAdapter:
                 self._as_json(request_params_json),
                 response_raw_text,
                 response_full_json,
-            ),
-        )
-
-    def upsert_provider_batch(
-        self,
-        *,
-        job_id: int,
-        batch: ProviderBatchState,
-    ) -> int:
-        now = self._utc_now()
-        existing = self._conn.execute(
-            "SELECT id FROM llm_provider_batch WHERE provider_batch_id = ?",
-            (batch.provider_batch_id,),
-        ).fetchone()
-        if existing is None:
-            cursor = self._write(
-                """
-                INSERT INTO llm_provider_batch (
-                    job_id, provider_batch_id, processing_status, results_url,
-                    created_at_remote, expires_at_remote, ended_at_remote,
-                    archived_at_remote, cancel_initiated_at_remote,
-                    count_processing, count_succeeded, count_errored,
-                    count_canceled, count_expired,
-                    last_request_id, last_rate_limit_headers_json,
-                    created_at_local, updated_at_local
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    job_id,
-                    batch.provider_batch_id,
-                    batch.processing_status,
-                    batch.results_url,
-                    batch.created_at_remote,
-                    batch.expires_at_remote,
-                    batch.ended_at_remote,
-                    batch.archived_at_remote,
-                    batch.cancel_initiated_at_remote,
-                    batch.count_processing,
-                    batch.count_succeeded,
-                    batch.count_errored,
-                    batch.count_canceled,
-                    batch.count_expired,
-                    batch.request_id,
-                    self._as_json(batch.rate_limit_headers),
-                    now,
-                    now,
-                ),
-            )
-            return int(cursor.lastrowid)
-
-        batch_id = int(existing["id"])
-        self._write(
-            """
-            UPDATE llm_provider_batch
-            SET processing_status = ?,
-                results_url = ?,
-                created_at_remote = ?,
-                expires_at_remote = ?,
-                ended_at_remote = ?,
-                archived_at_remote = ?,
-                cancel_initiated_at_remote = ?,
-                count_processing = ?,
-                count_succeeded = ?,
-                count_errored = ?,
-                count_canceled = ?,
-                count_expired = ?,
-                last_request_id = ?,
-                last_rate_limit_headers_json = ?,
-                updated_at_local = ?
-            WHERE id = ?
-            """,
-            (
-                batch.processing_status,
-                batch.results_url,
-                batch.created_at_remote,
-                batch.expires_at_remote,
-                batch.ended_at_remote,
-                batch.archived_at_remote,
-                batch.cancel_initiated_at_remote,
-                batch.count_processing,
-                batch.count_succeeded,
-                batch.count_errored,
-                batch.count_canceled,
-                batch.count_expired,
-                batch.request_id,
-                self._as_json(batch.rate_limit_headers),
-                now,
-                batch_id,
-            ),
-        )
-        return batch_id
-
-    def insert_batch_item_map(
-        self,
-        *,
-        provider_batch_local_id: int,
-        custom_id: str,
-        job_item_id: int,
-        attempt_no: int,
-    ) -> None:
-        self._write(
-            """
-            INSERT OR REPLACE INTO llm_batch_item_map (
-                provider_batch_id, custom_id, job_item_id, attempt_no
-            ) VALUES (?, ?, ?, ?)
-            """,
-            (
-                provider_batch_local_id,
-                custom_id,
-                job_item_id,
-                attempt_no,
             ),
         )
 

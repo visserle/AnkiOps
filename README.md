@@ -168,10 +168,10 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
-- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> [--model <model_id>] [--deck <deck_name>]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <model_id>] [--online] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
-- `ankiops llm --job <job_id|latest> --resume [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
+- `ankiops llm --job <job_id|latest> --resume [--online] [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
 **`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
@@ -191,10 +191,11 @@ After `ankiops init`, AnkiOps bootstraps:
 - `llm/prompts/grammar.md`
 - `llm/llm.db` (job history, auto-added to `.gitignore`)
 
-Set your Anthropic key before running tasks:
+Set the provider key for the model you use:
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-openai-key"
+export ANTHROPIC_API_KEY="your-anthropic-key"
 ```
 
 Plan, run, and inspect jobs:
@@ -203,17 +204,16 @@ Plan, run, and inspect jobs:
 ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
-ankiops llm grammar --run --batch
 ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
-ankiops llm grammar --run --model haiku
+ankiops llm grammar --run --model claude-haiku-4-5
 ankiops llm --job latest
 ankiops llm --job latest --resume
 ```
 ### Task File Format (`llm/tasks/<task-name>.yaml`)
 
 ```yaml
-model: sonnet
+model: claude-sonnet-4-6
 prompt_file: ../prompts/grammar.md
 
 fields:
@@ -224,13 +224,13 @@ fields:
 ```
 
 - Required keys: `model`, `prompt_file`
-- Supported models: `opus`, `sonnet`, `haiku`
+- Supported models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`
 - `prompt_file` is resolved relative to the task file and must stay within `llm/`
 - `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - `llm/system_prompt.md` is global and shared by all tasks
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
-- Request/execution tuning uses internal defaults; only model and mode can be overridden from CLI (`--model`, `--online`, `--batch`)
+- Request/execution tuning uses internal defaults; only model and online mode can be overridden from CLI (`--model`, `--online`)
 
 ### Runtime Behavior
 

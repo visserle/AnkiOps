@@ -8,7 +8,6 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDbAdapter
-from ankiops.llm.llm_models import ExecutionMode
 from ankiops.llm.runner import plan_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -55,7 +54,7 @@ def _prepare_collection(tmp_path: Path) -> Path:
     _write(
         tmp_path / TASK_FILE,
         """
-        model: sonnet
+        model: claude-sonnet-4-6
         prompt_file: ../prompts/grammar.md
         fields:
           exceptions:
@@ -78,7 +77,7 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     )
 
     assert plan.task_name == "grammar"
-    assert str(plan.model) == "sonnet"
+    assert str(plan.model) == "claude-sonnet-4-6"
     assert plan.summary.decks_seen == 1
     assert plan.summary.decks_matched == 1
     assert plan.summary.notes_seen == 2
@@ -118,7 +117,7 @@ def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
     _write(
         collection / "llm/tasks/translate.yaml",
         """
-        model: sonnet
+        model: claude-sonnet-4-6
         prompt_file: ../prompts/grammar.md
         sdk: anthropic
         """,
@@ -150,23 +149,10 @@ def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
 
     with pytest.raises(
         ValueError,
-        match="Deck override must be an exact deck name",
+        match=r"Deck override must be an exact deck name \(wildcards are not supported\)",
     ):
         plan_task(
             collection_dir=collection,
             task_name="grammar",
             deck_override="Test*",
         )
-
-
-def test_plan_task_applies_batch_discount_to_cost_estimate(tmp_path: Path):
-    collection = _prepare_collection(tmp_path)
-
-    plan = plan_task(
-        collection_dir=collection,
-        task_name="grammar",
-        mode_override="batch",
-    )
-
-    assert plan.summary.execution_mode is ExecutionMode.BATCH
-    assert plan.format_cost_estimate() == "$0.03"

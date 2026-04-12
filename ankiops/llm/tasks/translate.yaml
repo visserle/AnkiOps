@@ -1,4 +1,4 @@
-model: sonnet
+model: claude-sonnet-4-6
 prompt_file: ../prompts/translate.md
 
 fields:
