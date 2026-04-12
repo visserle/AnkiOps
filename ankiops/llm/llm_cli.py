@@ -400,19 +400,15 @@ def run_llm(
         if tasks:
             task_rows: list[list[str]] = []
             for task in tasks:
-                include = _format_field_list(task.decks.include)
-                exclude = _format_field_list(task.decks.exclude)
                 task_rows.append(
                     [
                         task.name,
                         str(task.model),
-                        include,
-                        exclude,
                         str(len(task.field_exceptions)),
                     ]
                 )
             _log_table(
-                ["Name", "Model", "Include", "Exclude", "Exceptions"],
+                ["Name", "Model", "Exceptions"],
                 task_rows,
             )
         else:

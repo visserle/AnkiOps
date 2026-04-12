@@ -28,7 +28,7 @@ def discover_and_record_candidates(
         task=task,
         note_type_configs=note_type_configs,
     )
-    selected_items = _select_snapshot_items(
+    selected_items, decks_seen, decks_matched, notes_seen = _select_snapshot_items(
         snapshot,
         resume_source_items=resume_source_items,
     )
@@ -46,12 +46,11 @@ def discover_and_record_candidates(
         if candidate is not None:
             candidates.append(candidate)
 
-    _set_discovery_counts(
-        db=db,
+    db.set_discovery_counts(
         job_id=job_id,
-        snapshot=snapshot,
-        selected_items=selected_items,
-        resume_source_items=resume_source_items,
+        decks_seen=decks_seen,
+        decks_matched=decks_matched,
+        notes_seen=notes_seen,
     )
     return candidates
 
@@ -182,44 +181,18 @@ def _record_discovery_item(
     return None
 
 
-def _set_discovery_counts(
-    *,
-    db: LlmDbAdapter,
-    job_id: int,
-    snapshot: DiscoverySnapshot,
-    selected_items: list[DiscoveryItem],
-    resume_source_items: dict[str, int] | None,
-) -> None:
-    if resume_source_items is None:
-        db.set_discovery_counts(
-            job_id=job_id,
-            decks_seen=snapshot.counts.decks_seen,
-            decks_matched=snapshot.counts.decks_matched,
-            notes_seen=snapshot.counts.notes_seen,
-        )
-        return
-
-    deck_names = {item.deck_name for item in selected_items}
-    matched_decks = {
-        item.deck_name
-        for item in selected_items
-        if item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE
-    }
-    db.set_discovery_counts(
-        job_id=job_id,
-        decks_seen=len(deck_names),
-        decks_matched=len(matched_decks),
-        notes_seen=len(selected_items),
-    )
-
-
 def _select_snapshot_items(
     snapshot: DiscoverySnapshot,
     *,
     resume_source_items: dict[str, int] | None,
-) -> list[DiscoveryItem]:
+) -> tuple[list[DiscoveryItem], int, int, int]:
     if resume_source_items is None:
-        return list(snapshot.items)
+        return (
+            list(snapshot.items),
+            snapshot.counts.decks_seen,
+            snapshot.counts.decks_matched,
+            snapshot.counts.notes_seen,
+        )
 
     selected: list[DiscoveryItem] = []
     resume_note_keys = set(resume_source_items)
@@ -229,4 +202,11 @@ def _select_snapshot_items(
             continue
         if note_key in resume_note_keys:
             selected.append(item)
-    return selected
+
+    deck_names = {item.deck_name for item in selected}
+    matched_decks = {
+        item.deck_name
+        for item in selected
+        if item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE
+    }
+    return selected, len(deck_names), len(matched_decks), len(selected)

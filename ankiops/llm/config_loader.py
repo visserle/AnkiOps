@@ -1,4 +1,4 @@
-"""YAML config loading for Claude task specs."""
+"""YAML config loading for task specs."""
 
 from __future__ import annotations
 
@@ -12,15 +12,7 @@ from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
 from .anthropic_models import format_supported_model_names, parse_model
-from .llm_models import (
-    DeckScope,
-    ExecutionMode,
-    FieldExceptionRule,
-    TaskCatalog,
-    TaskConfig,
-    TaskExecutionOptions,
-    TaskRequestOptions,
-)
+from .llm_models import FieldExceptionRule, TaskCatalog, TaskConfig
 
 
 class LlmConfigError(ValueError):
@@ -29,6 +21,8 @@ class LlmConfigError(ValueError):
 
 _SYSTEM_PROMPT_FILE_NAME = "system_prompt.md"
 _TASKS_DIR_NAME = "tasks"
+_SUPPORTED_TASK_KEYS_ORDERED = ("model", "prompt_file", "fields")
+_SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
 
 
 def _iter_yaml_files(directory: Path) -> list[Path]:
@@ -47,15 +41,6 @@ def _read_yaml_mapping(path: Path) -> dict[str, Any]:
 
 def _require_str(mapping: dict[str, Any], key: str, path: Path) -> str:
     value = mapping.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
-    return value.strip()
-
-
-def _optional_str(mapping: dict[str, Any], key: str, path: Path) -> str | None:
-    value = mapping.get(key)
-    if value is None:
-        return None
     if not isinstance(value, str) or not value.strip():
         raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
     return value.strip()
@@ -87,192 +72,26 @@ def _resolve_relative_file(
     return candidate
 
 
-def _parse_str_list(value: Any, key: str, path: Path) -> list[str]:
-    if not isinstance(value, list) or not value:
-        raise LlmConfigError(f"{path}: '{key}' must be a non-empty list of strings")
-    items: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise LlmConfigError(f"{path}: '{key}' must contain only strings")
-        items.append(item.strip())
-    return items
-
-
-def _parse_optional_str_list(value: Any, key: str, path: Path) -> list[str]:
+def _parse_str_list(
+    value: Any,
+    key: str,
+    path: Path,
+    *,
+    required: bool,
+) -> list[str]:
     if value is None:
+        if required:
+            raise LlmConfigError(f"{path}: '{key}' must be a non-empty list of strings")
         return []
-    if not isinstance(value, list):
-        raise LlmConfigError(f"{path}: '{key}' must be a list of strings")
+    if not isinstance(value, list) or (required and not value):
+        expected = "non-empty list of strings" if required else "list of strings"
+        raise LlmConfigError(f"{path}: '{key}' must be a {expected}")
     items: list[str] = []
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise LlmConfigError(f"{path}: '{key}' must contain only strings")
         items.append(item.strip())
     return items
-
-
-def _is_non_bool_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _parse_request_options(value: Any, path: Path) -> TaskRequestOptions:
-    if value is None:
-        return TaskRequestOptions()
-    if not isinstance(value, dict):
-        raise LlmConfigError(f"{path}: request options must be a mapping")
-
-    valid_keys = {
-        "temperature",
-        "max_output_tokens",
-        "retries",
-        "retry_backoff_seconds",
-        "retry_backoff_jitter",
-    }
-    unknown = sorted(set(value.keys()) - valid_keys)
-    if unknown:
-        raise LlmConfigError(f"{path}: unknown request option(s): {', '.join(unknown)}")
-
-    temperature = value.get("temperature")
-    if temperature is not None:
-        if not _is_non_bool_number(temperature):
-            raise LlmConfigError(f"{path}: 'temperature' must be numeric")
-        if not 0 <= float(temperature) <= 1:
-            raise LlmConfigError(f"{path}: 'temperature' must be between 0 and 1")
-
-    max_output_tokens = value.get("max_output_tokens")
-    if max_output_tokens is not None and (
-        not isinstance(max_output_tokens, int)
-        or isinstance(max_output_tokens, bool)
-        or max_output_tokens <= 0
-    ):
-        raise LlmConfigError(f"{path}: 'max_output_tokens' must be a positive integer")
-
-    retries = value.get("retries", 2)
-    if not isinstance(retries, int) or isinstance(retries, bool) or retries < 0:
-        raise LlmConfigError(f"{path}: 'retries' must be a non-negative integer")
-
-    retry_backoff_seconds = value.get("retry_backoff_seconds", 0.5)
-    if not _is_non_bool_number(retry_backoff_seconds):
-        raise LlmConfigError(f"{path}: 'retry_backoff_seconds' must be numeric")
-    if float(retry_backoff_seconds) <= 0:
-        raise LlmConfigError(f"{path}: 'retry_backoff_seconds' must be > 0")
-
-    retry_backoff_jitter = value.get("retry_backoff_jitter", True)
-    if not isinstance(retry_backoff_jitter, bool):
-        raise LlmConfigError(f"{path}: 'retry_backoff_jitter' must be a boolean")
-
-    return TaskRequestOptions(
-        temperature=float(temperature) if temperature is not None else None,
-        max_output_tokens=max_output_tokens,
-        retries=retries,
-        retry_backoff_seconds=float(retry_backoff_seconds),
-        retry_backoff_jitter=retry_backoff_jitter,
-    )
-
-
-def _parse_execution_options(value: Any, path: Path) -> TaskExecutionOptions:
-    if value is None:
-        return TaskExecutionOptions()
-    if not isinstance(value, dict):
-        raise LlmConfigError(f"{path}: 'execution' must be a mapping")
-
-    valid_keys = {
-        "mode",
-        "concurrency",
-        "fail_fast",
-        "batch_poll_seconds",
-    }
-    unknown = sorted(set(value.keys()) - valid_keys)
-    if unknown:
-        raise LlmConfigError(
-            f"{path}: unknown execution option(s): {', '.join(unknown)}"
-        )
-
-    raw_mode = value.get("mode")
-    if not isinstance(raw_mode, str) or not raw_mode.strip():
-        raise LlmConfigError(f"{path}: 'execution.mode' must be a non-empty string")
-    normalized_mode = raw_mode.strip().lower()
-    try:
-        mode = ExecutionMode(normalized_mode)
-    except ValueError as error:
-        supported = ", ".join(execution_mode.value for execution_mode in ExecutionMode)
-        raise LlmConfigError(
-            f"{path}: 'execution.mode' must be one of: {supported}"
-        ) from error
-
-    concurrency = value.get("concurrency", 8)
-    if not isinstance(concurrency, int) or isinstance(concurrency, bool):
-        raise LlmConfigError(f"{path}: 'execution.concurrency' must be an integer")
-    if concurrency <= 0:
-        raise LlmConfigError(f"{path}: 'execution.concurrency' must be > 0")
-
-    fail_fast = value.get("fail_fast", True)
-    if not isinstance(fail_fast, bool):
-        raise LlmConfigError(f"{path}: 'execution.fail_fast' must be a boolean")
-
-    batch_poll_seconds = value.get("batch_poll_seconds", 15)
-    if (
-        not isinstance(batch_poll_seconds, int)
-        or isinstance(batch_poll_seconds, bool)
-        or batch_poll_seconds <= 0
-    ):
-        raise LlmConfigError(
-            f"{path}: 'execution.batch_poll_seconds' must be a positive integer"
-        )
-
-    if mode is ExecutionMode.BATCH and "concurrency" in value:
-        raise LlmConfigError(
-            f"{path}: 'execution.concurrency' is only supported for online mode"
-        )
-    if mode is ExecutionMode.ONLINE and "batch_poll_seconds" in value:
-        raise LlmConfigError(
-            f"{path}: 'execution.batch_poll_seconds' is only supported for batch mode"
-        )
-
-    return TaskExecutionOptions(
-        mode=mode,
-        concurrency=concurrency,
-        fail_fast=fail_fast,
-        batch_poll_seconds=batch_poll_seconds,
-    )
-
-
-def _parse_deck_scope(value: Any, path: Path) -> DeckScope:
-    if value is None:
-        return DeckScope()
-    if not isinstance(value, dict):
-        raise LlmConfigError(f"{path}: 'decks' must be a mapping")
-
-    unknown = sorted(set(value.keys()) - {"include", "exclude", "include_subdecks"})
-    if unknown:
-        raise LlmConfigError(f"{path}: unknown deck scope key(s): {', '.join(unknown)}")
-
-    include_value = value.get("include", ["*"])
-    exclude_value = value.get("exclude", [])
-    include_subdecks = value.get("include_subdecks", True)
-    if not isinstance(include_value, list) or not include_value:
-        raise LlmConfigError(f"{path}: 'decks.include' must be a non-empty list")
-    if not isinstance(exclude_value, list):
-        raise LlmConfigError(f"{path}: 'decks.exclude' must be a list")
-    if not isinstance(include_subdecks, bool):
-        raise LlmConfigError(f"{path}: 'decks.include_subdecks' must be a boolean")
-
-    include = _parse_str_list(include_value, "decks.include", path)
-    exclude = _parse_optional_str_list(exclude_value, "decks.exclude", path)
-    return DeckScope(
-        include=include,
-        exclude=exclude,
-        include_subdecks=include_subdecks,
-    )
-
-
-def _field_names_by_note_type(
-    note_type_configs: list[NoteTypeConfig],
-) -> dict[str, set[str]]:
-    return {
-        config.name: {field.name for field in config.fields}
-        for config in note_type_configs
-    }
 
 
 def _parse_field_exceptions(
@@ -297,7 +116,10 @@ def _parse_field_exceptions(
         raise LlmConfigError(f"{path}: 'fields.exceptions' must be a list")
 
     note_type_names = [config.name for config in note_type_configs]
-    field_names = _field_names_by_note_type(note_type_configs)
+    field_names = {
+        config.name: {field.name for field in config.fields}
+        for config in note_type_configs
+    }
     parsed: list[FieldExceptionRule] = []
 
     for index, entry in enumerate(exceptions_value):
@@ -312,14 +134,27 @@ def _parse_field_exceptions(
             )
 
         note_types = (
-            _parse_str_list(entry["note_types"], "note_types", entry_path)
+            _parse_str_list(
+                entry.get("note_types"),
+                "note_types",
+                entry_path,
+                required=True,
+            )
             if "note_types" in entry
             else ["*"]
         )
-        read_only = _parse_optional_str_list(
-            entry.get("read_only"), "read_only", entry_path
+        read_only = _parse_str_list(
+            entry.get("read_only"),
+            "read_only",
+            entry_path,
+            required=False,
         )
-        hidden = _parse_optional_str_list(entry.get("hidden"), "hidden", entry_path)
+        hidden = _parse_str_list(
+            entry.get("hidden"),
+            "hidden",
+            entry_path,
+            required=False,
+        )
         if not read_only and not hidden:
             raise LlmConfigError(
                 f"{entry_path}: exception must declare 'read_only' or 'hidden'"
@@ -355,6 +190,16 @@ def _parse_field_exceptions(
     return parsed
 
 
+def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
+    unknown = sorted(set(mapping.keys()) - _SUPPORTED_TASK_KEYS)
+    if unknown:
+        allowed = ", ".join(_SUPPORTED_TASK_KEYS_ORDERED)
+        raise LlmConfigError(
+            f"{path}: unknown task key(s): {', '.join(unknown)}. "
+            f"Allowed keys: {allowed}"
+        )
+
+
 def _parse_task(
     path: Path,
     *,
@@ -362,6 +207,7 @@ def _parse_task(
     llm_dir: Path,
 ) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
+    _validate_task_keys(mapping, path)
     name = path.stem
     model_name = _require_str(mapping, "model", path)
     model = parse_model(model_name)
@@ -376,50 +222,13 @@ def _parse_task(
         key="prompt_file",
     )
     prompt = _read_text_file(prompt_file_path, label="prompt")
-    system_prompt_file_ref = _optional_str(mapping, "system_prompt_file", path)
-    if system_prompt_file_ref is None:
-        system_prompt_path = (llm_dir / _SYSTEM_PROMPT_FILE_NAME).resolve()
-    else:
-        system_prompt_path = _resolve_relative_file(
-            path,
-            system_prompt_file_ref,
-            llm_dir=llm_dir,
-            key="system_prompt_file",
-        )
+    system_prompt_path = (llm_dir / _SYSTEM_PROMPT_FILE_NAME).resolve()
     system_prompt = _read_text_file(system_prompt_path, label="system prompt")
-    api_key_env = _optional_str(mapping, "api_key_env", path) or "ANTHROPIC_API_KEY"
-    timeout_seconds = mapping.get("timeout_seconds", 60)
-    if (
-        not isinstance(timeout_seconds, int)
-        or isinstance(timeout_seconds, bool)
-        or timeout_seconds <= 0
-    ):
-        raise LlmConfigError(f"{path}: 'timeout_seconds' must be a positive integer")
-    decks = _parse_deck_scope(mapping.get("decks"), path)
     field_exceptions = _parse_field_exceptions(
         mapping.get("fields"),
         note_type_configs=note_type_configs,
         path=path,
     )
-    request = _parse_request_options(mapping.get("request"), path)
-    execution = _parse_execution_options(mapping.get("execution"), path)
-
-    unknown = sorted(
-        set(mapping.keys())
-        - {
-            "model",
-            "prompt_file",
-            "system_prompt_file",
-            "api_key_env",
-            "timeout_seconds",
-            "decks",
-            "fields",
-            "request",
-            "execution",
-        }
-    )
-    if unknown:
-        raise LlmConfigError(f"{path}: unknown task key(s): {', '.join(unknown)}")
 
     return TaskConfig(
         name=name,
@@ -428,12 +237,7 @@ def _parse_task(
         prompt=prompt,
         system_prompt_path=system_prompt_path,
         prompt_path=prompt_file_path,
-        api_key_env=api_key_env,
-        timeout_seconds=timeout_seconds,
-        decks=decks,
         field_exceptions=field_exceptions,
-        request=request,
-        execution=execution,
     )
 
 

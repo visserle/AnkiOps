@@ -15,6 +15,11 @@ from .llm_models import (
     TaskRequestOptions,
 )
 
+_DEFAULT_REQUEST_OPTIONS = TaskRequestOptions()
+_DEFAULT_EXECUTION_OPTIONS = TaskExecutionOptions()
+_DEFAULT_API_KEY_ENV = "ANTHROPIC_API_KEY"
+_DEFAULT_TIMEOUT_SECONDS = 60
+
 
 def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
     return {
@@ -27,9 +32,7 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
         "api_key_env": task.api_key_env,
         "timeout_seconds": task.timeout_seconds,
         "decks": {
-            "include": list(task.decks.include),
-            "exclude": list(task.decks.exclude),
-            "include_subdecks": task.decks.include_subdecks,
+            "deck_root": task.decks.deck_root,
         },
         "field_exceptions": [
             {
@@ -49,7 +52,6 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
         "execution": {
             "mode": task.execution.mode.value,
             "concurrency": task.execution.concurrency,
-            "fail_fast": task.execution.fail_fast,
             "batch_poll_seconds": task.execution.batch_poll_seconds,
         },
     }
@@ -79,6 +81,13 @@ def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
     if not isinstance(mode_raw, str):
         raise ValueError("Job snapshot execution mode is invalid")
 
+    deck_root_raw = decks.get("deck_root")
+    if deck_root_raw is not None and not isinstance(deck_root_raw, str):
+        raise ValueError("Job snapshot deck scope is invalid")
+    deck_root = deck_root_raw.strip() if isinstance(deck_root_raw, str) else None
+    if deck_root == "":
+        deck_root = None
+
     field_exceptions: list[FieldExceptionRule] = []
     field_exceptions_raw = snapshot.get("field_exceptions")
     if isinstance(field_exceptions_raw, list):
@@ -100,13 +109,11 @@ def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
         prompt=str(snapshot.get("prompt") or ""),
         system_prompt_path=Path(str(snapshot.get("system_prompt_path") or "")),
         prompt_path=Path(str(snapshot.get("prompt_path") or "")),
-        api_key_env=str(snapshot.get("api_key_env") or "ANTHROPIC_API_KEY"),
-        timeout_seconds=int(snapshot.get("timeout_seconds") or 60),
-        decks=DeckScope(
-            include=_string_list(decks.get("include"), default=["*"]),
-            exclude=_string_list(decks.get("exclude"), default=[]),
-            include_subdecks=bool(decks.get("include_subdecks", True)),
+        api_key_env=str(snapshot.get("api_key_env") or _DEFAULT_API_KEY_ENV),
+        timeout_seconds=int(
+            snapshot.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         ),
+        decks=DeckScope(deck_root=deck_root),
         field_exceptions=field_exceptions,
         request=TaskRequestOptions(
             temperature=(
@@ -119,15 +126,31 @@ def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
                 if request.get("max_output_tokens") is not None
                 else None
             ),
-            retries=int(request.get("retries", 2)),
-            retry_backoff_seconds=float(request.get("retry_backoff_seconds", 0.5)),
-            retry_backoff_jitter=bool(request.get("retry_backoff_jitter", True)),
+            retries=int(request.get("retries", _DEFAULT_REQUEST_OPTIONS.retries)),
+            retry_backoff_seconds=float(
+                request.get(
+                    "retry_backoff_seconds",
+                    _DEFAULT_REQUEST_OPTIONS.retry_backoff_seconds,
+                )
+            ),
+            retry_backoff_jitter=bool(
+                request.get(
+                    "retry_backoff_jitter",
+                    _DEFAULT_REQUEST_OPTIONS.retry_backoff_jitter,
+                )
+            ),
         ),
         execution=TaskExecutionOptions(
             mode=ExecutionMode(mode_raw),
-            concurrency=int(execution.get("concurrency", 8)),
-            fail_fast=bool(execution.get("fail_fast", True)),
-            batch_poll_seconds=int(execution.get("batch_poll_seconds", 15)),
+            concurrency=int(
+                execution.get("concurrency", _DEFAULT_EXECUTION_OPTIONS.concurrency)
+            ),
+            batch_poll_seconds=int(
+                execution.get(
+                    "batch_poll_seconds",
+                    _DEFAULT_EXECUTION_OPTIONS.batch_poll_seconds,
+                )
+            ),
         ),
     )
 

@@ -69,15 +69,7 @@ def _task_config(
     extra: str = "",
 ) -> str:
     suffix = f"\n{dedent(extra).strip()}" if extra.strip() else ""
-    return (
-        f"model: {model}\n"
-        f"prompt_file: {prompt_file}\n"
-        "execution:\n"
-        "  mode: online\n"
-        "  concurrency: 1\n"
-        "  fail_fast: true"
-        f"{suffix}\n"
-    )
+    return f"model: {model}\nprompt_file: {prompt_file}{suffix}\n"
 
 
 def _write_prompt(collection_dir: Path, content: str = DEFAULT_TASK_PROMPT) -> None:
@@ -431,9 +423,6 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
         tmp_path,
         content=_task_config(
             extra="""
-            decks:
-              include: ["Parent"]
-              include_subdecks: false
             fields:
               exceptions:
                 - read_only: ["Source"]
@@ -454,16 +443,15 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     assert task.prompt == "Fix grammar from file"
     assert task.system_prompt_path == (tmp_path / "llm/system_prompt.md").resolve()
     assert task.prompt_path == (tmp_path / "llm/prompts/grammar.md").resolve()
-    assert task.decks.include == ["Parent"]
-    assert task.decks.include_subdecks is False
+    assert task.decks.deck_root is None
 
 
-def test_load_llm_task_catalog_supports_task_specific_system_prompt_file(
+def test_load_llm_task_catalog_rejects_task_specific_system_prompt_file(
     note_type_configs,
     tmp_path: Path,
 ):
+    _write_system_prompt(tmp_path, "System rules")
     _write_prompt(tmp_path, "Fix grammar from file")
-    _write(tmp_path / "llm/prompts/custom_system.md", "Task-specific system rules")
     _write(
         tmp_path / TASK_FILE,
         _task_config(
@@ -475,12 +463,10 @@ def test_load_llm_task_catalog_supports_task_specific_system_prompt_file(
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
 
-    assert not catalog.errors
-    task = catalog.tasks_by_name["grammar"]
-    assert task.system_prompt == "Task-specific system rules"
-    assert task.system_prompt_path == (
-        tmp_path / "llm/prompts/custom_system.md"
-    ).resolve()
+    assert not catalog.tasks_by_name
+    assert "unknown task key(s): system_prompt_file" in next(
+        iter(catalog.errors.values())
+    )
 
 
 def test_load_llm_task_catalog_defaults_execution_when_omitted(
@@ -500,7 +486,6 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
     task = catalog.tasks_by_name["grammar"]
     assert task.execution.mode.value == "online"
     assert task.execution.concurrency == 8
-    assert task.execution.fail_fast is True
     assert task.execution.batch_poll_seconds == 15
 
 
@@ -535,16 +520,6 @@ def test_load_llm_task_catalog_requires_system_prompt(
             "DoesNotExist",
         ),
         (
-            _task_config(
-                extra="""
-                decks:
-                  include: ["Parent"]
-                  include_subdecks: "yes"
-                """
-            ),
-            "decks.include_subdecks",
-        ),
-        (
             _task_config(model="gpt-5"),
             "must be one of: opus, sonnet, haiku",
         ),
@@ -553,71 +528,50 @@ def test_load_llm_task_catalog_requires_system_prompt(
             "unknown task key(s): sdk",
         ),
         (
+            _task_config(
+                extra="""
+                decks:
+                  include: ["Parent"]
+                """
+            ),
+            "unknown task key(s): decks",
+        ),
+        (
+            _task_config(
+                extra="""
+                execution:
+                  mode: batch
+                """
+            ),
+            "unknown task key(s): execution",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  temperature: 0.2
+                """
+            ),
+            "unknown task key(s): request",
+        ),
+        (
             _task_config(extra="system_prompt_file: ../../../outside.md"),
-            "system_prompt_file",
+            "unknown task key(s): system_prompt_file",
         ),
         (
             _task_config(extra="timeout_seconds: true"),
-            "timeout_seconds",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  temperature: true
-                """
-            ),
-            "temperature",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  max_output_tokens: true
-                """
-            ),
-            "max_output_tokens",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  retries: true
-                """
-            ),
-            "retries",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  retry_backoff_seconds: true
-                """
-            ),
-            "retry_backoff_seconds",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  retry_backoff_jitter: 1
-                """
-            ),
-            "retry_backoff_jitter",
+            "unknown task key(s): timeout_seconds",
         ),
     ],
     ids=[
         "invalid-exception-field",
-        "invalid-include-subdecks",
         "non-claude-model",
         "legacy-provider-key",
-        "system-prompt-file-outside-llm",
-        "invalid-timeout-bool",
-        "invalid-temperature-bool",
-        "invalid-max-output-bool",
-        "invalid-retries-bool",
-        "invalid-backoff-bool",
-        "invalid-jitter-type",
+        "legacy-decks-key",
+        "legacy-execution-key",
+        "legacy-request-key",
+        "legacy-system-prompt-file-key",
+        "legacy-timeout-key",
     ],
 )
 def test_load_llm_task_catalog_rejects_invalid_tasks(
@@ -869,18 +823,7 @@ def test_run_task_marks_batch_pending_items_as_fatal_on_results_failure(
     tmp_path,
     monkeypatch,
 ):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: batch\n"
-            "  batch_poll_seconds: 1\n"
-            "  fail_fast: true\n"
-        ),
-    )
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
@@ -892,6 +835,7 @@ def test_run_task_marks_batch_pending_items_as_fatal_on_results_failure(
     result = run_task(
         collection_dir=collection,
         task_name="grammar",
+        mode_override="batch",
         no_auto_commit=True,
     )
 
@@ -923,10 +867,6 @@ def test_run_task_batch_fatal_cleanup_preserves_skipped_items(tmp_path, monkeypa
         task_content=(
             "model: sonnet\n"
             "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: batch\n"
-            "  batch_poll_seconds: 1\n"
-            "  fail_fast: true\n"
             "fields:\n"
             "  exceptions:\n"
             "    - note_types: ['AnkiOpsChoice']\n"
@@ -944,6 +884,7 @@ def test_run_task_batch_fatal_cleanup_preserves_skipped_items(tmp_path, monkeypa
     result = run_task(
         collection_dir=collection,
         task_name="grammar",
+        mode_override="batch",
         no_auto_commit=True,
     )
 
@@ -1004,18 +945,7 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
     tmp_path,
     monkeypatch,
 ):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: online\n"
-            "  concurrency: 2\n"
-            "  fail_fast: true\n"
-        ),
-    )
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
@@ -1047,53 +977,6 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
     assert detail.fatal_error == "Unexpected online execution error: boom runtime"
 
 
-def test_run_task_online_non_fail_fast_wraps_unexpected_worker_exception_as_fatal(
-    tmp_path,
-    monkeypatch,
-):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: online\n"
-            "  concurrency: 2\n"
-            "  fail_fast: false\n"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _OnlineUnexpectedErrorClient(),
-    )
-
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        no_auto_commit=True,
-    )
-
-    assert result.failed
-    assert not result.persisted
-    assert result.status == "failed"
-    assert result.summary.errors == 1
-    assert result.summary.canceled == 0
-
-    db = LlmDbAdapter.open(collection)
-    try:
-        detail = db.get_job_detail(result.job_id)
-    finally:
-        db.close()
-
-    assert detail is not None
-    assert detail.status is LlmJobStatus.FAILED
-    assert detail.fatal_error == "Unexpected online execution error: boom runtime"
-
-
 def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(
         tmp_path,
@@ -1101,10 +984,6 @@ def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypat
         task_content=(
             "model: sonnet\n"
             "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: batch\n"
-            "  batch_poll_seconds: 1\n"
-            "  fail_fast: true\n"
             "fields:\n"
             "  exceptions:\n"
             "    - note_types: ['AnkiOpsChoice']\n"
@@ -1122,6 +1001,7 @@ def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypat
     result = run_task(
         collection_dir=collection,
         task_name="grammar",
+        mode_override="batch",
         no_auto_commit=True,
     )
 
@@ -1152,18 +1032,7 @@ def test_run_task_batch_note_error_result_maps_to_note_error(tmp_path, monkeypat
 
 
 def test_run_task_batch_missing_results_records_attempts(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=(
-            "model: sonnet\n"
-            "prompt_file: ../prompts/grammar.md\n"
-            "execution:\n"
-            "  mode: batch\n"
-            "  batch_poll_seconds: 1\n"
-            "  fail_fast: true\n"
-        ),
-    )
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
         "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
     )
@@ -1175,6 +1044,7 @@ def test_run_task_batch_missing_results_records_attempts(tmp_path, monkeypatch):
     result = run_task(
         collection_dir=collection,
         task_name="grammar",
+        mode_override="batch",
         no_auto_commit=True,
     )
 
@@ -1201,11 +1071,11 @@ def test_run_task_batch_missing_results_records_attempts(tmp_path, monkeypatch):
     assert all(item.attempts == 1 for item in detail.items)
     assert len(attempt_rows) == 2
     assert all(
-        row["result_type"] == LlmAttemptResultType.CANCELED.value for row in attempt_rows
+        row["result_type"] == LlmAttemptResultType.CANCELED.value
+        for row in attempt_rows
     )
     assert all(
-        row["error_type"] == LlmAttemptResultType.CANCELED.value
-        for row in attempt_rows
+        row["error_type"] == LlmAttemptResultType.CANCELED.value for row in attempt_rows
     )
     assert all(
         row["error_message"] == "Batch result missing from provider response"
@@ -1252,30 +1122,24 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=sonnet, "
-        "api_model=claude-sonnet-4-6"
+        "Starting LLM task 'grammar' (model=sonnet, api_model=claude-sonnet-4-6"
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "
         "temperature=default retries=2 retry_backoff=0.5s retry_jitter=true "
-        "mode=online concurrency=1 fail_fast=true"
+        "mode=online concurrency=8"
     ) in caplog.text
-    assert "LLM serializer scope: *" in caplog.text
+    assert "LLM serializer scope: collection" in caplog.text
     assert "Auto-commit disabled (--no-auto-commit)" in caplog.text
     assert "Serialized 1 deck(s), 2 note(s) in memory" in caplog.text
     assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
     assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
-    assert (
-        "Task 'grammar' (sonnet): 2 notes — "
-        "1 updated, 1 unchanged"
-    ) in caplog.text
+    assert ("Task 'grammar' (sonnet): 2 notes — 1 updated, 1 unchanged") in caplog.text
     assert (
         "Usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
         "2.0s provider time"
     ) in caplog.text
-    assert (
-        "Cost: $0.00"
-    ) in caplog.text
+    assert ("Cost: $0.00") in caplog.text
     assert "Broken" not in caplog.text
     assert "<task>" not in caplog.text
     assert '{"note_key"' not in caplog.text
@@ -1312,57 +1176,12 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "LLM note error for nk-2 in 'TestDeck' (AnkiOpsChoice): "
         "Model attempted to update read-only field 'Answer'"
     ) in caplog.text
-    assert (
-        "Task 'grammar' (sonnet): 2 notes — "
-        "1 unchanged, 1 error"
-    ) in caplog.text
+    assert ("Task 'grammar' (sonnet): 2 notes — 1 unchanged, 1 error") in caplog.text
     assert (
         "Usage: 2 requests, 22 input tokens, 14 output tokens, "
         "0 retries, 1.8s provider time"
     ) in caplog.text
-    assert (
-        "Cost: $0.00"
-    ) in caplog.text
-
-
-def test_run_task_logs_deck_scope_skips(tmp_path, monkeypatch, caplog):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=_task_config(
-            extra="""
-            decks:
-              include: ["Other*"]
-            fields:
-              exceptions:
-                - read_only: ["Source"]
-            """
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ClaudeClient",
-        lambda _task: _StubClient([]),
-    )
-
-    with caplog.at_level(logging.DEBUG):
-        result = run_task(
-            collection_dir=collection,
-            task_name="grammar",
-            no_auto_commit=True,
-        )
-    summary = result.summary
-
-    assert not result.failed
-    assert not result.persisted
-    assert summary.decks_seen == 1
-    assert summary.decks_matched == 0
-    assert summary.notes_seen == 2
-    assert summary.skipped_deck_scope == 2
-    assert "Skipping deck 'TestDeck' (2 notes): outside task scope" in caplog.text
-    assert "Task 'grammar' (sonnet): 0 notes — 2 skipped" in caplog.text
+    assert ("Cost: $0.00") in caplog.text
 
 
 def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
@@ -1410,8 +1229,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
     assert summary.notes_seen == 1
     assert summary.skipped_no_editable_fields == 1
     assert (
-        "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): "
-        "no editable non-empty fields"
+        "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): no editable non-empty fields"
     ) in caplog.text
     assert "Task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
 
@@ -1450,81 +1268,29 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("task_content", "deck_override", "expected_scope"),
+    ("deck_override", "expected_scope"),
     [
         (
-            _task_config(
-                extra=f"""
-                decks:
-                  include: ["{TEST_DECK}"]
-                fields:
-                  exceptions:
-                    - read_only: ["Source"]
-                """
-            ),
-            None,
-            {"deck": TEST_DECK, "no_subdecks": False},
-        ),
-        (
-            _task_config(
-                extra=f"""
-                decks:
-                  include: ["{TEST_DECK}"]
-                  include_subdecks: false
-                fields:
-                  exceptions:
-                    - read_only: ["Source"]
-                """
-            ),
-            None,
-            {"deck": TEST_DECK, "no_subdecks": True},
-        ),
-        (
-            _task_config(
-                extra="""
-                decks:
-                  include: ["Test*"]
-                fields:
-                  exceptions:
-                    - read_only: ["Source"]
-                """
-            ),
             None,
             {"deck": None, "no_subdecks": False},
         ),
         (
-            _task_config(
-                extra="""
-                decks:
-                  include: ["Other*"]
-                fields:
-                  exceptions:
-                    - read_only: ["Source"]
-                """
-            ),
             TEST_DECK,
-            {"deck": TEST_DECK, "no_subdecks": True},
+            {"deck": TEST_DECK, "no_subdecks": False},
         ),
     ],
     ids=[
-        "exact-deck",
-        "exact-deck-without-subdecks",
-        "wildcard-deck",
+        "collection-default",
         "deck-override-exact",
     ],
 )
 def test_run_task_uses_expected_serialize_scope(
     tmp_path: Path,
     monkeypatch,
-    task_content: str,
     deck_override: str | None,
     expected_scope: dict[str, object],
 ):
-    collection = _prepare_runner_collection(
-        tmp_path,
-        monkeypatch,
-        task_content=task_content,
-    )
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
     captured: dict[str, object] = {}
 
     def _fake_serialize(
@@ -1650,7 +1416,7 @@ def test_run_task_writes_to_explicit_collection_dir(tmp_path: Path, monkeypatch)
 
     assert not result.failed
     assert result.persisted
-    assert "Q: Path-correct update." in (
-        collection / f"{TEST_DECK}.md"
-    ).read_text(encoding="utf-8")
+    assert "Q: Path-correct update." in (collection / f"{TEST_DECK}.md").read_text(
+        encoding="utf-8"
+    )
     assert not (other_root / f"{TEST_DECK}.md").exists()

@@ -2,15 +2,15 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file: Edit in plain text, version with Git, enhance with LLMs, sync changes both ways. 
+AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, sync changes both ways. 
 
 ## Features
 
-- **Full Anki support**: Safe, performant bidirectional syncing of notes, custom note types, decks, subdecks, and media files
-- **Markdown-first**: Manage decks from your favourite editor with Markdown rendering (including syntax highlighting) on Anki's desktop and mobile apps
+- **Full Anki support**: Safe, performant bidirectional syncing of notes with custom note types, (sub-)decks, and media files
+- **Markdown-first**: Edit in your favourite editor; render Markdown features on Anki's desktop and mobile apps (including syntax highlighting)
 - **Simple CLI interface**: After initialization, just two commands are needed for importing and exporting between Anki and your filesystem 
+- **LLM-integration**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations (wip)
 - **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands (nyi)
-- **LLM-ready**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations (wip)
 
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using `ankiops note-types --add <name>`.
@@ -168,8 +168,8 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
-- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>|--collection]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>|--collection] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> [--model <opus|sonnet|haiku>] [--deck <deck_name>]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <opus|sonnet|haiku>] [--online|--batch] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
 - `ankiops llm --job <job_id|latest> --resume [--online|--batch] [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
@@ -206,7 +206,6 @@ ankiops llm grammar --run           # run task job
 ankiops llm grammar --run --batch
 ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
-ankiops llm grammar --collection    # full collection override
 ankiops llm grammar --run --model haiku
 ankiops llm --job latest
 ankiops llm --job latest --resume
@@ -216,50 +215,22 @@ ankiops llm --job latest --resume
 ```yaml
 model: sonnet
 prompt_file: ../prompts/grammar.md
-system_prompt_file: ../system_prompt.md
-api_key_env: ANTHROPIC_API_KEY
-timeout_seconds: 60
-
-decks:
-  include: ["*"]
-  exclude: []
-  include_subdecks: true
 
 fields:
   exceptions:
     - hidden: ["AI Notes"]
     - note_types: ["AnkiOpsChoice"]
       read_only: ["Answer"]
-
-request:
-  temperature: 0
-  max_output_tokens: 2048
-  retries: 2
-  retry_backoff_seconds: 0.5
-  retry_backoff_jitter: true
 ```
 
 - Required keys: `model`, `prompt_file`
 - Supported models: `opus`, `sonnet`, `haiku`
 - `prompt_file` is resolved relative to the task file and must stay within `llm/`
-- `system_prompt_file` is optional (defaults to `llm/system_prompt.md`), resolved relative to the task file, and must stay within `llm/`
-- `api_key_env` defaults to `ANTHROPIC_API_KEY` if omitted
-- `decks.include` defaults to `["*"]`, `decks.exclude` defaults to `[]`, and `decks.include_subdecks` defaults to `true`
-- CLI overrides: `ankiops llm <task> --deck <name>` forces one exact deck with `include_subdecks=false`; `--collection` forces `decks.include=["*"]`
-- `decks` patterns use shell-style matching (`*`, `?`, character classes); non-wildcard names match exact deck names (and optionally subdecks)
+- `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
-- `request` tuning defaults: `retries=2`, `retry_backoff_seconds=0.5`, `retry_backoff_jitter=true`, `max_output_tokens=2048`
-- `execution` is optional; defaults are `mode=online`, `concurrency=8`, `fail_fast=true`, `batch_poll_seconds=15`
-- `execution.mode` chooses `online` (concurrent Messages API) or `batch` (Message Batches API)
-- `execution.concurrency` applies to `online` mode; `execution.batch_poll_seconds` applies to `batch` mode
-- `execution.fail_fast=true` cancels pending online work on fatal failures
-- Batch mode example:
-  ```yaml
-  execution:
-    mode: batch
-    batch_poll_seconds: 15
-    fail_fast: true
-  ```
+- `llm/system_prompt.md` is global and shared by all tasks
+- Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
+- Request/execution tuning uses internal defaults; only model and mode can be overridden from CLI (`--model`, `--online`, `--batch`)
 
 ### Runtime Behavior
 

@@ -63,12 +63,6 @@ def _prepare_collection(tmp_path: Path) -> Path:
             - note_types: ["AnkiOpsChoice"]
               read_only: ["Answer"]
             - hidden: ["AI Notes"]
-        request:
-          max_output_tokens: 2048
-        execution:
-          mode: online
-          concurrency: 1
-          fail_fast: true
         """,
     )
     return tmp_path
@@ -114,10 +108,9 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
 
     assert row is not None
     assert int(row["total"]) == 0
-    assert (
-        (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
-        == original_content
-    )
+    assert (collection / f"{TEST_DECK}.md").read_text(
+        encoding="utf-8"
+    ) == original_content
 
 
 def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
@@ -148,10 +141,8 @@ def test_plan_task_deck_override_forces_exact_scope(tmp_path: Path):
         deck_override=TEST_DECK,
     )
 
-    assert plan.deck_scope == (
-        f"include={TEST_DECK} exclude=- include_subdecks=false"
-    )
-    assert plan.serializer_scope == f"exact:{TEST_DECK}"
+    assert plan.deck_scope == f"deck:{TEST_DECK}"
+    assert plan.serializer_scope == f"deck:{TEST_DECK}"
 
 
 def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
@@ -170,29 +161,11 @@ def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
 
 def test_plan_task_applies_batch_discount_to_cost_estimate(tmp_path: Path):
     collection = _prepare_collection(tmp_path)
-    _write(
-        collection / TASK_FILE,
-        """
-        model: sonnet
-        prompt_file: ../prompts/grammar.md
-        fields:
-          exceptions:
-            - read_only: ["Source"]
-            - note_types: ["AnkiOpsChoice"]
-              read_only: ["Answer"]
-            - hidden: ["AI Notes"]
-        request:
-          max_output_tokens: 2048
-        execution:
-          mode: batch
-          batch_poll_seconds: 15
-          fail_fast: true
-        """,
-    )
 
     plan = plan_task(
         collection_dir=collection,
         task_name="grammar",
+        mode_override="batch",
     )
 
     assert plan.summary.execution_mode is ExecutionMode.BATCH

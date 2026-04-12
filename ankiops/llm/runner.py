@@ -40,7 +40,6 @@ from .task_options import (
     apply_mode_override,
     format_deck_scope,
     format_request_defaults,
-    format_serializer_scope,
     resolve_failure_policy,
     resolve_model,
     resolve_serializer_scope,
@@ -245,7 +244,7 @@ class LlmTaskExecutor:
         logger.debug("LLM request defaults: %s", format_request_defaults(task))
         logger.debug(
             "LLM serializer scope: %s",
-            format_serializer_scope(deck, no_subdecks),
+            format_deck_scope(task),
         )
         aggregate = None
         provider_client = None
@@ -326,7 +325,7 @@ class LlmTaskExecutor:
                         "error",
                         fatal_marked,
                     )
-            elif task.execution.fail_fast:
+            else:
                 canceled = db.mark_unfinished_items_canceled(job_id=job_id)
                 if canceled:
                     logger.warning(
@@ -405,44 +404,31 @@ class LlmTaskExecutor:
         if not tasks:
             return
 
-        if task.execution.fail_fast:
-            for completed in asyncio.as_completed(tasks):
-                try:
-                    await completed
-                except LlmFatalError as error:
-                    if first_fatal_error is None:
-                        first_fatal_error = error
-                    for pending in tasks:
-                        if not pending.done():
-                            pending.cancel()
-                    break
-                except Exception as error:
-                    if first_fatal_error is None:
-                        first_fatal_error = _unexpected_online_execution_error(error)
-                    for pending in tasks:
-                        if not pending.done():
-                            pending.cancel()
-                    break
-            await asyncio.gather(*tasks, return_exceptions=True)
-            if first_fatal_error is not None:
-                canceled = db.mark_unfinished_items_canceled(job_id=job_id)
-                if canceled:
-                    logger.warning(
-                        "Fail-fast canceled %d pending online item(s)",
-                        canceled,
-                    )
-                raise first_fatal_error
-            return
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, LlmFatalError):
+        for completed in asyncio.as_completed(tasks):
+            try:
+                await completed
+            except LlmFatalError as error:
                 if first_fatal_error is None:
-                    first_fatal_error = result
-            elif isinstance(result, Exception):
+                    first_fatal_error = error
+                for pending in tasks:
+                    if not pending.done():
+                        pending.cancel()
+                break
+            except Exception as error:
                 if first_fatal_error is None:
-                    first_fatal_error = _unexpected_online_execution_error(result)
+                    first_fatal_error = _unexpected_online_execution_error(error)
+                for pending in tasks:
+                    if not pending.done():
+                        pending.cancel()
+                break
+        await asyncio.gather(*tasks, return_exceptions=True)
         if first_fatal_error is not None:
+            canceled = db.mark_unfinished_items_canceled(job_id=job_id)
+            if canceled:
+                logger.warning(
+                    "Canceled %d pending online item(s) due to fatal error",
+                    canceled,
+                )
             raise first_fatal_error
 
     async def _process_online_candidate(

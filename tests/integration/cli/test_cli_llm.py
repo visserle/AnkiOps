@@ -26,7 +26,7 @@ def _plan_result() -> TaskPlanResult:
         task_name="grammar",
         model=SONNET,
         deck_scope="*",
-        serializer_scope="*",
+        serializer_scope="collection",
         system_prompt_path="/tmp/llm/system_prompt.md",
         prompt_path="/tmp/llm/prompts/grammar.md",
         system_prompt="System prompt",
@@ -34,7 +34,7 @@ def _plan_result() -> TaskPlanResult:
         request_defaults=(
             "timeout=60s max_tokens=2048 temperature=default retries=2 "
             "retry_backoff=0.5s retry_jitter=true mode=online "
-            "concurrency=8 fail_fast=true"
+            "concurrency=8"
         ),
         summary=TaskRunSummary(
             task_name="grammar",

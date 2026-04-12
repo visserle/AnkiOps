@@ -13,18 +13,9 @@ from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
 
 
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
-    include = task.decks.include
-    if task.decks.exclude or len(include) != 1:
+    if task.decks.deck_root is None:
         return None, False
-
-    deck_name = include[0].strip()
-    if not deck_name:
-        return None, False
-
-    if any(char in deck_name for char in ("*", "?", "[")):
-        return None, False
-
-    return deck_name, not task.decks.include_subdecks
+    return task.decks.deck_root, False
 
 
 def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConfig:
@@ -41,11 +32,7 @@ def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConf
 
     return replace(
         task,
-        decks=DeckScope(
-            include=[deck_name],
-            exclude=[],
-            include_subdecks=False,
-        ),
+        decks=DeckScope(deck_root=deck_name),
     )
 
 
@@ -67,22 +54,9 @@ def apply_mode_override(task: TaskConfig, mode_override: str | None) -> TaskConf
 
 
 def format_deck_scope(task: TaskConfig) -> str:
-    include = ",".join(task.decks.include)
-    exclude = ",".join(task.decks.exclude) if task.decks.exclude else "-"
-    if include == "*" and exclude == "-" and task.decks.include_subdecks:
-        return "*"
-    return (
-        f"include={include} exclude={exclude} "
-        f"include_subdecks={str(task.decks.include_subdecks).lower()}"
-    )
-
-
-def format_serializer_scope(deck: str | None, no_subdecks: bool) -> str:
-    if deck is None:
-        return "*"
-    if no_subdecks:
-        return f"exact:{deck}"
-    return deck
+    if task.decks.deck_root is None:
+        return "collection"
+    return f"deck:{task.decks.deck_root}"
 
 
 def format_request_defaults(task: TaskConfig) -> str:
@@ -92,15 +66,9 @@ def format_request_defaults(task: TaskConfig) -> str:
     )
     execution = task.execution
     if execution.mode is ExecutionMode.ONLINE:
-        execution_text = (
-            f"mode=online concurrency={execution.concurrency} "
-            f"fail_fast={str(execution.fail_fast).lower()}"
-        )
+        execution_text = f"mode=online concurrency={execution.concurrency}"
     else:
-        execution_text = (
-            f"mode=batch poll={execution.batch_poll_seconds}s "
-            f"fail_fast={str(execution.fail_fast).lower()}"
-        )
+        execution_text = f"mode=batch poll={execution.batch_poll_seconds}s"
 
     return (
         f"timeout={task.timeout_seconds}s "

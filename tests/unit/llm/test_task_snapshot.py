@@ -26,11 +26,7 @@ def test_task_snapshot_roundtrip_preserves_core_fields():
         prompt_path=Path("llm/prompts/grammar.md"),
         api_key_env="ANTHROPIC_API_KEY",
         timeout_seconds=45,
-        decks=DeckScope(
-            include=["DeckA"],
-            exclude=["DeckB"],
-            include_subdecks=False,
-        ),
+        decks=DeckScope(deck_root="DeckA"),
         field_exceptions=[
             FieldExceptionRule(
                 note_types=["AnkiOpsQA"],
@@ -48,7 +44,6 @@ def test_task_snapshot_roundtrip_preserves_core_fields():
         execution=TaskExecutionOptions(
             mode=ExecutionMode.BATCH,
             concurrency=4,
-            fail_fast=False,
             batch_poll_seconds=30,
         ),
     )
@@ -73,7 +68,7 @@ def test_task_from_snapshot_rejects_invalid_model():
         task_from_snapshot(
             {
                 "model": "unknown",
-                "decks": {"include": ["*"], "exclude": [], "include_subdecks": True},
+                "decks": {"deck_root": None},
                 "request": {},
                 "execution": {"mode": "online"},
             }
@@ -85,7 +80,7 @@ def test_task_from_snapshot_requires_execution_mapping():
         task_from_snapshot(
             {
                 "model": "sonnet",
-                "decks": {"include": ["*"], "exclude": [], "include_subdecks": True},
+                "decks": {"deck_root": None},
                 "request": {},
             }
         )

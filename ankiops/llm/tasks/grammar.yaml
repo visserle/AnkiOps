@@ -1,17 +1,8 @@
 model: sonnet
 prompt_file: ../prompts/grammar.md
 
-decks:
-  include: ["*"]
-  exclude: []
-  include_subdecks: true
-
 fields:
   exceptions:
     - hidden: ["AI Notes"]
     - note_types: ["AnkiOpsChoice"]
       read_only: ["Answer"]
-
-request:
-  temperature: 0
-  max_output_tokens: 2048

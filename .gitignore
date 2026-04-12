@@ -104,3 +104,5 @@ node_modules/
 # AI
 .gemini/
 .claude/
+AGENTS.md
+.gitignore

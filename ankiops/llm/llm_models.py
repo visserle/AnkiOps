@@ -61,43 +61,13 @@ class LlmJobStatus(Enum):
 
 @dataclass(frozen=True)
 class DeckScope:
-    include: list[str] = field(default_factory=lambda: ["*"])
-    exclude: list[str] = field(default_factory=list)
-    include_subdecks: bool = True
-
-    @staticmethod
-    def _matches_pattern(
-        deck_name: str,
-        pattern: str,
-        *,
-        include_subdecks: bool,
-    ) -> bool:
-        if any(char in pattern for char in ("*", "?", "[")):
-            return fnmatchcase(deck_name, pattern)
-
-        if deck_name == pattern:
-            return True
-        if include_subdecks and deck_name.startswith(f"{pattern}::"):
-            return True
-        return False
+    deck_root: str | None = None
 
     def matches(self, deck_name: str) -> bool:
-        return any(
-            self._matches_pattern(
-                deck_name,
-                pattern,
-                include_subdecks=self.include_subdecks,
-            )
-            for pattern in self.include
-        ) and (
-            not any(
-                self._matches_pattern(
-                    deck_name,
-                    pattern,
-                    include_subdecks=self.include_subdecks,
-                )
-                for pattern in self.exclude
-            )
+        if self.deck_root is None:
+            return True
+        return deck_name == self.deck_root or deck_name.startswith(
+            f"{self.deck_root}::"
         )
 
 
@@ -124,7 +94,6 @@ class TaskRequestOptions:
 class TaskExecutionOptions:
     mode: ExecutionMode = ExecutionMode.ONLINE
     concurrency: int = 8
-    fail_fast: bool = True
     batch_poll_seconds: int = 15
 
 
@@ -241,12 +210,14 @@ class TaskRunSummary:
     def format(self) -> str:
         base = (
             f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — "
-            f"{format_changes(
-                updated=self.updated,
-                unchanged=self.unchanged,
-                skipped=self.skipped,
-                errors=self.errors,
-            )}"
+            f"{
+                format_changes(
+                    updated=self.updated,
+                    unchanged=self.unchanged,
+                    skipped=self.skipped,
+                    errors=self.errors,
+                )
+            }"
         )
         suffix_parts: list[str] = []
         if self.canceled:

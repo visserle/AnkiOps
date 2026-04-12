@@ -21,7 +21,6 @@ from .llm_models import (
 from .task_options import (
     format_deck_scope,
     format_request_defaults,
-    format_serializer_scope,
     resolve_serializer_scope,
 )
 
@@ -91,7 +90,7 @@ def build_task_plan_result(
         task_name=task.name,
         model=task.model,
         deck_scope=format_deck_scope(task),
-        serializer_scope=format_serializer_scope(deck, no_subdecks),
+        serializer_scope=format_deck_scope(task),
         system_prompt_path=str(task.system_prompt_path),
         prompt_path=str(task.prompt_path),
         system_prompt=task.system_prompt,
