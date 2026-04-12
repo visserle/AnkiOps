@@ -13,7 +13,6 @@ from typing import Any, Iterator, TypeVar
 
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
-from .model_registry import parse_model
 from .llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
@@ -23,6 +22,7 @@ from .llm_models import (
     RunFailurePolicy,
     TaskRunSummary,
 )
+from .model_registry import parse_model
 
 _DEFAULT_JOB_LIST_LIMIT = 20
 

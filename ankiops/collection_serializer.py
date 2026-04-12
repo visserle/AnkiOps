@@ -18,6 +18,7 @@ from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
 
+
 def serialize_collection(
     collection_dir: Path,
     *,

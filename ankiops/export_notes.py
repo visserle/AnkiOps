@@ -552,7 +552,9 @@ def export_collection(
         active_files = {
             sync_result.file_path for sync_result in results if sync_result.file_path
         }
-        active_note_keys = {note_key for note_key in note_keys_by_id.values() if note_key}
+        active_note_keys = {
+            note_key for note_key in note_keys_by_id.values() if note_key
+        }
         for md_file in md_files:
             # A prior deck-rename step can move this file already.
             if not md_file.exists():

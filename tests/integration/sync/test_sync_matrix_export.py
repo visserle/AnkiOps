@@ -282,10 +282,7 @@ def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
     with world.db_session() as db:
         db.upsert_note_links([("stale-orphan-key", 999002)])
         result = world.sync_export(db)
-        assert (
-            db.resolve_note_ids(["stale-orphan-key"]).get("stale-orphan-key")
-            is None
-        )
+        assert db.resolve_note_ids(["stale-orphan-key"]).get("stale-orphan-key") is None
 
     content = world.read_deck("MixedOrphanDeck")
     assert orphan_file.exists()
@@ -357,8 +354,7 @@ def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):
     assert len(world.extract_note_keys("NoDuplicateDeck")) == 1
     assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
     assert all(
-        deck.deck_name != "NoDuplicateDeck"
-        for deck in result.protected_note_groups
+        deck.deck_name != "NoDuplicateDeck" for deck in result.protected_note_groups
     )
 
 

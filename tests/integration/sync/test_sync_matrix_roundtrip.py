@@ -127,7 +127,9 @@ def test_rt_run_update_003_directional_cache_isolation(world):
         updated_md = world.read_deck("RoundTripCacheIso").replace("Iso A1", "Iso A2")
         deck_path.write_text(updated_md, encoding="utf-8")
         edited_md_note = world.fs.read_markdown_file(deck_path).notes[0]
-        edited_md_hash = note_fingerprint(edited_md_note.note_type, edited_md_note.fields)
+        edited_md_hash = note_fingerprint(
+            edited_md_note.note_type, edited_md_note.fields
+        )
         current_anki_fields = {
             name: field_data["value"]
             for name, field_data in world.mock_anki.notes[note_id]["fields"].items()

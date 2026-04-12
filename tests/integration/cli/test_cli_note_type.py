@@ -108,6 +108,7 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
         {"name": "Choice 1", "label": "X1:", "identifying": True},
     ]
 
+
 def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, caplog):
     _seed_note_types(tmp_path / "note_types")
 

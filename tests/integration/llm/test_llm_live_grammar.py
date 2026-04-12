@@ -201,9 +201,7 @@ def test_live_grammar_three_note_end_to_end(tmp_path: Path) -> None:
     detail, job_id, db = _open_job_detail(tmp_path, result.job_id)
     try:
         assert detail is not None
-        status_by_note_key = {
-            item.note_key: item.final_status for item in detail.items
-        }
+        status_by_note_key = {item.note_key: item.final_status for item in detail.items}
         assert status_by_note_key["live-nk-a"] is LlmFinalStatus.SUCCEEDED_UPDATED
         assert status_by_note_key["live-nk-c"] is LlmFinalStatus.SUCCEEDED_UPDATED
         assert status_by_note_key["live-nk-b"] in {

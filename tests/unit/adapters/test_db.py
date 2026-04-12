@@ -381,9 +381,7 @@ def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
 def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:
-        adapter.upsert_markdown_media_cache(
-            [("Deck.md", 10, 200, {"a.png", "b.png"})]
-        )
+        adapter.upsert_markdown_media_cache([("Deck.md", 10, 200, {"a.png", "b.png"})])
         assert adapter.resolve_markdown_media_cache(["Deck.md"]) == {
             "Deck.md": (10, 200, {"a.png", "b.png"})
         }

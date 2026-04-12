@@ -36,9 +36,7 @@ _PROTECTED_TAGS = {
 _HTML_TAG_RE = re.compile(
     r"(?is)(<!--.*?-->|</?[a-z][a-z0-9-]*(?:\s[^<>]*?)?>|<!doctype\s+html[^>]*>)"
 )
-_HTML_ENTITY_RE = re.compile(
-    r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);"
-)
+_HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);")
 # Preserve only well-formed LaTeX delimiters. Reject sequences that contain an
 # unescaped closing delimiter inside, otherwise literals like \[\]\] are
 # misclassified as math and accumulate backslashes across roundtrips.

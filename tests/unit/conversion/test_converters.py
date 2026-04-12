@@ -293,7 +293,10 @@ def test_html_to_markdown_math_block_end_is_not_treated_as_link(html_to_md):
         r"\](bei mehreren Prädiktoren gilt dies nur, wenn sie unkorreliert sind, "
         r"was selten der Fall ist)"
     ) in md
-    assert r"\](<bei mehreren Prädiktoren gilt dies nur, wenn sie unkorreliert sind, was selten der Fall ist>)" not in md
+    assert (
+        r"\](<bei mehreren Prädiktoren gilt dies nur, wenn sie unkorreliert sind, was selten der Fall ist>)"
+        not in md
+    )
 
 
 def test_html_to_markdown_bullet_spans_with_br_and_images(html_to_md):

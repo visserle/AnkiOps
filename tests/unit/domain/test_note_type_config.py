@@ -202,9 +202,7 @@ def test_reject_name_key_in_note_type_yaml():
                 {
                     "name": "DifferentName",
                     "styling": "AnkiOpsStyling.css",
-                    "fields": [
-                        {"name": "XField", "label": "XF:", "identifying": True}
-                    ],
+                    "fields": [{"name": "XField", "label": "XF:", "identifying": True}],
                 }
             ),
             encoding="utf-8",
