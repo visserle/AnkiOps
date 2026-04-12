@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .llm_db import LlmDbAdapter
+from .llm_db import LlmDb
 from .llm_errors import LlmFatalError, LlmNoteError
 from .llm_models import (
     ExecutionMode,
@@ -21,7 +21,7 @@ class AttemptRecorder:
     def __init__(
         self,
         *,
-        db: LlmDbAdapter,
+        db: LlmDb,
         provider: str = "openai",
         initial_attempt_no: int = 1,
     ) -> None:

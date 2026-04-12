@@ -8,14 +8,14 @@ from typing import Any
 from ankiops.models import NoteTypeConfig
 
 from .discovery import DiscoveryItem, DiscoverySnapshot, discover_candidates
-from .llm_db import LlmDbAdapter
+from .llm_db import LlmDb
 from .llm_models import LlmCandidateStatus, LlmFinalStatus, TaskConfig
 from .task_runtime_types import EligibleCandidate
 
 
 def discover_and_record_candidates(
     *,
-    db: LlmDbAdapter,
+    db: LlmDb,
     job_id: int,
     data: dict[str, Any],
     task: TaskConfig,
@@ -86,7 +86,7 @@ def _resume_source_item_id(
 
 def _record_discovery_item(
     *,
-    db: LlmDbAdapter,
+    db: LlmDb,
     job_id: int,
     item: DiscoveryItem,
     resume_source_items: dict[str, int] | None,

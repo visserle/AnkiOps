@@ -12,7 +12,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_errors import LlmFatalError
 from ankiops.llm.llm_models import (
     LlmFinalStatus,
@@ -300,7 +300,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
         )
         prompt_ref = prompt_line.split(":", 1)[1].strip()
         assert prompt_ref.startswith("../prompts/")
-    assert (tmp_path / "llm/llm.db").exists()
+    assert (tmp_path / "llm/.llm.db").exists()
 
 
 def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
@@ -648,7 +648,7 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
     )
 
     assert result.job_id > 0
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         detail = db.get_job_detail(result.job_id)
     finally:
@@ -667,7 +667,7 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
     assert detail.items[0].final_status is LlmFinalStatus.SUCCEEDED_UPDATED
     assert detail.items[1].final_status is LlmFinalStatus.SUCCEEDED_UNCHANGED
 
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         payload_rows = db._conn.execute(
             """
@@ -709,7 +709,7 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
     assert not result.persisted
     assert result.status == "failed"
 
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         detail = db.get_job_detail(result.job_id)
     finally:
@@ -756,7 +756,7 @@ def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkey
     assert result.summary.errors == 1
     assert result.summary.canceled == 1
 
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         detail = db.get_job_detail(result.job_id)
     finally:
@@ -793,7 +793,7 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
     assert result.summary.errors == 1
     assert result.summary.canceled == 1
 
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         detail = db.get_job_detail(result.job_id)
     finally:

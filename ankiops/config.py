@@ -10,7 +10,7 @@ ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 LLM_DIR = "llm"
-LLM_DB_FILENAME = "llm.db"
+LLM_DB_FILENAME = ".llm.db"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
 

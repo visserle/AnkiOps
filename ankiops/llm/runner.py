@@ -19,7 +19,7 @@ from ankiops.git import git_snapshot
 from ankiops.models import Note, NoteTypeConfig
 
 from .config_loader import load_llm_task_catalog
-from .llm_db import LlmDbAdapter, LlmJobDetail, LlmJobListItem
+from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .llm_errors import LlmFatalError, LlmNoteError
 from .llm_models import (
     ExecutionMode,
@@ -61,8 +61,8 @@ def _default_provider_client_factory(task: TaskConfig) -> ProviderClient:
 
 
 @contextmanager
-def _open_llm_db(collection_dir: Path) -> Iterator[LlmDbAdapter]:
-    db = LlmDbAdapter.open(collection_dir)
+def _open_llm_db(collection_dir: Path) -> Iterator[LlmDb]:
+    db = LlmDb.open(collection_dir)
     try:
         yield db
     finally:
@@ -217,7 +217,7 @@ class LlmTaskExecutor:
         model = resolve_model(task, self.model_override)
         task = replace(task, model=model)
 
-        db = LlmDbAdapter.open(self.collection_dir)
+        db = LlmDb.open(self.collection_dir)
 
         job_id = db.start_job(
             task_name=task.name,
@@ -351,7 +351,7 @@ class LlmTaskExecutor:
     async def _execute_candidates_online(
         self,
         *,
-        db: LlmDbAdapter,
+        db: LlmDb,
         job_id: int,
         task: TaskConfig,
         api_model: str,
@@ -411,7 +411,7 @@ class LlmTaskExecutor:
     async def _process_online_candidate(
         self,
         *,
-        db: LlmDbAdapter,
+        db: LlmDb,
         task: TaskConfig,
         api_model: str,
         provider_client,
@@ -544,7 +544,7 @@ class LlmTaskExecutor:
     def _apply_updates(
         self,
         *,
-        db: LlmDbAdapter,
+        db: LlmDb,
         job_id: int,
         data: dict[str, Any],
     ) -> bool:

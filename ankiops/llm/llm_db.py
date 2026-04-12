@@ -1,4 +1,4 @@
-"""SQLite adapter for LLM execution history."""
+"""SQLite database for LLM execution history."""
 
 from __future__ import annotations
 
@@ -100,8 +100,8 @@ class JobAggregate:
     status: LlmJobStatus
 
 
-class LlmDbAdapter:
-    """SQLite adapter for LLM job/run persistence."""
+class LlmDb:
+    """SQLite database for LLM job/run persistence."""
 
     def __init__(self, conn: sqlite3.Connection, db_path: Path):
         self._conn = conn
@@ -113,27 +113,27 @@ class LlmDbAdapter:
         return self._db_path
 
     @classmethod
-    def open(cls, collection_dir: Path) -> "LlmDbAdapter":
+    def open(cls, collection_dir: Path) -> "LlmDb":
         llm_dir = collection_dir / LLM_DIR
         llm_dir.mkdir(parents=True, exist_ok=True)
         db_path = llm_dir / LLM_DB_FILENAME
 
         conn = cls._connect(db_path)
-        adapter = cls(conn, db_path)
+        db = cls(conn, db_path)
         try:
-            adapter._create_schema()
+            db._create_schema()
         except sqlite3.DatabaseError as error:
             conn.close()
             raise RuntimeError(
                 "LLM DB schema is incompatible with this build. "
                 f"Delete '{db_path}' to reinitialize."
             ) from error
-        return adapter
+        return db
 
     @staticmethod
     def _connect(db_path: Path) -> sqlite3.Connection:
         conn = sqlite3.connect(db_path)
-        LlmDbAdapter._configure_connection(conn)
+        LlmDb._configure_connection(conn)
         return conn
 
     @staticmethod

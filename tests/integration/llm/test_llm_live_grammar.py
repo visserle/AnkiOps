@@ -9,7 +9,7 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_models import LlmFinalStatus
 from ankiops.llm.runner import run_task
 
@@ -55,7 +55,7 @@ def _bootstrap_collection(collection_dir: Path, *, deck_markdown: str) -> None:
 
 
 def _open_job_detail(collection_dir: Path, job_id: int):
-    db = LlmDbAdapter.open(collection_dir)
+    db = LlmDb.open(collection_dir)
     try:
         detail = db.get_job_detail(job_id)
         return detail, job_id, db

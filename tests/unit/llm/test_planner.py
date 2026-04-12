@@ -7,7 +7,7 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.runner import plan_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -99,7 +99,7 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     assert "AI Notes" in surface_by_type["AnkiOpsQA"].hidden_fields
     assert "Answer" in surface_by_type["AnkiOpsChoice"].read_only_fields
 
-    db = LlmDbAdapter.open(collection)
+    db = LlmDb.open(collection)
     try:
         row = db._conn.execute("SELECT COUNT(*) AS total FROM llm_job").fetchone()
     finally:

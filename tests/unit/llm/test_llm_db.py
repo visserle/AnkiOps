@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_models import (
     ExecutionMode,
     LlmAttemptResultType,
@@ -25,7 +25,7 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
     return {name for (name,) in rows}
 
 
-def _start_job(adapter: LlmDbAdapter) -> int:
+def _start_job(adapter: LlmDb) -> int:
     return adapter.start_job(
         task_name="grammar",
         model_name="claude-sonnet-4-6",
@@ -37,7 +37,7 @@ def _start_job(adapter: LlmDbAdapter) -> int:
 
 
 def _insert_attempt(
-    adapter: LlmDbAdapter,
+    adapter: LlmDb,
     *,
     item_id: int,
     provider_message_id: str,
@@ -74,9 +74,9 @@ def _insert_attempt(
 
 
 def test_open_creates_schema_and_indexes(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
-        assert adapter.db_path == tmp_path / "llm" / "llm.db"
+        assert adapter.db_path == tmp_path / "llm" / ".llm.db"
         assert adapter.db_path.exists()
 
         tables = _table_names(adapter._conn)
@@ -111,7 +111,7 @@ def test_open_creates_schema_and_indexes(tmp_path):
 
 
 def test_roundtrip_job_item_attempt_payload(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         adapter.set_discovery_counts(
@@ -198,7 +198,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
     finally:
         adapter.close()
 
-    reopened = LlmDbAdapter.open(tmp_path)
+    reopened = LlmDb.open(tmp_path)
     try:
         detail = reopened.get_job_detail(job_id)
         assert detail is not None
@@ -210,7 +210,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
 def test_open_fails_for_incompatible_schema(tmp_path):
     llm_dir = tmp_path / "llm"
     llm_dir.mkdir(parents=True, exist_ok=True)
-    legacy_path = llm_dir / "llm.db"
+    legacy_path = llm_dir / ".llm.db"
     conn = sqlite3.connect(legacy_path)
     try:
         conn.execute("CREATE TABLE llm_job (id INTEGER PRIMARY KEY, status TEXT)")
@@ -223,11 +223,11 @@ def test_open_fails_for_incompatible_schema(tmp_path):
         RuntimeError,
         match="LLM DB schema is incompatible with this build",
     ):
-        _ = LlmDbAdapter.open(tmp_path)
+        _ = LlmDb.open(tmp_path)
 
 
 def test_enforces_uniqueness_constraints(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         item_id = adapter.insert_job_item(
@@ -289,7 +289,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
 
 
 def test_enforces_status_constraints(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
             adapter._conn.execute(
@@ -317,7 +317,7 @@ def test_enforces_status_constraints(tmp_path):
 
 
 def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         assert adapter.resolve_job_id(str(job_id)) == job_id
@@ -327,7 +327,7 @@ def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
 
 
 def test_resolve_job_id_rejects_non_numeric_lookup(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         _ = _start_job(adapter)
         with pytest.raises(ValueError, match="Job ID must be numeric"):
@@ -337,7 +337,7 @@ def test_resolve_job_id_rejects_non_numeric_lookup(tmp_path):
 
 
 def test_resolve_job_id_returns_none_for_missing_numeric_id(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         _ = _start_job(adapter)
         assert adapter.resolve_job_id("999999") is None
@@ -346,7 +346,7 @@ def test_resolve_job_id_returns_none_for_missing_numeric_id(tmp_path):
 
 
 def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         item_id = adapter.insert_job_item(
@@ -400,7 +400,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
 
 
 def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
-    adapter = LlmDbAdapter.open(tmp_path)
+    adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
         pending_id = adapter.insert_job_item(

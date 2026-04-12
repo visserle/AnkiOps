@@ -16,7 +16,7 @@ from ankiops.config import (
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.llm_db import LlmDbAdapter
+from ankiops.llm.llm_db import LlmDb
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
@@ -142,7 +142,7 @@ def initialize_collection(profile: str) -> Path:
     db = SQLiteDbAdapter.open(collection_dir)
     db.set_profile_name(profile)
     db.close()
-    llm_db = LlmDbAdapter.open(collection_dir)
+    llm_db = LlmDb.open(collection_dir)
     llm_db.close()
 
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)

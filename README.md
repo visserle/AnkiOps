@@ -189,7 +189,7 @@ After `ankiops init`, AnkiOps bootstraps:
 - `llm/system_prompt.md`
 - `llm/tasks/grammar.yaml`
 - `llm/prompts/grammar.md`
-- `llm/llm.db` (job history, auto-added to `.gitignore`)
+- `llm/.llm.db` (job history, auto-added to `.gitignore`)
 
 Set the provider key for the model you use:
 
@@ -239,5 +239,5 @@ fields:
 - `ankiops llm <task>` prints the resolved system/task prompt file paths and the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning
 - Only notes in scope with at least one editable, non-empty field are sent to the model
 - Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
-- Every job is recorded in `llm/llm.db` with per-note status, token usage, latency, and errors
+- Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors
 - Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics
