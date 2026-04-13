@@ -94,6 +94,11 @@ def _eject_llm_configs(collection_dir: Path) -> None:
     llm_dir = collection_dir / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
 
+    models_src = resources.files("ankiops.llm").joinpath("models.yaml")
+    models_dst = llm_dir / "models.yaml"
+    if not models_dst.exists():
+        models_dst.write_text(models_src.read_text(encoding="utf-8"), encoding="utf-8")
+
     system_prompt_src = resources.files("ankiops.llm").joinpath("system_prompt.md")
     system_prompt_dst = llm_dir / "system_prompt.md"
     if not system_prompt_dst.exists():
@@ -106,9 +111,13 @@ def _eject_llm_configs(collection_dir: Path) -> None:
     tasks_dir.mkdir(parents=True, exist_ok=True)
     packaged_tasks_dir = resources.files("ankiops.llm").joinpath("tasks")
     for resource in packaged_tasks_dir.iterdir():
-        if not resource.is_file() or resource.suffix not in {".yaml", ".yml"}:
+        resource_name = resource.name
+        if not resource.is_file() or Path(resource_name).suffix not in {
+            ".yaml",
+            ".yml",
+        }:
             continue
-        destination = tasks_dir / resource.name
+        destination = tasks_dir / resource_name
         if destination.exists():
             continue
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
@@ -117,9 +126,10 @@ def _eject_llm_configs(collection_dir: Path) -> None:
     prompts_dir.mkdir(parents=True, exist_ok=True)
     packaged_prompts_dir = resources.files("ankiops.llm").joinpath("prompts")
     for resource in packaged_prompts_dir.iterdir():
-        if not resource.is_file() or resource.suffix != ".md":
+        resource_name = resource.name
+        if not resource.is_file() or Path(resource_name).suffix != ".md":
             continue
-        destination = prompts_dir / resource.name
+        destination = prompts_dir / resource_name
         if destination.exists():
             continue
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")

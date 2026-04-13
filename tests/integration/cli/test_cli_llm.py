@@ -18,13 +18,23 @@ from ankiops.llm.llm_models import (
     TaskPlanResult,
     TaskRunSummary,
 )
-from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
+from ankiops.llm.model_registry import ProviderModel
+
+TEST_MODEL = ProviderModel(
+    name="claude-sonnet-4-6",
+    api_id="claude-sonnet-4-6",
+    provider="anthropic",
+    base_url="https://api.anthropic.com/v1/",
+    api_key_env="ANTHROPIC_API_KEY",
+    input_usd_per_mtok=3,
+    output_usd_per_mtok=15,
+)
 
 
 def _plan_result() -> TaskPlanResult:
     return TaskPlanResult(
         task_name="grammar",
-        model=CLAUDE_SONNET_4_6,
+        model=TEST_MODEL,
         deck_scope="*",
         serializer_scope="collection",
         system_prompt_path="/tmp/llm/system_prompt.md",
@@ -38,7 +48,7 @@ def _plan_result() -> TaskPlanResult:
         ),
         summary=TaskRunSummary(
             task_name="grammar",
-            model=CLAUDE_SONNET_4_6,
+            model=TEST_MODEL,
             decks_seen=1,
             decks_matched=1,
             notes_seen=2,
@@ -67,7 +77,7 @@ def test_cli_llm_dispatches_run():
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
+        summary=TaskRunSummary(task_name="grammar", model=TEST_MODEL),
         failed=False,
         persisted=False,
     )
@@ -87,7 +97,7 @@ def test_cli_llm_dispatches_run_with_deck_override():
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
+        summary=TaskRunSummary(task_name="grammar", model=TEST_MODEL),
         failed=False,
         persisted=False,
     )
@@ -197,7 +207,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
         {
             "grammar": TaskConfig(
                 name="grammar",
-                model=CLAUDE_SONNET_4_6,
+                model=TEST_MODEL,
                 system_prompt="system",
                 prompt="prompt",
             )
@@ -234,7 +244,7 @@ def test_cli_llm_dispatches_resume_with_job_selector(tmp_path):
     success_result = LlmJobResult(
         job_id=25,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
+        summary=TaskRunSummary(task_name="grammar", model=TEST_MODEL),
         failed=False,
         persisted=True,
     )
@@ -323,7 +333,7 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
     success_result = LlmJobResult(
         job_id=24,
         status="completed",
-        summary=TaskRunSummary(task_name="grammar", model=CLAUDE_SONNET_4_6),
+        summary=TaskRunSummary(task_name="grammar", model=TEST_MODEL),
         failed=False,
         persisted=False,
     )

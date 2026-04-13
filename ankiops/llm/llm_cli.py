@@ -15,7 +15,6 @@ from ankiops.config import get_note_types_dir, require_initialized_collection_di
 from ankiops.fs import FileSystemAdapter
 
 from .config_loader import load_llm_task_catalog
-from .model_registry import supported_model_names
 from .runner import list_jobs as list_llm_jobs
 from .runner import plan_task, resume_task, run_task, show_job
 
@@ -171,8 +170,7 @@ def configure_llm_parser(
     )
     llm_parser.add_argument(
         "--model",
-        choices=supported_model_names(),
-        help="Override model for this plan/run (full model id)",
+        help=("Override model for this plan/run (must exist in llm/models.yaml)"),
     )
     llm_parser.add_argument(
         "--online",
@@ -256,7 +254,8 @@ def run_llm(
             inspect_command = f"ankiops llm --job {result.job_id}"
             if result.failed:
                 logger.error(
-                    "LLM resume job #%d failed with %d error(s)%s. Cost: %s. Inspect: %s",
+                    "LLM resume job #%d failed with %d error(s)%s. "
+                    "Cost: %s. Inspect: %s",
                     result.job_id,
                     result.summary.errors,
                     " (atomic policy: no updates persisted)"
@@ -527,7 +526,7 @@ def run_llm(
     logger.info("%s", plan.format_full_prompt())
     logger.info("")
     logger.info("Request estimate: %s", _format_count(plan.requests_estimate))
-    logger.info("Cost estimate (max): %s", plan.format_cost_estimate())
+    logger.info("Cost estimate (worst-case): %s", plan.format_cost_estimate())
     run_command = f"ankiops llm {plan.task_name} --run"
     if model_override:
         run_command = f"{run_command} --model {model_override}"

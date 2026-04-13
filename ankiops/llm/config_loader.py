@@ -12,7 +12,7 @@ from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
 from .llm_models import FieldExceptionRule, TaskCatalog, TaskConfig
-from .model_registry import format_supported_model_names, parse_model
+from .model_registry import ModelRegistry, ModelRegistryError, load_model_registry
 
 
 class LlmConfigError(ValueError):
@@ -205,14 +205,15 @@ def _parse_task(
     *,
     note_type_configs: list[NoteTypeConfig],
     llm_dir: Path,
+    model_registry: ModelRegistry,
 ) -> TaskConfig:
     mapping = _read_yaml_mapping(path)
     _validate_task_keys(mapping, path)
     name = path.stem
     model_name = _require_str(mapping, "model", path)
-    model = parse_model(model_name)
+    model = model_registry.parse(model_name)
     if model is None:
-        supported = format_supported_model_names()
+        supported = model_registry.format_names()
         raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
     prompt_file_ref = _require_str(mapping, "prompt_file", path)
     prompt_file_path = _resolve_relative_file(
@@ -271,12 +272,19 @@ def load_llm_task_catalog(
         errors[str(tasks_dir)] = f"{tasks_dir}: no task YAML files found"
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
+    try:
+        model_registry = load_model_registry(collection_dir=collection_dir)
+    except ModelRegistryError as error:
+        errors[str(llm_dir / "models.yaml")] = str(error)
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
     for path in task_files:
         try:
             task = _parse_task(
                 path,
                 note_type_configs=note_type_configs,
                 llm_dir=llm_dir,
+                model_registry=model_registry,
             )
             if task.name in tasks_by_name:
                 raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")

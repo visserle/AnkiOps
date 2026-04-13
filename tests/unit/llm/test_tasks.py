@@ -21,7 +21,6 @@ from ankiops.llm.llm_models import (
     PreparedAttemptRequest,
     ProviderAttemptOutcome,
 )
-from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
 from ankiops.llm.runner import run_task
 
 TASK_FILE = Path("llm/tasks/grammar.yaml")
@@ -60,6 +59,14 @@ def _write(path: Path, content: str) -> None:
     path.write_text(dedent(content).strip() + "\n", encoding="utf-8")
 
 
+def _write_default_models(collection_dir: Path) -> None:
+    models_path = collection_dir / "llm/models.yaml"
+    if models_path.exists():
+        return
+    models_src = resources.files("ankiops.llm").joinpath("models.yaml")
+    _write(models_path, models_src.read_text(encoding="utf-8"))
+
+
 def _task_config(
     *,
     model: str = "claude-sonnet-4-6",
@@ -71,16 +78,19 @@ def _task_config(
 
 
 def _write_prompt(collection_dir: Path, content: str = DEFAULT_TASK_PROMPT) -> None:
+    _write_default_models(collection_dir)
     _write(collection_dir / PROMPT_FILE, content)
 
 
 def _write_system_prompt(
     collection_dir: Path, content: str = DEFAULT_SYSTEM_PROMPT
 ) -> None:
+    _write_default_models(collection_dir)
     _write(collection_dir / SYSTEM_PROMPT_FILE, content)
 
 
 def _write_task(collection_dir: Path, *, content: str) -> None:
+    _write_default_models(collection_dir)
     if not (collection_dir / SYSTEM_PROMPT_FILE).exists():
         _write_system_prompt(collection_dir)
     if not (collection_dir / PROMPT_FILE).exists():
@@ -269,7 +279,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     packaged_tasks = sorted(
         resource.name
         for resource in resources.files("ankiops.llm").joinpath("tasks").iterdir()
-        if resource.is_file() and resource.suffix == ".yaml"
+        if resource.is_file() and Path(resource.name).suffix == ".yaml"
     )
     ejected_tasks = sorted(
         path.name for path in (tmp_path / "llm/tasks").glob("*.yaml")
@@ -277,7 +287,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     packaged_prompts = sorted(
         resource.name
         for resource in resources.files("ankiops.llm").joinpath("prompts").iterdir()
-        if resource.is_file() and resource.suffix == ".md"
+        if resource.is_file() and Path(resource.name).suffix == ".md"
     )
     ejected_prompts = sorted(
         path.name for path in (tmp_path / "llm/prompts").glob("*.md")
@@ -286,6 +296,10 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
     assert ejected_prompts == packaged_prompts
+    assert (tmp_path / "llm/models.yaml").exists()
+    models_content = (tmp_path / "llm/models.yaml").read_text(encoding="utf-8")
+    assert "models:" in models_content
+    assert "name: claude-sonnet-4-6" in models_content
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
     for task_path in (tmp_path / "llm/tasks").glob("*.yaml"):
         content = task_path.read_text(encoding="utf-8")
@@ -342,13 +356,66 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model == CLAUDE_SONNET_4_6
+    assert task.model.name == "claude-sonnet-4-6"
     assert task.api_key_env == "ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == "Fix grammar from file"
     assert task.system_prompt_path == (tmp_path / "llm/system_prompt.md").resolve()
     assert task.prompt_path == (tmp_path / "llm/prompts/grammar.md").resolve()
     assert task.decks.deck_root is None
+
+
+def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write(
+        tmp_path / "llm/models.yaml",
+        """
+        models:
+          - name: qwen3-32b
+            api_id: qwen3-32b
+            provider: openai-compatible
+            base_url: https://api.example.com/v1
+            api_key_env: EXAMPLE_API_KEY
+        """,
+    )
+    _write_system_prompt(tmp_path, "System rules")
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_task(
+        tmp_path,
+        content=_task_config(model="qwen3-32b"),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.model.name == "qwen3-32b"
+    assert task.model.api_id == "qwen3-32b"
+    assert task.model.provider == "openai-compatible"
+    assert task.model.base_url == "https://api.example.com/v1"
+    assert task.api_key_env == "EXAMPLE_API_KEY"
+
+
+def test_load_llm_task_catalog_rejects_invalid_models_registry(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write(
+        tmp_path / "llm/models.yaml",
+        """
+        models: []
+        """,
+    )
+    _write_system_prompt(tmp_path, "System rules")
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_task(tmp_path, content=_task_config())
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "'models' must be a non-empty list" in next(iter(catalog.errors.values()))
 
 
 def test_load_llm_task_catalog_rejects_task_specific_system_prompt_file(
@@ -556,7 +623,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 
     assert not result.failed
     assert result.persisted
-    assert summary.model == CLAUDE_SONNET_4_6
+    assert summary.model.name == "claude-sonnet-4-6"
     assert summary.requests == 2
     assert summary.input_tokens == 34
     assert summary.output_tokens == 13
@@ -843,7 +910,8 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=claude-sonnet-4-6, api_model=claude-sonnet-4-6"
+        "Starting LLM task 'grammar' (model=claude-sonnet-4-6, "
+        "api_model=claude-sonnet-4-6"
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "

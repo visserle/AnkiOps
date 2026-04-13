@@ -648,7 +648,10 @@ class LlmDb:
         if row is None:
             raise ValueError(f"Unknown LLM job id {job_id}")
 
-        model = parse_model(row["model_name"])
+        model = parse_model(
+            row["model_name"],
+            collection_dir=self._db_path.parent.parent,
+        )
         if model is None:
             raise ValueError(f"Unknown model '{row['model_name']}' in persisted job")
         execution_mode = self._parse_enum(ExecutionMode, row["execution_mode"])

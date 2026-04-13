@@ -12,9 +12,17 @@ from openai import APIConnectionError, APIStatusError
 
 from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError
 from ankiops.llm.llm_models import NotePayload, TaskConfig, TaskRequestOptions
-from ankiops.llm.model_registry import CLAUDE_SONNET_4_6
+from ankiops.llm.model_registry import ProviderModel
 from ankiops.llm.prompting import build_system_prompt
 from ankiops.llm.provider_client import ProviderClient
+
+TEST_MODEL = ProviderModel(
+    name="claude-sonnet-4-6",
+    api_id="claude-sonnet-4-6",
+    provider="anthropic",
+    base_url="https://api.anthropic.com/v1/",
+    api_key_env="ANTHROPIC_API_KEY",
+)
 
 
 def _extract_note_json(message: str) -> dict[str, object]:
@@ -50,7 +58,7 @@ def _response(
 def task_config() -> TaskConfig:
     return TaskConfig(
         name="grammar",
-        model=CLAUDE_SONNET_4_6,
+        model=TEST_MODEL,
         system_prompt="System prompt for tests",
         prompt="Fix grammar",
         api_key_env="ANTHROPIC_API_KEY",

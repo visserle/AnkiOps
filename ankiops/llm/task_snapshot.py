@@ -55,11 +55,15 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
     }
 
 
-def task_from_snapshot(snapshot: dict[str, Any]) -> TaskConfig:
+def task_from_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    collection_dir: Path,
+) -> TaskConfig:
     model_name = snapshot.get("model")
     if not isinstance(model_name, str):
         raise ValueError("Job snapshot is missing model")
-    model = parse_model(model_name)
+    model = parse_model(model_name, collection_dir=collection_dir)
     if model is None:
         raise ValueError(f"Job snapshot references unsupported model '{model_name}'")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
 from .model_registry import (
@@ -79,13 +80,15 @@ def format_request_defaults(task: TaskConfig) -> str:
 def resolve_model(
     task: TaskConfig,
     model_override: str | None,
+    *,
+    collection_dir: Path,
 ) -> ProviderModel:
     if model_override is None:
         return task.model
 
-    model = parse_model(model_override)
+    model = parse_model(model_override, collection_dir=collection_dir)
     if model is None:
-        supported = format_supported_model_names()
+        supported = format_supported_model_names(collection_dir=collection_dir)
         raise ValueError(f"Model must be one of: {supported}")
     return model
 

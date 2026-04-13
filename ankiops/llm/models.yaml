@@ -1,0 +1,48 @@
+models:
+  - name: claude-opus-4-6
+    api_id: claude-opus-4-6
+    provider: anthropic
+    base_url: https://api.anthropic.com/v1/
+    api_key_env: ANTHROPIC_API_KEY
+    input_usd_per_mtok: 5
+    output_usd_per_mtok: 25
+
+  - name: claude-sonnet-4-6
+    api_id: claude-sonnet-4-6
+    provider: anthropic
+    base_url: https://api.anthropic.com/v1/
+    api_key_env: ANTHROPIC_API_KEY
+    input_usd_per_mtok: 3
+    output_usd_per_mtok: 15
+
+  - name: claude-haiku-4-5
+    api_id: claude-haiku-4-5
+    provider: anthropic
+    base_url: https://api.anthropic.com/v1/
+    api_key_env: ANTHROPIC_API_KEY
+    input_usd_per_mtok: 1
+    output_usd_per_mtok: 5
+
+  - name: gpt-5.4
+    api_id: gpt-5.4
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    input_usd_per_mtok: 2.5
+    output_usd_per_mtok: 15
+
+  - name: gpt-5.4-mini
+    api_id: gpt-5.4-mini
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    input_usd_per_mtok: 0.75
+    output_usd_per_mtok: 4.5
+
+  - name: gpt-5.4-nano
+    api_id: gpt-5.4-nano
+    provider: openai
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    input_usd_per_mtok: 0.2
+    output_usd_per_mtok: 1.25

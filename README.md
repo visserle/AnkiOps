@@ -37,7 +37,7 @@ With the first import, AnkiOps adds a stable `note_key` comment above each note 
 pipx install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize AnkiOps in any empty directory of your choosing. This is where your text-based decks will live. The additional tutorial flag creates a sample Markdown deck.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize AnkiOps in any empty directory of your choosing. The command creates a database file for synchronization, an `llm/` directory for custom LLM tasks, and a `note_types/` directory for the note types AnkiOps will act on (following Infrastructure as Code principles). The additional tutorial flag creates a sample Markdown deck you can experiment with.
 
 ```bash
 ankiops init --tutorial
@@ -99,17 +99,6 @@ In this example, the last note is a new note which will get a `note_key` comment
 
 AnkiOps reads note types exclusively from your local `note_types/` directory. `ankiops init` ejects default note types as bootstrap files; those local files are then the only source of truth and can be modified as needed. Each note type is identified by a unique set of field labels. These labels are defined in`note_types/name/note_type.yaml` and can be customized as needed. The set operations of each unique note type are defined by the `identifying` fields in the yamls. For an overview of the current configuration, use `ankiops note-types`.
 
-### How does it work?
-
-AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. One AnkiOps folder represents one Anki profile. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
-### What is the recommended workflow?
-
-We recommend using VS Code. It has excellent AI integration, a native Markdown previewer, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up).
-
-### How can I share my AnkiOps collection?
-
-TODO
-
 ### How can I migrate my existing notes into AnkiOps?
 
 There are three ways to migrate your existing collection.
@@ -120,6 +109,18 @@ For the last option specifically, the recommended workflow is:
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
 2. Export your notes from Anki to Markdown using `ankiops am`.
 3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
+
+### How does it work?
+
+AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. One AnkiOps folder represents one Anki profile. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
+
+### What is the recommended workflow?
+
+We recommend using VS Code. It has excellent AI integration, a native Markdown previewer, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up).
+
+### How can I share my AnkiOps collection?
+
+TODO
 
 ### How do I upgrade AnkiOps to the latest version?
 
@@ -186,12 +187,13 @@ AnkiOps includes a LLM pipeline for repeatable task execution.
 
 After `ankiops init`, AnkiOps bootstraps:
 
+- `llm/models.yaml`
 - `llm/system_prompt.md`
 - `llm/tasks/grammar.yaml`
 - `llm/prompts/grammar.md`
 - `llm/.llm.db` (job history, auto-added to `.gitignore`)
 
-Set the provider key for the model you use:
+Set the key required by the model entry you use (from `llm/models.yaml`):
 
 ```bash
 export OPENAI_API_KEY="your-openai-key"
@@ -224,13 +226,28 @@ fields:
 ```
 
 - Required keys: `model`, `prompt_file`
-- Supported models: `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`
+- `model` must reference a model name from `llm/models.yaml`
 - `prompt_file` is resolved relative to the task file and must stay within `llm/`
 - `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - `llm/system_prompt.md` is global and shared by all tasks
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
 - Request/execution tuning uses internal defaults; only model and online mode can be overridden from CLI (`--model`, `--online`)
+
+### Model Registry (`llm/models.yaml`)
+
+`llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key_env`, and `api_id`.
+
+```yaml
+models:
+  - name: qwen3-32b
+    api_id: qwen3-32b
+    provider: my-openai-compatible
+    base_url: https://api.example.com/v1
+    api_key_env: EXAMPLE_API_KEY
+```
+
+Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and only used for cost estimates.
 
 ### Runtime Behavior
 

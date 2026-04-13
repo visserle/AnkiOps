@@ -214,7 +214,11 @@ class LlmTaskExecutor:
 
     async def execute(self) -> LlmJobResult:
         task = apply_mode_override(self.task, self.mode_override)
-        model = resolve_model(task, self.model_override)
+        model = resolve_model(
+            task,
+            self.model_override,
+            collection_dir=self.collection_dir,
+        )
         task = replace(task, model=model)
 
         db = LlmDb.open(self.collection_dir)
@@ -599,7 +603,7 @@ def plan_task(
     )
     task = apply_deck_override(task, deck_override)
     task = apply_mode_override(task, mode_override)
-    model = resolve_model(task, model_override)
+    model = resolve_model(task, model_override, collection_dir=collection_dir)
     task = replace(task, model=model)
     return build_task_plan_result(
         collection_dir=collection_dir,
@@ -653,7 +657,7 @@ async def resume_task_async(
             raise ValueError(f"Missing config snapshot for LLM job '{resolved}'")
         resume_source_items = db.get_resume_source_items(job_id=resolved)
 
-    task = task_from_snapshot(snapshot)
+    task = task_from_snapshot(snapshot, collection_dir=collection_dir)
     note_type_configs = _load_note_type_configs(collection_dir)
 
     executor = LlmTaskExecutor(

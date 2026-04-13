@@ -7,6 +7,7 @@ Do not modify read_only_fields.
 Do not invent new field names or change field names.
 Preserve Markdown structure, math, code fences, links, cloze syntax, and meaning.
 Return only changed editable fields in edits.
+The edited fields must contain the full content of the field, not just the changed portion.
 If no changes are needed, return an empty edits object.
 Do not use null values anywhere in edits.
 Use an empty string only when you intentionally want to clear a field.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.5.7"
+version = "0.5.8"
 description = "Anki ↔ Markdown, with bidirectional sync, custom note types, and LLM integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,6 +59,7 @@ ankiops = [
     "note_types/**/*.anki",
     "note_types/**/*.css",
     "note_types/**/*.yaml",
+    "llm/models.yaml",
     "llm/system_prompt.md",
     "llm/prompts/*.md",
     "llm/tasks/*.yaml",
