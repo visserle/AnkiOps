@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from importlib import resources
 
 import pytest
 
@@ -73,6 +74,17 @@ def _insert_attempt(
     )
 
 
+def _write_models_registry(tmp_path) -> None:
+    models_path = tmp_path / "llm" / "models.yaml"
+    models_path.parent.mkdir(parents=True, exist_ok=True)
+    models_path.write_text(
+        resources.files("ankiops.llm").joinpath("models.yaml").read_text(
+            encoding="utf-8"
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_open_creates_schema_and_indexes(tmp_path):
     adapter = LlmDb.open(tmp_path)
     try:
@@ -111,6 +123,7 @@ def test_open_creates_schema_and_indexes(tmp_path):
 
 
 def test_roundtrip_job_item_attempt_payload(tmp_path):
+    _write_models_registry(tmp_path)
     adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)

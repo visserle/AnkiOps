@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 from textwrap import dedent
 
@@ -42,6 +43,12 @@ def _prepare_collection(tmp_path: Path) -> Path:
 
     fs = FileSystemAdapter()
     fs.eject_builtin_note_types(tmp_path / "note_types")
+    _write(
+        tmp_path / "llm/models.yaml",
+        resources.files("ankiops.llm").joinpath("models.yaml").read_text(
+            encoding="utf-8"
+        ),
+    )
     _write(tmp_path / f"{TEST_DECK}.md", TEST_DECK_MARKDOWN)
     _write(
         tmp_path / SYSTEM_PROMPT_FILE,
@@ -149,7 +156,10 @@ def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
 
     with pytest.raises(
         ValueError,
-        match=r"Deck override must be an exact deck name \(wildcards are not supported\)",
+        match=(
+            r"Deck override must be an exact deck name "
+            r"\(wildcards are not supported\)"
+        ),
     ):
         plan_task(
             collection_dir=collection,
