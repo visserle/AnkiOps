@@ -243,7 +243,7 @@ def run_llm(
                     "Cost: %s. Inspect: %s",
                     result.job_id,
                     result.summary.errors,
-                    " (atomic policy: no updates persisted)"
+                    " (no updates persisted due to errors)"
                     if not result.persisted and result.summary.updated > 0
                     else "",
                     result.summary.format_cost(),
@@ -437,7 +437,7 @@ def run_llm(
                 "LLM job #%d failed with %d error(s)%s. Cost: %s. Inspect: %s",
                 result.job_id,
                 result.summary.errors,
-                " (atomic policy: no updates persisted)"
+                " (no updates persisted due to errors)"
                 if not result.persisted and result.summary.updated > 0
                 else "",
                 result.summary.format_cost(),

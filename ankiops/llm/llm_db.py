@@ -18,7 +18,6 @@ from .llm_models import (
     LlmCandidateStatus,
     LlmFinalStatus,
     LlmJobStatus,
-    RunFailurePolicy,
     TaskRunSummary,
 )
 from .model_registry import parse_model
@@ -79,7 +78,6 @@ class LlmJobDetail:
     api_model: str
     status: LlmJobStatus
     persisted: bool
-    failure_policy: RunFailurePolicy
     created_at: str
     started_at: str
     finished_at: str | None
@@ -215,9 +213,6 @@ class LlmDb:
             [result.value for result in LlmAttemptResultType]
         )
         job_status_check = _enum_check_sql([status.value for status in LlmJobStatus])
-        failure_policy_check = _enum_check_sql(
-            [policy.value for policy in RunFailurePolicy]
-        )
 
         with self._conn:
             self._conn.executescript(
@@ -227,8 +222,6 @@ class LlmDb:
                     task_name TEXT NOT NULL,
                     model_name TEXT NOT NULL,
                     api_model TEXT NOT NULL,
-                    failure_policy TEXT NOT NULL
-                        CHECK (failure_policy IN {failure_policy_check}),
                     status TEXT NOT NULL CHECK (status IN {job_status_check}),
                     persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
@@ -344,7 +337,6 @@ class LlmDb:
         task_name: str,
         model_name: str,
         api_model: str,
-        failure_policy: RunFailurePolicy,
         config_snapshot: dict[str, Any],
         resume_from_job_id: int | None = None,
     ) -> int:
@@ -353,16 +345,15 @@ class LlmDb:
             """
             INSERT INTO llm_job (
                 task_name, model_name, api_model,
-                failure_policy, status, persisted, fatal_error,
+                status, persisted, fatal_error,
                 config_snapshot_json, resume_from_job_id,
                 created_at, started_at
-            ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
             """,
             (
                 task_name,
                 model_name,
                 api_model,
-                failure_policy.value,
                 LlmJobStatus.RUNNING.value,
                 self._as_json(config_snapshot),
                 resume_from_job_id,
@@ -826,7 +817,6 @@ class LlmDb:
                 api_model,
                 status,
                 persisted,
-                failure_policy,
                 created_at,
                 started_at,
                 finished_at,
@@ -915,7 +905,6 @@ class LlmDb:
             api_model=str(row["api_model"]),
             status=self._parse_enum(LlmJobStatus, row["status"]),
             persisted=bool(row["persisted"]),
-            failure_policy=self._parse_enum(RunFailurePolicy, row["failure_policy"]),
             created_at=str(row["created_at"]),
             started_at=str(row["started_at"]),
             finished_at=(str(row["finished_at"]) if row["finished_at"] else None),

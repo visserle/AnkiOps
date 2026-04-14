@@ -364,7 +364,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
     assert task.model.name == "claude-sonnet-4-6"
-    assert task.api_key_env == "ANTHROPIC_API_KEY"
+    assert task.model.api_key == "$ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == DEFAULT_TASK_PROMPT
     assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
@@ -401,10 +401,10 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
         tmp_path / "llm/models.yaml",
         """
         - name: qwen3-32b
-          api_id: qwen3-32b
+          model_id: qwen3-32b
           provider: openai-compatible
           base_url: https://api.example.com/v1
-          api_key_env: EXAMPLE_API_KEY
+          api_key: $EXAMPLE_API_KEY
         """,
     )
     _write_task(
@@ -417,10 +417,10 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
     assert task.model.name == "qwen3-32b"
-    assert task.model.api_id == "qwen3-32b"
+    assert task.model.model_id == "qwen3-32b"
     assert task.model.provider == "openai-compatible"
     assert task.model.base_url == "https://api.example.com/v1"
-    assert task.api_key_env == "EXAMPLE_API_KEY"
+    assert task.model.api_key == "$EXAMPLE_API_KEY"
 
 
 def test_load_llm_task_catalog_rejects_invalid_models_registry(
@@ -1255,7 +1255,7 @@ def test_run_task_rejects_wildcard_deck_override(tmp_path: Path, monkeypatch):
         )
 
 
-def test_run_task_atomic_policy_skips_persistence_when_any_note_fails(
+def test_run_task_skips_persistence_when_any_note_fails(
     tmp_path: Path,
     monkeypatch,
     caplog,
@@ -1288,8 +1288,7 @@ def test_run_task_atomic_policy_skips_persistence_when_any_note_fails(
     assert summary.updated == 1
     assert summary.errors == 1
     assert (
-        "Atomic failure policy prevented persistence: 1 update(s) staged, "
-        "1 error(s) observed"
+        "Errors prevented persistence: 1 update(s) staged, 1 error(s) observed"
     ) in caplog.text
     updated_content = (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
     assert updated_content == original_content

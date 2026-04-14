@@ -18,11 +18,6 @@ class FieldAccess(Enum):
     HIDDEN = "hidden"
 
 
-class RunFailurePolicy(Enum):
-    ATOMIC = "atomic"
-    PARTIAL = "partial"
-
-
 class LlmCandidateStatus(Enum):
     ELIGIBLE = "eligible"
     SKIPPED_DECK_SCOPE = "skipped_deck_scope"

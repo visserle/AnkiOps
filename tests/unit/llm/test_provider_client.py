@@ -18,10 +18,10 @@ from ankiops.llm.provider_client import ProviderClient
 
 TEST_MODEL = ProviderModel(
     name="claude-sonnet-4-6",
-    api_id="claude-sonnet-4-6",
+    model_id="claude-sonnet-4-6",
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
-    api_key_env="ANTHROPIC_API_KEY",
+    api_key="$ANTHROPIC_API_KEY",
 )
 
 
@@ -61,7 +61,6 @@ def task_config() -> TaskConfig:
         model=TEST_MODEL,
         system_prompt="System prompt for tests",
         prompt="Fix grammar",
-        api_key_env="ANTHROPIC_API_KEY",
     )
 
 
@@ -285,3 +284,25 @@ def test_missing_api_key_raises_fatal(task_config: TaskConfig, monkeypatch):
 
     with pytest.raises(LlmFatalError, match="ANTHROPIC_API_KEY"):
         ProviderClient(task_config)
+
+
+def test_literal_api_key_is_used_directly(monkeypatch):
+    monkeypatch.delenv("sk-ant-literal-123", raising=False)
+    literal_model = ProviderModel(
+        name="claude-sonnet-4-6",
+        model_id="claude-sonnet-4-6",
+        provider="anthropic",
+        base_url="https://api.anthropic.com/v1/",
+        api_key="sk-ant-literal-123",
+    )
+    task = TaskConfig(
+        name="grammar",
+        model=literal_model,
+        system_prompt="System prompt for tests",
+        prompt="Fix grammar",
+    )
+
+    with patch("ankiops.llm.provider_client.AsyncOpenAI") as client_class:
+        ProviderClient(task)
+
+    assert client_class.call_args.kwargs["api_key"] == "sk-ant-literal-123"

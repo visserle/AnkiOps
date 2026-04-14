@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .llm_models import DeckScope, RunFailurePolicy, TaskConfig
+from .llm_models import DeckScope, TaskConfig
 from .model_registry import (
     ProviderModel,
     format_supported_model_names,
@@ -74,17 +74,3 @@ def resolve_model(
         supported = format_supported_model_names(collection_dir=collection_dir)
         raise ValueError(f"Model must be one of: {supported}")
     return model
-
-
-def resolve_failure_policy(
-    value: RunFailurePolicy | str,
-) -> RunFailurePolicy:
-    if isinstance(value, RunFailurePolicy):
-        return value
-
-    normalized = value.strip().lower()
-    for policy in RunFailurePolicy:
-        if policy.value == normalized:
-            return policy
-    supported = ", ".join(policy.value for policy in RunFailurePolicy)
-    raise ValueError(f"Failure policy must be one of: {supported}")

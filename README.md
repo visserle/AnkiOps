@@ -247,15 +247,17 @@ task_prompt: !file grammar.md
 
 ### Model Registry (`llm/models.yaml`)
 
-`llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key_env`, and `api_id`.
+`llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key`, and `model_id`.
 
 ```yaml
 - name: qwen3-32b
-  api_id: qwen3-32b
+  model_id: qwen3-32b
   provider: my-openai-compatible
   base_url: https://api.example.com/v1
-  api_key_env: EXAMPLE_API_KEY
+  api_key: $EXAMPLE_API_KEY
 ```
+
+`api_key` accepts either an env-var reference (`$EXAMPLE_API_KEY`) or a literal API key string.
 
 Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and only used for cost estimates.
 
@@ -265,6 +267,6 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 - AnkiOps creates a pre-LLM git snapshot unless `--no-auto-commit` is passed
 - `ankiops llm <task>` prints the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning; file paths are shown only when `system_prompt` or `task_prompt` use `!file`
 - Only notes in scope with at least one editable, non-empty field are sent to the model
-- Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
+- If any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors
 - Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics

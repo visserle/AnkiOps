@@ -21,10 +21,10 @@ from ankiops.llm.model_registry import ProviderModel
 
 TEST_MODEL = ProviderModel(
     name="claude-sonnet-4-6",
-    api_id="claude-sonnet-4-6",
+    model_id="claude-sonnet-4-6",
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
-    api_key_env="ANTHROPIC_API_KEY",
+    api_key="$ANTHROPIC_API_KEY",
     input_usd_per_mtok=3,
     output_usd_per_mtok=15,
 )

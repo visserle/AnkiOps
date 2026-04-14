@@ -11,7 +11,6 @@ from ankiops.llm.llm_models import (
     LlmCandidateStatus,
     LlmFinalStatus,
     LlmJobStatus,
-    RunFailurePolicy,
 )
 
 
@@ -30,7 +29,6 @@ def _start_job(adapter: LlmDb) -> int:
         task_name="grammar",
         model_name="claude-sonnet-4-6",
         api_model="claude-sonnet-4-6",
-        failure_policy=RunFailurePolicy.ATOMIC,
         config_snapshot={"task": "grammar"},
     )
 
@@ -106,15 +104,28 @@ def test_open_creates_schema_and_indexes(tmp_path):
         job_columns = [
             row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job)")
         ]
-        assert "eligible" not in job_columns
-        assert "requests" not in job_columns
-        assert "notes_seen" in job_columns
+        assert set(job_columns) == {
+            "id",
+            "task_name",
+            "model_name",
+            "api_model",
+            "status",
+            "persisted",
+            "fatal_error",
+            "config_snapshot_json",
+            "resume_from_job_id",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "decks_seen",
+            "decks_matched",
+            "notes_seen",
+        }
 
         job_sql = adapter._conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_job'"
         ).fetchone()[0]
         assert "CHECK (status IN ('running', 'completed', 'failed'))" in job_sql
-        assert "CHECK (failure_policy IN ('atomic', 'partial'))" in job_sql
     finally:
         adapter.close()
 
@@ -305,15 +316,14 @@ def test_enforces_status_constraints(tmp_path):
             adapter._conn.execute(
                 """
                 INSERT INTO llm_job (
-                    task_name, model_name, api_model, failure_policy,
+                    task_name, model_name, api_model,
                     status, persisted, config_snapshot_json, created_at, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "grammar",
                     "claude-sonnet-4-6",
                     "claude-sonnet-4-6",
-                    "atomic",
                     "not_a_status",
                     0,
                     "{}",

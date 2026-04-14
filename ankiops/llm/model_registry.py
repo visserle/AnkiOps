@@ -16,7 +16,7 @@ _USD_CENTS_QUANTUM = Decimal("0.01")
 _MODELS_FILE_NAME = "models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "name",
-    "api_id",
+    "model_id",
     "provider",
     "base_url",
     "api_key",
@@ -45,7 +45,7 @@ class CostEstimate:
 @dataclass(frozen=True)
 class ProviderModel:
     name: str
-    api_id: str
+    model_id: str
     provider: str
     base_url: str
     api_key: str
@@ -151,9 +151,9 @@ def _parse_model_entry(entry: Any, *, index: int) -> ProviderModel:
 
     return ProviderModel(
         name=_require_string(entry.get("name"), key="name", item_label=item_label),
-        api_id=_require_string(
-            entry.get("api_id"),
-            key="api_id",
+        model_id=_require_string(
+            entry.get("model_id"),
+            key="model_id",
             item_label=item_label,
         ),
         provider=_require_string(

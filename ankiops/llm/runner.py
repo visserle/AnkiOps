@@ -26,7 +26,6 @@ from .llm_models import (
     LlmFinalStatus,
     LlmJobResult,
     LlmJobStatus,
-    RunFailurePolicy,
     TaskConfig,
     TaskPlanResult,
     TaskRunSummary,
@@ -38,7 +37,6 @@ from .task_options import (
     apply_deck_override,
     format_deck_scope,
     format_request_defaults,
-    resolve_failure_policy,
     resolve_model,
     resolve_serializer_scope,
 )
@@ -183,7 +181,6 @@ class LlmTaskExecutor:
         note_type_configs: dict[str, NoteTypeConfig],
         model_override: str | None,
         no_auto_commit: bool,
-        failure_policy: RunFailurePolicy | str,
         resume_from_job_id: int | None = None,
         resume_source_items: dict[str, int] | None = None,
         provider_client_factory: ProviderClientFactory | None = None,
@@ -196,7 +193,6 @@ class LlmTaskExecutor:
         self.note_type_configs = note_type_configs
         self.model_override = model_override
         self.no_auto_commit = no_auto_commit
-        self.failure_policy = resolve_failure_policy(failure_policy)
         self.resume_from_job_id = resume_from_job_id
         self.resume_source_items = resume_source_items
         self.provider_client_factory = (
@@ -222,8 +218,7 @@ class LlmTaskExecutor:
         job_id = db.start_job(
             task_name=task.name,
             model_name=model.name,
-            api_model=model.api_id,
-            failure_policy=self.failure_policy,
+            api_model=model.model_id,
             config_snapshot=task_to_snapshot(task),
             resume_from_job_id=self.resume_from_job_id,
         )
@@ -231,13 +226,12 @@ class LlmTaskExecutor:
         deck, no_subdecks = resolve_serializer_scope(task)
         logger.debug(
             "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
-            "deck_scope=%s, failure_policy=%s)",
+            "deck_scope=%s)",
             task.name,
             model,
-            model.api_id,
+            model.model_id,
             self.collection_dir,
             format_deck_scope(task),
-            self.failure_policy.value,
         )
         logger.debug("LLM request defaults: %s", format_request_defaults(task))
         logger.debug(
@@ -276,7 +270,7 @@ class LlmTaskExecutor:
                 db=db,
                 job_id=job_id,
                 task=task,
-                api_model=model.api_id,
+                api_model=model.model_id,
                 provider_client=provider_client,
                 candidates=candidates,
                 attempt_recorder=attempt_recorder,
@@ -546,9 +540,9 @@ class LlmTaskExecutor:
         persisted = False
 
         if summary.updated > 0:
-            if self.failure_policy is RunFailurePolicy.ATOMIC and summary.errors:
+            if summary.errors:
                 logger.error(
-                    "Atomic failure policy prevented persistence: %d update(s) staged, "
+                    "Errors prevented persistence: %d update(s) staged, "
                     "%d error(s) observed",
                     summary.updated,
                     summary.errors,
@@ -607,7 +601,6 @@ async def run_task_async(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
-    failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
     task, note_type_configs = _load_task(
         collection_dir=collection_dir,
@@ -620,7 +613,6 @@ async def run_task_async(
         note_type_configs=note_type_configs,
         model_override=model_override,
         no_auto_commit=no_auto_commit,
-        failure_policy=failure_policy,
     )
     return await executor.execute()
 
@@ -630,7 +622,6 @@ async def resume_task_async(
     collection_dir: Path,
     resume_job_id: str,
     no_auto_commit: bool = False,
-    failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
     with _open_llm_db(collection_dir) as db:
         resolved = db.resolve_job_id(resume_job_id)
@@ -650,7 +641,6 @@ async def resume_task_async(
         note_type_configs=note_type_configs,
         model_override=None,
         no_auto_commit=no_auto_commit,
-        failure_policy=failure_policy,
         resume_from_job_id=resolved,
         resume_source_items=resume_source_items,
     )
@@ -664,7 +654,6 @@ def run_task(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
-    failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
     return asyncio.run(
         run_task_async(
@@ -673,7 +662,6 @@ def run_task(
             model_override=model_override,
             deck_override=deck_override,
             no_auto_commit=no_auto_commit,
-            failure_policy=failure_policy,
         )
     )
 
@@ -683,14 +671,12 @@ def resume_task(
     collection_dir: Path,
     resume_job_id: str,
     no_auto_commit: bool = False,
-    failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
     return asyncio.run(
         resume_task_async(
             collection_dir=collection_dir,
             resume_job_id=resume_job_id,
             no_auto_commit=no_auto_commit,
-            failure_policy=failure_policy,
         )
     )
 

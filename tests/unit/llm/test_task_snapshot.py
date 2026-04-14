@@ -16,10 +16,10 @@ from ankiops.llm.task_snapshot import task_from_snapshot, task_to_snapshot
 
 TEST_MODEL = ProviderModel(
     name="claude-sonnet-4-6",
-    api_id="claude-sonnet-4-6",
+    model_id="claude-sonnet-4-6",
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
-    api_key_env="ANTHROPIC_API_KEY",
+    api_key="$ANTHROPIC_API_KEY",
     input_usd_per_mtok=3,
     output_usd_per_mtok=15,
 )
@@ -38,10 +38,10 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
         tmp_path,
         content="""
         - name: claude-sonnet-4-6
-          api_id: claude-sonnet-4-6
+          model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
-          api_key_env: ANTHROPIC_API_KEY
+          api_key: $ANTHROPIC_API_KEY
           input_usd_per_mtok: 3
           output_usd_per_mtok: 15
         """,
@@ -54,7 +54,6 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
         prompt="task prompt",
         system_prompt_path=Path("llm/system.md"),
         prompt_path=Path("llm/grammar.md"),
-        api_key_env="ANTHROPIC_API_KEY",
         timeout_seconds=45,
         decks=DeckScope(deck_root="DeckA"),
         field_exceptions=[
@@ -81,7 +80,6 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
     assert loaded.model == task.model
     assert loaded.system_prompt == task.system_prompt
     assert loaded.prompt == task.prompt
-    assert loaded.api_key_env == task.api_key_env
     assert loaded.timeout_seconds == task.timeout_seconds
     assert loaded.decks == task.decks
     assert loaded.field_exceptions == task.field_exceptions
@@ -94,10 +92,10 @@ def test_task_snapshot_roundtrip_supports_inline_prompt_without_prompt_path(tmp_
         tmp_path,
         content="""
         - name: claude-sonnet-4-6
-          api_id: claude-sonnet-4-6
+          model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
-          api_key_env: ANTHROPIC_API_KEY
+          api_key: $ANTHROPIC_API_KEY
         """,
     )
 
@@ -138,10 +136,10 @@ def test_task_from_snapshot_rejects_unknown_model(tmp_path):
         tmp_path,
         content="""
         - name: claude-sonnet-4-6
-          api_id: claude-sonnet-4-6
+          model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
-          api_key_env: ANTHROPIC_API_KEY
+          api_key: $ANTHROPIC_API_KEY
         """,
     )
 
@@ -162,10 +160,10 @@ def test_task_from_snapshot_defaults_concurrency_when_omitted(tmp_path):
         tmp_path,
         content="""
         - name: claude-sonnet-4-6
-          api_id: claude-sonnet-4-6
+          model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
-          api_key_env: ANTHROPIC_API_KEY
+          api_key: $ANTHROPIC_API_KEY
         """,
     )
 
@@ -186,10 +184,10 @@ def test_task_from_snapshot_uses_collection_local_model_registry(tmp_path):
         tmp_path,
         content="""
         - name: qwen3-32b
-          api_id: qwen3-32b
+          model_id: qwen3-32b
           provider: openai-compatible
           base_url: https://api.example.com/v1
-          api_key_env: EXAMPLE_API_KEY
+          api_key: $EXAMPLE_API_KEY
         """,
     )
 
