@@ -32,7 +32,6 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
         "prompt_path": (
             str(task.prompt_path) if task.prompt_path is not None else None
         ),
-        "api_key_env": task.api_key_env,
         "timeout_seconds": task.timeout_seconds,
         "decks": {
             "deck_root": task.decks.deck_root,
@@ -117,7 +116,6 @@ def task_from_snapshot(
         prompt=str(snapshot.get("prompt") or ""),
         system_prompt_path=system_prompt_path,
         prompt_path=prompt_path,
-        api_key_env=str(snapshot.get("api_key_env") or model.api_key_env),
         timeout_seconds=int(
             snapshot.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS
         ),

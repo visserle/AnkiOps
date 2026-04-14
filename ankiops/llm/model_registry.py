@@ -19,7 +19,7 @@ _SUPPORTED_MODEL_KEYS = {
     "api_id",
     "provider",
     "base_url",
-    "api_key_env",
+    "api_key",
     "input_usd_per_mtok",
     "output_usd_per_mtok",
 }
@@ -48,7 +48,7 @@ class ProviderModel:
     api_id: str
     provider: str
     base_url: str
-    api_key_env: str
+    api_key: str
     input_usd_per_mtok: Decimal | None = None
     output_usd_per_mtok: Decimal | None = None
 
@@ -166,9 +166,9 @@ def _parse_model_entry(entry: Any, *, index: int) -> ProviderModel:
             key="base_url",
             item_label=item_label,
         ),
-        api_key_env=_require_string(
-            entry.get("api_key_env"),
-            key="api_key_env",
+        api_key=_require_string(
+            entry.get("api_key"),
+            key="api_key",
             item_label=item_label,
         ),
         input_usd_per_mtok=_parse_decimal(

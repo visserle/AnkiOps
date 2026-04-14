@@ -93,7 +93,6 @@ class TaskConfig:
     prompt: str
     system_prompt_path: Path | None = None
     prompt_path: Path | None = None
-    api_key_env: str = "OPENAI_API_KEY"
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)

@@ -300,7 +300,6 @@ def _parse_task(
         prompt=task_prompt,
         system_prompt_path=system_prompt_path,
         prompt_path=task_prompt_path,
-        api_key_env=model.api_key_env,
         field_exceptions=field_exceptions,
     )
 

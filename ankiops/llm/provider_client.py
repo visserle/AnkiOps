@@ -35,12 +35,7 @@ class ProviderClient:
     """Async wrapper around OpenAI-compatible chat completions APIs."""
 
     def __init__(self, task: TaskConfig) -> None:
-        api_key_env = task.model.api_key_env or task.api_key_env
-        api_key = os.environ.get(api_key_env)
-        if not api_key:
-            raise LlmFatalError(
-                f"Required environment variable '{api_key_env}' is not set"
-            )
+        api_key = _resolve_api_key(task.model.api_key)
 
         self._system_prompt = task.system_prompt
         self._client = AsyncOpenAI(
@@ -310,6 +305,20 @@ class ProviderClient:
 def _status_code(error: APIStatusError) -> int | None:
     value = getattr(error, "status_code", None)
     return value if isinstance(value, int) else None
+
+
+def _resolve_api_key(configured_value: str) -> str:
+    if configured_value.startswith("$"):
+        env_name = configured_value[1:].strip()
+        if not env_name:
+            raise LlmFatalError("Model api_key env reference must include a variable")
+        resolved = os.environ.get(env_name)
+        if not resolved:
+            raise LlmFatalError(
+                f"Required environment variable '{env_name}' is not set"
+            )
+        return resolved
+    return configured_value
 
 
 def _api_error_message(error: Exception) -> str:
