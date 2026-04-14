@@ -1028,8 +1028,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=sonnet, "
-        "api_model=claude-sonnet-4-6"
+        "Starting LLM task 'grammar' (model=sonnet, api_model=claude-sonnet-4-6"
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "
@@ -1041,9 +1040,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert "Serialized 1 deck(s), 2 note(s) in memory" in caplog.text
     assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
     assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
-    assert (
-        "Task 'grammar' (sonnet): 2 notes — 1 updated, 1 unchanged"
-    ) in caplog.text
+    assert ("Task 'grammar' (sonnet): 2 notes — 1 updated, 1 unchanged") in caplog.text
     assert (
         "Usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
         "2.0s provider time"
@@ -1085,9 +1082,7 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "LLM note error for nk-2 in 'TestDeck' (AnkiOpsChoice): "
         "Model attempted to update read-only field 'Answer'"
     ) in caplog.text
-    assert (
-        "Task 'grammar' (sonnet): 2 notes — 1 unchanged, 1 error"
-    ) in caplog.text
+    assert ("Task 'grammar' (sonnet): 2 notes — 1 unchanged, 1 error") in caplog.text
     assert (
         "Usage: 2 requests, 22 input tokens, 14 output tokens, "
         "0 retries, 1.8s provider time"

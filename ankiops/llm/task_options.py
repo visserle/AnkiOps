@@ -29,7 +29,9 @@ def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConf
 
 
 def format_deck_scope(task: TaskConfig) -> str:
-    return "collection" if task.decks.deck_root is None else f"deck:{task.decks.deck_root}"
+    return (
+        "collection" if task.decks.deck_root is None else f"deck:{task.decks.deck_root}"
+    )
 
 
 def format_request_defaults(task: TaskConfig) -> str:

@@ -158,7 +158,11 @@ def _load_note_type_configs(
 
 def _is_task_file(path: str) -> bool:
     path_obj = Path(path)
-    return path_obj.suffix in {".yaml", ".yml"} and path_obj.parent.name == "llm" and path_obj.name != MODEL_REGISTRY_FILE_NAME
+    return (
+        path_obj.suffix in {".yaml", ".yml"}
+        and path_obj.parent.name == "llm"
+        and path_obj.name != MODEL_REGISTRY_FILE_NAME
+    )
 
 
 def _is_task_file_for_name(path: str, task_name: str) -> bool:
