@@ -1,4 +1,4 @@
-- name: claude-opus-4-6
+- name: opus
   model_id: claude-opus-4-6
   provider: anthropic
   base_url: https://api.anthropic.com/v1/
@@ -6,7 +6,7 @@
   input_usd_per_mtok: 5
   output_usd_per_mtok: 25
 
-- name: claude-sonnet-4-6
+- name: sonnet
   model_id: claude-sonnet-4-6
   provider: anthropic
   base_url: https://api.anthropic.com/v1/
@@ -14,7 +14,7 @@
   input_usd_per_mtok: 3
   output_usd_per_mtok: 15
 
-- name: claude-haiku-4-5
+- name: haiku
   model_id: claude-haiku-4-5
   provider: anthropic
   base_url: https://api.anthropic.com/v1/

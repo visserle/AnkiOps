@@ -51,7 +51,7 @@ def _prepare_collection(tmp_path: Path) -> Path:
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: |
           You are a strict editor.
         task_prompt: |
@@ -77,7 +77,7 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     )
 
     assert plan.task_name == "grammar"
-    assert str(plan.model) == "claude-sonnet-4-6"
+    assert str(plan.model) == "sonnet"
     assert plan.summary.decks_seen == 1
     assert plan.summary.decks_matched == 1
     assert plan.summary.notes_seen == 2
@@ -117,7 +117,7 @@ def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
     _write(
         collection / "llm/translate.yaml",
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         task_prompt: |
           fix grammar
         sdk: anthropic

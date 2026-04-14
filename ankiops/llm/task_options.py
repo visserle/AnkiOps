@@ -6,16 +6,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from .llm_models import DeckScope, TaskConfig
-from .model_registry import (
-    ProviderModel,
-    format_supported_model_names,
-    parse_model,
-)
+from .model_registry import ProviderModel, load_model_registry
 
 
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
-    if task.decks.deck_root is None:
-        return None, False
     return task.decks.deck_root, False
 
 
@@ -31,16 +25,11 @@ def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConf
             "Deck override must be an exact deck name (wildcards are not supported)"
         )
 
-    return replace(
-        task,
-        decks=DeckScope(deck_root=deck_name),
-    )
+    return replace(task, decks=DeckScope(deck_root=deck_name))
 
 
 def format_deck_scope(task: TaskConfig) -> str:
-    if task.decks.deck_root is None:
-        return "collection"
-    return f"deck:{task.decks.deck_root}"
+    return "collection" if task.decks.deck_root is None else f"deck:{task.decks.deck_root}"
 
 
 def format_request_defaults(task: TaskConfig) -> str:
@@ -69,8 +58,9 @@ def resolve_model(
     if model_override is None:
         return task.model
 
-    model = parse_model(model_override, collection_dir=collection_dir)
+    registry = load_model_registry(collection_dir=collection_dir)
+    model = registry.parse(model_override)
     if model is None:
-        supported = format_supported_model_names(collection_dir=collection_dir)
+        supported = registry.format_names()
         raise ValueError(f"Model must be one of: {supported}")
     return model

@@ -27,8 +27,8 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
 def _start_job(adapter: LlmDb) -> int:
     return adapter.start_job(
         task_name="grammar",
-        model_name="claude-sonnet-4-6",
-        api_model="claude-sonnet-4-6",
+        model_name="sonnet",
+        api_model="sonnet",
         config_snapshot={"task": "grammar"},
     )
 
@@ -155,7 +155,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             adapter,
             item_id=item_id,
             provider_message_id="msg_123",
-            provider_model="claude-sonnet-4-6",
+            provider_model="sonnet",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=901,
@@ -170,7 +170,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             attempt_id=attempt_id,
             system_prompt_text="system",
             user_message_text="user",
-            request_params_json={"model": "claude-sonnet-4-6"},
+            request_params_json={"model": "sonnet"},
             response_raw_text='{"note_key":"nk-1","edits":{"Question":"fixed"}}',
             response_full_json='{"id":"msg_123"}',
         )
@@ -195,7 +195,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             (attempt_id,),
         ).fetchone()
         assert payload_row is not None
-        assert payload_row["request_params_json"] == '{"model":"claude-sonnet-4-6"}'
+        assert payload_row["request_params_json"] == '{"model":"sonnet"}'
         assert (
             payload_row["response_raw_text"]
             == '{"note_key":"nk-1","edits":{"Question":"fixed"}}'
@@ -278,7 +278,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
             adapter,
             item_id=item_id,
             provider_message_id="msg",
-            provider_model="claude-sonnet-4-6",
+            provider_model="sonnet",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=1,
@@ -294,7 +294,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 adapter,
                 item_id=item_id,
                 provider_message_id="msg2",
-                provider_model="claude-sonnet-4-6",
+                provider_model="sonnet",
                 stop_reason="end_turn",
                 result_type=LlmAttemptResultType.SUCCEEDED,
                 latency_ms=1,
@@ -322,8 +322,8 @@ def test_enforces_status_constraints(tmp_path):
                 """,
                 (
                     "grammar",
-                    "claude-sonnet-4-6",
-                    "claude-sonnet-4-6",
+                    "sonnet",
+                    "sonnet",
                     "not_a_status",
                     0,
                     "{}",
@@ -385,7 +385,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     adapter,
                     item_id=item_id,
                     provider_message_id="msg",
-                    provider_model="claude-sonnet-4-6",
+                    provider_model="sonnet",
                     stop_reason="end_turn",
                     result_type=LlmAttemptResultType.ERRORED,
                     latency_ms=1,
@@ -400,7 +400,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     attempt_id=attempt_id,
                     system_prompt_text="system",
                     user_message_text="user",
-                    request_params_json={"model": "claude-sonnet-4-6"},
+                    request_params_json={"model": "sonnet"},
                     response_raw_text=None,
                     response_full_json=None,
                 )

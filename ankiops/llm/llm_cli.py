@@ -11,10 +11,15 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ankiops.config import get_note_types_dir, require_initialized_collection_dir
+from ankiops.config import (
+    LLM_DIR,
+    get_note_types_dir,
+    require_initialized_collection_dir,
+)
 from ankiops.fs import FileSystemAdapter
 
 from .config_loader import load_llm_task_catalog
+from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .runner import list_jobs as list_llm_jobs
 from .runner import plan_task, resume_task, run_task, show_job
 
@@ -164,7 +169,7 @@ def configure_llm_parser(
     )
     llm_parser.add_argument(
         "--model",
-        help=("Override model for this plan/run (must exist in llm/models.yaml)"),
+        help=f"Override model for this plan/run (must exist in {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME})",
     )
     llm_parser.add_argument(
         "--deck",

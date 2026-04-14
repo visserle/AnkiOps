@@ -17,6 +17,7 @@ from ankiops.config import (
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
+from ankiops.llm.model_registry import MODEL_REGISTRY_FILE_NAME
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
@@ -93,29 +94,24 @@ def _eject_llm_configs(collection_dir: Path) -> None:
 
     llm_dir = collection_dir / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
+    llm_resources = resources.files("ankiops.llm")
 
-    models_src = resources.files("ankiops.llm").joinpath("models.yaml")
-    models_dst = llm_dir / "models.yaml"
-    if not models_dst.exists():
-        models_dst.write_text(models_src.read_text(encoding="utf-8"), encoding="utf-8")
-
-    system_prompt_src = resources.files("ankiops.llm").joinpath("system_prompt.md")
-    system_prompt_dst = llm_dir / "system_prompt.md"
-    if not system_prompt_dst.exists():
-        system_prompt_dst.write_text(
-            system_prompt_src.read_text(encoding="utf-8"),
+    for resource_name in (MODEL_REGISTRY_FILE_NAME, "system_prompt.md"):
+        destination = llm_dir / resource_name
+        if destination.exists():
+            continue
+        destination.write_text(
+            llm_resources.joinpath(resource_name).read_text(encoding="utf-8"),
             encoding="utf-8",
         )
 
-    packaged_tasks_dir = resources.files("ankiops.llm").joinpath("tasks")
-    for resource in packaged_tasks_dir.iterdir():
-        resource_name = resource.name
-        if not resource.is_file() or Path(resource_name).suffix not in {
+    for resource in llm_resources.joinpath("tasks").iterdir():
+        if not resource.is_file() or Path(resource.name).suffix not in {
             ".yaml",
             ".yml",
         }:
             continue
-        destination = llm_dir / resource_name
+        destination = llm_dir / resource.name
         if destination.exists():
             continue
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")

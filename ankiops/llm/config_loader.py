@@ -13,14 +13,19 @@ from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
 from .llm_models import FieldExceptionRule, TaskCatalog, TaskConfig
-from .model_registry import ModelRegistry, ModelRegistryError, load_model_registry
+from .model_registry import (
+    MODEL_REGISTRY_FILE_NAME,
+    ModelRegistry,
+    ModelRegistryError,
+    load_model_registry,
+    model_registry_path,
+)
 
 
 class LlmConfigError(ValueError):
     """Raised when an LLM task config is invalid."""
 
 
-_MODEL_REGISTRY_FILE_NAMES = {"models.yaml"}
 _SUPPORTED_TASK_KEYS_ORDERED = ("model", "system_prompt", "task_prompt", "fields")
 _SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
 
@@ -323,7 +328,7 @@ def load_llm_task_catalog(
     task_files = [
         path
         for path in _iter_yaml_files(llm_dir)
-        if path.name not in _MODEL_REGISTRY_FILE_NAMES
+        if path.name != MODEL_REGISTRY_FILE_NAME
     ]
     if not task_files:
         errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
@@ -332,7 +337,7 @@ def load_llm_task_catalog(
     try:
         model_registry = load_model_registry(collection_dir=collection_dir)
     except ModelRegistryError as error:
-        errors[str(llm_dir / "models.yaml")] = str(error)
+        errors[str(model_registry_path(collection_dir=collection_dir))] = str(error)
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
     for path in task_files:

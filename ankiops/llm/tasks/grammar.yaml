@@ -1,4 +1,4 @@
-model: claude-sonnet-4-6
+model: haiku
 system_prompt: !file system_prompt.md
 task_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.

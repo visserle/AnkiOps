@@ -13,7 +13,7 @@ from ankiops.config import LLM_DIR
 
 _TOKENS_PER_MTOK = Decimal("1000000")
 _USD_CENTS_QUANTUM = Decimal("0.01")
-_MODELS_FILE_NAME = "models.yaml"
+MODEL_REGISTRY_FILE_NAME = "models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "name",
     "model_id",
@@ -99,8 +99,8 @@ class ModelRegistry:
         return ", ".join(self._models_by_name)
 
 
-def _models_path(collection_dir: Path) -> Path:
-    return collection_dir / LLM_DIR / _MODELS_FILE_NAME
+def model_registry_path(*, collection_dir: Path) -> Path:
+    return collection_dir / LLM_DIR / MODEL_REGISTRY_FILE_NAME
 
 
 def _read_yaml_list(path: Path) -> list[Any]:
@@ -196,11 +196,11 @@ def _parse_registry(path: Path) -> ModelRegistry:
 
 
 def load_model_registry(*, collection_dir: Path) -> ModelRegistry:
-    path = _models_path(collection_dir)
+    path = model_registry_path(collection_dir=collection_dir)
     if not path.exists():
         raise ModelRegistryError(
             f"{path}: model registry file not found. "
-            "Run 'ankiops init' to eject llm/models.yaml."
+            f"Run 'ankiops init' to eject {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME}."
         )
     if not path.is_file():
         raise ModelRegistryError(f"{path}: model registry must be a file")

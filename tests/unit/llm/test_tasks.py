@@ -69,7 +69,7 @@ def _write_default_models(collection_dir: Path) -> None:
 
 def _task_config(
     *,
-    model: str = "claude-sonnet-4-6",
+    model: str = "sonnet",
     system_prompt: str = f"!file {SYSTEM_PROMPT_FILE.name}",
     task_prompt: str = DEFAULT_TASK_PROMPT,
     extra: str = "",
@@ -313,13 +313,13 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     assert (tmp_path / "llm/models.yaml").exists()
     models_content = (tmp_path / "llm/models.yaml").read_text(encoding="utf-8")
     assert "models:" not in models_content
-    assert "name: claude-sonnet-4-6" in models_content
+    assert "name: sonnet" in models_content
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
     for task_path in (tmp_path / "llm").glob("*.yaml"):
         if task_path.name == "models.yaml":
             continue
         content = task_path.read_text(encoding="utf-8")
-        assert "model: claude-sonnet-4-6" in content
+        assert "model: " in content
         assert "system_prompt: !file system_prompt.md" in content
         assert "task_prompt: |" in content
     assert (tmp_path / "llm/.llm.db").exists()
@@ -332,14 +332,14 @@ def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
     existing_task = tmp_path / TASK_FILE
     existing_task.parent.mkdir(parents=True, exist_ok=True)
     existing_task.write_text(
-        "model: claude-sonnet-4-6\nsystem_prompt: keep\ntask_prompt: keep\n",
+        "model: sonnet\nsystem_prompt: keep\ntask_prompt: keep\n",
         encoding="utf-8",
     )
 
     initialize_collection("TestProfile")
 
     assert existing_task.read_text(encoding="utf-8") == (
-        "model: claude-sonnet-4-6\nsystem_prompt: keep\ntask_prompt: keep\n"
+        "model: sonnet\nsystem_prompt: keep\ntask_prompt: keep\n"
     )
 
 
@@ -363,7 +363,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model.name == "claude-sonnet-4-6"
+    assert task.model.name == "sonnet"
     assert task.model.api_key == "$ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == DEFAULT_TASK_PROMPT
@@ -490,7 +490,7 @@ def test_load_llm_task_catalog_requires_system_prompt(
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         task_prompt: fix grammar
         """,
     )
@@ -508,7 +508,7 @@ def test_load_llm_task_catalog_requires_task_prompt(note_type_configs, tmp_path:
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: system rules
         """,
     )
@@ -529,7 +529,7 @@ def test_load_llm_task_catalog_rejects_unknown_task_key(
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: system rules
         task_prompt: fix grammar
         unsupported_key: value
@@ -550,7 +550,7 @@ def test_load_llm_task_catalog_rejects_invalid_file_tag_path(
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: !file ""
         task_prompt: |
           fix grammar
@@ -573,7 +573,7 @@ def test_load_llm_task_catalog_rejects_file_tag_outside_llm(
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: !file ../outside.md
         task_prompt: |
           fix grammar
@@ -594,7 +594,7 @@ def test_load_llm_task_catalog_rejects_invalid_yaml(
     _write(
         tmp_path / TASK_FILE,
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         system_prompt: !file [
         task_prompt: fix grammar
         """,
@@ -622,7 +622,7 @@ def test_load_llm_task_catalog_rejects_invalid_yaml(
         ),
         (
             _task_config(model="unknown-model"),
-            "must be one of: claude-opus-4-6",
+            "must be one of: opus",
         ),
         (
             _task_config(extra="sdk: anthropic"),
@@ -705,7 +705,7 @@ def test_load_llm_task_catalog_ignores_non_task_dirs(
         tmp_path / "llm/providers/anthropic.yaml",
         """
         name: anthropic
-        model: claude-sonnet-4-6
+        model: sonnet
         """,
     )
 
@@ -753,7 +753,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 
     assert not result.failed
     assert result.persisted
-    assert summary.model.name == "claude-sonnet-4-6"
+    assert summary.model.name == "sonnet"
     assert summary.requests == 2
     assert summary.input_tokens == 34
     assert summary.output_tokens == 13
@@ -1028,7 +1028,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=claude-sonnet-4-6, "
+        "Starting LLM task 'grammar' (model=sonnet, "
         "api_model=claude-sonnet-4-6"
     ) in caplog.text
     assert (
@@ -1042,7 +1042,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert "  Updated nk-1 in 'TestDeck' (AnkiOpsQA): fields=Question" in caplog.text
     assert "  Unchanged nk-2 in 'TestDeck' (AnkiOpsChoice)" in caplog.text
     assert (
-        "Task 'grammar' (claude-sonnet-4-6): 2 notes — 1 updated, 1 unchanged"
+        "Task 'grammar' (sonnet): 2 notes — 1 updated, 1 unchanged"
     ) in caplog.text
     assert (
         "Usage: 2 requests, 34 input tokens, 13 output tokens, 0 retries, "
@@ -1086,7 +1086,7 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
         "Model attempted to update read-only field 'Answer'"
     ) in caplog.text
     assert (
-        "Task 'grammar' (claude-sonnet-4-6): 2 notes — 1 unchanged, 1 error"
+        "Task 'grammar' (sonnet): 2 notes — 1 unchanged, 1 error"
     ) in caplog.text
     assert (
         "Usage: 2 requests, 22 input tokens, 14 output tokens, "
@@ -1142,7 +1142,7 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
     assert (
         "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): no editable non-empty fields"
     ) in caplog.text
-    assert "Task 'grammar' (claude-sonnet-4-6): 0 notes — 1 skipped" in caplog.text
+    assert "Task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
 
 
 def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
@@ -1150,7 +1150,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
     _write(
         collection / "llm/translate.yaml",
         """
-        model: claude-sonnet-4-6
+        model: sonnet
         task_prompt: |
           fix grammar
         sdk: anthropic

@@ -1,4 +1,4 @@
-model: claude-sonnet-4-6
+model: sonnet
 system_prompt: !file system_prompt.md
 task_prompt: |
   Translate the following text from English to German.
