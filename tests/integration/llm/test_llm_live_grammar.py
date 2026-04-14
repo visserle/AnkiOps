@@ -25,6 +25,12 @@ def _write(path: Path, content: str) -> None:
 def _eject_standard_llm_files(collection_dir: Path) -> None:
     llm_dir = collection_dir / "llm"
     _write(
+        llm_dir / "_models.yaml",
+        resources.files("ankiops.llm")
+        .joinpath("_models.yaml")
+        .read_text(encoding="utf-8"),
+    )
+    _write(
         llm_dir / "_system_prompt.md",
         resources.files("ankiops.llm")
         .joinpath("_system_prompt.md")
