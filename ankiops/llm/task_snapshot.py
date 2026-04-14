@@ -7,17 +7,15 @@ from typing import Any
 
 from .llm_models import (
     DeckScope,
-    ExecutionMode,
     FieldExceptionRule,
     TaskConfig,
-    TaskExecutionOptions,
     TaskRequestOptions,
 )
 from .model_registry import parse_model
 
 _DEFAULT_REQUEST_OPTIONS = TaskRequestOptions()
-_DEFAULT_EXECUTION_OPTIONS = TaskExecutionOptions()
 _DEFAULT_TIMEOUT_SECONDS = 60
+_DEFAULT_CONCURRENCY = 8
 
 
 def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
@@ -54,10 +52,7 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
             "retry_backoff_seconds": task.request.retry_backoff_seconds,
             "retry_backoff_jitter": task.request.retry_backoff_jitter,
         },
-        "execution": {
-            "mode": task.execution.mode.value,
-            "concurrency": task.execution.concurrency,
-        },
+        "concurrency": task.concurrency,
     }
 
 
@@ -79,15 +74,7 @@ def task_from_snapshot(
         "request",
         "Job snapshot is missing request options",
     )
-    execution = _require_mapping(
-        snapshot,
-        "execution",
-        "Job snapshot is missing execution options",
-    )
-
-    mode_raw = execution.get("mode")
-    if not isinstance(mode_raw, str):
-        raise ValueError("Job snapshot execution mode is invalid")
+    concurrency = int(snapshot.get("concurrency", _DEFAULT_CONCURRENCY))
 
     deck_root_raw = decks.get("deck_root")
     if deck_root_raw is not None and not isinstance(deck_root_raw, str):
@@ -161,12 +148,7 @@ def task_from_snapshot(
                 )
             ),
         ),
-        execution=TaskExecutionOptions(
-            mode=ExecutionMode(mode_raw),
-            concurrency=int(
-                execution.get("concurrency", _DEFAULT_EXECUTION_OPTIONS.concurrency)
-            ),
-        ),
+        concurrency=concurrency,
     )
 
 

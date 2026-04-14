@@ -7,7 +7,6 @@ import pytest
 
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_models import (
-    ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -31,7 +30,6 @@ def _start_job(adapter: LlmDb) -> int:
         task_name="grammar",
         model_name="claude-sonnet-4-6",
         api_model="claude-sonnet-4-6",
-        execution_mode=ExecutionMode.ONLINE,
         failure_policy=RunFailurePolicy.ATOMIC,
         config_snapshot={"task": "grammar"},
     )
@@ -60,7 +58,6 @@ def _insert_attempt(
         provider_message_id=provider_message_id,
         provider_model=provider_model,
         provider_request_id=None,
-        provider_execution_mode=ExecutionMode.ONLINE,
         stop_reason=stop_reason,
         result_type=result_type,
         latency_ms=latency_ms,
@@ -308,15 +305,14 @@ def test_enforces_status_constraints(tmp_path):
             adapter._conn.execute(
                 """
                 INSERT INTO llm_job (
-                    task_name, model_name, api_model, execution_mode, failure_policy,
+                    task_name, model_name, api_model, failure_policy,
                     status, persisted, config_snapshot_json, created_at, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "grammar",
                     "claude-sonnet-4-6",
                     "claude-sonnet-4-6",
-                    "online",
                     "atomic",
                     "not_a_status",
                     0,

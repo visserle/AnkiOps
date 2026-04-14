@@ -7,10 +7,8 @@ import pytest
 
 from ankiops.llm.llm_models import (
     DeckScope,
-    ExecutionMode,
     FieldExceptionRule,
     TaskConfig,
-    TaskExecutionOptions,
     TaskRequestOptions,
 )
 from ankiops.llm.model_registry import ProviderModel
@@ -73,10 +71,7 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
             retry_backoff_seconds=0.75,
             retry_backoff_jitter=False,
         ),
-        execution=TaskExecutionOptions(
-            mode=ExecutionMode.ONLINE,
-            concurrency=4,
-        ),
+        concurrency=4,
     )
 
     snapshot = task_to_snapshot(task)
@@ -91,7 +86,7 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
     assert loaded.decks == task.decks
     assert loaded.field_exceptions == task.field_exceptions
     assert loaded.request == task.request
-    assert loaded.execution == task.execution
+    assert loaded.concurrency == task.concurrency
 
 
 def test_task_snapshot_roundtrip_supports_inline_prompt_without_prompt_path(tmp_path):
@@ -132,7 +127,7 @@ def test_task_from_snapshot_rejects_missing_model_registry(tmp_path):
                 "model": "unknown",
                 "decks": {"deck_root": None},
                 "request": {},
-                "execution": {"mode": "online"},
+                "concurrency": 8,
             },
             collection_dir=missing_collection,
         )
@@ -156,13 +151,13 @@ def test_task_from_snapshot_rejects_unknown_model(tmp_path):
                 "model": "unknown",
                 "decks": {"deck_root": None},
                 "request": {},
-                "execution": {"mode": "online"},
+                "concurrency": 8,
             },
             collection_dir=tmp_path,
         )
 
 
-def test_task_from_snapshot_requires_execution_mapping(tmp_path):
+def test_task_from_snapshot_defaults_concurrency_when_omitted(tmp_path):
     _write_models_file(
         tmp_path,
         content="""
@@ -174,15 +169,16 @@ def test_task_from_snapshot_requires_execution_mapping(tmp_path):
         """,
     )
 
-    with pytest.raises(ValueError, match="missing execution options"):
-        task_from_snapshot(
-            {
-                "model": "claude-sonnet-4-6",
-                "decks": {"deck_root": None},
-                "request": {},
-            },
-            collection_dir=tmp_path,
-        )
+    loaded = task_from_snapshot(
+        {
+            "model": "claude-sonnet-4-6",
+            "decks": {"deck_root": None},
+            "request": {},
+        },
+        collection_dir=tmp_path,
+    )
+
+    assert loaded.concurrency == 8
 
 
 def test_task_from_snapshot_uses_collection_local_model_registry(tmp_path):
@@ -203,7 +199,7 @@ def test_task_from_snapshot_uses_collection_local_model_registry(tmp_path):
             "model": "qwen3-32b",
             "decks": {"deck_root": None},
             "request": {},
-            "execution": {"mode": "online"},
+            "concurrency": 8,
         },
         collection_dir=tmp_path,
     )

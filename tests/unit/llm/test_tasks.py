@@ -477,8 +477,7 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.execution.mode.value == "online"
-    assert task.execution.concurrency == 8
+    assert task.concurrency == 8
     assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
     assert task.prompt_path is None
 
@@ -540,9 +539,7 @@ def test_load_llm_task_catalog_rejects_unknown_task_key(
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
 
     assert not catalog.tasks_by_name
-    assert "unknown task key(s): unsupported_key" in next(
-        iter(catalog.errors.values())
-    )
+    assert "unknown task key(s): unsupported_key" in next(iter(catalog.errors.values()))
 
 
 def test_load_llm_task_catalog_rejects_invalid_file_tag_path(
@@ -923,18 +920,6 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
     )
 
 
-def test_run_task_rejects_batch_mode_override(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(tmp_path, monkeypatch)
-
-    with pytest.raises(ValueError, match="Execution mode must be one of: online"):
-        run_task(
-            collection_dir=collection,
-            task_name="grammar",
-            mode_override="batch",
-            no_auto_commit=True,
-        )
-
-
 def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
@@ -1049,7 +1034,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "
         "temperature=default retries=2 retry_backoff=0.5s retry_jitter=true "
-        "mode=online concurrency=8"
+        "concurrency=8"
     ) in caplog.text
     assert "LLM serializer scope: collection" in caplog.text
     assert "Auto-commit disabled (--no-auto-commit)" in caplog.text

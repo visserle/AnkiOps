@@ -9,7 +9,6 @@ import pytest
 from ankiops.cli import main, run_llm
 from ankiops.llm.llm_db import LlmJobListItem
 from ankiops.llm.llm_models import (
-    ExecutionMode,
     LlmJobResult,
     LlmJobStatus,
     PlanFieldSurface,
@@ -43,8 +42,7 @@ def _plan_result() -> TaskPlanResult:
         task_prompt="Task prompt",
         request_defaults=(
             "timeout=60s max_tokens=2048 temperature=default retries=2 "
-            "retry_backoff=0.5s retry_jitter=true mode=online "
-            "concurrency=8"
+            "retry_backoff=0.5s retry_jitter=true concurrency=8"
         ),
         summary=TaskRunSummary(
             task_name="grammar",
@@ -125,18 +123,6 @@ def test_cli_llm_dispatches_plan():
     assert plan_task.call_args.kwargs["deck_override"] is None
 
 
-def test_cli_llm_dispatches_plan_with_online_override():
-    with (
-        patch("ankiops.cli.require_initialized_collection_dir"),
-        patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
-        patch("sys.argv", ["ankiops", "llm", "grammar", "--online"]),
-    ):
-        main()
-
-    plan_task.assert_called_once()
-    assert plan_task.call_args.kwargs["mode_override"] == "online"
-
-
 def test_cli_llm_dispatches_plan_with_deck_override():
     with (
         patch("ankiops.cli.require_initialized_collection_dir"),
@@ -195,7 +181,6 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
             job_id=24,
             task_name="grammar",
             model_name="claude-sonnet-4-6",
-            execution_mode=ExecutionMode.ONLINE,
             status=LlmJobStatus.COMPLETED,
             persisted=True,
             created_at="2026-03-21T10:00:00Z",

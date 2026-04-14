@@ -76,7 +76,6 @@ def build_task_plan_result(
     summary = TaskRunSummary(
         task_name=task.name,
         model=task.model,
-        execution_mode=task.execution.mode,
         decks_seen=snapshot.counts.decks_seen,
         decks_matched=snapshot.counts.decks_matched,
         notes_seen=snapshot.counts.notes_seen,
@@ -96,9 +95,7 @@ def build_task_plan_result(
             if task.system_prompt_path is not None
             else None
         ),
-        prompt_path=(
-            str(task.prompt_path) if task.prompt_path is not None else None
-        ),
+        prompt_path=(str(task.prompt_path) if task.prompt_path is not None else None),
         system_prompt=task.system_prompt,
         task_prompt=task.prompt,
         request_defaults=format_request_defaults(task),

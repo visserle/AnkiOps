@@ -14,7 +14,6 @@ from typing import Any, Iterator, TypeVar
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
 from .llm_models import (
-    ExecutionMode,
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -48,7 +47,6 @@ class LlmJobListItem:
     job_id: int
     task_name: str
     model_name: str
-    execution_mode: ExecutionMode
     status: LlmJobStatus
     persisted: bool
     created_at: str
@@ -79,7 +77,6 @@ class LlmJobDetail:
     task_name: str
     model_name: str
     api_model: str
-    execution_mode: ExecutionMode
     status: LlmJobStatus
     persisted: bool
     failure_policy: RunFailurePolicy
@@ -221,7 +218,6 @@ class LlmDb:
         failure_policy_check = _enum_check_sql(
             [policy.value for policy in RunFailurePolicy]
         )
-        execution_mode_check = _enum_check_sql([mode.value for mode in ExecutionMode])
 
         with self._conn:
             self._conn.executescript(
@@ -231,8 +227,8 @@ class LlmDb:
                     task_name TEXT NOT NULL,
                     model_name TEXT NOT NULL,
                     api_model TEXT NOT NULL,
-                    execution_mode TEXT NOT NULL CHECK (execution_mode IN {execution_mode_check}),
-                    failure_policy TEXT NOT NULL CHECK (failure_policy IN {failure_policy_check}),
+                    failure_policy TEXT NOT NULL
+                        CHECK (failure_policy IN {failure_policy_check}),
                     status TEXT NOT NULL CHECK (status IN {job_status_check}),
                     persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
@@ -254,12 +250,15 @@ class LlmDb:
                     note_key TEXT,
                     deck_name TEXT NOT NULL,
                     note_type TEXT,
-                    candidate_status TEXT NOT NULL CHECK (candidate_status IN {candidate_status_check}),
+                    candidate_status TEXT NOT NULL
+                        CHECK (candidate_status IN {candidate_status_check}),
                     skip_reason TEXT,
-                    final_status TEXT NOT NULL CHECK (final_status IN {final_status_check}),
+                    final_status TEXT NOT NULL
+                        CHECK (final_status IN {final_status_check}),
                     error_message TEXT,
                     changed_fields_json TEXT NOT NULL,
-                    applied_to_markdown INTEGER NOT NULL DEFAULT 0 CHECK (applied_to_markdown IN (0, 1)),
+                    applied_to_markdown INTEGER NOT NULL DEFAULT 0
+                        CHECK (applied_to_markdown IN (0, 1)),
                     resume_source_item_id INTEGER,
                     UNIQUE(job_id, ordinal),
                     FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE,
@@ -274,9 +273,9 @@ class LlmDb:
                     provider_message_id TEXT,
                     provider_model TEXT,
                     provider_request_id TEXT,
-                    provider_execution_mode TEXT NOT NULL CHECK (provider_execution_mode IN {execution_mode_check}),
                     stop_reason TEXT,
-                    result_type TEXT NOT NULL CHECK (result_type IN {attempt_result_check}),
+                    result_type TEXT NOT NULL
+                        CHECK (result_type IN {attempt_result_check}),
                     latency_ms INTEGER NOT NULL,
                     input_tokens INTEGER NOT NULL,
                     output_tokens INTEGER NOT NULL,
@@ -288,7 +287,8 @@ class LlmDb:
                     created_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL,
                     UNIQUE(job_item_id, attempt_no),
-                    FOREIGN KEY(job_item_id) REFERENCES llm_job_item(id) ON DELETE CASCADE
+                    FOREIGN KEY(job_item_id)
+                        REFERENCES llm_job_item(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS llm_attempt_payload (
@@ -298,7 +298,8 @@ class LlmDb:
                     request_params_json TEXT NOT NULL,
                     response_raw_text TEXT,
                     response_full_json TEXT,
-                    FOREIGN KEY(attempt_id) REFERENCES llm_item_attempt(id) ON DELETE CASCADE
+                    FOREIGN KEY(attempt_id)
+                        REFERENCES llm_item_attempt(id) ON DELETE CASCADE
                 );
                 """
             )
@@ -343,7 +344,6 @@ class LlmDb:
         task_name: str,
         model_name: str,
         api_model: str,
-        execution_mode: ExecutionMode,
         failure_policy: RunFailurePolicy,
         config_snapshot: dict[str, Any],
         resume_from_job_id: int | None = None,
@@ -352,17 +352,16 @@ class LlmDb:
         cursor = self._write(
             """
             INSERT INTO llm_job (
-                task_name, model_name, api_model, execution_mode,
+                task_name, model_name, api_model,
                 failure_policy, status, persisted, fatal_error,
                 config_snapshot_json, resume_from_job_id,
                 created_at, started_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
             """,
             (
                 task_name,
                 model_name,
                 api_model,
-                execution_mode.value,
                 failure_policy.value,
                 LlmJobStatus.RUNNING.value,
                 self._as_json(config_snapshot),
@@ -371,7 +370,10 @@ class LlmDb:
                 now,
             ),
         )
-        return int(cursor.lastrowid)
+        rowid = cursor.lastrowid
+        if rowid is None:
+            raise RuntimeError("Failed to persist llm_job row")
+        return int(rowid)
 
     def set_discovery_counts(
         self,
@@ -430,7 +432,10 @@ class LlmDb:
                 resume_source_item_id,
             ),
         )
-        return int(cursor.lastrowid)
+        rowid = cursor.lastrowid
+        if rowid is None:
+            raise RuntimeError("Failed to persist llm_job_item row")
+        return int(rowid)
 
     def update_job_item_result(
         self,
@@ -491,7 +496,6 @@ class LlmDb:
         provider_message_id: str | None,
         provider_model: str | None,
         provider_request_id: str | None,
-        provider_execution_mode: ExecutionMode,
         stop_reason: str | None,
         result_type: LlmAttemptResultType,
         latency_ms: int,
@@ -508,12 +512,12 @@ class LlmDb:
             """
             INSERT INTO llm_item_attempt (
                 job_item_id, attempt_no, provider, provider_message_id,
-                provider_model, provider_request_id, provider_execution_mode,
+                provider_model, provider_request_id,
                 stop_reason, result_type, latency_ms,
                 input_tokens, output_tokens, retry_count, error_type,
                 error_message, rate_limit_headers_json, parsed_update_json,
                 created_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item_id,
@@ -522,7 +526,6 @@ class LlmDb:
                 provider_message_id,
                 provider_model,
                 provider_request_id,
-                provider_execution_mode.value,
                 stop_reason,
                 result_type.value,
                 latency_ms,
@@ -545,7 +548,10 @@ class LlmDb:
                 now,
             ),
         )
-        return int(cursor.lastrowid)
+        rowid = cursor.lastrowid
+        if rowid is None:
+            raise RuntimeError("Failed to persist llm_item_attempt row")
+        return int(rowid)
 
     def insert_attempt_payload(
         self,
@@ -634,7 +640,6 @@ class LlmDb:
             SELECT
                 task_name,
                 model_name,
-                execution_mode,
                 decks_seen,
                 decks_matched,
                 notes_seen,
@@ -654,12 +659,10 @@ class LlmDb:
         )
         if model is None:
             raise ValueError(f"Unknown model '{row['model_name']}' in persisted job")
-        execution_mode = self._parse_enum(ExecutionMode, row["execution_mode"])
 
         summary = TaskRunSummary(
             task_name=row["task_name"],
             model=model,
-            execution_mode=execution_mode,
             decks_seen=int(row["decks_seen"]),
             decks_matched=int(row["decks_matched"]),
             notes_seen=int(row["notes_seen"]),
@@ -668,12 +671,36 @@ class LlmDb:
         item_counts = self._conn.execute(
             """
             SELECT
-                SUM(CASE WHEN candidate_status = 'eligible' THEN 1 ELSE 0 END) AS eligible,
-                SUM(CASE WHEN final_status = 'succeeded_updated' THEN 1 ELSE 0 END) AS updated,
-                SUM(CASE WHEN final_status = 'succeeded_unchanged' THEN 1 ELSE 0 END) AS unchanged,
-                SUM(CASE WHEN candidate_status = 'skipped_deck_scope' THEN 1 ELSE 0 END) AS skipped_deck_scope,
-                SUM(CASE WHEN candidate_status = 'skipped_no_editable_fields' THEN 1 ELSE 0 END) AS skipped_no_editable_fields,
-                SUM(CASE WHEN final_status IN ('note_error', 'provider_error', 'fatal_error') THEN 1 ELSE 0 END) AS errors,
+                SUM(
+                    CASE WHEN candidate_status = 'eligible' THEN 1 ELSE 0 END
+                ) AS eligible,
+                SUM(
+                    CASE WHEN final_status = 'succeeded_updated' THEN 1 ELSE 0 END
+                ) AS updated,
+                SUM(
+                    CASE WHEN final_status = 'succeeded_unchanged' THEN 1 ELSE 0 END
+                ) AS unchanged,
+                SUM(
+                    CASE WHEN candidate_status = 'skipped_deck_scope' THEN 1 ELSE 0 END
+                ) AS skipped_deck_scope,
+                SUM(
+                    CASE
+                        WHEN candidate_status = 'skipped_no_editable_fields'
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS skipped_no_editable_fields,
+                SUM(
+                    CASE
+                        WHEN final_status IN (
+                            'note_error',
+                            'provider_error',
+                            'fatal_error'
+                        )
+                        THEN 1
+                        ELSE 0
+                    END
+                ) AS errors,
                 SUM(CASE WHEN final_status = 'canceled' THEN 1 ELSE 0 END) AS canceled,
                 SUM(CASE WHEN final_status = 'expired' THEN 1 ELSE 0 END) AS expired
             FROM llm_job_item
@@ -760,7 +787,6 @@ class LlmDb:
                 id,
                 task_name,
                 model_name,
-                execution_mode,
                 status,
                 persisted,
                 created_at,
@@ -777,7 +803,6 @@ class LlmDb:
                 job_id=int(row["id"]),
                 task_name=str(row["task_name"]),
                 model_name=str(row["model_name"]),
-                execution_mode=self._parse_enum(ExecutionMode, row["execution_mode"]),
                 status=self._parse_enum(LlmJobStatus, row["status"]),
                 persisted=bool(row["persisted"]),
                 created_at=str(row["created_at"]),
@@ -799,7 +824,6 @@ class LlmDb:
                 task_name,
                 model_name,
                 api_model,
-                execution_mode,
                 status,
                 persisted,
                 failure_policy,
@@ -889,7 +913,6 @@ class LlmDb:
             task_name=str(row["task_name"]),
             model_name=str(row["model_name"]),
             api_model=str(row["api_model"]),
-            execution_mode=self._parse_enum(ExecutionMode, row["execution_mode"]),
             status=self._parse_enum(LlmJobStatus, row["status"]),
             persisted=bool(row["persisted"]),
             failure_policy=self._parse_enum(RunFailurePolicy, row["failure_policy"]),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .llm_models import DeckScope, ExecutionMode, RunFailurePolicy, TaskConfig
+from .llm_models import DeckScope, RunFailurePolicy, TaskConfig
 from .model_registry import (
     ProviderModel,
     format_supported_model_names,
@@ -37,23 +37,6 @@ def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConf
     )
 
 
-def apply_mode_override(task: TaskConfig, mode_override: str | None) -> TaskConfig:
-    if mode_override is None:
-        return task
-
-    normalized = mode_override.strip().lower()
-    try:
-        execution_mode = ExecutionMode(normalized)
-    except ValueError as error:
-        supported = ", ".join(mode.value for mode in ExecutionMode)
-        raise ValueError(f"Execution mode must be one of: {supported}") from error
-
-    return replace(
-        task,
-        execution=replace(task.execution, mode=execution_mode),
-    )
-
-
 def format_deck_scope(task: TaskConfig) -> str:
     if task.decks.deck_root is None:
         return "collection"
@@ -65,7 +48,7 @@ def format_request_defaults(task: TaskConfig) -> str:
     temperature = (
         task.request.temperature if task.request.temperature is not None else "default"
     )
-    execution_text = f"mode=online concurrency={task.execution.concurrency}"
+    execution_text = f"concurrency={task.concurrency}"
 
     return (
         f"timeout={task.timeout_seconds}s "

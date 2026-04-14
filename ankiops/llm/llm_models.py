@@ -23,10 +23,6 @@ class RunFailurePolicy(Enum):
     PARTIAL = "partial"
 
 
-class ExecutionMode(Enum):
-    ONLINE = "online"
-
-
 class LlmCandidateStatus(Enum):
     ELIGIBLE = "eligible"
     SKIPPED_DECK_SCOPE = "skipped_deck_scope"
@@ -90,12 +86,6 @@ class TaskRequestOptions:
 
 
 @dataclass(frozen=True)
-class TaskExecutionOptions:
-    mode: ExecutionMode = ExecutionMode.ONLINE
-    concurrency: int = 8
-
-
-@dataclass(frozen=True)
 class TaskConfig:
     name: str
     model: ProviderModel
@@ -108,7 +98,7 @@ class TaskConfig:
     decks: DeckScope = field(default_factory=DeckScope)
     field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
-    execution: TaskExecutionOptions = field(default_factory=TaskExecutionOptions)
+    concurrency: int = 8
 
     def field_access(self, note_type: str, field_name: str) -> FieldAccess:
         access = FieldAccess.EDIT
@@ -181,7 +171,6 @@ class ProviderAttemptOutcome:
 class TaskRunSummary:
     task_name: str
     model: ProviderModel
-    execution_mode: ExecutionMode = ExecutionMode.ONLINE
     decks_seen: int = 0
     decks_matched: int = 0
     notes_seen: int = 0

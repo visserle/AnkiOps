@@ -170,9 +170,9 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
 - `ankiops llm <task_name> [--model <model_id>] [--deck <deck_name>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <model_id>] [--online] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> --run [--model <model_id>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
-- `ankiops llm --job <job_id|latest> --resume [--online] [--no-auto-commit]` - Resume unfinished/error items from a prior job
+- `ankiops llm --job <job_id|latest> --resume [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
 **`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
@@ -206,7 +206,6 @@ Plan, run, and inspect jobs:
 ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
-ankiops llm grammar --run --online
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
 ankiops llm grammar --run --model claude-haiku-4-5
 ankiops llm --job latest
@@ -236,7 +235,7 @@ fields:
 - `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
-- Request/execution tuning uses internal defaults; only model and online mode can be overridden from CLI (`--model`, `--online`)
+- Request/execution tuning uses internal defaults; only model can be overridden from CLI (`--model`)
 
 Optional file-linked prompt example:
 

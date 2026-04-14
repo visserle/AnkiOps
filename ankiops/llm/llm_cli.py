@@ -50,12 +50,6 @@ def _normalize_deck_override(value: str | None) -> str | None:
     return deck_name
 
 
-def _resolve_mode_override(args: argparse.Namespace) -> str | None:
-    if bool(getattr(args, "online", False)):
-        return "online"
-    return None
-
-
 def _format_table(
     headers: list[str],
     rows: list[list[str]],
@@ -173,11 +167,6 @@ def configure_llm_parser(
         help=("Override model for this plan/run (must exist in llm/models.yaml)"),
     )
     llm_parser.add_argument(
-        "--online",
-        action="store_true",
-        help="Override execution mode to online for this plan/run/resume",
-    )
-    llm_parser.add_argument(
         "--deck",
         help="Override task scope to one exact deck (subdecks excluded by default)",
     )
@@ -220,7 +209,6 @@ def run_llm(
     job_id = getattr(args, "job_id", None)
     resume_requested = bool(getattr(args, "resume", False))
     model_override = getattr(args, "model", None)
-    mode_override = _resolve_mode_override(args)
     deck_override = _normalize_deck_override(getattr(args, "deck", None))
     no_auto_commit = bool(getattr(args, "no_auto_commit", False))
 
@@ -231,8 +219,6 @@ def run_llm(
             _usage_error("Cannot combine --run with --job.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
-        if mode_override is not None and not resume_requested:
-            _usage_error("--online requires <task> or --job with --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit and not resume_requested:
@@ -245,7 +231,6 @@ def run_llm(
                 result = resume_task_fn(
                     collection_dir=collection_dir,
                     resume_job_id=job_id,
-                    mode_override=mode_override,
                     no_auto_commit=no_auto_commit,
                 )
             except ValueError as error:
@@ -287,12 +272,11 @@ def run_llm(
             raise SystemExit(1)
 
         logger.info(
-            "Job %s — %s (%s / %s / %s)",
+            "Job %s — %s (%s / %s)",
             detail.job_id,
             detail.task_name,
             detail.model_name,
             detail.api_model,
-            detail.execution_mode.value,
         )
         logger.info(
             "Status: %s (persisted=%s)",
@@ -370,8 +354,6 @@ def run_llm(
             _usage_error("--run requires <task>.")
         if model_override is not None:
             _usage_error("--model requires <task>.")
-        if mode_override is not None:
-            _usage_error("--online requires <task> or --job with --resume.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit:
@@ -418,14 +400,13 @@ def run_llm(
                         str(job.job_id),
                         job.task_name,
                         job.model_name,
-                        job.execution_mode.value,
                         job.status.value,
                         "yes" if job.persisted else "no",
                         job.created_at,
                     ]
                 )
             _log_table(
-                ["Job", "Task", "Model", "Mode", "Status", "Persisted", "Created"],
+                ["Job", "Task", "Model", "Status", "Persisted", "Created"],
                 job_rows,
             )
 
@@ -444,7 +425,6 @@ def run_llm(
                 collection_dir=collection_dir,
                 task_name=task_name,
                 model_override=model_override,
-                mode_override=mode_override,
                 deck_override=deck_override,
                 no_auto_commit=no_auto_commit,
             )
@@ -478,7 +458,6 @@ def run_llm(
             collection_dir=collection_dir,
             task_name=task_name,
             model_override=model_override,
-            mode_override=mode_override,
             deck_override=deck_override,
         )
     except ValueError as error:

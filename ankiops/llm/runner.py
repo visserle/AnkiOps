@@ -22,7 +22,6 @@ from .config_loader import load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .llm_errors import LlmFatalError, LlmNoteError
 from .llm_models import (
-    ExecutionMode,
     LlmAttemptResultType,
     LlmFinalStatus,
     LlmJobResult,
@@ -37,7 +36,6 @@ from .task_attempts import AttemptRecorder
 from .task_discovery import discover_and_record_candidates
 from .task_options import (
     apply_deck_override,
-    apply_mode_override,
     format_deck_scope,
     format_request_defaults,
     resolve_failure_policy,
@@ -184,7 +182,6 @@ class LlmTaskExecutor:
         task: TaskConfig,
         note_type_configs: dict[str, NoteTypeConfig],
         model_override: str | None,
-        mode_override: str | None,
         no_auto_commit: bool,
         failure_policy: RunFailurePolicy | str,
         resume_from_job_id: int | None = None,
@@ -198,7 +195,6 @@ class LlmTaskExecutor:
         self.task = task
         self.note_type_configs = note_type_configs
         self.model_override = model_override
-        self.mode_override = mode_override
         self.no_auto_commit = no_auto_commit
         self.failure_policy = resolve_failure_policy(failure_policy)
         self.resume_from_job_id = resume_from_job_id
@@ -213,7 +209,7 @@ class LlmTaskExecutor:
         self.snapshot_fn = snapshot_fn or git_snapshot
 
     async def execute(self) -> LlmJobResult:
-        task = apply_mode_override(self.task, self.mode_override)
+        task = self.task
         model = resolve_model(
             task,
             self.model_override,
@@ -227,7 +223,6 @@ class LlmTaskExecutor:
             task_name=task.name,
             model_name=model.name,
             api_model=model.api_id,
-            execution_mode=task.execution.mode,
             failure_policy=self.failure_policy,
             config_snapshot=task_to_snapshot(task),
             resume_from_job_id=self.resume_from_job_id,
@@ -235,12 +230,11 @@ class LlmTaskExecutor:
 
         deck, no_subdecks = resolve_serializer_scope(task)
         logger.debug(
-            "Starting LLM task '%s' (model=%s, api_model=%s, mode=%s, collection=%s, "
+            "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
             "deck_scope=%s, failure_policy=%s)",
             task.name,
             model,
             model.api_id,
-            task.execution.mode.value,
             self.collection_dir,
             format_deck_scope(task),
             self.failure_policy.value,
@@ -363,7 +357,7 @@ class LlmTaskExecutor:
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
     ) -> None:
-        semaphore = asyncio.Semaphore(task.execution.concurrency)
+        semaphore = asyncio.Semaphore(task.concurrency)
         first_fatal_error: LlmFatalError | None = None
 
         async def _run_with_semaphore(candidate: EligibleCandidate) -> None:
@@ -455,7 +449,6 @@ class LlmTaskExecutor:
                     error_type="fatal_error",
                     final_status=LlmFinalStatus.FATAL_ERROR,
                     result_type=LlmAttemptResultType.ERRORED,
-                    execution_mode=ExecutionMode.ONLINE,
                 )
             raise
         except LlmNoteError as error:
@@ -473,7 +466,6 @@ class LlmTaskExecutor:
                         else LlmFinalStatus.NOTE_ERROR
                     ),
                     result_type=LlmAttemptResultType.ERRORED,
-                    execution_mode=ExecutionMode.ONLINE,
                 )
             logger.error(
                 "LLM note error for %s in '%s' (%s): %s",
@@ -500,7 +492,6 @@ class LlmTaskExecutor:
                     error_type="fatal_error",
                     final_status=LlmFinalStatus.FATAL_ERROR,
                     result_type=LlmAttemptResultType.ERRORED,
-                    execution_mode=ExecutionMode.ONLINE,
                 )
             raise fatal_error from error
 
@@ -510,7 +501,6 @@ class LlmTaskExecutor:
                     candidate=candidate,
                     prepared_request=prepared_request,
                     outcome=outcome,
-                    execution_mode=ExecutionMode.ONLINE,
                 )
                 db.update_job_item_result(
                     item_id=candidate.item_id,
@@ -531,7 +521,6 @@ class LlmTaskExecutor:
                 candidate=candidate,
                 prepared_request=prepared_request,
                 outcome=outcome,
-                execution_mode=ExecutionMode.ONLINE,
             )
             db.update_job_item_result(
                 item_id=candidate.item_id,
@@ -595,14 +584,12 @@ def plan_task(
     task_name: str,
     model_override: str | None = None,
     deck_override: str | None = None,
-    mode_override: str | None = None,
 ) -> TaskPlanResult:
     task, note_type_configs = _load_task(
         collection_dir=collection_dir,
         task_name=task_name,
     )
     task = apply_deck_override(task, deck_override)
-    task = apply_mode_override(task, mode_override)
     model = resolve_model(task, model_override, collection_dir=collection_dir)
     task = replace(task, model=model)
     return build_task_plan_result(
@@ -618,7 +605,6 @@ async def run_task_async(
     collection_dir: Path,
     task_name: str,
     model_override: str | None = None,
-    mode_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
@@ -633,7 +619,6 @@ async def run_task_async(
         task=task,
         note_type_configs=note_type_configs,
         model_override=model_override,
-        mode_override=mode_override,
         no_auto_commit=no_auto_commit,
         failure_policy=failure_policy,
     )
@@ -644,7 +629,6 @@ async def resume_task_async(
     *,
     collection_dir: Path,
     resume_job_id: str,
-    mode_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
@@ -665,7 +649,6 @@ async def resume_task_async(
         task=task,
         note_type_configs=note_type_configs,
         model_override=None,
-        mode_override=mode_override,
         no_auto_commit=no_auto_commit,
         failure_policy=failure_policy,
         resume_from_job_id=resolved,
@@ -679,7 +662,6 @@ def run_task(
     collection_dir: Path,
     task_name: str,
     model_override: str | None = None,
-    mode_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
@@ -689,7 +671,6 @@ def run_task(
             collection_dir=collection_dir,
             task_name=task_name,
             model_override=model_override,
-            mode_override=mode_override,
             deck_override=deck_override,
             no_auto_commit=no_auto_commit,
             failure_policy=failure_policy,
@@ -701,7 +682,6 @@ def resume_task(
     *,
     collection_dir: Path,
     resume_job_id: str,
-    mode_override: str | None = None,
     no_auto_commit: bool = False,
     failure_policy: RunFailurePolicy | str = RunFailurePolicy.ATOMIC,
 ) -> LlmJobResult:
@@ -709,7 +689,6 @@ def resume_task(
         resume_task_async(
             collection_dir=collection_dir,
             resume_job_id=resume_job_id,
-            mode_override=mode_override,
             no_auto_commit=no_auto_commit,
             failure_policy=failure_policy,
         )

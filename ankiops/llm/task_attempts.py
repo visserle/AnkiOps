@@ -7,7 +7,6 @@ from typing import Any
 from .llm_db import LlmDb
 from .llm_errors import LlmFatalError, LlmNoteError
 from .llm_models import (
-    ExecutionMode,
     LlmAttemptResultType,
     LlmFinalStatus,
     PreparedAttemptRequest,
@@ -35,7 +34,6 @@ class AttemptRecorder:
         candidate: EligibleCandidate,
         prepared_request: PreparedAttemptRequest,
         outcome: ProviderAttemptOutcome | None,
-        execution_mode: ExecutionMode,
     ) -> None:
         if outcome is None:
             raise RuntimeError("Successful attempt recording requires provider outcome")
@@ -47,7 +45,6 @@ class AttemptRecorder:
         self._write_attempt(
             candidate=candidate,
             prepared_request=prepared_request,
-            execution_mode=execution_mode,
             result_type=LlmAttemptResultType.SUCCEEDED,
             provider_message_id=outcome.provider_message_id,
             provider_model=outcome.provider_model,
@@ -75,7 +72,6 @@ class AttemptRecorder:
         error_type: str,
         final_status: LlmFinalStatus,
         result_type: LlmAttemptResultType,
-        execution_mode: ExecutionMode,
     ) -> None:
         context = _error_context_for_attempt(outcome=outcome, error=error)
         parsed_update = None
@@ -87,7 +83,6 @@ class AttemptRecorder:
         self._write_attempt(
             candidate=candidate,
             prepared_request=prepared_request,
-            execution_mode=execution_mode,
             result_type=result_type,
             provider_message_id=(
                 context.provider_message_id if context is not None else None
@@ -123,7 +118,6 @@ class AttemptRecorder:
         *,
         candidate: EligibleCandidate,
         prepared_request: PreparedAttemptRequest,
-        execution_mode: ExecutionMode,
         result_type: LlmAttemptResultType,
         final_status: LlmFinalStatus,
         error_message: str | None,
@@ -131,7 +125,6 @@ class AttemptRecorder:
         self._write_attempt(
             candidate=candidate,
             prepared_request=prepared_request,
-            execution_mode=execution_mode,
             result_type=result_type,
             provider_message_id=None,
             provider_model=None,
@@ -159,7 +152,6 @@ class AttemptRecorder:
         *,
         candidate: EligibleCandidate,
         prepared_request: PreparedAttemptRequest,
-        execution_mode: ExecutionMode,
         result_type: LlmAttemptResultType,
         provider_message_id: str | None,
         provider_model: str | None,
@@ -183,7 +175,6 @@ class AttemptRecorder:
             provider_message_id=provider_message_id,
             provider_model=provider_model,
             provider_request_id=provider_request_id,
-            provider_execution_mode=execution_mode,
             stop_reason=stop_reason,
             result_type=result_type,
             latency_ms=latency_ms,
