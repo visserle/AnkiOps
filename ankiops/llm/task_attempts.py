@@ -6,14 +6,14 @@ from typing import Any
 
 from .llm_db import LlmDb
 from .llm_errors import LlmFatalError, LlmNoteError
-from .llm_models import (
+from .task_runtime_types import EligibleCandidate
+from .task_types import (
     LlmAttemptResultType,
     LlmFinalStatus,
     PreparedAttemptRequest,
     ProviderAttemptErrorContext,
     ProviderAttemptOutcome,
 )
-from .task_runtime_types import EligibleCandidate
 
 
 class AttemptRecorder:
@@ -47,7 +47,7 @@ class AttemptRecorder:
             prepared_request=prepared_request,
             result_type=LlmAttemptResultType.SUCCEEDED,
             provider_message_id=outcome.provider_message_id,
-            provider_model=outcome.provider_model,
+            response_model_id=outcome.response_model_id,
             provider_request_id=outcome.request_id,
             stop_reason=outcome.stop_reason,
             latency_ms=outcome.latency_ms,
@@ -87,7 +87,9 @@ class AttemptRecorder:
             provider_message_id=(
                 context.provider_message_id if context is not None else None
             ),
-            provider_model=context.provider_model if context is not None else None,
+            response_model_id=(
+                context.response_model_id if context is not None else None
+            ),
             provider_request_id=context.request_id if context is not None else None,
             stop_reason=context.stop_reason if context is not None else None,
             latency_ms=context.latency_ms if context is not None else 0,
@@ -127,7 +129,7 @@ class AttemptRecorder:
             prepared_request=prepared_request,
             result_type=result_type,
             provider_message_id=None,
-            provider_model=None,
+            response_model_id=None,
             provider_request_id=None,
             stop_reason=None,
             latency_ms=0,
@@ -154,7 +156,7 @@ class AttemptRecorder:
         prepared_request: PreparedAttemptRequest,
         result_type: LlmAttemptResultType,
         provider_message_id: str | None,
-        provider_model: str | None,
+        response_model_id: str | None,
         provider_request_id: str | None,
         stop_reason: str | None,
         latency_ms: int,
@@ -173,7 +175,7 @@ class AttemptRecorder:
             attempt_no=self._initial_attempt_no,
             provider=self._provider,
             provider_message_id=provider_message_id,
-            provider_model=provider_model,
+            response_model_id=response_model_id,
             provider_request_id=provider_request_id,
             stop_reason=stop_reason,
             result_type=result_type,
@@ -204,7 +206,7 @@ def _error_context_for_attempt(
     if outcome is not None:
         return ProviderAttemptErrorContext(
             provider_message_id=outcome.provider_message_id,
-            provider_model=outcome.provider_model,
+            response_model_id=outcome.response_model_id,
             stop_reason=outcome.stop_reason,
             request_id=outcome.request_id,
             rate_limit_headers=outcome.rate_limit_headers,

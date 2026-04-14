@@ -11,13 +11,13 @@ import pytest
 from openai import APIConnectionError, APIStatusError
 
 from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError
-from ankiops.llm.llm_models import NotePayload, TaskConfig, TaskRequestOptions
-from ankiops.llm.model_registry import ProviderModel
+from ankiops.llm.model_registry import ModelSpec
 from ankiops.llm.prompting import build_system_prompt
 from ankiops.llm.provider_client import ProviderClient
+from ankiops.llm.task_types import NotePayload, TaskConfig, TaskRequestOptions
 
-TEST_MODEL = ProviderModel(
-    name="claude-sonnet-4-6",
+TEST_MODEL = ModelSpec(
+    model="claude-sonnet-4-6",
     model_id="claude-sonnet-4-6",
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
@@ -99,7 +99,7 @@ def test_generate_update_builds_request_and_returns_update(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=TaskRequestOptions(temperature=0, max_output_tokens=200),
-            api_model="claude-sonnet-4-6",
+            model_id="claude-sonnet-4-6",
         )
         update_result = asyncio.run(
             client.generate_update(
@@ -114,7 +114,7 @@ def test_generate_update_builds_request_and_returns_update(
     assert update_result.update.note_key == "nk-1"
     assert update_result.update.edits == {"Question": "Fixed"}
     assert update_result.provider_message_id == "chatcmpl_123"
-    assert update_result.provider_model == "claude-sonnet-4-6"
+    assert update_result.response_model_id == "claude-sonnet-4-6"
     assert update_result.input_tokens == 311
     assert update_result.output_tokens == 37
     assert update_result.latency_ms >= 0
@@ -174,7 +174,7 @@ def test_generate_update_rejects_note_level_failures(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=TaskRequestOptions(),
-            api_model="claude-sonnet-4-6",
+            model_id="claude-sonnet-4-6",
         )
         with pytest.raises(LlmNoteError, match=expected_error):
             asyncio.run(
@@ -214,7 +214,7 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
             note_payload=note_payload,
             task_prompt="Fix grammar",
             request_options=request_options,
-            api_model="claude-sonnet-4-6",
+            model_id="claude-sonnet-4-6",
         )
         update_result = asyncio.run(
             client.generate_update(
@@ -261,7 +261,7 @@ def test_generate_update_fails_after_exhausting_retries(
                 retry_backoff_seconds=0.25,
                 retry_backoff_jitter=False,
             ),
-            api_model="claude-sonnet-4-6",
+            model_id="claude-sonnet-4-6",
         )
         with pytest.raises(LlmFatalError, match="Provider returned HTTP 503"):
             asyncio.run(
@@ -288,8 +288,8 @@ def test_missing_api_key_raises_fatal(task_config: TaskConfig, monkeypatch):
 
 def test_literal_api_key_is_used_directly(monkeypatch):
     monkeypatch.delenv("sk-ant-literal-123", raising=False)
-    literal_model = ProviderModel(
-        name="claude-sonnet-4-6",
+    literal_model = ModelSpec(
+        model="claude-sonnet-4-6",
         model_id="claude-sonnet-4-6",
         provider="anthropic",
         base_url="https://api.anthropic.com/v1/",

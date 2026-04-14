@@ -14,14 +14,14 @@ from ankiops.init import initialize_collection
 from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_errors import LlmFatalError
-from ankiops.llm.llm_models import (
+from ankiops.llm.runner import run_task
+from ankiops.llm.task_types import (
     LlmFinalStatus,
     LlmJobStatus,
     NoteUpdate,
     PreparedAttemptRequest,
     ProviderAttemptOutcome,
 )
-from ankiops.llm.runner import run_task
 
 TASK_FILE = Path("llm/grammar.yaml")
 PROMPT_FILE = Path("llm/grammar.md")
@@ -170,12 +170,12 @@ class _StubClient:
         note_payload,
         task_prompt,
         request_options,
-        api_model,
+        model_id,
     ) -> PreparedAttemptRequest:
         del task_prompt
         max_tokens = request_options.max_output_tokens or 2048
         request_params: dict[str, object] = {
-            "model": api_model,
+            "model": model_id,
             "max_tokens": max_tokens,
             "output_config": {"format": {"type": "json_schema", "schema": {}}},
         }
@@ -207,12 +207,12 @@ class _OnlineFailFastClient:
         note_payload,
         task_prompt,
         request_options,
-        api_model,
+        model_id,
     ) -> PreparedAttemptRequest:
         del task_prompt
         max_tokens = request_options.max_output_tokens or 2048
         request_params: dict[str, object] = {
-            "model": api_model,
+            "model": model_id,
             "max_tokens": max_tokens,
             "output_config": {"format": {"type": "json_schema", "schema": {}}},
         }
@@ -273,7 +273,7 @@ def _result(
     return ProviderAttemptOutcome(
         update=NoteUpdate(note_key=note_key, edits=edits),
         provider_message_id=message_id,
-        provider_model=model,
+        response_model_id=model,
         stop_reason=stop_reason,
         request_id=None,
         rate_limit_headers={},
@@ -313,7 +313,7 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
     assert (tmp_path / "llm/models.yaml").exists()
     models_content = (tmp_path / "llm/models.yaml").read_text(encoding="utf-8")
     assert "models:" not in models_content
-    assert "name: sonnet" in models_content
+    assert "model: sonnet" in models_content
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
     for task_path in (tmp_path / "llm").glob("*.yaml"):
         if task_path.name == "models.yaml":
@@ -363,7 +363,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model.name == "sonnet"
+    assert task.model.model == "sonnet"
     assert task.model.api_key == "$ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
     assert task.prompt == DEFAULT_TASK_PROMPT
@@ -400,7 +400,7 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
     _write(
         tmp_path / "llm/models.yaml",
         """
-        - name: qwen3-32b
+        - model: qwen3-32b
           model_id: qwen3-32b
           provider: openai-compatible
           base_url: https://api.example.com/v1
@@ -416,7 +416,7 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.model.name == "qwen3-32b"
+    assert task.model.model == "qwen3-32b"
     assert task.model.model_id == "qwen3-32b"
     assert task.model.provider == "openai-compatible"
     assert task.model.base_url == "https://api.example.com/v1"
@@ -753,7 +753,7 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 
     assert not result.failed
     assert result.persisted
-    assert summary.model.name == "sonnet"
+    assert summary.model.model == "sonnet"
     assert summary.requests == 2
     assert summary.input_tokens == 34
     assert summary.output_tokens == 13
@@ -1028,7 +1028,7 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     assert result.persisted
     assert summary.requests == 2
     assert (
-        "Starting LLM task 'grammar' (model=sonnet, api_model=claude-sonnet-4-6"
+        "Starting LLM task 'grammar' (model=sonnet, model_id=claude-sonnet-4-6"
     ) in caplog.text
     assert (
         "LLM request defaults: timeout=60s max_tokens=2048 "

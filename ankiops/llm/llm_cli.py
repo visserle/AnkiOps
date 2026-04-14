@@ -169,7 +169,10 @@ def configure_llm_parser(
     )
     llm_parser.add_argument(
         "--model",
-        help=f"Override model for this plan/run (must exist in {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME})",
+        help=(
+            "Override model for this plan/run "
+            f"(must exist in {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME})"
+        ),
     )
     llm_parser.add_argument(
         "--deck",
@@ -280,8 +283,8 @@ def run_llm(
             "Job %s — %s (%s / %s)",
             detail.job_id,
             detail.task_name,
-            detail.model_name,
-            detail.api_model,
+            detail.model,
+            detail.model_id,
         )
         logger.info(
             "Status: %s (persisted=%s)",
@@ -404,7 +407,7 @@ def run_llm(
                     [
                         str(job.job_id),
                         job.task_name,
-                        job.model_name,
+                        job.model,
                         job.status.value,
                         "yes" if job.persisted else "no",
                         job.created_at,

@@ -169,8 +169,8 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
-- `ankiops llm <task_name> [--model <model_id>] [--deck <deck_name>]` - Plan one configured task
-- `ankiops llm <task_name> --run [--model <model_id>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
+- `ankiops llm <task_name> [--model <model>] [--deck <deck_name>]` - Plan one configured task
+- `ankiops llm <task_name> --run [--model <model>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
 - `ankiops llm --job <job_id|latest> --resume [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
@@ -207,14 +207,14 @@ ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
-ankiops llm grammar --run --model claude-haiku-4-5
+ankiops llm grammar --run --model haiku
 ankiops llm --job latest
 ankiops llm --job latest --resume
 ```
 ### Task File Format (`llm/<task-name>.yaml`)
 
 ```yaml
-model: claude-sonnet-4-6
+model: sonnet
 system_prompt: !file system_prompt.md
 task_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
@@ -240,7 +240,7 @@ fields:
 Optional file-linked prompt example:
 
 ```yaml
-model: claude-sonnet-4-6
+model: sonnet
 system_prompt: !file system_prompt.md
 task_prompt: !file grammar.md
 ```
@@ -250,7 +250,7 @@ task_prompt: !file grammar.md
 `llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key`, and `model_id`.
 
 ```yaml
-- name: qwen3-32b
+- model: qwen3-32b
   model_id: qwen3-32b
   provider: my-openai-compatible
   base_url: https://api.example.com/v1

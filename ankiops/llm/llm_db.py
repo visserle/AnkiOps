@@ -13,14 +13,14 @@ from typing import Any, Iterator, TypeVar
 
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
-from .llm_models import (
+from .model_registry import parse_model
+from .task_types import (
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
     LlmJobStatus,
     TaskRunSummary,
 )
-from .model_registry import parse_model
 
 _DEFAULT_JOB_LIST_LIMIT = 20
 
@@ -45,7 +45,7 @@ def _enum_check_sql(values: list[str]) -> str:
 class LlmJobListItem:
     job_id: int
     task_name: str
-    model_name: str
+    model: str
     status: LlmJobStatus
     persisted: bool
     created_at: str
@@ -74,8 +74,8 @@ class LlmJobItemDetail:
 class LlmJobDetail:
     job_id: int
     task_name: str
-    model_name: str
-    api_model: str
+    model: str
+    model_id: str
     status: LlmJobStatus
     persisted: bool
     created_at: str
@@ -220,8 +220,8 @@ class LlmDb:
                 CREATE TABLE IF NOT EXISTS llm_job (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     task_name TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
-                    api_model TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (status IN {job_status_check}),
                     persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
@@ -264,7 +264,7 @@ class LlmDb:
                     attempt_no INTEGER NOT NULL,
                     provider TEXT NOT NULL,
                     provider_message_id TEXT,
-                    provider_model TEXT,
+                    response_model_id TEXT,
                     provider_request_id TEXT,
                     stop_reason TEXT,
                     result_type TEXT NOT NULL
@@ -335,8 +335,8 @@ class LlmDb:
         self,
         *,
         task_name: str,
-        model_name: str,
-        api_model: str,
+        model: str,
+        model_id: str,
         config_snapshot: dict[str, Any],
         resume_from_job_id: int | None = None,
     ) -> int:
@@ -344,7 +344,7 @@ class LlmDb:
         cursor = self._write(
             """
             INSERT INTO llm_job (
-                task_name, model_name, api_model,
+                task_name, model, model_id,
                 status, persisted, fatal_error,
                 config_snapshot_json, resume_from_job_id,
                 created_at, started_at
@@ -352,8 +352,8 @@ class LlmDb:
             """,
             (
                 task_name,
-                model_name,
-                api_model,
+                model,
+                model_id,
                 LlmJobStatus.RUNNING.value,
                 self._as_json(config_snapshot),
                 resume_from_job_id,
@@ -485,7 +485,7 @@ class LlmDb:
         attempt_no: int,
         provider: str,
         provider_message_id: str | None,
-        provider_model: str | None,
+        response_model_id: str | None,
         provider_request_id: str | None,
         stop_reason: str | None,
         result_type: LlmAttemptResultType,
@@ -503,7 +503,7 @@ class LlmDb:
             """
             INSERT INTO llm_item_attempt (
                 job_item_id, attempt_no, provider, provider_message_id,
-                provider_model, provider_request_id,
+                response_model_id, provider_request_id,
                 stop_reason, result_type, latency_ms,
                 input_tokens, output_tokens, retry_count, error_type,
                 error_message, rate_limit_headers_json, parsed_update_json,
@@ -515,7 +515,7 @@ class LlmDb:
                 attempt_no,
                 provider,
                 provider_message_id,
-                provider_model,
+                response_model_id,
                 provider_request_id,
                 stop_reason,
                 result_type.value,
@@ -630,7 +630,7 @@ class LlmDb:
             """
             SELECT
                 task_name,
-                model_name,
+                model,
                 decks_seen,
                 decks_matched,
                 notes_seen,
@@ -645,11 +645,11 @@ class LlmDb:
             raise ValueError(f"Unknown LLM job id {job_id}")
 
         model = parse_model(
-            row["model_name"],
+            row["model"],
             collection_dir=self._db_path.parent.parent,
         )
         if model is None:
-            raise ValueError(f"Unknown model '{row['model_name']}' in persisted job")
+            raise ValueError(f"Unknown model '{row['model']}' in persisted job")
 
         summary = TaskRunSummary(
             task_name=row["task_name"],
@@ -777,7 +777,7 @@ class LlmDb:
             SELECT
                 id,
                 task_name,
-                model_name,
+                model,
                 status,
                 persisted,
                 created_at,
@@ -793,7 +793,7 @@ class LlmDb:
             LlmJobListItem(
                 job_id=int(row["id"]),
                 task_name=str(row["task_name"]),
-                model_name=str(row["model_name"]),
+                model=str(row["model"]),
                 status=self._parse_enum(LlmJobStatus, row["status"]),
                 persisted=bool(row["persisted"]),
                 created_at=str(row["created_at"]),
@@ -813,8 +813,8 @@ class LlmDb:
             SELECT
                 id,
                 task_name,
-                model_name,
-                api_model,
+                model,
+                model_id,
                 status,
                 persisted,
                 created_at,
@@ -901,8 +901,8 @@ class LlmDb:
         return LlmJobDetail(
             job_id=resolved_job_id,
             task_name=str(row["task_name"]),
-            model_name=str(row["model_name"]),
-            api_model=str(row["api_model"]),
+            model=str(row["model"]),
+            model_id=str(row["model_id"]),
             status=self._parse_enum(LlmJobStatus, row["status"]),
             persisted=bool(row["persisted"]),
             created_at=str(row["created_at"]),

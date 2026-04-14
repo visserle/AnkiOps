@@ -4,7 +4,6 @@ from collections.abc import Callable
 
 import pytest
 
-from ankiops.llm.llm_models import NotePayload, NoteUpdate
 from ankiops.llm.structured_output import (
     NoteUpdateContract,
     StructuredOutputError,
@@ -12,6 +11,7 @@ from ankiops.llm.structured_output import (
     parse_note_update_json,
     validate_note_update_data,
 )
+from ankiops.llm.task_types import NotePayload, NoteUpdate
 
 
 def _parse(contract: NoteUpdateContract, payload: str) -> NoteUpdate:

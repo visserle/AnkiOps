@@ -6,7 +6,7 @@ from importlib import resources
 import pytest
 
 from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.llm_models import (
+from ankiops.llm.task_types import (
     LlmAttemptResultType,
     LlmCandidateStatus,
     LlmFinalStatus,
@@ -27,8 +27,8 @@ def _index_names(conn: sqlite3.Connection) -> set[str]:
 def _start_job(adapter: LlmDb) -> int:
     return adapter.start_job(
         task_name="grammar",
-        model_name="sonnet",
-        api_model="sonnet",
+        model="sonnet",
+        model_id="sonnet",
         config_snapshot={"task": "grammar"},
     )
 
@@ -38,7 +38,7 @@ def _insert_attempt(
     *,
     item_id: int,
     provider_message_id: str,
-    provider_model: str,
+    response_model_id: str,
     stop_reason: str,
     result_type: LlmAttemptResultType,
     latency_ms: int,
@@ -54,7 +54,7 @@ def _insert_attempt(
         attempt_no=1,
         provider="anthropic",
         provider_message_id=provider_message_id,
-        provider_model=provider_model,
+        response_model_id=response_model_id,
         provider_request_id=None,
         stop_reason=stop_reason,
         result_type=result_type,
@@ -107,8 +107,8 @@ def test_open_creates_schema_and_indexes(tmp_path):
         assert set(job_columns) == {
             "id",
             "task_name",
-            "model_name",
-            "api_model",
+            "model",
+            "model_id",
             "status",
             "persisted",
             "fatal_error",
@@ -155,7 +155,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             adapter,
             item_id=item_id,
             provider_message_id="msg_123",
-            provider_model="sonnet",
+            response_model_id="sonnet",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=901,
@@ -278,7 +278,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
             adapter,
             item_id=item_id,
             provider_message_id="msg",
-            provider_model="sonnet",
+            response_model_id="sonnet",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=1,
@@ -294,7 +294,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 adapter,
                 item_id=item_id,
                 provider_message_id="msg2",
-                provider_model="sonnet",
+                response_model_id="sonnet",
                 stop_reason="end_turn",
                 result_type=LlmAttemptResultType.SUCCEEDED,
                 latency_ms=1,
@@ -316,7 +316,7 @@ def test_enforces_status_constraints(tmp_path):
             adapter._conn.execute(
                 """
                 INSERT INTO llm_job (
-                    task_name, model_name, api_model,
+                    task_name, model, model_id,
                     status, persisted, config_snapshot_json, created_at, started_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -385,7 +385,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     adapter,
                     item_id=item_id,
                     provider_message_id="msg",
-                    provider_model="sonnet",
+                    response_model_id="sonnet",
                     stop_reason="end_turn",
                     result_type=LlmAttemptResultType.ERRORED,
                     latency_ms=1,

@@ -21,15 +21,6 @@ from ankiops.models import Note, NoteTypeConfig
 from .config_loader import load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .llm_errors import LlmFatalError, LlmNoteError
-from .llm_models import (
-    LlmAttemptResultType,
-    LlmFinalStatus,
-    LlmJobResult,
-    LlmJobStatus,
-    TaskConfig,
-    TaskPlanResult,
-    TaskRunSummary,
-)
 from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .provider_client import ProviderClient
 from .task_attempts import AttemptRecorder
@@ -44,6 +35,15 @@ from .task_options import (
 from .task_planner import build_task_plan_result
 from .task_runtime_types import EligibleCandidate
 from .task_snapshot import task_from_snapshot, task_to_snapshot
+from .task_types import (
+    LlmAttemptResultType,
+    LlmFinalStatus,
+    LlmJobResult,
+    LlmJobStatus,
+    TaskConfig,
+    TaskPlanResult,
+    TaskRunSummary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,15 +222,15 @@ class LlmTaskExecutor:
 
         job_id = db.start_job(
             task_name=task.name,
-            model_name=model.name,
-            api_model=model.model_id,
+            model=model.model,
+            model_id=model.model_id,
             config_snapshot=task_to_snapshot(task),
             resume_from_job_id=self.resume_from_job_id,
         )
 
         deck, no_subdecks = resolve_serializer_scope(task)
         logger.debug(
-            "Starting LLM task '%s' (model=%s, api_model=%s, collection=%s, "
+            "Starting LLM task '%s' (model=%s, model_id=%s, collection=%s, "
             "deck_scope=%s)",
             task.name,
             model,
@@ -275,7 +275,7 @@ class LlmTaskExecutor:
                 db=db,
                 job_id=job_id,
                 task=task,
-                api_model=model.model_id,
+                model_id=model.model_id,
                 provider_client=provider_client,
                 candidates=candidates,
                 attempt_recorder=attempt_recorder,
@@ -351,7 +351,7 @@ class LlmTaskExecutor:
         db: LlmDb,
         job_id: int,
         task: TaskConfig,
-        api_model: str,
+        model_id: str,
         provider_client,
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
@@ -364,7 +364,7 @@ class LlmTaskExecutor:
                 await self._process_online_candidate(
                     db=db,
                     task=task,
-                    api_model=api_model,
+                    model_id=model_id,
                     provider_client=provider_client,
                     candidate=candidate,
                     attempt_recorder=attempt_recorder,
@@ -410,7 +410,7 @@ class LlmTaskExecutor:
         *,
         db: LlmDb,
         task: TaskConfig,
-        api_model: str,
+        model_id: str,
         provider_client,
         candidate: EligibleCandidate,
         attempt_recorder: AttemptRecorder,
@@ -419,7 +419,7 @@ class LlmTaskExecutor:
             note_payload=candidate.payload,
             task_prompt=task.prompt,
             request_options=task.request,
-            api_model=api_model,
+            model_id=model_id,
         )
         outcome = None
 

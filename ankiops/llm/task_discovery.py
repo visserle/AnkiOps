@@ -9,7 +9,7 @@ from ankiops.models import NoteTypeConfig
 
 from .discovery import DiscoveryItem, DiscoverySnapshot, discover_candidates
 from .llm_db import LlmDb
-from .llm_models import LlmCandidateStatus, LlmFinalStatus, TaskConfig
+from .task_types import LlmCandidateStatus, LlmFinalStatus, TaskConfig
 from .task_runtime_types import EligibleCandidate
 
 

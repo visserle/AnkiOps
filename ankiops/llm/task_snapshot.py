@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .llm_models import (
+from .model_registry import parse_model
+from .task_types import (
     DeckScope,
     FieldExceptionRule,
     TaskConfig,
     TaskRequestOptions,
 )
-from .model_registry import parse_model
 
 _DEFAULT_REQUEST_OPTIONS = TaskRequestOptions()
 _DEFAULT_TIMEOUT_SECONDS = 60
@@ -21,7 +21,7 @@ _DEFAULT_CONCURRENCY = 8
 def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
     return {
         "name": task.name,
-        "model": task.model.name,
+        "model": task.model.model,
         "system_prompt": task.system_prompt,
         "prompt": task.prompt,
         "system_prompt_path": (
@@ -60,12 +60,12 @@ def task_from_snapshot(
     *,
     collection_dir: Path,
 ) -> TaskConfig:
-    model_name = snapshot.get("model")
-    if not isinstance(model_name, str):
+    model_value = snapshot.get("model")
+    if not isinstance(model_value, str):
         raise ValueError("Job snapshot is missing model")
-    model = parse_model(model_name, collection_dir=collection_dir)
+    model = parse_model(model_value, collection_dir=collection_dir)
     if model is None:
-        raise ValueError(f"Job snapshot references unsupported model '{model_name}'")
+        raise ValueError(f"Job snapshot references unsupported model '{model_value}'")
 
     decks = _require_mapping(snapshot, "decks", "Job snapshot is missing deck scope")
     request = _require_mapping(

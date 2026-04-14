@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from .llm_models import DeckScope, TaskConfig
-from .model_registry import ProviderModel, load_model_registry
+from .model_registry import ModelSpec, load_model_registry
+from .task_types import DeckScope, TaskConfig
 
 
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
@@ -56,13 +56,13 @@ def resolve_model(
     model_override: str | None,
     *,
     collection_dir: Path,
-) -> ProviderModel:
+) -> ModelSpec:
     if model_override is None:
         return task.model
 
     registry = load_model_registry(collection_dir=collection_dir)
     model = registry.parse(model_override)
     if model is None:
-        supported = registry.format_names()
+        supported = registry.format_models()
         raise ValueError(f"Model must be one of: {supported}")
     return model

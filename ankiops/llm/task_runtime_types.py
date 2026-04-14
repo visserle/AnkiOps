@@ -7,7 +7,7 @@ from typing import Any
 
 from ankiops.models import NoteTypeConfig
 
-from .llm_models import NotePayload
+from .task_types import NotePayload
 
 
 @dataclass(frozen=True)

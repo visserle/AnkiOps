@@ -9,7 +9,7 @@ from ankiops.config import NOTE_TYPES_DIR
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
 from .discovery import DiscoveryItem, discover_candidates
-from .llm_models import (
+from .task_types import (
     FieldAccess,
     LlmCandidateStatus,
     NotePayload,

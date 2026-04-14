@@ -8,7 +8,7 @@ from typing import Any
 
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
-from .llm_models import FieldAccess, LlmCandidateStatus, NotePayload, TaskConfig
+from .task_types import FieldAccess, LlmCandidateStatus, NotePayload, TaskConfig
 
 
 @dataclass(frozen=True)

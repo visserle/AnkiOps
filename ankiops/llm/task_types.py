@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ankiops.log import format_changes
 
-from .model_registry import ProviderModel
+from .model_registry import ModelSpec
 
 
 class FieldAccess(Enum):
@@ -83,7 +83,7 @@ class TaskRequestOptions:
 @dataclass(frozen=True)
 class TaskConfig:
     name: str
-    model: ProviderModel
+    model: ModelSpec
     system_prompt: str
     prompt: str
     system_prompt_path: Path | None = None
@@ -133,7 +133,7 @@ class PreparedAttemptRequest:
 @dataclass(frozen=True)
 class ProviderAttemptErrorContext:
     provider_message_id: str | None
-    provider_model: str | None
+    response_model_id: str | None
     stop_reason: str | None
     request_id: str | None
     rate_limit_headers: dict[str, str]
@@ -149,7 +149,7 @@ class ProviderAttemptErrorContext:
 class ProviderAttemptOutcome:
     update: NoteUpdate
     provider_message_id: str | None
-    provider_model: str | None
+    response_model_id: str | None
     stop_reason: str | None
     request_id: str | None
     rate_limit_headers: dict[str, str]
@@ -164,7 +164,7 @@ class ProviderAttemptOutcome:
 @dataclass
 class TaskRunSummary:
     task_name: str
-    model: ProviderModel
+    model: ModelSpec
     decks_seen: int = 0
     decks_matched: int = 0
     notes_seen: int = 0
@@ -256,7 +256,7 @@ class PlanFieldSurface:
 @dataclass(frozen=True)
 class TaskPlanResult:
     task_name: str
-    model: ProviderModel
+    model: ModelSpec
     deck_scope: str
     serializer_scope: str
     system_prompt_path: str | None

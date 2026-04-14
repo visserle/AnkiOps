@@ -11,11 +11,9 @@ import yaml
 
 from ankiops.config import LLM_DIR
 
-_TOKENS_PER_MTOK = Decimal("1000000")
-_USD_CENTS_QUANTUM = Decimal("0.01")
 MODEL_REGISTRY_FILE_NAME = "models.yaml"
 _SUPPORTED_MODEL_KEYS = {
-    "name",
+    "model",
     "model_id",
     "provider",
     "base_url",
@@ -23,6 +21,8 @@ _SUPPORTED_MODEL_KEYS = {
     "input_usd_per_mtok",
     "output_usd_per_mtok",
 }
+_TOKENS_PER_MTOK = Decimal("1000000")
+_USD_CENTS_QUANTUM = Decimal("0.01")
 
 
 class ModelRegistryError(ValueError):
@@ -43,8 +43,8 @@ class CostEstimate:
 
 
 @dataclass(frozen=True)
-class ProviderModel:
-    name: str
+class ModelSpec:
+    model: str
     model_id: str
     provider: str
     base_url: str
@@ -70,33 +70,31 @@ class ProviderModel:
         )
 
     def __str__(self) -> str:
-        return self.name
+        return self.model
 
 
 @dataclass(frozen=True)
 class ModelRegistry:
-    models: tuple[ProviderModel, ...]
-    _models_by_name: dict[str, ProviderModel] = field(init=False, repr=False)
+    models: tuple[ModelSpec, ...]
+    _models_by_model: dict[str, ModelSpec] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        by_name: dict[str, ProviderModel] = {}
+        by_model: dict[str, ModelSpec] = {}
         for model in self.models:
-            if model.name in by_name:
-                raise ModelRegistryError(
-                    f"duplicate model name '{model.name}' in registry"
-                )
-            by_name[model.name] = model
+            if model.model in by_model:
+                raise ModelRegistryError(f"duplicate model '{model.model}' in registry")
+            by_model[model.model] = model
 
-        if not by_name:
+        if not by_model:
             raise ModelRegistryError("model registry must contain at least one model")
 
-        object.__setattr__(self, "_models_by_name", by_name)
+        object.__setattr__(self, "_models_by_model", by_model)
 
-    def parse(self, value: str) -> ProviderModel | None:
-        return self._models_by_name.get(value.strip())
+    def parse(self, value: str) -> ModelSpec | None:
+        return self._models_by_model.get(value.strip())
 
-    def format_names(self) -> str:
-        return ", ".join(self._models_by_name)
+    def format_models(self) -> str:
+        return ", ".join(self._models_by_model)
 
 
 def model_registry_path(*, collection_dir: Path) -> Path:
@@ -140,7 +138,7 @@ def _parse_decimal(
         raise ModelRegistryError(f"{item_label}: '{key}' must be numeric") from error
 
 
-def _parse_model_entry(entry: Any, *, index: int) -> ProviderModel:
+def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
     item_label = f"models[{index}]"
     if not isinstance(entry, dict):
         raise ModelRegistryError(f"{item_label}: model entry must be a mapping")
@@ -149,8 +147,12 @@ def _parse_model_entry(entry: Any, *, index: int) -> ProviderModel:
     if unknown:
         raise ModelRegistryError(f"{item_label}: unknown key(s): {', '.join(unknown)}")
 
-    return ProviderModel(
-        name=_require_string(entry.get("name"), key="name", item_label=item_label),
+    return ModelSpec(
+        model=_require_string(
+            entry.get("model"),
+            key="model",
+            item_label=item_label,
+        ),
         model_id=_require_string(
             entry.get("model_id"),
             key="model_id",
@@ -214,12 +216,12 @@ def parse_model(
     value: str,
     *,
     collection_dir: Path,
-) -> ProviderModel | None:
+) -> ModelSpec | None:
     return load_model_registry(collection_dir=collection_dir).parse(value)
 
 
-def format_supported_model_names(*, collection_dir: Path) -> str:
-    return load_model_registry(collection_dir=collection_dir).format_names()
+def format_supported_models(*, collection_dir: Path) -> str:
+    return load_model_registry(collection_dir=collection_dir).format_models()
 
 
 def format_usd_cents(amount: Decimal) -> str:

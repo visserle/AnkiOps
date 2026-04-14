@@ -8,7 +8,8 @@ import pytest
 
 from ankiops.cli import main, run_llm
 from ankiops.llm.llm_db import LlmJobListItem
-from ankiops.llm.llm_models import (
+from ankiops.llm.model_registry import ModelSpec
+from ankiops.llm.task_types import (
     LlmJobResult,
     LlmJobStatus,
     PlanFieldSurface,
@@ -17,10 +18,9 @@ from ankiops.llm.llm_models import (
     TaskPlanResult,
     TaskRunSummary,
 )
-from ankiops.llm.model_registry import ProviderModel
 
-TEST_MODEL = ProviderModel(
-    name="claude-sonnet-4-6",
+TEST_MODEL = ModelSpec(
+    model="claude-sonnet-4-6",
     model_id="claude-sonnet-4-6",
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
@@ -180,7 +180,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
         LlmJobListItem(
             job_id=24,
             task_name="grammar",
-            model_name="claude-sonnet-4-6",
+            model="claude-sonnet-4-6",
             status=LlmJobStatus.COMPLETED,
             persisted=True,
             created_at="2026-03-21T10:00:00Z",

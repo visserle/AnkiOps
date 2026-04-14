@@ -3,14 +3,14 @@ from textwrap import dedent
 
 import pytest
 
-from ankiops.llm.llm_models import TaskRunSummary
 from ankiops.llm.model_registry import (
     ModelRegistryError,
-    format_supported_model_names,
+    format_supported_models,
     format_usd_cents,
     load_model_registry,
     parse_model,
 )
+from ankiops.llm.task_types import TaskRunSummary
 
 
 def _write_models_file(tmp_path, content: str) -> None:
@@ -25,7 +25,7 @@ def test_parse_model_returns_model_from_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: claude-sonnet-4-6
+        - model: claude-sonnet-4-6
           model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
@@ -38,26 +38,26 @@ def test_parse_model_returns_model_from_registry(tmp_path):
     model = parse_model("claude-sonnet-4-6", collection_dir=tmp_path)
 
     assert model is not None
-    assert model.name == "claude-sonnet-4-6"
+    assert model.model == "claude-sonnet-4-6"
     assert model.model_id == "claude-sonnet-4-6"
 
 
-def test_format_supported_model_names_comes_from_registry(tmp_path):
+def test_format_supported_models_comes_from_registry(tmp_path):
     _write_models_file(
         tmp_path,
-        "- name: local-a\n"
+        "- model: local-a\n"
         "  model_id: local-a\n"
         "  provider: local\n"
         "  base_url: https://localhost/v1\n"
         "  api_key: $LOCAL_A_KEY\n"
-        "- name: local-b\n"
+        "- model: local-b\n"
         "  model_id: local-b\n"
         "  provider: local\n"
         "  base_url: https://localhost/v1\n"
         "  api_key: $LOCAL_B_KEY\n",
     )
 
-    rendered = format_supported_model_names(collection_dir=tmp_path)
+    rendered = format_supported_models(collection_dir=tmp_path)
     assert rendered == "local-a, local-b"
 
 
@@ -65,7 +65,7 @@ def test_model_estimate_cost_uses_registry_rates(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: claude-sonnet-4-6
+        - model: claude-sonnet-4-6
           model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
@@ -93,7 +93,7 @@ def test_task_run_summary_format_cost_reports_priced_model(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: claude-sonnet-4-6
+        - model: claude-sonnet-4-6
           model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
@@ -119,7 +119,7 @@ def test_parse_model_rejects_unknown_values(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: claude-sonnet-4-6
+        - model: claude-sonnet-4-6
           model_id: claude-sonnet-4-6
           provider: anthropic
           base_url: https://api.anthropic.com/v1/
@@ -140,7 +140,7 @@ def test_parse_model_uses_collection_local_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: qwen3-32b
+        - model: qwen3-32b
           model_id: qwen3-32b
           provider: openai-compatible
           base_url: https://api.example.com/v1
@@ -151,7 +151,7 @@ def test_parse_model_uses_collection_local_registry(tmp_path):
     model = parse_model("qwen3-32b", collection_dir=tmp_path)
 
     assert model is not None
-    assert model.name == "qwen3-32b"
+    assert model.model == "qwen3-32b"
     assert model.base_url == "https://api.example.com/v1"
     assert model.api_key == "$EXAMPLE_API_KEY"
 
@@ -160,7 +160,7 @@ def test_load_model_registry_rejects_invalid_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        - name: bad
+        - model: bad
           model_id: bad
           provider: local
           base_url: https://localhost/v1

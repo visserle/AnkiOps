@@ -12,7 +12,6 @@ from yaml.nodes import ScalarNode
 from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
 
-from .llm_models import FieldExceptionRule, TaskCatalog, TaskConfig
 from .model_registry import (
     MODEL_REGISTRY_FILE_NAME,
     ModelRegistry,
@@ -20,6 +19,7 @@ from .model_registry import (
     load_model_registry,
     model_registry_path,
 )
+from .task_types import FieldExceptionRule, TaskCatalog, TaskConfig
 
 
 class LlmConfigError(ValueError):
@@ -276,10 +276,10 @@ def _parse_task(
     mapping = _read_yaml_mapping(path, llm_dir=llm_dir)
     _validate_task_keys(mapping, path)
     name = path.stem
-    model_name = _require_str(mapping, "model", path)
-    model = model_registry.parse(model_name)
+    model_value = _require_str(mapping, "model", path)
+    model = model_registry.parse(model_value)
     if model is None:
-        supported = model_registry.format_names()
+        supported = model_registry.format_models()
         raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
 
     system_prompt, system_prompt_path = _parse_text_source(

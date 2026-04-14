@@ -12,19 +12,19 @@ from collections.abc import Iterable
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
 
 from .llm_errors import LlmFatalError, LlmNoteError
-from .llm_models import (
-    PreparedAttemptRequest,
-    ProviderAttemptErrorContext,
-    ProviderAttemptOutcome,
-    TaskConfig,
-    TaskRequestOptions,
-)
 from .prompting import build_system_prompt, build_user_message
 from .structured_output import (
     NoteUpdateContract,
     StructuredOutputError,
     build_note_update_contract,
     parse_note_update_json,
+)
+from .task_types import (
+    PreparedAttemptRequest,
+    ProviderAttemptErrorContext,
+    ProviderAttemptOutcome,
+    TaskConfig,
+    TaskRequestOptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,14 +54,14 @@ class ProviderClient:
         note_payload,
         task_prompt: str,
         request_options: TaskRequestOptions,
-        api_model: str,
+        model_id: str,
     ) -> PreparedAttemptRequest:
         contract = build_note_update_contract(note_payload)
         max_tokens = request_options.max_output_tokens or 2048
         system_prompt_text = build_system_prompt(self._system_prompt)
         user_message_text = build_user_message(task_prompt, note_payload)
         request_params: dict[str, object] = {
-            "model": api_model,
+            "model": model_id,
             "max_tokens": max_tokens,
             "response_format": {
                 "type": "json_schema",
@@ -91,8 +91,8 @@ class ProviderClient:
         request_options: TaskRequestOptions,
     ) -> ProviderAttemptOutcome:
         note_payload = prepared_request.note_payload
-        api_model = str(prepared_request.request_params.get("model") or "")
-        if not api_model:
+        model_id = str(prepared_request.request_params.get("model") or "")
+        if not model_id:
             raise LlmFatalError("Prepared request is missing provider model")
 
         kwargs: dict[str, object] = dict(prepared_request.request_params)
@@ -253,10 +253,10 @@ class ProviderClient:
         request_id: str | None,
         rate_limit_headers: dict[str, str],
     ) -> ProviderAttemptOutcome:
-        api_model = str(prepared_request.request_params.get("model") or "")
+        model_id = str(prepared_request.request_params.get("model") or "")
         context = _attempt_context_from_response(
             response,
-            fallback_model=api_model,
+            fallback_model_id=model_id,
             retry_count=retry_count,
             latency_ms=latency_ms,
             request_id=request_id,
@@ -289,7 +289,7 @@ class ProviderClient:
         return ProviderAttemptOutcome(
             update=update,
             provider_message_id=context.provider_message_id,
-            provider_model=context.provider_model,
+            response_model_id=context.response_model_id,
             stop_reason=context.stop_reason,
             request_id=context.request_id,
             rate_limit_headers=context.rate_limit_headers,
@@ -430,7 +430,7 @@ def _headers_to_dict(value: object) -> dict[str, str]:
 def _attempt_context_from_response(
     response: object,
     *,
-    fallback_model: str,
+    fallback_model_id: str,
     retry_count: int,
     latency_ms: int,
     request_id: str | None,
@@ -441,7 +441,7 @@ def _attempt_context_from_response(
         message_id = None
 
     model = getattr(response, "model", None)
-    provider_model = model if isinstance(model, str) else fallback_model
+    response_model_id = model if isinstance(model, str) else fallback_model_id
 
     choice = _first_choice(response)
     stop_reason = _stop_reason(response)
@@ -452,7 +452,7 @@ def _attempt_context_from_response(
     usage = getattr(response, "usage", None)
     return ProviderAttemptErrorContext(
         provider_message_id=message_id,
-        provider_model=provider_model,
+        response_model_id=response_model_id,
         stop_reason=stop_reason,
         request_id=request_id,
         rate_limit_headers=rate_limit_headers,
