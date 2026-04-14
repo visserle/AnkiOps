@@ -11,7 +11,8 @@ import yaml
 
 from ankiops.config import LLM_DIR
 
-MODEL_REGISTRY_FILE_NAME = "models.yaml"
+SYSTEM_PROMPT_FILE_NAME = "_system_prompt.md"
+MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "model",
     "model_id",

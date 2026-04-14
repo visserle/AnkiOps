@@ -187,13 +187,13 @@ AnkiOps includes a LLM pipeline for repeatable task execution.
 
 After `ankiops init`, AnkiOps bootstraps:
 
-- `llm/models.yaml`
-- `llm/system_prompt.md`
+- `llm/_models.yaml`
+- `llm/_system_prompt.md`
 - `llm/grammar.yaml`
 - `llm/translate.yaml`
 - `llm/.llm.db` (job history, auto-added to `.gitignore`)
 
-Set the key required by the model entry you use (from `llm/models.yaml`):
+Set the key required by the model entry you use (from `llm/_models.yaml`):
 
 ```bash
 export OPENAI_API_KEY="your-openai-key"
@@ -215,7 +215,7 @@ ankiops llm --job latest --resume
 
 ```yaml
 model: sonnet
-system_prompt: !file system_prompt.md
+system_prompt: !file _system_prompt.md
 task_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
   Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
@@ -229,9 +229,9 @@ fields:
 ```
 
 - Required keys: `model`, `system_prompt`, `task_prompt`
-- `model` must reference a model name from `llm/models.yaml`
+- `model` must reference a model name from `llm/_models.yaml`
 - `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
-- Default templates use `system_prompt: !file system_prompt.md`
+- Default templates use `system_prompt: !file _system_prompt.md`
 - `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
@@ -241,13 +241,13 @@ Optional file-linked prompt example:
 
 ```yaml
 model: sonnet
-system_prompt: !file system_prompt.md
+system_prompt: !file _system_prompt.md
 task_prompt: !file grammar.md
 ```
 
-### Model Registry (`llm/models.yaml`)
+### Model Registry (`llm/_models.yaml`)
 
-`llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key`, and `model_id`.
+`llm/_models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key`, and `model_id`.
 
 ```yaml
 - model: qwen3-32b

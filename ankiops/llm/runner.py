@@ -18,10 +18,9 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import Note, NoteTypeConfig
 
-from .config_loader import load_llm_task_catalog
+from .config_loader import is_task_config_file, load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .llm_errors import LlmFatalError, LlmNoteError
-from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .provider_client import ProviderClient
 from .task_attempts import AttemptRecorder
 from .task_discovery import discover_and_record_candidates
@@ -158,11 +157,7 @@ def _load_note_type_configs(
 
 def _is_task_file(path: str) -> bool:
     path_obj = Path(path)
-    return (
-        path_obj.suffix in {".yaml", ".yml"}
-        and path_obj.parent.name == "llm"
-        and path_obj.name != MODEL_REGISTRY_FILE_NAME
-    )
+    return path_obj.parent.name == "llm" and is_task_config_file(path_obj)
 
 
 def _is_task_file_for_name(path: str, task_name: str) -> bool:

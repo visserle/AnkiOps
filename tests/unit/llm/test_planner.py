@@ -42,9 +42,9 @@ def _prepare_collection(tmp_path: Path) -> Path:
     fs = FileSystemAdapter()
     fs.eject_builtin_note_types(tmp_path / "note_types")
     _write(
-        tmp_path / "llm/models.yaml",
+        tmp_path / "llm/_models.yaml",
         resources.files("ankiops.llm")
-        .joinpath("models.yaml")
+        .joinpath("_models.yaml")
         .read_text(encoding="utf-8"),
     )
     _write(tmp_path / f"{TEST_DECK}.md", TEST_DECK_MARKDOWN)

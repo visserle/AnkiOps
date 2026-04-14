@@ -27,7 +27,7 @@ TEST_MODEL = ModelSpec(
 
 def _write_models_file(tmp_path: Path, *, content: str) -> None:
     (tmp_path / "llm").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "llm/models.yaml").write_text(
+    (tmp_path / "llm/_models.yaml").write_text(
         dedent(content).strip() + "\n",
         encoding="utf-8",
     )

@@ -1,7 +1,7 @@
-model: sonnet
-system_prompt: !file system_prompt.md
+model: haiku
+system_prompt: !file _system_prompt.md
 task_prompt: |
-  Translate the following text from English to German.
+  Correct grammar, spelling, and punctuation in editable fields.
   Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
   Do not add facts or change correctness.
 

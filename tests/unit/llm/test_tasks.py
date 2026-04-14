@@ -25,7 +25,7 @@ from ankiops.llm.task_types import (
 
 TASK_FILE = Path("llm/grammar.yaml")
 PROMPT_FILE = Path("llm/grammar.md")
-SYSTEM_PROMPT_FILE = Path("llm/system_prompt.md")
+SYSTEM_PROMPT_FILE = Path("llm/_system_prompt.md")
 TEST_DECK = "TestDeck"
 TEST_DECK_MARKDOWN = """
 <!-- note_key: nk-1 -->
@@ -60,10 +60,10 @@ def _write(path: Path, content: str) -> None:
 
 
 def _write_default_models(collection_dir: Path) -> None:
-    models_path = collection_dir / "llm/models.yaml"
+    models_path = collection_dir / "llm/_models.yaml"
     if models_path.exists():
         return
-    models_src = resources.files("ankiops.llm").joinpath("models.yaml")
+    models_src = resources.files("ankiops.llm").joinpath("_models.yaml")
     _write(models_path, models_src.read_text(encoding="utf-8"))
 
 
@@ -298,29 +298,31 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
 
     packaged_tasks = sorted(
         resource.name
-        for resource in resources.files("ankiops.llm").joinpath("tasks").iterdir()
-        if resource.is_file() and Path(resource.name).suffix == ".yaml"
+        for resource in resources.files("ankiops.llm").iterdir()
+        if resource.is_file()
+        and resource.name != "_models.yaml"
+        and Path(resource.name).suffix in {".yaml", ".yml"}
     )
     ejected_tasks = sorted(
         path.name
         for path in (tmp_path / "llm").glob("*.yaml")
-        if path.name != "models.yaml"
+        if path.name != "_models.yaml"
     )
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
     assert not (tmp_path / "llm/prompts").exists()
-    assert (tmp_path / "llm/models.yaml").exists()
-    models_content = (tmp_path / "llm/models.yaml").read_text(encoding="utf-8")
+    assert (tmp_path / "llm/_models.yaml").exists()
+    models_content = (tmp_path / "llm/_models.yaml").read_text(encoding="utf-8")
     assert "models:" not in models_content
     assert "model: sonnet" in models_content
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
     for task_path in (tmp_path / "llm").glob("*.yaml"):
-        if task_path.name == "models.yaml":
+        if task_path.name == "_models.yaml":
             continue
         content = task_path.read_text(encoding="utf-8")
         assert "model: " in content
-        assert "system_prompt: !file system_prompt.md" in content
+        assert "system_prompt: !file _system_prompt.md" in content
         assert "task_prompt: |" in content
     assert (tmp_path / "llm/.llm.db").exists()
 
@@ -398,7 +400,7 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
     tmp_path: Path,
 ):
     _write(
-        tmp_path / "llm/models.yaml",
+        tmp_path / "llm/_models.yaml",
         """
         - model: qwen3-32b
           model_id: qwen3-32b
@@ -428,7 +430,7 @@ def test_load_llm_task_catalog_rejects_invalid_models_registry(
     tmp_path: Path,
 ):
     _write(
-        tmp_path / "llm/models.yaml",
+        tmp_path / "llm/_models.yaml",
         """
         []
         """,

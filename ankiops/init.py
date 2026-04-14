@@ -17,7 +17,10 @@ from ankiops.config import (
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.model_registry import MODEL_REGISTRY_FILE_NAME
+from ankiops.llm.model_registry import (
+    MODEL_REGISTRY_FILE_NAME,
+    SYSTEM_PROMPT_FILE_NAME,
+)
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
@@ -96,7 +99,7 @@ def _eject_llm_configs(collection_dir: Path) -> None:
     llm_dir.mkdir(parents=True, exist_ok=True)
     llm_resources = resources.files("ankiops.llm")
 
-    for resource_name in (MODEL_REGISTRY_FILE_NAME, "system_prompt.md"):
+    for resource_name in (MODEL_REGISTRY_FILE_NAME, SYSTEM_PROMPT_FILE_NAME):
         destination = llm_dir / resource_name
         if destination.exists():
             continue
@@ -105,11 +108,12 @@ def _eject_llm_configs(collection_dir: Path) -> None:
             encoding="utf-8",
         )
 
-    for resource in llm_resources.joinpath("tasks").iterdir():
-        if not resource.is_file() or Path(resource.name).suffix not in {
-            ".yaml",
-            ".yml",
-        }:
+    for resource in llm_resources.iterdir():
+        if (
+            not resource.is_file()
+            or resource.name == MODEL_REGISTRY_FILE_NAME
+            or Path(resource.name).suffix not in {".yaml", ".yml"}
+        ):
             continue
         destination = llm_dir / resource.name
         if destination.exists():

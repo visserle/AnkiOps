@@ -59,10 +59,8 @@ ankiops = [
     "note_types/**/*.anki",
     "note_types/**/*.css",
     "note_types/**/*.yaml",
-    "llm/models.yaml",
-    "llm/system_prompt.md",
-    "llm/tasks/*.yaml",
-    "llm/tasks/**/*.yaml",
+    "llm/*.yaml",
+    "llm/_system_prompt.md",
 ]
 
 [tool.ruff]

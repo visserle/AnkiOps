@@ -25,15 +25,15 @@ def _write(path: Path, content: str) -> None:
 def _eject_standard_llm_files(collection_dir: Path) -> None:
     llm_dir = collection_dir / "llm"
     _write(
-        llm_dir / "system_prompt.md",
+        llm_dir / "_system_prompt.md",
         resources.files("ankiops.llm")
-        .joinpath("system_prompt.md")
+        .joinpath("_system_prompt.md")
         .read_text(encoding="utf-8"),
     )
     _write(
         llm_dir / "grammar.yaml",
         resources.files("ankiops.llm")
-        .joinpath("tasks/grammar.yaml")
+        .joinpath("grammar.yaml")
         .read_text(encoding="utf-8"),
     )
 

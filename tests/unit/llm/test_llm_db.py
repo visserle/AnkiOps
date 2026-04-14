@@ -70,11 +70,11 @@ def _insert_attempt(
 
 
 def _write_models_registry(tmp_path) -> None:
-    models_path = tmp_path / "llm" / "models.yaml"
+    models_path = tmp_path / "llm" / "_models.yaml"
     models_path.parent.mkdir(parents=True, exist_ok=True)
     models_path.write_text(
         resources.files("ankiops.llm")
-        .joinpath("models.yaml")
+        .joinpath("_models.yaml")
         .read_text(encoding="utf-8"),
         encoding="utf-8",
     )

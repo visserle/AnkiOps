@@ -74,6 +74,10 @@ def _iter_yaml_files(directory: Path) -> list[Path]:
     return files
 
 
+def is_task_config_file(path: Path) -> bool:
+    return path.suffix in {".yaml", ".yml"} and path.name != MODEL_REGISTRY_FILE_NAME
+
+
 def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         loader = _TaskConfigLoader(handle)
@@ -328,7 +332,7 @@ def load_llm_task_catalog(
     task_files = [
         path
         for path in _iter_yaml_files(llm_dir)
-        if path.name != MODEL_REGISTRY_FILE_NAME
+        if is_task_config_file(path)
     ]
     if not task_files:
         errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
