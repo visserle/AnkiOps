@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from yaml.nodes import ScalarNode
 
 from ankiops.config import LLM_DIR
 from ankiops.models import NoteTypeConfig
@@ -19,10 +20,47 @@ class LlmConfigError(ValueError):
     """Raised when an LLM task config is invalid."""
 
 
-_SYSTEM_PROMPT_FILE_NAME = "system_prompt.md"
-_TASKS_DIR_NAME = "tasks"
-_SUPPORTED_TASK_KEYS_ORDERED = ("model", "prompt_file", "fields")
+_MODEL_REGISTRY_FILE_NAMES = {"models.yaml"}
+_SUPPORTED_TASK_KEYS_ORDERED = ("model", "system_prompt", "task_prompt", "fields")
 _SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
+
+
+class _FileSource:
+    def __init__(self, text: str, path: Path) -> None:
+        self.text = text
+        self.path = path
+
+
+class _TaskConfigLoader(yaml.SafeLoader):
+    task_path: Path
+    llm_dir: Path
+
+
+def _construct_file_source(
+    loader: _TaskConfigLoader,
+    node: Any,
+) -> _FileSource:
+    if not isinstance(node, ScalarNode):
+        raise LlmConfigError(
+            f"{loader.task_path}: !file tag must be used with a scalar path"
+        )
+
+    raw_reference = loader.construct_scalar(node).strip()
+    if not raw_reference:
+        raise LlmConfigError(
+            f"{loader.task_path}: !file path must be a non-empty string"
+        )
+
+    resolved_path = _resolve_relative_file(
+        loader.task_path,
+        raw_reference,
+        llm_dir=loader.llm_dir,
+    )
+    content = _read_text_file(resolved_path)
+    return _FileSource(text=content, path=resolved_path)
+
+
+_TaskConfigLoader.add_constructor("!file", _construct_file_source)
 
 
 def _iter_yaml_files(directory: Path) -> list[Path]:
@@ -31,9 +69,17 @@ def _iter_yaml_files(directory: Path) -> list[Path]:
     return files
 
 
-def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
+        loader = _TaskConfigLoader(handle)
+        loader.task_path = path
+        loader.llm_dir = llm_dir
+        try:
+            raw = loader.get_single_data() or {}
+        except yaml.YAMLError as error:
+            raise LlmConfigError(f"{path}: invalid YAML ({error})") from error
+        finally:
+            loader.dispose()
     if not isinstance(raw, dict):
         raise LlmConfigError(f"{path}: config must be a YAML mapping")
     return raw
@@ -46,12 +92,12 @@ def _require_str(mapping: dict[str, Any], key: str, path: Path) -> str:
     return value.strip()
 
 
-def _read_text_file(path: Path, *, label: str) -> str:
+def _read_text_file(path: Path) -> str:
     if not path.exists() or not path.is_file():
-        raise LlmConfigError(f"{path}: {label} file not found")
+        raise LlmConfigError(f"{path}: file not found")
     value = path.read_text(encoding="utf-8")
     if not value.strip():
-        raise LlmConfigError(f"{path}: {label} file must be non-empty")
+        raise LlmConfigError(f"{path}: file must be non-empty")
     return value.strip()
 
 
@@ -60,14 +106,13 @@ def _resolve_relative_file(
     raw_reference: str,
     *,
     llm_dir: Path,
-    key: str,
 ) -> Path:
     candidate = (task_path.parent / raw_reference).resolve()
     try:
         candidate.relative_to(llm_dir.resolve())
     except ValueError as error:
         raise LlmConfigError(
-            f"{task_path}: '{key}' must stay within {llm_dir}"
+            f"{task_path}: !file path must stay within {llm_dir}"
         ) from error
     return candidate
 
@@ -200,6 +245,22 @@ def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
         )
 
 
+def _parse_text_source(
+    mapping: dict[str, Any],
+    *,
+    key: str,
+    path: Path,
+) -> tuple[str, Path | None]:
+    raw_value = mapping.get(key)
+    if isinstance(raw_value, _FileSource):
+        return raw_value.text, raw_value.path
+
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip(), None
+
+    raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
+
+
 def _parse_task(
     path: Path,
     *,
@@ -207,7 +268,7 @@ def _parse_task(
     llm_dir: Path,
     model_registry: ModelRegistry,
 ) -> TaskConfig:
-    mapping = _read_yaml_mapping(path)
+    mapping = _read_yaml_mapping(path, llm_dir=llm_dir)
     _validate_task_keys(mapping, path)
     name = path.stem
     model_name = _require_str(mapping, "model", path)
@@ -215,16 +276,17 @@ def _parse_task(
     if model is None:
         supported = model_registry.format_names()
         raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
-    prompt_file_ref = _require_str(mapping, "prompt_file", path)
-    prompt_file_path = _resolve_relative_file(
-        path,
-        prompt_file_ref,
-        llm_dir=llm_dir,
-        key="prompt_file",
+
+    system_prompt, system_prompt_path = _parse_text_source(
+        mapping,
+        key="system_prompt",
+        path=path,
     )
-    prompt = _read_text_file(prompt_file_path, label="prompt")
-    system_prompt_path = (llm_dir / _SYSTEM_PROMPT_FILE_NAME).resolve()
-    system_prompt = _read_text_file(system_prompt_path, label="system prompt")
+    task_prompt, task_prompt_path = _parse_text_source(
+        mapping,
+        key="task_prompt",
+        path=path,
+    )
     field_exceptions = _parse_field_exceptions(
         mapping.get("fields"),
         note_type_configs=note_type_configs,
@@ -235,9 +297,9 @@ def _parse_task(
         name=name,
         model=model,
         system_prompt=system_prompt,
-        prompt=prompt,
+        prompt=task_prompt,
         system_prompt_path=system_prompt_path,
-        prompt_path=prompt_file_path,
+        prompt_path=task_prompt_path,
         api_key_env=model.api_key_env,
         field_exceptions=field_exceptions,
     )
@@ -259,17 +321,13 @@ def load_llm_task_catalog(
         )
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
-    tasks_dir = llm_dir / _TASKS_DIR_NAME
-    if not tasks_dir.exists() or not tasks_dir.is_dir():
-        errors[str(tasks_dir)] = (
-            f"{tasks_dir}: task directory not found. "
-            "Expected task YAML files in llm/tasks/."
-        )
-        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
-
-    task_files = _iter_yaml_files(tasks_dir)
+    task_files = [
+        path
+        for path in _iter_yaml_files(llm_dir)
+        if path.name not in _MODEL_REGISTRY_FILE_NAMES
+    ]
     if not task_files:
-        errors[str(tasks_dir)] = f"{tasks_dir}: no task YAML files found"
+        errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
     try:

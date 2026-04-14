@@ -26,8 +26,14 @@ def task_to_snapshot(task: TaskConfig) -> dict[str, Any]:
         "model": task.model.name,
         "system_prompt": task.system_prompt,
         "prompt": task.prompt,
-        "system_prompt_path": str(task.system_prompt_path),
-        "prompt_path": str(task.prompt_path),
+        "system_prompt_path": (
+            str(task.system_prompt_path)
+            if task.system_prompt_path is not None
+            else None
+        ),
+        "prompt_path": (
+            str(task.prompt_path) if task.prompt_path is not None else None
+        ),
         "api_key_env": task.api_key_env,
         "timeout_seconds": task.timeout_seconds,
         "decks": {
@@ -104,13 +110,26 @@ def task_from_snapshot(
                 )
             )
 
+    prompt_path_raw = snapshot.get("prompt_path")
+    prompt_path = (
+        Path(prompt_path_raw)
+        if isinstance(prompt_path_raw, str) and prompt_path_raw
+        else None
+    )
+    system_prompt_path_raw = snapshot.get("system_prompt_path")
+    system_prompt_path = (
+        Path(system_prompt_path_raw)
+        if isinstance(system_prompt_path_raw, str) and system_prompt_path_raw
+        else None
+    )
+
     return TaskConfig(
         name=str(snapshot.get("name") or "unknown"),
         model=model,
         system_prompt=str(snapshot.get("system_prompt") or ""),
         prompt=str(snapshot.get("prompt") or ""),
-        system_prompt_path=Path(str(snapshot.get("system_prompt_path") or "")),
-        prompt_path=Path(str(snapshot.get("prompt_path") or "")),
+        system_prompt_path=system_prompt_path,
+        prompt_path=prompt_path,
         api_key_env=str(snapshot.get("api_key_env") or model.api_key_env),
         timeout_seconds=int(
             snapshot.get("timeout_seconds") or _DEFAULT_TIMEOUT_SECONDS

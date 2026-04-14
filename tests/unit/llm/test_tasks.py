@@ -23,8 +23,8 @@ from ankiops.llm.llm_models import (
 )
 from ankiops.llm.runner import run_task
 
-TASK_FILE = Path("llm/tasks/grammar.yaml")
-PROMPT_FILE = Path("llm/prompts/grammar.md")
+TASK_FILE = Path("llm/grammar.yaml")
+PROMPT_FILE = Path("llm/grammar.md")
 SYSTEM_PROMPT_FILE = Path("llm/system_prompt.md")
 TEST_DECK = "TestDeck"
 TEST_DECK_MARKDOWN = """
@@ -70,11 +70,28 @@ def _write_default_models(collection_dir: Path) -> None:
 def _task_config(
     *,
     model: str = "claude-sonnet-4-6",
-    prompt_file: str = "../prompts/grammar.md",
+    system_prompt: str = f"!file {SYSTEM_PROMPT_FILE.name}",
+    task_prompt: str = DEFAULT_TASK_PROMPT,
     extra: str = "",
 ) -> str:
+    lines: list[str] = [f"model: {model}"]
+
+    if system_prompt.startswith("!file "):
+        lines.append(f"system_prompt: {system_prompt}")
+    else:
+        system_prompt_value = dedent(system_prompt).strip()
+        lines.append("system_prompt: |")
+        lines.extend([f"  {line}" for line in system_prompt_value.splitlines()])
+
+    if task_prompt.startswith("!file "):
+        lines.append(f"task_prompt: {task_prompt}")
+    else:
+        prompt_value = dedent(task_prompt).strip()
+        lines.append("task_prompt: |")
+        lines.extend([f"  {line}" for line in prompt_value.splitlines()])
+
     suffix = f"\n{dedent(extra).strip()}" if extra.strip() else ""
-    return f"model: {model}\nprompt_file: {prompt_file}{suffix}\n"
+    return "\n".join(lines) + f"{suffix}\n"
 
 
 def _write_prompt(collection_dir: Path, content: str = DEFAULT_TASK_PROMPT) -> None:
@@ -91,9 +108,12 @@ def _write_system_prompt(
 
 def _write_task(collection_dir: Path, *, content: str) -> None:
     _write_default_models(collection_dir)
-    if not (collection_dir / SYSTEM_PROMPT_FILE).exists():
+    if (
+        "system_prompt: !file" in content
+        and not (collection_dir / SYSTEM_PROMPT_FILE).exists()
+    ):
         _write_system_prompt(collection_dir)
-    if not (collection_dir / PROMPT_FILE).exists():
+    if "task_prompt: !file" in content and not (collection_dir / PROMPT_FILE).exists():
         _write_prompt(collection_dir)
     _write(collection_dir / TASK_FILE, content)
 
@@ -282,38 +302,26 @@ def test_initialize_collection_ejects_packaged_tasks(tmp_path, monkeypatch):
         if resource.is_file() and Path(resource.name).suffix == ".yaml"
     )
     ejected_tasks = sorted(
-        path.name for path in (tmp_path / "llm/tasks").glob("*.yaml")
-    )
-    packaged_prompts = sorted(
-        resource.name
-        for resource in resources.files("ankiops.llm").joinpath("prompts").iterdir()
-        if resource.is_file() and Path(resource.name).suffix == ".md"
-    )
-    ejected_prompts = sorted(
-        path.name for path in (tmp_path / "llm/prompts").glob("*.md")
+        path.name
+        for path in (tmp_path / "llm").glob("*.yaml")
+        if path.name != "models.yaml"
     )
 
     assert collection_dir == tmp_path
     assert ejected_tasks == packaged_tasks
-    assert ejected_prompts == packaged_prompts
+    assert not (tmp_path / "llm/prompts").exists()
     assert (tmp_path / "llm/models.yaml").exists()
     models_content = (tmp_path / "llm/models.yaml").read_text(encoding="utf-8")
-    assert "models:" in models_content
+    assert "models:" not in models_content
     assert "name: claude-sonnet-4-6" in models_content
     assert (tmp_path / SYSTEM_PROMPT_FILE).exists()
-    for task_path in (tmp_path / "llm/tasks").glob("*.yaml"):
+    for task_path in (tmp_path / "llm").glob("*.yaml"):
+        if task_path.name == "models.yaml":
+            continue
         content = task_path.read_text(encoding="utf-8")
         assert "model: claude-sonnet-4-6" in content
-        prompt_line = next(
-            (
-                line
-                for line in content.splitlines()
-                if line.strip().startswith("prompt_file:")
-            ),
-            "",
-        )
-        prompt_ref = prompt_line.split(":", 1)[1].strip()
-        assert prompt_ref.startswith("../prompts/")
+        assert "system_prompt: !file system_prompt.md" in content
+        assert "task_prompt: |" in content
     assert (tmp_path / "llm/.llm.db").exists()
 
 
@@ -324,20 +332,19 @@ def test_initialize_collection_preserves_existing_task(tmp_path, monkeypatch):
     existing_task = tmp_path / TASK_FILE
     existing_task.parent.mkdir(parents=True, exist_ok=True)
     existing_task.write_text(
-        "model: claude-sonnet-4-6\nprompt_file: ../prompts/custom.md\n",
+        "model: claude-sonnet-4-6\nsystem_prompt: keep\ntask_prompt: keep\n",
         encoding="utf-8",
     )
 
     initialize_collection("TestProfile")
 
     assert existing_task.read_text(encoding="utf-8") == (
-        "model: claude-sonnet-4-6\nprompt_file: ../prompts/custom.md\n"
+        "model: claude-sonnet-4-6\nsystem_prompt: keep\ntask_prompt: keep\n"
     )
 
 
 def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Path):
     _write_system_prompt(tmp_path, "System rules")
-    _write_prompt(tmp_path, "Fix grammar from file")
     _write_task(
         tmp_path,
         content=_task_config(
@@ -359,10 +366,31 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     assert task.model.name == "claude-sonnet-4-6"
     assert task.api_key_env == "ANTHROPIC_API_KEY"
     assert task.system_prompt == "System rules"
-    assert task.prompt == "Fix grammar from file"
-    assert task.system_prompt_path == (tmp_path / "llm/system_prompt.md").resolve()
-    assert task.prompt_path == (tmp_path / "llm/prompts/grammar.md").resolve()
+    assert task.prompt == DEFAULT_TASK_PROMPT
+    assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
+    assert task.prompt_path is None
     assert task.decks.deck_root is None
+
+
+def test_load_catalog_file_prompt_task(note_type_configs, tmp_path: Path):
+    _write_system_prompt(tmp_path, "System rules from file")
+    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_task(
+        tmp_path,
+        content=_task_config(
+            system_prompt=f"!file {SYSTEM_PROMPT_FILE.name}",
+            task_prompt=f"!file {PROMPT_FILE.name}",
+        ),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.system_prompt == "System rules from file"
+    assert task.prompt == "Fix grammar from file"
+    assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
+    assert task.prompt_path == (tmp_path / PROMPT_FILE).resolve()
 
 
 def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
@@ -372,19 +400,16 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
     _write(
         tmp_path / "llm/models.yaml",
         """
-        models:
-          - name: qwen3-32b
-            api_id: qwen3-32b
-            provider: openai-compatible
-            base_url: https://api.example.com/v1
-            api_key_env: EXAMPLE_API_KEY
+        - name: qwen3-32b
+          api_id: qwen3-32b
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key_env: EXAMPLE_API_KEY
         """,
     )
-    _write_system_prompt(tmp_path, "System rules")
-    _write_prompt(tmp_path, "Fix grammar from file")
     _write_task(
         tmp_path,
-        content=_task_config(model="qwen3-32b"),
+        content=_task_config(model="qwen3-32b", system_prompt="System rules"),
     )
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
@@ -405,40 +430,37 @@ def test_load_llm_task_catalog_rejects_invalid_models_registry(
     _write(
         tmp_path / "llm/models.yaml",
         """
-        models: []
+        []
         """,
     )
-    _write_system_prompt(tmp_path, "System rules")
-    _write_prompt(tmp_path, "Fix grammar from file")
-    _write_task(tmp_path, content=_task_config())
+    _write_task(tmp_path, content=_task_config(system_prompt="System rules"))
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
 
     assert not catalog.tasks_by_name
-    assert "'models' must be a non-empty list" in next(iter(catalog.errors.values()))
+    assert "model registry must be a non-empty list" in next(
+        iter(catalog.errors.values())
+    )
 
 
-def test_load_llm_task_catalog_rejects_task_specific_system_prompt_file(
+def test_load_llm_task_catalog_supports_system_prompt_file_tag(
     note_type_configs,
     tmp_path: Path,
 ):
-    _write_system_prompt(tmp_path, "System rules")
-    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_system_prompt(tmp_path, "System rules from file")
     _write(
         tmp_path / TASK_FILE,
         _task_config(
-            extra="""
-            system_prompt_file: ../prompts/custom_system.md
-            """
+            system_prompt=f"!file {SYSTEM_PROMPT_FILE.name}",
         ),
     )
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
 
-    assert not catalog.tasks_by_name
-    assert "unknown task key(s): system_prompt_file" in next(
-        iter(catalog.errors.values())
-    )
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.system_prompt == "System rules from file"
+    assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
 
 
 def test_load_llm_task_catalog_defaults_execution_when_omitted(
@@ -446,10 +468,9 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
     tmp_path: Path,
 ):
     _write_system_prompt(tmp_path, "System rules")
-    _write_prompt(tmp_path, "Fix grammar from file")
     _write_task(
         tmp_path,
-        content="model: claude-sonnet-4-6\nprompt_file: ../prompts/grammar.md\n",
+        content=_task_config(),
     )
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
@@ -458,22 +479,134 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
     task = catalog.tasks_by_name["grammar"]
     assert task.execution.mode.value == "online"
     assert task.execution.concurrency == 8
+    assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
+    assert task.prompt_path is None
 
 
 def test_load_llm_task_catalog_requires_system_prompt(
     note_type_configs,
     tmp_path: Path,
 ):
-    _write_prompt(tmp_path, "Fix grammar from file")
+    _write_default_models(tmp_path)
     _write(
         tmp_path / TASK_FILE,
-        _task_config(),
+        """
+        model: claude-sonnet-4-6
+        task_prompt: fix grammar
+        """,
     )
 
     catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
 
     assert not catalog.tasks_by_name
-    assert "system prompt file not found" in next(iter(catalog.errors.values()))
+    assert "'system_prompt' must be a non-empty string" in next(
+        iter(catalog.errors.values())
+    )
+
+
+def test_load_llm_task_catalog_requires_task_prompt(note_type_configs, tmp_path: Path):
+    _write_default_models(tmp_path)
+    _write(
+        tmp_path / TASK_FILE,
+        """
+        model: claude-sonnet-4-6
+        system_prompt: system rules
+        """,
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "'task_prompt' must be a non-empty string" in next(
+        iter(catalog.errors.values())
+    )
+
+
+def test_load_llm_task_catalog_rejects_unknown_task_key(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_default_models(tmp_path)
+    _write(
+        tmp_path / TASK_FILE,
+        """
+        model: claude-sonnet-4-6
+        system_prompt: system rules
+        task_prompt: fix grammar
+        unsupported_key: value
+        """,
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "unknown task key(s): unsupported_key" in next(
+        iter(catalog.errors.values())
+    )
+
+
+def test_load_llm_task_catalog_rejects_invalid_file_tag_path(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_default_models(tmp_path)
+    _write(
+        tmp_path / TASK_FILE,
+        """
+        model: claude-sonnet-4-6
+        system_prompt: !file ""
+        task_prompt: |
+          fix grammar
+        """,
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "!file path must be a non-empty string" in next(
+        iter(catalog.errors.values())
+    )
+
+
+def test_load_llm_task_catalog_rejects_file_tag_outside_llm(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_default_models(tmp_path)
+    _write(
+        tmp_path / TASK_FILE,
+        """
+        model: claude-sonnet-4-6
+        system_prompt: !file ../outside.md
+        task_prompt: |
+          fix grammar
+        """,
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "!file path must stay within" in next(iter(catalog.errors.values()))
+
+
+def test_load_llm_task_catalog_rejects_invalid_yaml(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_default_models(tmp_path)
+    _write(
+        tmp_path / TASK_FILE,
+        """
+        model: claude-sonnet-4-6
+        system_prompt: !file [
+        task_prompt: fix grammar
+        """,
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert "invalid YAML" in next(iter(catalog.errors.values()))
 
 
 @pytest.mark.parametrize(
@@ -526,8 +659,8 @@ def test_load_llm_task_catalog_requires_system_prompt(
             "unknown task key(s): request",
         ),
         (
-            _task_config(extra="system_prompt_file: ../../../outside.md"),
-            "unknown task key(s): system_prompt_file",
+            _task_config(extra="unsupported_key: value"),
+            "unknown task key(s): unsupported_key",
         ),
         (
             _task_config(extra="timeout_seconds: true"),
@@ -537,12 +670,12 @@ def test_load_llm_task_catalog_requires_system_prompt(
     ids=[
         "invalid-exception-field",
         "non-claude-model",
-        "legacy-provider-key",
-        "legacy-decks-key",
-        "legacy-execution-key",
-        "legacy-request-key",
-        "legacy-system-prompt-file-key",
-        "legacy-timeout-key",
+        "unknown-provider-key",
+        "unknown-decks-key",
+        "unknown-execution-key",
+        "unknown-request-key",
+        "unknown-extra-key",
+        "unknown-timeout-key",
     ],
 )
 def test_load_llm_task_catalog_rejects_invalid_tasks(
@@ -568,7 +701,7 @@ def test_load_llm_task_catalog_ignores_non_task_dirs(
         tmp_path / "llm/actions/old.yaml",
         """
         name: old
-        prompt: should be ignored
+        task_prompt: should be ignored
         """,
     )
     _write(
@@ -1030,10 +1163,11 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
 def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     _write(
-        collection / "llm/tasks/translate.yaml",
+        collection / "llm/translate.yaml",
         """
         model: claude-sonnet-4-6
-        prompt_file: ../prompts/grammar.md
+        task_prompt: |
+          fix grammar
         sdk: anthropic
         """,
     )

@@ -189,8 +189,8 @@ After `ankiops init`, AnkiOps bootstraps:
 
 - `llm/models.yaml`
 - `llm/system_prompt.md`
-- `llm/tasks/grammar.yaml`
-- `llm/prompts/grammar.md`
+- `llm/grammar.yaml`
+- `llm/translate.yaml`
 - `llm/.llm.db` (job history, auto-added to `.gitignore`)
 
 Set the key required by the model entry you use (from `llm/models.yaml`):
@@ -212,11 +212,15 @@ ankiops llm grammar --run --model claude-haiku-4-5
 ankiops llm --job latest
 ankiops llm --job latest --resume
 ```
-### Task File Format (`llm/tasks/<task-name>.yaml`)
+### Task File Format (`llm/<task-name>.yaml`)
 
 ```yaml
 model: claude-sonnet-4-6
-prompt_file: ../prompts/grammar.md
+system_prompt: !file system_prompt.md
+task_prompt: |
+  Correct grammar, spelling, and punctuation in editable fields.
+  Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
+  Do not add facts or change correctness.
 
 fields:
   exceptions:
@@ -225,26 +229,33 @@ fields:
       read_only: ["Answer"]
 ```
 
-- Required keys: `model`, `prompt_file`
+- Required keys: `model`, `system_prompt`, `task_prompt`
 - `model` must reference a model name from `llm/models.yaml`
-- `prompt_file` is resolved relative to the task file and must stay within `llm/`
+- `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
+- Default templates use `system_prompt: !file system_prompt.md`
 - `fields.exceptions` is optional
 - `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
-- `llm/system_prompt.md` is global and shared by all tasks
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
 - Request/execution tuning uses internal defaults; only model and online mode can be overridden from CLI (`--model`, `--online`)
+
+Optional file-linked prompt example:
+
+```yaml
+model: claude-sonnet-4-6
+system_prompt: !file system_prompt.md
+task_prompt: !file grammar.md
+```
 
 ### Model Registry (`llm/models.yaml`)
 
 `llm/models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key_env`, and `api_id`.
 
 ```yaml
-models:
-  - name: qwen3-32b
-    api_id: qwen3-32b
-    provider: my-openai-compatible
-    base_url: https://api.example.com/v1
-    api_key_env: EXAMPLE_API_KEY
+- name: qwen3-32b
+  api_id: qwen3-32b
+  provider: my-openai-compatible
+  base_url: https://api.example.com/v1
+  api_key_env: EXAMPLE_API_KEY
 ```
 
 Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and only used for cost estimates.
@@ -253,7 +264,7 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 
 - `ankiops llm` validates all task configs and exits non-zero on errors
 - AnkiOps creates a pre-LLM git snapshot unless `--no-auto-commit` is passed
-- `ankiops llm <task>` prints the resolved system/task prompt file paths and the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning
+- `ankiops llm <task>` prints the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning; file paths are shown only when `system_prompt` or `task_prompt` use `!file`
 - Only notes in scope with at least one editable, non-empty field are sent to the model
 - Jobs use an atomic failure policy by default: if any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors

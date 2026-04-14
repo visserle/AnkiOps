@@ -37,8 +37,8 @@ def _plan_result() -> TaskPlanResult:
         model=TEST_MODEL,
         deck_scope="*",
         serializer_scope="collection",
-        system_prompt_path="/tmp/llm/system_prompt.md",
-        prompt_path="/tmp/llm/prompts/grammar.md",
+        system_prompt_path=None,
+        prompt_path=None,
         system_prompt="System prompt",
         task_prompt="Task prompt",
         request_defaults=(
@@ -166,8 +166,8 @@ def test_run_llm_plan_logs_system_prompt_path_and_full_prompt(tmp_path, caplog):
     ):
         run_llm(args)
 
-    assert "System prompt file: /tmp/llm/system_prompt.md" in caplog.text
-    assert "Task prompt file: /tmp/llm/prompts/grammar.md" in caplog.text
+    assert "System prompt file:" not in caplog.text
+    assert "Task prompt file:" not in caplog.text
     assert "<system>\nSystem prompt\n</system>" in caplog.text
     assert "<task>\nTask prompt\n</task>" in caplog.text
 

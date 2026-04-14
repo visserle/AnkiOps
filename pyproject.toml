@@ -61,7 +61,6 @@ ankiops = [
     "note_types/**/*.yaml",
     "llm/models.yaml",
     "llm/system_prompt.md",
-    "llm/prompts/*.md",
     "llm/tasks/*.yaml",
     "llm/tasks/**/*.yaml",
 ]

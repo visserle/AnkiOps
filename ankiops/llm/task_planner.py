@@ -91,8 +91,14 @@ def build_task_plan_result(
         model=task.model,
         deck_scope=format_deck_scope(task),
         serializer_scope=format_deck_scope(task),
-        system_prompt_path=str(task.system_prompt_path),
-        prompt_path=str(task.prompt_path),
+        system_prompt_path=(
+            str(task.system_prompt_path)
+            if task.system_prompt_path is not None
+            else None
+        ),
+        prompt_path=(
+            str(task.prompt_path) if task.prompt_path is not None else None
+        ),
         system_prompt=task.system_prompt,
         task_prompt=task.prompt,
         request_defaults=format_request_defaults(task),

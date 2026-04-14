@@ -101,10 +101,8 @@ class TaskConfig:
     model: ProviderModel
     system_prompt: str
     prompt: str
-    system_prompt_path: Path = field(
-        default_factory=lambda: Path("llm/system_prompt.md")
-    )
-    prompt_path: Path = field(default_factory=lambda: Path("llm/prompts/unknown.md"))
+    system_prompt_path: Path | None = None
+    prompt_path: Path | None = None
     api_key_env: str = "OPENAI_API_KEY"
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
@@ -278,8 +276,8 @@ class TaskPlanResult:
     model: ProviderModel
     deck_scope: str
     serializer_scope: str
-    system_prompt_path: str
-    prompt_path: str
+    system_prompt_path: str | None
+    prompt_path: str | None
     system_prompt: str
     task_prompt: str
     request_defaults: str

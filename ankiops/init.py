@@ -107,8 +107,6 @@ def _eject_llm_configs(collection_dir: Path) -> None:
             encoding="utf-8",
         )
 
-    tasks_dir = llm_dir / "tasks"
-    tasks_dir.mkdir(parents=True, exist_ok=True)
     packaged_tasks_dir = resources.files("ankiops.llm").joinpath("tasks")
     for resource in packaged_tasks_dir.iterdir():
         resource_name = resource.name
@@ -117,19 +115,7 @@ def _eject_llm_configs(collection_dir: Path) -> None:
             ".yml",
         }:
             continue
-        destination = tasks_dir / resource_name
-        if destination.exists():
-            continue
-        destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
-
-    prompts_dir = llm_dir / "prompts"
-    prompts_dir.mkdir(parents=True, exist_ok=True)
-    packaged_prompts_dir = resources.files("ankiops.llm").joinpath("prompts")
-    for resource in packaged_prompts_dir.iterdir():
-        resource_name = resource.name
-        if not resource.is_file() or Path(resource_name).suffix != ".md":
-            continue
-        destination = prompts_dir / resource_name
+        destination = llm_dir / resource_name
         if destination.exists():
             continue
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")

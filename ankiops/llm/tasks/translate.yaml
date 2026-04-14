@@ -1,5 +1,9 @@
 model: claude-sonnet-4-6
-prompt_file: ../prompts/translate.md
+system_prompt: !file system_prompt.md
+task_prompt: |
+  Translate the following text from English to German.
+  Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
+  Do not add facts or change correctness.
 
 fields:
   exceptions:

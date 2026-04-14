@@ -39,14 +39,13 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
     _write_models_file(
         tmp_path,
         content="""
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
-            input_usd_per_mtok: 3
-            output_usd_per_mtok: 15
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
+          input_usd_per_mtok: 3
+          output_usd_per_mtok: 15
         """,
     )
 
@@ -55,8 +54,8 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
         model=TEST_MODEL,
         system_prompt="system prompt",
         prompt="task prompt",
-        system_prompt_path=Path("llm/system_prompt.md"),
-        prompt_path=Path("llm/prompts/grammar.md"),
+        system_prompt_path=Path("llm/system.md"),
+        prompt_path=Path("llm/grammar.md"),
         api_key_env="ANTHROPIC_API_KEY",
         timeout_seconds=45,
         decks=DeckScope(deck_root="DeckA"),
@@ -95,6 +94,36 @@ def test_task_snapshot_roundtrip_preserves_core_fields(tmp_path):
     assert loaded.execution == task.execution
 
 
+def test_task_snapshot_roundtrip_supports_inline_prompt_without_prompt_path(tmp_path):
+    _write_models_file(
+        tmp_path,
+        content="""
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
+        """,
+    )
+
+    task = TaskConfig(
+        name="grammar",
+        model=TEST_MODEL,
+        system_prompt="system prompt",
+        prompt="inline task prompt",
+        system_prompt_path=None,
+        prompt_path=None,
+    )
+
+    snapshot = task_to_snapshot(task)
+    loaded = task_from_snapshot(snapshot, collection_dir=tmp_path)
+
+    assert snapshot["system_prompt_path"] is None
+    assert snapshot["prompt_path"] is None
+    assert loaded.system_prompt_path is None
+    assert loaded.prompt_path is None
+
+
 def test_task_from_snapshot_rejects_missing_model_registry(tmp_path):
     missing_collection = tmp_path / "missing-collection"
     with pytest.raises(ValueError, match="model registry file not found"):
@@ -113,12 +142,11 @@ def test_task_from_snapshot_rejects_unknown_model(tmp_path):
     _write_models_file(
         tmp_path,
         content="""
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
         """,
     )
 
@@ -138,12 +166,11 @@ def test_task_from_snapshot_requires_execution_mapping(tmp_path):
     _write_models_file(
         tmp_path,
         content="""
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
         """,
     )
 
@@ -162,12 +189,11 @@ def test_task_from_snapshot_uses_collection_local_model_registry(tmp_path):
     _write_models_file(
         tmp_path,
         content="""
-        models:
-          - name: qwen3-32b
-            api_id: qwen3-32b
-            provider: openai-compatible
-            base_url: https://api.example.com/v1
-            api_key_env: EXAMPLE_API_KEY
+        - name: qwen3-32b
+          api_id: qwen3-32b
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key_env: EXAMPLE_API_KEY
         """,
     )
 

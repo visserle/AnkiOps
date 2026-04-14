@@ -25,14 +25,13 @@ def test_parse_model_returns_model_from_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
-            input_usd_per_mtok: 3
-            output_usd_per_mtok: 15
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
+          input_usd_per_mtok: 3
+          output_usd_per_mtok: 15
         """,
     )
 
@@ -46,19 +45,16 @@ def test_parse_model_returns_model_from_registry(tmp_path):
 def test_format_supported_model_names_comes_from_registry(tmp_path):
     _write_models_file(
         tmp_path,
-        """
-        models:
-          - name: local-a
-            api_id: local-a
-            provider: local
-            base_url: https://localhost/v1
-            api_key_env: LOCAL_A_KEY
-          - name: local-b
-            api_id: local-b
-            provider: local
-            base_url: https://localhost/v1
-            api_key_env: LOCAL_B_KEY
-        """,
+        "- name: local-a\n"
+        "  api_id: local-a\n"
+        "  provider: local\n"
+        "  base_url: https://localhost/v1\n"
+        "  api_key_env: LOCAL_A_KEY\n"
+        "- name: local-b\n"
+        "  api_id: local-b\n"
+        "  provider: local\n"
+        "  base_url: https://localhost/v1\n"
+        "  api_key_env: LOCAL_B_KEY\n",
     )
 
     rendered = format_supported_model_names(collection_dir=tmp_path)
@@ -69,14 +65,13 @@ def test_model_estimate_cost_uses_registry_rates(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
-            input_usd_per_mtok: 3
-            output_usd_per_mtok: 15
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
+          input_usd_per_mtok: 3
+          output_usd_per_mtok: 15
         """,
     )
     model = parse_model("claude-sonnet-4-6", collection_dir=tmp_path)
@@ -98,14 +93,13 @@ def test_task_run_summary_format_cost_reports_priced_model(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
-            input_usd_per_mtok: 3
-            output_usd_per_mtok: 15
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
+          input_usd_per_mtok: 3
+          output_usd_per_mtok: 15
         """,
     )
     model = parse_model("claude-sonnet-4-6", collection_dir=tmp_path)
@@ -125,12 +119,11 @@ def test_parse_model_rejects_unknown_values(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: claude-sonnet-4-6
-            api_id: claude-sonnet-4-6
-            provider: anthropic
-            base_url: https://api.anthropic.com/v1/
-            api_key_env: ANTHROPIC_API_KEY
+        - name: claude-sonnet-4-6
+          api_id: claude-sonnet-4-6
+          provider: anthropic
+          base_url: https://api.anthropic.com/v1/
+          api_key_env: ANTHROPIC_API_KEY
         """,
     )
 
@@ -147,12 +140,11 @@ def test_parse_model_uses_collection_local_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: qwen3-32b
-            api_id: qwen3-32b
-            provider: openai-compatible
-            base_url: https://api.example.com/v1
-            api_key_env: EXAMPLE_API_KEY
+        - name: qwen3-32b
+          api_id: qwen3-32b
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key_env: EXAMPLE_API_KEY
         """,
     )
 
@@ -168,11 +160,10 @@ def test_load_model_registry_rejects_invalid_registry(tmp_path):
     _write_models_file(
         tmp_path,
         """
-        models:
-          - name: bad
-            api_id: bad
-            provider: local
-            base_url: https://localhost/v1
+        - name: bad
+          api_id: bad
+          provider: local
+          base_url: https://localhost/v1
         """,
     )
 

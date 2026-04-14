@@ -488,8 +488,10 @@ def run_llm(
     logger.info("Plan: %s (model=%s)", plan.task_name, plan.model)
     logger.info("Deck scope: %s", plan.deck_scope)
     logger.info("Serializer scope: %s", plan.serializer_scope)
-    logger.info("System prompt file: %s", plan.system_prompt_path)
-    logger.info("Task prompt file: %s", plan.prompt_path)
+    if plan.system_prompt_path is not None:
+        logger.info("System prompt file: %s", plan.system_prompt_path)
+    if plan.prompt_path is not None:
+        logger.info("Task prompt file: %s", plan.prompt_path)
     logger.info("Request defaults: %s", plan.request_defaults)
     logger.info(
         "Discovery: decks_seen=%d decks_matched=%d notes_seen=%d "

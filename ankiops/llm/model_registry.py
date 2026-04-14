@@ -103,11 +103,13 @@ def _models_path(collection_dir: Path) -> Path:
     return collection_dir / LLM_DIR / _MODELS_FILE_NAME
 
 
-def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+def _read_yaml_list(path: Path) -> list[Any]:
     with path.open("r", encoding="utf-8") as handle:
-        raw = yaml.safe_load(handle) or {}
-    if not isinstance(raw, dict):
-        raise ModelRegistryError("model registry must be a YAML mapping")
+        raw = yaml.safe_load(handle)
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ModelRegistryError("model registry must be a YAML list")
     return raw
 
 
@@ -183,16 +185,9 @@ def _parse_model_entry(entry: Any, *, index: int) -> ProviderModel:
 
 
 def _parse_registry(path: Path) -> ModelRegistry:
-    mapping = _read_yaml_mapping(path)
-    unknown_top_level = sorted(set(mapping.keys()) - {"models"})
-    if unknown_top_level:
-        raise ModelRegistryError(
-            "unknown top-level key(s): " + ", ".join(unknown_top_level)
-        )
-
-    models = mapping.get("models")
-    if not isinstance(models, list) or not models:
-        raise ModelRegistryError("'models' must be a non-empty list")
+    models = _read_yaml_list(path)
+    if not models:
+        raise ModelRegistryError("model registry must be a non-empty list")
 
     parsed = tuple(
         _parse_model_entry(entry, index=index) for index, entry in enumerate(models)

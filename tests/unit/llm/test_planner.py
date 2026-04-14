@@ -11,9 +11,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.runner import plan_task
 
-TASK_FILE = Path("llm/tasks/grammar.yaml")
-PROMPT_FILE = Path("llm/prompts/grammar.md")
-SYSTEM_PROMPT_FILE = Path("llm/system_prompt.md")
+TASK_FILE = Path("llm/grammar.yaml")
 TEST_DECK = "TestDeck"
 TEST_DECK_MARKDOWN = """
 <!-- note_key: nk-1 -->
@@ -51,18 +49,13 @@ def _prepare_collection(tmp_path: Path) -> Path:
     )
     _write(tmp_path / f"{TEST_DECK}.md", TEST_DECK_MARKDOWN)
     _write(
-        tmp_path / SYSTEM_PROMPT_FILE,
-        "You are a strict editor.",
-    )
-    _write(
-        tmp_path / PROMPT_FILE,
-        "fix grammar",
-    )
-    _write(
         tmp_path / TASK_FILE,
         """
         model: claude-sonnet-4-6
-        prompt_file: ../prompts/grammar.md
+        system_prompt: |
+          You are a strict editor.
+        task_prompt: |
+          fix grammar
         fields:
           exceptions:
             - read_only: ["Source"]
@@ -90,8 +83,8 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     assert plan.summary.notes_seen == 2
     assert plan.summary.eligible == 2
     assert plan.summary.errors == 0
-    assert plan.system_prompt_path == str((collection / SYSTEM_PROMPT_FILE).resolve())
-    assert plan.prompt_path == str((collection / PROMPT_FILE).resolve())
+    assert plan.system_prompt_path is None
+    assert plan.prompt_path is None
     assert plan.system_prompt == "You are a strict editor."
     assert plan.task_prompt == "fix grammar"
     assert "<system>\nYou are a strict editor.\n</system>" in plan.format_full_prompt()
@@ -122,10 +115,11 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
 def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
     collection = _prepare_collection(tmp_path)
     _write(
-        collection / "llm/tasks/translate.yaml",
+        collection / "llm/translate.yaml",
         """
         model: claude-sonnet-4-6
-        prompt_file: ../prompts/grammar.md
+        task_prompt: |
+          fix grammar
         sdk: anthropic
         """,
     )

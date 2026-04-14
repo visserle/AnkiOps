@@ -31,15 +31,9 @@ def _eject_standard_llm_files(collection_dir: Path) -> None:
         .read_text(encoding="utf-8"),
     )
     _write(
-        llm_dir / "tasks/grammar.yaml",
+        llm_dir / "grammar.yaml",
         resources.files("ankiops.llm")
         .joinpath("tasks/grammar.yaml")
-        .read_text(encoding="utf-8"),
-    )
-    _write(
-        llm_dir / "prompts/grammar.md",
-        resources.files("ankiops.llm")
-        .joinpath("prompts/grammar.md")
         .read_text(encoding="utf-8"),
     )
 
