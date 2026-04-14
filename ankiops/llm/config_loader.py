@@ -330,9 +330,7 @@ def load_llm_task_catalog(
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
     task_files = [
-        path
-        for path in _iter_yaml_files(llm_dir)
-        if is_task_config_file(path)
+        path for path in _iter_yaml_files(llm_dir) if is_task_config_file(path)
     ]
     if not task_files:
         errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
