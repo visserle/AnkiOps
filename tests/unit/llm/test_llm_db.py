@@ -113,7 +113,6 @@ def test_open_creates_schema_and_indexes(tmp_path):
             "persisted",
             "fatal_error",
             "config_snapshot_json",
-            "resume_from_job_id",
             "created_at",
             "started_at",
             "finished_at",

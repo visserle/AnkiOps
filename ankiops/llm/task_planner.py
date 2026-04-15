@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ankiops.config import NOTE_TYPES_DIR
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
 from .discovery import DiscoveryItem, discover_candidates
+from .task_options import (
+    format_deck_scope,
+    format_request_defaults,
+    resolve_serializer_scope,
+)
 from .task_types import (
     FieldAccess,
     LlmCandidateStatus,
@@ -17,11 +23,6 @@ from .task_types import (
     TaskConfig,
     TaskPlanResult,
     TaskRunSummary,
-)
-from .task_options import (
-    format_deck_scope,
-    format_request_defaults,
-    resolve_serializer_scope,
 )
 
 CollectionSerializer = Callable[..., dict[str, Any]]

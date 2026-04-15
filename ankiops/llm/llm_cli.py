@@ -21,7 +21,7 @@ from ankiops.fs import FileSystemAdapter
 from .config_loader import load_llm_task_catalog
 from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .runner import list_jobs as list_llm_jobs
-from .runner import plan_task, resume_task, run_task, show_job
+from .runner import plan_task, run_task, show_job
 
 logger = logging.getLogger(__name__)
 
@@ -179,15 +179,10 @@ def configure_llm_parser(
         help="Override task scope to one exact deck (subdecks excluded by default)",
     )
     llm_parser.add_argument(
-        "--resume",
-        action="store_true",
-        help="With --job, resume unfinished/error items from that job",
-    )
-    llm_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
-        help="Skip automatic git snapshot (with <task> --run or --job ... --resume)",
+        help="Skip automatic git snapshot (with <task> --run)",
     )
     llm_parser.set_defaults(handler=handler)
 
@@ -203,7 +198,6 @@ def run_llm(
     load_llm_task_catalog_fn: Callable[..., Any] = load_llm_task_catalog,
     plan_task_fn: Callable[..., Any] = plan_task,
     run_task_fn: Callable[..., Any] = run_task,
-    resume_task_fn: Callable[..., Any] = resume_task,
     list_jobs_fn: Callable[..., Any] = list_llm_jobs,
     show_job_fn: Callable[..., Any] = show_job,
 ) -> None:
@@ -215,7 +209,6 @@ def run_llm(
     task_name = getattr(args, "task_name", None)
     run_mode = bool(getattr(args, "run", False))
     job_id = getattr(args, "job_id", None)
-    resume_requested = bool(getattr(args, "resume", False))
     model_override = getattr(args, "model", None)
     deck_override = _normalize_deck_override(getattr(args, "deck", None))
     no_auto_commit = bool(getattr(args, "no_auto_commit", False))
@@ -229,43 +222,8 @@ def run_llm(
             _usage_error("--model requires <task>.")
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
-        if no_auto_commit and not resume_requested:
-            _usage_error(
-                "--no-auto-commit requires <task> --run or --job with --resume."
-            )
-
-        if resume_requested:
-            try:
-                result = resume_task_fn(
-                    collection_dir=collection_dir,
-                    resume_job_id=job_id,
-                    no_auto_commit=no_auto_commit,
-                )
-            except ValueError as error:
-                logger.error(str(error))
-                raise SystemExit(1) from error
-            inspect_command = f"ankiops llm --job {result.job_id}"
-            if result.failed:
-                logger.error(
-                    "LLM resume job #%d failed with %d error(s)%s. "
-                    "Cost: %s. Inspect: %s",
-                    result.job_id,
-                    result.summary.errors,
-                    " (no updates persisted due to errors)"
-                    if not result.persisted and result.summary.updated > 0
-                    else "",
-                    result.summary.format_cost(),
-                    inspect_command,
-                )
-                raise SystemExit(1)
-            logger.info(
-                "LLM resume job #%d completed%s. Cost: %s. Inspect: %s",
-                result.job_id,
-                " (no markdown changes persisted)" if not result.persisted else "",
-                result.summary.format_cost(),
-                inspect_command,
-            )
-            return
+        if no_auto_commit:
+            _usage_error("--no-auto-commit requires <task> --run.")
 
         try:
             detail = show_job_fn(
@@ -291,8 +249,6 @@ def run_llm(
             detail.status.value,
             "yes" if detail.persisted else "no",
         )
-        if detail.resume_from_job_id is not None:
-            logger.info("Resume source: %s", detail.resume_from_job_id)
         logger.info(
             "Timing: created=%s started=%s finished=%s",
             detail.created_at,
@@ -354,9 +310,6 @@ def run_llm(
                     logger.error("  #%d error=%s", item.ordinal, item.error_message)
         return
 
-    if resume_requested:
-        _usage_error("--resume requires --job.")
-
     if task_name is None:
         if run_mode:
             _usage_error("--run requires <task>.")
@@ -365,9 +318,7 @@ def run_llm(
         if deck_override is not None:
             _usage_error("--deck requires <task>.")
         if no_auto_commit:
-            _usage_error(
-                "--no-auto-commit requires <task> --run or --job with --resume."
-            )
+            _usage_error("--no-auto-commit requires <task> --run.")
 
         note_type_configs = load_note_type_configs_fn(get_note_types_dir_fn())
         catalog = load_llm_task_catalog_fn(

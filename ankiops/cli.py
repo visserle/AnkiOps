@@ -25,7 +25,7 @@ from ankiops.llm.config_loader import load_llm_task_catalog
 from ankiops.llm.llm_cli import configure_llm_parser
 from ankiops.llm.llm_cli import run_llm as run_llm_impl
 from ankiops.llm.runner import list_jobs as list_llm_jobs
-from ankiops.llm.runner import plan_task, resume_task, run_task, show_job
+from ankiops.llm.runner import plan_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
@@ -309,7 +309,6 @@ def run_llm(args):
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
         run_task_fn=run_task,
-        resume_task_fn=resume_task,
         list_jobs_fn=list_llm_jobs,
         show_job_fn=show_job,
     )

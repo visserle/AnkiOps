@@ -172,7 +172,6 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 - `ankiops llm <task_name> [--model <model>] [--deck <deck_name>]` - Plan one configured task
 - `ankiops llm <task_name> --run [--model <model>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
-- `ankiops llm --job <job_id|latest> --resume [--no-auto-commit]` - Resume unfinished/error items from a prior job
 
 **`note-types`:**
 - `ankiops note-types` - Show note types, identifying labels, and the label registry
@@ -209,7 +208,6 @@ ankiops llm grammar --run           # run task job
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
 ankiops llm grammar --run --model haiku
 ankiops llm --job latest
-ankiops llm --job latest --resume
 ```
 ### Task File Format (`llm/<task-name>.yaml`)
 

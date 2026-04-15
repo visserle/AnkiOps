@@ -7,10 +7,10 @@ from typing import Any
 
 from ankiops.models import NoteTypeConfig
 
-from .discovery import DiscoveryItem, DiscoverySnapshot, discover_candidates
+from .discovery import DiscoveryItem, discover_candidates
 from .llm_db import LlmDb
-from .task_types import LlmCandidateStatus, LlmFinalStatus, TaskConfig
 from .task_runtime_types import EligibleCandidate
+from .task_types import LlmCandidateStatus, LlmFinalStatus, TaskConfig
 
 
 def discover_and_record_candidates(
@@ -20,7 +20,6 @@ def discover_and_record_candidates(
     data: dict[str, Any],
     task: TaskConfig,
     note_type_configs: dict[str, NoteTypeConfig],
-    resume_source_items: dict[str, int] | None,
     logger: logging.Logger,
 ) -> list[EligibleCandidate]:
     snapshot = discover_candidates(
@@ -28,19 +27,14 @@ def discover_and_record_candidates(
         task=task,
         note_type_configs=note_type_configs,
     )
-    selected_items, decks_seen, decks_matched, notes_seen = _select_snapshot_items(
-        snapshot,
-        resume_source_items=resume_source_items,
-    )
-    _log_skipped_decks(selected_items, logger=logger)
+    _log_skipped_decks(snapshot.items, logger=logger)
 
     candidates: list[EligibleCandidate] = []
-    for item in selected_items:
+    for item in snapshot.items:
         candidate = _record_discovery_item(
             db=db,
             job_id=job_id,
             item=item,
-            resume_source_items=resume_source_items,
             logger=logger,
         )
         if candidate is not None:
@@ -48,9 +42,9 @@ def discover_and_record_candidates(
 
     db.set_discovery_counts(
         job_id=job_id,
-        decks_seen=decks_seen,
-        decks_matched=decks_matched,
-        notes_seen=notes_seen,
+        decks_seen=snapshot.counts.decks_seen,
+        decks_matched=snapshot.counts.decks_matched,
+        notes_seen=snapshot.counts.notes_seen,
     )
     return candidates
 
@@ -71,31 +65,13 @@ def _log_skipped_decks(items: list[DiscoveryItem], *, logger: logging.Logger) ->
         )
 
 
-def _resume_source_item_id(
-    item: DiscoveryItem,
-    *,
-    resume_source_items: dict[str, int] | None,
-) -> int | None:
-    if resume_source_items is None:
-        return None
-    note_key = item.note_key
-    if note_key is None:
-        return None
-    return resume_source_items.get(note_key)
-
-
 def _record_discovery_item(
     *,
     db: LlmDb,
     job_id: int,
     item: DiscoveryItem,
-    resume_source_items: dict[str, int] | None,
     logger: logging.Logger,
 ) -> EligibleCandidate | None:
-    resume_source_item_id = _resume_source_item_id(
-        item,
-        resume_source_items=resume_source_items,
-    )
     note_label = item.note_key or "unknown"
     note_type_label = item.note_type or "unknown"
 
@@ -111,7 +87,6 @@ def _record_discovery_item(
             skip_reason=None,
             final_status=LlmFinalStatus.NOTE_ERROR,
             error_message=message,
-            resume_source_item_id=resume_source_item_id,
         )
         logger.error(
             "LLM note error for %s in '%s' (%s): %s",
@@ -132,7 +107,6 @@ def _record_discovery_item(
             candidate_status=item.candidate_status,
             skip_reason=item.skip_reason,
             final_status=LlmFinalStatus.NOT_ATTEMPTED,
-            resume_source_item_id=resume_source_item_id,
         )
         logger.debug(
             "  Skipped %s in '%s' (%s): no editable non-empty fields",
@@ -157,7 +131,6 @@ def _record_discovery_item(
             candidate_status=item.candidate_status,
             skip_reason=None,
             final_status=LlmFinalStatus.NOT_ATTEMPTED,
-            resume_source_item_id=resume_source_item_id,
         )
         return EligibleCandidate(
             item_id=item_id,
@@ -176,37 +149,5 @@ def _record_discovery_item(
         candidate_status=item.candidate_status,
         skip_reason=item.skip_reason,
         final_status=LlmFinalStatus.NOT_ATTEMPTED,
-        resume_source_item_id=resume_source_item_id,
     )
     return None
-
-
-def _select_snapshot_items(
-    snapshot: DiscoverySnapshot,
-    *,
-    resume_source_items: dict[str, int] | None,
-) -> tuple[list[DiscoveryItem], int, int, int]:
-    if resume_source_items is None:
-        return (
-            list(snapshot.items),
-            snapshot.counts.decks_seen,
-            snapshot.counts.decks_matched,
-            snapshot.counts.notes_seen,
-        )
-
-    selected: list[DiscoveryItem] = []
-    resume_note_keys = set(resume_source_items)
-    for item in snapshot.items:
-        note_key = item.note_key
-        if note_key is None:
-            continue
-        if note_key in resume_note_keys:
-            selected.append(item)
-
-    deck_names = {item.deck_name for item in selected}
-    matched_decks = {
-        item.deck_name
-        for item in selected
-        if item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE
-    }
-    return selected, len(deck_names), len(matched_decks), len(selected)

@@ -33,7 +33,7 @@ from .task_options import (
 )
 from .task_planner import build_task_plan_result
 from .task_runtime_types import EligibleCandidate
-from .task_snapshot import task_from_snapshot, task_to_snapshot
+from .task_snapshot import task_to_snapshot
 from .task_types import (
     LlmAttemptResultType,
     LlmFinalStatus,
@@ -147,14 +147,6 @@ def _load_task(
     return task, config_by_name
 
 
-def _load_note_type_configs(
-    collection_dir: Path,
-) -> dict[str, NoteTypeConfig]:
-    fs = FileSystemAdapter()
-    configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
-    return {config.name: config for config in configs}
-
-
 def _is_task_file(path: str) -> bool:
     path_obj = Path(path)
     return path_obj.parent.name == "llm" and is_task_config_file(path_obj)
@@ -181,8 +173,6 @@ class LlmTaskExecutor:
         note_type_configs: dict[str, NoteTypeConfig],
         model_override: str | None,
         no_auto_commit: bool,
-        resume_from_job_id: int | None = None,
-        resume_source_items: dict[str, int] | None = None,
         provider_client_factory: ProviderClientFactory | None = None,
         serialize_collection_fn: CollectionSerializer | None = None,
         deserialize_collection_fn: CollectionDeserializer | None = None,
@@ -193,8 +183,6 @@ class LlmTaskExecutor:
         self.note_type_configs = note_type_configs
         self.model_override = model_override
         self.no_auto_commit = no_auto_commit
-        self.resume_from_job_id = resume_from_job_id
-        self.resume_source_items = resume_source_items
         self.provider_client_factory = (
             provider_client_factory or _default_provider_client_factory
         )
@@ -220,7 +208,6 @@ class LlmTaskExecutor:
             model=model.model,
             model_id=model.model_id,
             config_snapshot=task_to_snapshot(task),
-            resume_from_job_id=self.resume_from_job_id,
         )
 
         deck, no_subdecks = resolve_serializer_scope(task)
@@ -263,7 +250,6 @@ class LlmTaskExecutor:
                 data=data,
                 task=task,
                 note_type_configs=self.note_type_configs,
-                resume_source_items=self.resume_source_items,
                 logger=logger,
             )
             await self._execute_candidates_online(
@@ -617,36 +603,6 @@ async def run_task_async(
     return await executor.execute()
 
 
-async def resume_task_async(
-    *,
-    collection_dir: Path,
-    resume_job_id: str,
-    no_auto_commit: bool = False,
-) -> LlmJobResult:
-    with _open_llm_db(collection_dir) as db:
-        resolved = db.resolve_job_id(resume_job_id)
-        if resolved is None:
-            raise ValueError(f"Unknown LLM job '{resume_job_id}'")
-        snapshot = db.get_job_snapshot(job_id=resolved)
-        if snapshot is None:
-            raise ValueError(f"Missing config snapshot for LLM job '{resolved}'")
-        resume_source_items = db.get_resume_source_items(job_id=resolved)
-
-    task = task_from_snapshot(snapshot, collection_dir=collection_dir)
-    note_type_configs = _load_note_type_configs(collection_dir)
-
-    executor = LlmTaskExecutor(
-        collection_dir=collection_dir,
-        task=task,
-        note_type_configs=note_type_configs,
-        model_override=None,
-        no_auto_commit=no_auto_commit,
-        resume_from_job_id=resolved,
-        resume_source_items=resume_source_items,
-    )
-    return await executor.execute()
-
-
 def run_task(
     *,
     collection_dir: Path,
@@ -661,21 +617,6 @@ def run_task(
             task_name=task_name,
             model_override=model_override,
             deck_override=deck_override,
-            no_auto_commit=no_auto_commit,
-        )
-    )
-
-
-def resume_task(
-    *,
-    collection_dir: Path,
-    resume_job_id: str,
-    no_auto_commit: bool = False,
-) -> LlmJobResult:
-    return asyncio.run(
-        resume_task_async(
-            collection_dir=collection_dir,
-            resume_job_id=resume_job_id,
             no_auto_commit=no_auto_commit,
         )
     )

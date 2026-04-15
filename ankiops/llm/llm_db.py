@@ -24,15 +24,6 @@ from .task_types import (
 
 _DEFAULT_JOB_LIST_LIMIT = 20
 
-_RESUMABLE_FINAL_STATUSES = (
-    LlmFinalStatus.NOT_ATTEMPTED.value,
-    LlmFinalStatus.NOTE_ERROR.value,
-    LlmFinalStatus.PROVIDER_ERROR.value,
-    LlmFinalStatus.FATAL_ERROR.value,
-    LlmFinalStatus.CANCELED.value,
-    LlmFinalStatus.EXPIRED.value,
-)
-
 EnumT = TypeVar("EnumT", bound=Enum)
 
 
@@ -50,7 +41,6 @@ class LlmJobListItem:
     persisted: bool
     created_at: str
     finished_at: str | None
-    resume_from_job_id: int | None
 
 
 @dataclass(frozen=True)
@@ -67,7 +57,6 @@ class LlmJobItemDetail:
     input_tokens: int
     output_tokens: int
     latency_ms: int
-    resume_source_item_id: int | None
 
 
 @dataclass(frozen=True)
@@ -84,7 +73,6 @@ class LlmJobDetail:
     fatal_error: str | None
     summary: TaskRunSummary
     items: list[LlmJobItemDetail]
-    resume_from_job_id: int | None
 
 
 @dataclass(frozen=True)
@@ -226,14 +214,12 @@ class LlmDb:
                     persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
                     config_snapshot_json TEXT NOT NULL,
-                    resume_from_job_id INTEGER,
                     created_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     finished_at TEXT,
                     decks_seen INTEGER NOT NULL DEFAULT 0,
                     decks_matched INTEGER NOT NULL DEFAULT 0,
-                    notes_seen INTEGER NOT NULL DEFAULT 0,
-                    FOREIGN KEY(resume_from_job_id) REFERENCES llm_job(id)
+                    notes_seen INTEGER NOT NULL DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS llm_job_item (
@@ -252,10 +238,8 @@ class LlmDb:
                     changed_fields_json TEXT NOT NULL,
                     applied_to_markdown INTEGER NOT NULL DEFAULT 0
                         CHECK (applied_to_markdown IN (0, 1)),
-                    resume_source_item_id INTEGER,
                     UNIQUE(job_id, ordinal),
-                    FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE,
-                    FOREIGN KEY(resume_source_item_id) REFERENCES llm_job_item(id)
+                    FOREIGN KEY(job_id) REFERENCES llm_job(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS llm_item_attempt (
@@ -338,7 +322,6 @@ class LlmDb:
         model: str,
         model_id: str,
         config_snapshot: dict[str, Any],
-        resume_from_job_id: int | None = None,
     ) -> int:
         now = self._utc_now()
         cursor = self._write(
@@ -346,9 +329,9 @@ class LlmDb:
             INSERT INTO llm_job (
                 task_name, model, model_id,
                 status, persisted, fatal_error,
-                config_snapshot_json, resume_from_job_id,
+                config_snapshot_json,
                 created_at, started_at
-            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?)
             """,
             (
                 task_name,
@@ -356,7 +339,6 @@ class LlmDb:
                 model_id,
                 LlmJobStatus.RUNNING.value,
                 self._as_json(config_snapshot),
-                resume_from_job_id,
                 now,
                 now,
             ),
@@ -397,16 +379,14 @@ class LlmDb:
         error_message: str | None = None,
         changed_fields: list[str] | None = None,
         applied_to_markdown: bool = False,
-        resume_source_item_id: int | None = None,
     ) -> int:
         cursor = self._write(
             """
             INSERT INTO llm_job_item (
                 job_id, ordinal, note_key, deck_name, note_type,
                 candidate_status, skip_reason, final_status,
-                error_message, changed_fields_json, applied_to_markdown,
-                resume_source_item_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                error_message, changed_fields_json, applied_to_markdown
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -420,7 +400,6 @@ class LlmDb:
                 error_message,
                 self._as_json(changed_fields or []),
                 1 if applied_to_markdown else 0,
-                resume_source_item_id,
             ),
         )
         rowid = cursor.lastrowid
@@ -570,25 +549,6 @@ class LlmDb:
                 response_full_json,
             ),
         )
-
-    def get_resume_source_items(self, *, job_id: int) -> dict[str, int]:
-        placeholders = ",".join("?" for _ in _RESUMABLE_FINAL_STATUSES)
-        rows = self._conn.execute(
-            f"""
-            SELECT id, note_key
-            FROM llm_job_item
-            WHERE job_id = ?
-              AND note_key IS NOT NULL
-              AND final_status IN ({placeholders})
-            """,
-            (job_id, *_RESUMABLE_FINAL_STATUSES),
-        ).fetchall()
-        mapping: dict[str, int] = {}
-        for row in rows:
-            note_key = row["note_key"]
-            if isinstance(note_key, str):
-                mapping[note_key] = int(row["id"])
-        return mapping
 
     def get_job_snapshot(self, *, job_id: int) -> dict[str, Any] | None:
         row = self._conn.execute(
@@ -781,8 +741,7 @@ class LlmDb:
                 status,
                 persisted,
                 created_at,
-                finished_at,
-                resume_from_job_id
+                finished_at
             FROM llm_job
             ORDER BY created_at DESC
             LIMIT ?
@@ -798,11 +757,6 @@ class LlmDb:
                 persisted=bool(row["persisted"]),
                 created_at=str(row["created_at"]),
                 finished_at=(str(row["finished_at"]) if row["finished_at"] else None),
-                resume_from_job_id=(
-                    int(row["resume_from_job_id"])
-                    if row["resume_from_job_id"] is not None
-                    else None
-                ),
             )
             for row in rows
         ]
@@ -820,8 +774,7 @@ class LlmDb:
                 created_at,
                 started_at,
                 finished_at,
-                fatal_error,
-                resume_from_job_id
+                fatal_error
             FROM llm_job
             WHERE id = ?
             """,
@@ -843,7 +796,6 @@ class LlmDb:
                 i.final_status,
                 i.error_message,
                 i.changed_fields_json,
-                i.resume_source_item_id,
                 COUNT(a.id) AS attempts,
                 COALESCE(SUM(a.input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(a.output_tokens), 0) AS output_tokens,
@@ -860,8 +812,7 @@ class LlmDb:
                 i.candidate_status,
                 i.final_status,
                 i.error_message,
-                i.changed_fields_json,
-                i.resume_source_item_id
+                i.changed_fields_json
             ORDER BY i.ordinal ASC
             """,
             (resolved_job_id,),
@@ -889,11 +840,6 @@ class LlmDb:
                 input_tokens=int(item["input_tokens"] or 0),
                 output_tokens=int(item["output_tokens"] or 0),
                 latency_ms=int(item["latency_ms"] or 0),
-                resume_source_item_id=(
-                    int(item["resume_source_item_id"])
-                    if item["resume_source_item_id"] is not None
-                    else None
-                ),
             )
             for item in item_rows
         ]
@@ -911,9 +857,4 @@ class LlmDb:
             fatal_error=(str(row["fatal_error"]) if row["fatal_error"] else None),
             summary=aggregate.summary,
             items=items,
-            resume_from_job_id=(
-                int(row["resume_from_job_id"])
-                if row["resume_from_job_id"] is not None
-                else None
-            ),
         )
