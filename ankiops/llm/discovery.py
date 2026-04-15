@@ -8,7 +8,7 @@ from typing import Any
 
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
-from .task_types import FieldAccess, LlmCandidateStatus, NotePayload, TaskConfig
+from .task_types import FieldAccess, LlmItemStatus, NotePayload, TaskConfig
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class DiscoveryItem:
     deck_name: str
     note_key: str | None
     note_type: str | None
-    candidate_status: LlmCandidateStatus
+    item_status: LlmItemStatus
     skip_reason: str | None
     error_message: str | None
     payload: NotePayload | None
@@ -145,7 +145,7 @@ def discover_candidates(
                         deck_name=deck_name,
                         note_key=note_key_value,
                         note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.SKIPPED_DECK_SCOPE,
+                        item_status=LlmItemStatus.SKIPPED_DECK_SCOPE,
                         skip_reason="outside task scope",
                         error_message=None,
                         payload=None,
@@ -168,7 +168,7 @@ def discover_candidates(
                         deck_name=deck_name,
                         note_key=note_key_value,
                         note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
+                        item_status=LlmItemStatus.INVALID_NOTE,
                         skip_reason=None,
                         error_message=message,
                         payload=None,
@@ -191,7 +191,7 @@ def discover_candidates(
                         deck_name=deck_name,
                         note_key=note_key_value,
                         note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.INVALID_NOTE,
+                        item_status=LlmItemStatus.INVALID_NOTE,
                         skip_reason=None,
                         error_message=str(error),
                         payload=None,
@@ -208,7 +208,7 @@ def discover_candidates(
                         deck_name=deck_name,
                         note_key=note_key_value,
                         note_type=note_type_value,
-                        candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
+                        item_status=LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS,
                         skip_reason="no editable non-empty fields",
                         error_message=None,
                         payload=None,
@@ -224,7 +224,7 @@ def discover_candidates(
                     deck_name=deck_name,
                     note_key=payload.note_key,
                     note_type=payload.note_type,
-                    candidate_status=LlmCandidateStatus.ELIGIBLE,
+                    item_status=LlmItemStatus.QUEUED,
                     skip_reason=None,
                     error_message=None,
                     payload=payload,

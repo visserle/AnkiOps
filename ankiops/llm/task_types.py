@@ -18,29 +18,22 @@ class FieldAccess(Enum):
     HIDDEN = "hidden"
 
 
-class LlmCandidateStatus(Enum):
-    ELIGIBLE = "eligible"
+class LlmItemStatus(Enum):
+    QUEUED = "queued"
     SKIPPED_DECK_SCOPE = "skipped_deck_scope"
     SKIPPED_NO_EDITABLE_FIELDS = "skipped_no_editable_fields"
     INVALID_NOTE = "invalid_note"
-
-
-class LlmFinalStatus(Enum):
-    NOT_ATTEMPTED = "not_attempted"
     SUCCEEDED_UPDATED = "succeeded_updated"
     SUCCEEDED_UNCHANGED = "succeeded_unchanged"
     NOTE_ERROR = "note_error"
     PROVIDER_ERROR = "provider_error"
     FATAL_ERROR = "fatal_error"
     CANCELED = "canceled"
-    EXPIRED = "expired"
 
 
 class LlmAttemptResultType(Enum):
     SUCCEEDED = "succeeded"
     ERRORED = "errored"
-    CANCELED = "canceled"
-    EXPIRED = "expired"
 
 
 class LlmJobStatus(Enum):
@@ -56,9 +49,7 @@ class DeckScope:
     def matches(self, deck_name: str) -> bool:
         if self.deck_root is None:
             return True
-        return deck_name == self.deck_root or deck_name.startswith(
-            f"{self.deck_root}::"
-        )
+        return deck_name == self.deck_root
 
 
 @dataclass(frozen=True)
@@ -175,7 +166,6 @@ class TaskRunSummary:
     skipped_no_editable_fields: int = 0
     errors: int = 0
     canceled: int = 0
-    expired: int = 0
     requests: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
@@ -201,8 +191,6 @@ class TaskRunSummary:
         suffix_parts: list[str] = []
         if self.canceled:
             suffix_parts.append(f"{self.canceled} canceled")
-        if self.expired:
-            suffix_parts.append(f"{self.expired} expired")
         if not suffix_parts:
             return base
         return f"{base}, {', '.join(suffix_parts)}"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -12,6 +13,11 @@ class LlmFatalError(RuntimeError):
     """Raised for fatal provider API failures that should abort the run."""
 
 
+class LlmNoteErrorCategory(Enum):
+    NOTE = "note_error"
+    PROVIDER = "provider_error"
+
+
 class LlmNoteError(RuntimeError):
     """Raised for note-scoped provider failures."""
 
@@ -19,7 +25,9 @@ class LlmNoteError(RuntimeError):
         self,
         message: str,
         *,
+        category: LlmNoteErrorCategory = LlmNoteErrorCategory.NOTE,
         attempt_context: ProviderAttemptErrorContext | None = None,
     ) -> None:
         super().__init__(message)
+        self.category = category
         self.attempt_context = attempt_context

@@ -282,7 +282,7 @@ def run_llm(
                         item.note_key or "unknown",
                         item.deck_name,
                         item.note_type or "unknown",
-                        item.final_status.value,
+                        item.item_status.value,
                         str(item.attempts),
                         f"{_format_count(item.input_tokens)}/{_format_count(item.output_tokens)}",
                         f"{item.latency_ms / 1000:.2f}s",

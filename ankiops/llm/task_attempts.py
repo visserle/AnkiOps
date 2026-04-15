@@ -9,7 +9,7 @@ from .llm_errors import LlmFatalError, LlmNoteError
 from .task_runtime_types import EligibleCandidate
 from .task_types import (
     LlmAttemptResultType,
-    LlmFinalStatus,
+    LlmItemStatus,
     PreparedAttemptRequest,
     ProviderAttemptErrorContext,
     ProviderAttemptOutcome,
@@ -22,11 +22,9 @@ class AttemptRecorder:
         *,
         db: LlmDb,
         provider: str = "openai",
-        initial_attempt_no: int = 1,
     ) -> None:
         self._db = db
         self._provider = provider
-        self._initial_attempt_no = initial_attempt_no
 
     def record_success(
         self,
@@ -70,7 +68,7 @@ class AttemptRecorder:
         outcome: ProviderAttemptOutcome | None,
         error: LlmNoteError | LlmFatalError,
         error_type: str,
-        final_status: LlmFinalStatus,
+        item_status: LlmItemStatus,
         result_type: LlmAttemptResultType,
     ) -> None:
         context = _error_context_for_attempt(outcome=outcome, error=error)
@@ -109,44 +107,10 @@ class AttemptRecorder:
                 context.response_full_json if context is not None else None
             ),
         )
-        self._db.update_job_item_result(
+        self._db.update_job_item_status(
             item_id=candidate.item_id,
-            final_status=final_status,
+            item_status=item_status,
             error_message=str(error),
-        )
-
-    def record_terminal(
-        self,
-        *,
-        candidate: EligibleCandidate,
-        prepared_request: PreparedAttemptRequest,
-        result_type: LlmAttemptResultType,
-        final_status: LlmFinalStatus,
-        error_message: str | None,
-    ) -> None:
-        self._write_attempt(
-            candidate=candidate,
-            prepared_request=prepared_request,
-            result_type=result_type,
-            provider_message_id=None,
-            response_model_id=None,
-            provider_request_id=None,
-            stop_reason=None,
-            latency_ms=0,
-            input_tokens=0,
-            output_tokens=0,
-            retry_count=0,
-            error_type=result_type.value,
-            error_message=error_message,
-            parsed_update_json=None,
-            rate_limit_headers_json=None,
-            response_raw_text=None,
-            response_full_json=None,
-        )
-        self._db.update_job_item_result(
-            item_id=candidate.item_id,
-            final_status=final_status,
-            error_message=error_message,
         )
 
     def _write_attempt(
@@ -172,7 +136,7 @@ class AttemptRecorder:
     ) -> None:
         attempt_id = self._db.insert_attempt(
             item_id=candidate.item_id,
-            attempt_no=self._initial_attempt_no,
+            attempt_no=1,
             provider=self._provider,
             provider_message_id=provider_message_id,
             response_model_id=response_model_id,

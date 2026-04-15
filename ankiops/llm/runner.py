@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -19,11 +19,12 @@ from ankiops.git import git_snapshot
 from ankiops.models import Note, NoteTypeConfig
 
 from .config_loader import is_task_config_file, load_llm_task_catalog
+from .discovery import DiscoverySnapshot, discover_candidates
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
-from .llm_errors import LlmFatalError, LlmNoteError
+from .llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
 from .provider_client import ProviderClient
 from .task_attempts import AttemptRecorder
-from .task_discovery import discover_and_record_candidates
+from .task_discovery import record_discovery_snapshot
 from .task_options import (
     apply_deck_override,
     format_deck_scope,
@@ -33,10 +34,9 @@ from .task_options import (
 )
 from .task_planner import build_task_plan_result
 from .task_runtime_types import EligibleCandidate
-from .task_snapshot import task_to_snapshot
 from .task_types import (
     LlmAttemptResultType,
-    LlmFinalStatus,
+    LlmItemStatus,
     LlmJobResult,
     LlmJobStatus,
     TaskConfig,
@@ -50,6 +50,14 @@ ProviderClientFactory = Callable[[TaskConfig], Any]
 CollectionSerializer = Callable[..., dict[str, Any]]
 CollectionDeserializer = Callable[..., None]
 Snapshotter = Callable[[Path, str], bool]
+
+
+@dataclass(frozen=True)
+class MaterializedTaskContext:
+    task: TaskConfig
+    note_type_configs: dict[str, NoteTypeConfig]
+    serialized_data: dict[str, Any]
+    discovery_snapshot: DiscoverySnapshot
 
 
 def _default_provider_client_factory(task: TaskConfig) -> ProviderClient:
@@ -147,6 +155,42 @@ def _load_task(
     return task, config_by_name
 
 
+def _materialize_task_context(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None,
+    deck_override: str | None,
+    serialize_collection_fn: CollectionSerializer,
+) -> MaterializedTaskContext:
+    task, note_type_configs = _load_task(
+        collection_dir=collection_dir,
+        task_name=task_name,
+    )
+    task = apply_deck_override(task, deck_override)
+    model = resolve_model(task, model_override, collection_dir=collection_dir)
+    task = replace(task, model=model)
+
+    deck, no_subdecks = resolve_serializer_scope(task)
+    serialized_data = serialize_collection_fn(
+        collection_dir,
+        deck=deck,
+        no_subdecks=no_subdecks,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    discovery_snapshot = discover_candidates(
+        data=serialized_data,
+        task=task,
+        note_type_configs=note_type_configs,
+    )
+    return MaterializedTaskContext(
+        task=task,
+        note_type_configs=note_type_configs,
+        serialized_data=serialized_data,
+        discovery_snapshot=discovery_snapshot,
+    )
+
+
 def _is_task_file(path: str) -> bool:
     path_obj = Path(path)
     return path_obj.parent.name == "llm" and is_task_config_file(path_obj)
@@ -169,156 +213,119 @@ class LlmTaskExecutor:
         self,
         *,
         collection_dir: Path,
-        task: TaskConfig,
-        note_type_configs: dict[str, NoteTypeConfig],
-        model_override: str | None,
+        materialized_context: MaterializedTaskContext,
         no_auto_commit: bool,
         provider_client_factory: ProviderClientFactory | None = None,
-        serialize_collection_fn: CollectionSerializer | None = None,
         deserialize_collection_fn: CollectionDeserializer | None = None,
         snapshot_fn: Snapshotter | None = None,
     ) -> None:
         self.collection_dir = collection_dir
-        self.task = task
-        self.note_type_configs = note_type_configs
-        self.model_override = model_override
+        self.materialized_context = materialized_context
         self.no_auto_commit = no_auto_commit
         self.provider_client_factory = (
             provider_client_factory or _default_provider_client_factory
         )
-        self.serialize_collection_fn = serialize_collection_fn or serialize_collection
         self.deserialize_collection_fn = (
             deserialize_collection_fn or deserialize_collection_data
         )
         self.snapshot_fn = snapshot_fn or git_snapshot
 
     async def execute(self) -> LlmJobResult:
-        task = self.task
-        model = resolve_model(
-            task,
-            self.model_override,
-            collection_dir=self.collection_dir,
-        )
-        task = replace(task, model=model)
-
+        task_context = self.materialized_context
+        task = task_context.task
+        model = task.model
         db = LlmDb.open(self.collection_dir)
-
-        job_id = db.start_job(
-            task_name=task.name,
-            model=model.model,
-            model_id=model.model_id,
-            config_snapshot=task_to_snapshot(task),
-        )
-
-        deck, no_subdecks = resolve_serializer_scope(task)
-        logger.debug(
-            "Starting LLM task '%s' (model=%s, model_id=%s, collection=%s, "
-            "deck_scope=%s)",
-            task.name,
-            model,
-            model.model_id,
-            self.collection_dir,
-            format_deck_scope(task),
-        )
-        logger.debug("LLM request defaults: %s", format_request_defaults(task))
-        logger.debug(
-            "LLM serializer scope: %s",
-            format_deck_scope(task),
-        )
-        aggregate = None
-        provider_client = None
-        attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
-
         try:
-            provider_client = self.provider_client_factory(task)
+            job_id = db.start_job(
+                task_name=task.name,
+                model=model.model,
+                model_id=model.model_id,
+            )
+
+            logger.debug(
+                "Starting LLM task '%s' (model=%s, model_id=%s, collection=%s, "
+                "deck_scope=%s)",
+                task.name,
+                model,
+                model.model_id,
+                self.collection_dir,
+                format_deck_scope(task),
+            )
+            logger.debug("LLM request defaults: %s", format_request_defaults(task))
+            logger.debug(
+                "LLM serializer scope: %s",
+                format_deck_scope(task),
+            )
+
             if not self.no_auto_commit:
                 logger.debug("Creating pre-LLM git snapshot")
                 self.snapshot_fn(self.collection_dir, f"llm:{task.name}")
             else:
                 logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-            data = self.serialize_collection_fn(
-                self.collection_dir,
-                deck=deck,
-                no_subdecks=no_subdecks,
-                note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
-            )
+            fatal_error: str | None = None
+            provider_client = None
+            attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
+            try:
+                provider_client = self.provider_client_factory(task)
+                candidates = record_discovery_snapshot(
+                    db=db,
+                    job_id=job_id,
+                    snapshot=task_context.discovery_snapshot,
+                    logger=logger,
+                )
+                await self._execute_candidates_online(
+                    db=db,
+                    task=task,
+                    model_id=model.model_id,
+                    provider_client=provider_client,
+                    candidates=candidates,
+                    attempt_recorder=attempt_recorder,
+                )
+            except LlmFatalError as error:
+                fatal_error = str(error)
+                logger.error(fatal_error)
+            except Exception as error:
+                fatal_error = str(_unexpected_online_execution_error(error))
+                logger.error(fatal_error)
+            finally:
+                if provider_client is not None:
+                    await provider_client.close()
 
-            candidates = discover_and_record_candidates(
-                db=db,
-                job_id=job_id,
-                data=data,
-                task=task,
-                note_type_configs=self.note_type_configs,
-                logger=logger,
-            )
-            await self._execute_candidates_online(
-                db=db,
-                job_id=job_id,
-                task=task,
-                model_id=model.model_id,
-                provider_client=provider_client,
-                candidates=candidates,
-                attempt_recorder=attempt_recorder,
-            )
+            if fatal_error is not None:
+                canceled = db.mark_unfinished_items_canceled(job_id=job_id)
+                if canceled:
+                    logger.warning(
+                        "Marked %d pending item(s) as canceled due to fatal error",
+                        canceled,
+                    )
 
             persisted = self._apply_updates(
                 db=db,
                 job_id=job_id,
-                data=data,
+                data=task_context.serialized_data,
             )
 
             aggregate = db.aggregate_job(job_id)
-            status = (
-                LlmJobStatus.FAILED
-                if aggregate.summary.errors > 0
-                else LlmJobStatus.COMPLETED
-            )
+            failed = fatal_error is not None or aggregate.summary.errors > 0
             db.finalize_job(
                 job_id=job_id,
-                status=status,
+                status=LlmJobStatus.FAILED if failed else LlmJobStatus.COMPLETED,
                 persisted=persisted,
+                fatal_error=fatal_error if failed else None,
             )
             aggregate = db.aggregate_job(job_id)
-        except LlmFatalError as error:
-            canceled = db.mark_unfinished_items_canceled(job_id=job_id)
-            if canceled:
-                logger.warning(
-                    "Marked %d pending item(s) as canceled due to fatal error",
-                    canceled,
-                )
-            db.finalize_job(
-                job_id=job_id,
-                status=LlmJobStatus.FAILED,
-                persisted=False,
-                fatal_error=str(error),
-            )
-            aggregate = db.aggregate_job(job_id)
-            summary = aggregate.summary
-            logger.error(str(error))
-            self._log_summary(summary)
+
+            self._log_summary(aggregate.summary)
             return LlmJobResult(
                 job_id=job_id,
-                status=LlmJobStatus.FAILED.value,
-                summary=summary,
-                failed=True,
-                persisted=False,
+                status=aggregate.status.value,
+                summary=aggregate.summary,
+                failed=aggregate.failed,
+                persisted=aggregate.persisted,
             )
         finally:
-            if provider_client is not None:
-                await provider_client.close()
             db.close()
-        if aggregate is None:
-            raise RuntimeError("LLM job aggregation failed")
-
-        self._log_summary(aggregate.summary)
-        return LlmJobResult(
-            job_id=job_id,
-            status=aggregate.status.value,
-            summary=aggregate.summary,
-            failed=aggregate.failed,
-            persisted=aggregate.persisted,
-        )
 
     @staticmethod
     def _log_summary(summary: TaskRunSummary) -> None:
@@ -330,7 +337,6 @@ class LlmTaskExecutor:
         self,
         *,
         db: LlmDb,
-        job_id: int,
         task: TaskConfig,
         model_id: str,
         provider_client,
@@ -378,12 +384,6 @@ class LlmTaskExecutor:
                 break
         await asyncio.gather(*tasks, return_exceptions=True)
         if first_fatal_error is not None:
-            canceled = db.mark_unfinished_items_canceled(job_id=job_id)
-            if canceled:
-                logger.warning(
-                    "Canceled %d pending online item(s) due to fatal error",
-                    canceled,
-                )
             raise first_fatal_error
 
     async def _process_online_candidate(
@@ -427,12 +427,12 @@ class LlmTaskExecutor:
                     outcome=outcome,
                     error=error,
                     error_type="fatal_error",
-                    final_status=LlmFinalStatus.FATAL_ERROR,
+                    item_status=LlmItemStatus.FATAL_ERROR,
                     result_type=LlmAttemptResultType.ERRORED,
                 )
             raise
         except LlmNoteError as error:
-            provider_error = str(error).startswith("Provider returned HTTP")
+            provider_error = error.category is LlmNoteErrorCategory.PROVIDER
             with db.write_tx():
                 attempt_recorder.record_error(
                     candidate=candidate,
@@ -440,10 +440,10 @@ class LlmTaskExecutor:
                     outcome=outcome,
                     error=error,
                     error_type="provider_error" if provider_error else "note_error",
-                    final_status=(
-                        LlmFinalStatus.PROVIDER_ERROR
+                    item_status=(
+                        LlmItemStatus.PROVIDER_ERROR
                         if provider_error
-                        else LlmFinalStatus.NOTE_ERROR
+                        else LlmItemStatus.NOTE_ERROR
                     ),
                     result_type=LlmAttemptResultType.ERRORED,
                 )
@@ -470,7 +470,7 @@ class LlmTaskExecutor:
                     outcome=outcome,
                     error=fatal_error,
                     error_type="fatal_error",
-                    final_status=LlmFinalStatus.FATAL_ERROR,
+                    item_status=LlmItemStatus.FATAL_ERROR,
                     result_type=LlmAttemptResultType.ERRORED,
                 )
             raise fatal_error from error
@@ -482,9 +482,9 @@ class LlmTaskExecutor:
                     prepared_request=prepared_request,
                     outcome=outcome,
                 )
-                db.update_job_item_result(
+                db.update_job_item_status(
                     item_id=candidate.item_id,
-                    final_status=LlmFinalStatus.SUCCEEDED_UPDATED,
+                    item_status=LlmItemStatus.SUCCEEDED_UPDATED,
                     changed_fields=changed_fields,
                 )
             logger.debug(
@@ -502,9 +502,9 @@ class LlmTaskExecutor:
                 prepared_request=prepared_request,
                 outcome=outcome,
             )
-            db.update_job_item_result(
+            db.update_job_item_status(
                 item_id=candidate.item_id,
-                final_status=LlmFinalStatus.SUCCEEDED_UNCHANGED,
+                item_status=LlmItemStatus.SUCCEEDED_UNCHANGED,
                 changed_fields=[],
             )
         logger.debug(
@@ -526,23 +526,30 @@ class LlmTaskExecutor:
         persisted = False
 
         if summary.updated > 0:
+            self.deserialize_collection_fn(
+                data,
+                root_dir=self.collection_dir,
+                note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
+                overwrite=True,
+                quiet=True,
+            )
+            persisted = True
+            db.set_applied_for_updated_items(job_id=job_id)
             if summary.errors:
-                logger.error(
-                    "Errors prevented persistence: %d update(s) staged, "
-                    "%d error(s) observed",
+                logger.warning(
+                    "Persisted %d updated note(s) across %d deck file(s) "
+                    "despite %d error(s)",
                     summary.updated,
+                    len(
+                        [
+                            deck
+                            for deck in data.get("decks", [])
+                            if isinstance(deck, dict)
+                        ]
+                    ),
                     summary.errors,
                 )
             else:
-                self.deserialize_collection_fn(
-                    data,
-                    root_dir=self.collection_dir,
-                    note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
-                    overwrite=True,
-                    quiet=True,
-                )
-                persisted = True
-                db.set_applied_for_updated_items(job_id=job_id)
                 logger.info(
                     "Persisted %d updated note(s) across %d deck file(s)",
                     summary.updated,
@@ -565,18 +572,17 @@ def plan_task(
     model_override: str | None = None,
     deck_override: str | None = None,
 ) -> TaskPlanResult:
-    task, note_type_configs = _load_task(
+    task_context = _materialize_task_context(
         collection_dir=collection_dir,
         task_name=task_name,
-    )
-    task = apply_deck_override(task, deck_override)
-    model = resolve_model(task, model_override, collection_dir=collection_dir)
-    task = replace(task, model=model)
-    return build_task_plan_result(
-        collection_dir=collection_dir,
-        task=task,
-        note_type_configs=note_type_configs,
+        model_override=model_override,
+        deck_override=deck_override,
         serialize_collection_fn=serialize_collection,
+    )
+    return build_task_plan_result(
+        task=task_context.task,
+        note_type_configs=task_context.note_type_configs,
+        snapshot=task_context.discovery_snapshot,
     )
 
 
@@ -588,16 +594,16 @@ async def run_task_async(
     deck_override: str | None = None,
     no_auto_commit: bool = False,
 ) -> LlmJobResult:
-    task, note_type_configs = _load_task(
+    task_context = _materialize_task_context(
         collection_dir=collection_dir,
         task_name=task_name,
+        model_override=model_override,
+        deck_override=deck_override,
+        serialize_collection_fn=serialize_collection,
     )
-    task = apply_deck_override(task, deck_override)
     executor = LlmTaskExecutor(
         collection_dir=collection_dir,
-        task=task,
-        note_type_configs=note_type_configs,
-        model_override=model_override,
+        materialized_context=task_context,
         no_auto_commit=no_auto_commit,
     )
     return await executor.execute()

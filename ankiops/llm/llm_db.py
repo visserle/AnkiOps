@@ -16,8 +16,7 @@ from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 from .model_registry import parse_model
 from .task_types import (
     LlmAttemptResultType,
-    LlmCandidateStatus,
-    LlmFinalStatus,
+    LlmItemStatus,
     LlmJobStatus,
     TaskRunSummary,
 )
@@ -49,8 +48,7 @@ class LlmJobItemDetail:
     note_key: str | None
     deck_name: str
     note_type: str | None
-    candidate_status: LlmCandidateStatus
-    final_status: LlmFinalStatus
+    item_status: LlmItemStatus
     error_message: str | None
     changed_fields: list[str]
     attempts: int
@@ -180,23 +178,8 @@ class LlmDb:
             return []
         return [item for item in decoded if isinstance(item, str)]
 
-    @staticmethod
-    def _parse_json_mapping(raw: str | None) -> dict[str, Any]:
-        if raw is None:
-            return {}
-        try:
-            decoded = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        return decoded if isinstance(decoded, dict) else {}
-
     def _create_schema(self) -> None:
-        candidate_status_check = _enum_check_sql(
-            [status.value for status in LlmCandidateStatus]
-        )
-        final_status_check = _enum_check_sql(
-            [status.value for status in LlmFinalStatus]
-        )
+        item_status_check = _enum_check_sql([status.value for status in LlmItemStatus])
         attempt_result_check = _enum_check_sql(
             [result.value for result in LlmAttemptResultType]
         )
@@ -213,7 +196,6 @@ class LlmDb:
                     status TEXT NOT NULL CHECK (status IN {job_status_check}),
                     persisted INTEGER NOT NULL DEFAULT 0 CHECK (persisted IN (0, 1)),
                     fatal_error TEXT,
-                    config_snapshot_json TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT NOT NULL,
                     finished_at TEXT,
@@ -229,11 +211,9 @@ class LlmDb:
                     note_key TEXT,
                     deck_name TEXT NOT NULL,
                     note_type TEXT,
-                    candidate_status TEXT NOT NULL
-                        CHECK (candidate_status IN {candidate_status_check}),
+                    item_status TEXT NOT NULL
+                        CHECK (item_status IN {item_status_check}),
                     skip_reason TEXT,
-                    final_status TEXT NOT NULL
-                        CHECK (final_status IN {final_status_check}),
                     error_message TEXT,
                     changed_fields_json TEXT NOT NULL,
                     applied_to_markdown INTEGER NOT NULL DEFAULT 0
@@ -321,7 +301,6 @@ class LlmDb:
         task_name: str,
         model: str,
         model_id: str,
-        config_snapshot: dict[str, Any],
     ) -> int:
         now = self._utc_now()
         cursor = self._write(
@@ -329,16 +308,14 @@ class LlmDb:
             INSERT INTO llm_job (
                 task_name, model, model_id,
                 status, persisted, fatal_error,
-                config_snapshot_json,
                 created_at, started_at
-            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 0, NULL, ?, ?)
             """,
             (
                 task_name,
                 model,
                 model_id,
                 LlmJobStatus.RUNNING.value,
-                self._as_json(config_snapshot),
                 now,
                 now,
             ),
@@ -373,9 +350,8 @@ class LlmDb:
         deck_name: str,
         note_key: str | None,
         note_type: str | None,
-        candidate_status: LlmCandidateStatus,
+        item_status: LlmItemStatus,
         skip_reason: str | None,
-        final_status: LlmFinalStatus,
         error_message: str | None = None,
         changed_fields: list[str] | None = None,
         applied_to_markdown: bool = False,
@@ -384,9 +360,9 @@ class LlmDb:
             """
             INSERT INTO llm_job_item (
                 job_id, ordinal, note_key, deck_name, note_type,
-                candidate_status, skip_reason, final_status,
+                item_status, skip_reason,
                 error_message, changed_fields_json, applied_to_markdown
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
@@ -394,9 +370,8 @@ class LlmDb:
                 note_key,
                 deck_name,
                 note_type,
-                candidate_status.value,
+                item_status.value,
                 skip_reason,
-                final_status.value,
                 error_message,
                 self._as_json(changed_fields or []),
                 1 if applied_to_markdown else 0,
@@ -407,24 +382,24 @@ class LlmDb:
             raise RuntimeError("Failed to persist llm_job_item row")
         return int(rowid)
 
-    def update_job_item_result(
+    def update_job_item_status(
         self,
         *,
         item_id: int,
-        final_status: LlmFinalStatus,
+        item_status: LlmItemStatus,
         error_message: str | None = None,
         changed_fields: list[str] | None = None,
     ) -> None:
         self._write(
             """
             UPDATE llm_job_item
-            SET final_status = ?,
+            SET item_status = ?,
                 error_message = ?,
                 changed_fields_json = ?
             WHERE id = ?
             """,
             (
-                final_status.value,
+                item_status.value,
                 error_message,
                 self._as_json(changed_fields or []),
                 item_id,
@@ -435,14 +410,13 @@ class LlmDb:
         cursor = self._write(
             """
             UPDATE llm_job_item
-            SET final_status = ?
-            WHERE job_id = ? AND candidate_status = ? AND final_status = ?
+            SET item_status = ?
+            WHERE job_id = ? AND item_status = ?
             """,
             (
-                LlmFinalStatus.CANCELED.value,
+                LlmItemStatus.CANCELED.value,
                 job_id,
-                LlmCandidateStatus.ELIGIBLE.value,
-                LlmFinalStatus.NOT_ATTEMPTED.value,
+                LlmItemStatus.QUEUED.value,
             ),
         )
         return int(cursor.rowcount)
@@ -452,9 +426,9 @@ class LlmDb:
             """
             UPDATE llm_job_item
             SET applied_to_markdown = 1
-            WHERE job_id = ? AND final_status = ?
+            WHERE job_id = ? AND item_status = ?
             """,
-            (job_id, LlmFinalStatus.SUCCEEDED_UPDATED.value),
+            (job_id, LlmItemStatus.SUCCEEDED_UPDATED.value),
         )
 
     def insert_attempt(
@@ -550,15 +524,6 @@ class LlmDb:
             ),
         )
 
-    def get_job_snapshot(self, *, job_id: int) -> dict[str, Any] | None:
-        row = self._conn.execute(
-            "SELECT config_snapshot_json FROM llm_job WHERE id = ?",
-            (job_id,),
-        ).fetchone()
-        if row is None:
-            return None
-        return self._parse_json_mapping(row["config_snapshot_json"])
-
     def finalize_job(
         self,
         *,
@@ -623,27 +588,36 @@ class LlmDb:
             """
             SELECT
                 SUM(
-                    CASE WHEN candidate_status = 'eligible' THEN 1 ELSE 0 END
+                    CASE
+                        WHEN item_status NOT IN (
+                            'skipped_deck_scope',
+                            'skipped_no_editable_fields',
+                            'invalid_note'
+                        )
+                        THEN 1
+                        ELSE 0
+                    END
                 ) AS eligible,
                 SUM(
-                    CASE WHEN final_status = 'succeeded_updated' THEN 1 ELSE 0 END
+                    CASE WHEN item_status = 'succeeded_updated' THEN 1 ELSE 0 END
                 ) AS updated,
                 SUM(
-                    CASE WHEN final_status = 'succeeded_unchanged' THEN 1 ELSE 0 END
+                    CASE WHEN item_status = 'succeeded_unchanged' THEN 1 ELSE 0 END
                 ) AS unchanged,
                 SUM(
-                    CASE WHEN candidate_status = 'skipped_deck_scope' THEN 1 ELSE 0 END
+                    CASE WHEN item_status = 'skipped_deck_scope' THEN 1 ELSE 0 END
                 ) AS skipped_deck_scope,
                 SUM(
                     CASE
-                        WHEN candidate_status = 'skipped_no_editable_fields'
+                        WHEN item_status = 'skipped_no_editable_fields'
                         THEN 1
                         ELSE 0
                     END
                 ) AS skipped_no_editable_fields,
                 SUM(
                     CASE
-                        WHEN final_status IN (
+                        WHEN item_status IN (
+                            'invalid_note',
                             'note_error',
                             'provider_error',
                             'fatal_error'
@@ -652,8 +626,7 @@ class LlmDb:
                         ELSE 0
                     END
                 ) AS errors,
-                SUM(CASE WHEN final_status = 'canceled' THEN 1 ELSE 0 END) AS canceled,
-                SUM(CASE WHEN final_status = 'expired' THEN 1 ELSE 0 END) AS expired
+                SUM(CASE WHEN item_status = 'canceled' THEN 1 ELSE 0 END) AS canceled
             FROM llm_job_item
             WHERE job_id = ?
             """,
@@ -686,7 +659,6 @@ class LlmDb:
         )
         summary.errors = int(item_counts["errors"] or 0)
         summary.canceled = int(item_counts["canceled"] or 0)
-        summary.expired = int(item_counts["expired"] or 0)
         summary.requests = int(attempts["requests"] or 0)
         summary.input_tokens = int(attempts["input_tokens"] or 0)
         summary.output_tokens = int(attempts["output_tokens"] or 0)
@@ -792,8 +764,7 @@ class LlmDb:
                 i.note_key,
                 i.deck_name,
                 i.note_type,
-                i.candidate_status,
-                i.final_status,
+                i.item_status,
                 i.error_message,
                 i.changed_fields_json,
                 COUNT(a.id) AS attempts,
@@ -809,8 +780,7 @@ class LlmDb:
                 i.note_key,
                 i.deck_name,
                 i.note_type,
-                i.candidate_status,
-                i.final_status,
+                i.item_status,
                 i.error_message,
                 i.changed_fields_json
             ORDER BY i.ordinal ASC
@@ -824,13 +794,9 @@ class LlmDb:
                 note_key=(str(item["note_key"]) if item["note_key"] else None),
                 deck_name=str(item["deck_name"]),
                 note_type=(str(item["note_type"]) if item["note_type"] else None),
-                candidate_status=self._parse_enum(
-                    LlmCandidateStatus,
-                    item["candidate_status"],
-                ),
-                final_status=self._parse_enum(
-                    LlmFinalStatus,
-                    item["final_status"],
+                item_status=self._parse_enum(
+                    LlmItemStatus,
+                    item["item_status"],
                 ),
                 error_message=(
                     str(item["error_message"]) if item["error_message"] else None

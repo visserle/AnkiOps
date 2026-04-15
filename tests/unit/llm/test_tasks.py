@@ -16,7 +16,7 @@ from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_errors import LlmFatalError
 from ankiops.llm.runner import run_task
 from ankiops.llm.task_types import (
-    LlmFinalStatus,
+    LlmItemStatus,
     LlmJobStatus,
     NoteUpdate,
     PreparedAttemptRequest,
@@ -863,8 +863,8 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
     assert detail.items[0].attempts == 1
     assert detail.items[1].attempts == 1
     assert detail.status is LlmJobStatus.COMPLETED
-    assert detail.items[0].final_status is LlmFinalStatus.SUCCEEDED_UPDATED
-    assert detail.items[1].final_status is LlmFinalStatus.SUCCEEDED_UNCHANGED
+    assert detail.items[0].item_status is LlmItemStatus.SUCCEEDED_UPDATED
+    assert detail.items[1].item_status is LlmItemStatus.SUCCEEDED_UNCHANGED
 
     db = LlmDb.open(collection)
     try:
@@ -950,9 +950,9 @@ def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkey
         db.close()
 
     assert detail is not None
-    statuses = [item.final_status for item in detail.items]
-    assert statuses.count(LlmFinalStatus.FATAL_ERROR) == 1
-    assert statuses.count(LlmFinalStatus.CANCELED) == 1
+    statuses = [item.item_status for item in detail.items]
+    assert statuses.count(LlmItemStatus.FATAL_ERROR) == 1
+    assert statuses.count(LlmItemStatus.CANCELED) == 1
 
 
 def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
@@ -1185,7 +1185,7 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
         ),
         (
             TEST_DECK,
-            {"deck": TEST_DECK, "no_subdecks": False},
+            {"deck": TEST_DECK, "no_subdecks": True},
         ),
     ],
     ids=[
@@ -1252,7 +1252,7 @@ def test_run_task_rejects_wildcard_deck_override(tmp_path: Path, monkeypatch):
         )
 
 
-def test_run_task_skips_persistence_when_any_note_fails(
+def test_run_task_persists_updates_when_any_note_fails(
     tmp_path: Path,
     monkeypatch,
     caplog,
@@ -1281,14 +1281,15 @@ def test_run_task_skips_persistence_when_any_note_fails(
     summary = result.summary
 
     assert result.failed
-    assert not result.persisted
+    assert result.persisted
     assert summary.updated == 1
     assert summary.errors == 1
     assert (
-        "Errors prevented persistence: 1 update(s) staged, 1 error(s) observed"
+        "Persisted 1 updated note(s) across 1 deck file(s) despite 1 error(s)"
     ) in caplog.text
     updated_content = (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
-    assert updated_content == original_content
+    assert updated_content != original_content
+    assert "Q: This should not persist." in updated_content
 
 
 def test_run_task_writes_to_explicit_collection_dir(tmp_path: Path, monkeypatch):

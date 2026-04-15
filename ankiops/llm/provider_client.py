@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
 
-from .llm_errors import LlmFatalError, LlmNoteError
+from .llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
 from .prompting import build_system_prompt, build_user_message
 from .structured_output import (
     NoteUpdateContract,
@@ -185,11 +185,13 @@ class ProviderClient:
 
                     if status_code is None:
                         raise LlmNoteError(
-                            f"Provider request failed: {message}"
+                            f"Provider request failed: {message}",
+                            category=LlmNoteErrorCategory.PROVIDER,
                         ) from error
 
                     raise LlmNoteError(
-                        f"Provider returned HTTP {status_code}: {message}"
+                        f"Provider returned HTTP {status_code}: {message}",
+                        category=LlmNoteErrorCategory.PROVIDER,
                     ) from error
         except LlmFatalError:
             raise
@@ -267,12 +269,14 @@ class ProviderClient:
             message = raw_text or "Model output was blocked by content filtering"
             raise LlmNoteError(
                 f"Provider refused request: {message}",
+                category=LlmNoteErrorCategory.PROVIDER,
                 attempt_context=context,
             )
 
         if not raw_text:
             raise LlmNoteError(
                 "Provider response contained no JSON text output",
+                category=LlmNoteErrorCategory.PROVIDER,
                 attempt_context=context,
             )
 
@@ -284,7 +288,11 @@ class ProviderClient:
         try:
             update = parse_note_update_json(raw_text, contract=contract)
         except StructuredOutputError as error:
-            raise LlmNoteError(str(error), attempt_context=context) from error
+            raise LlmNoteError(
+                str(error),
+                category=LlmNoteErrorCategory.NOTE,
+                attempt_context=context,
+            ) from error
 
         return ProviderAttemptOutcome(
             update=update,

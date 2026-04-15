@@ -6,12 +6,7 @@ from importlib import resources
 import pytest
 
 from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.task_types import (
-    LlmAttemptResultType,
-    LlmCandidateStatus,
-    LlmFinalStatus,
-    LlmJobStatus,
-)
+from ankiops.llm.task_types import LlmAttemptResultType, LlmItemStatus, LlmJobStatus
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -28,8 +23,7 @@ def _start_job(adapter: LlmDb) -> int:
     return adapter.start_job(
         task_name="grammar",
         model="sonnet",
-        model_id="sonnet",
-        config_snapshot={"task": "grammar"},
+        model_id="claude-sonnet-4-6",
     )
 
 
@@ -93,7 +87,6 @@ def test_open_creates_schema_and_indexes(tmp_path):
             "llm_item_attempt",
             "llm_attempt_payload",
         }.issubset(tables)
-        assert "llm_schema_meta" not in tables
 
         indexes = _index_names(adapter._conn)
         assert "idx_llm_job_created" in indexes
@@ -112,7 +105,6 @@ def test_open_creates_schema_and_indexes(tmp_path):
             "status",
             "persisted",
             "fatal_error",
-            "config_snapshot_json",
             "created_at",
             "started_at",
             "finished_at",
@@ -120,6 +112,13 @@ def test_open_creates_schema_and_indexes(tmp_path):
             "decks_matched",
             "notes_seen",
         }
+
+        item_columns = [
+            row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job_item)")
+        ]
+        assert "item_status" in item_columns
+        assert "candidate_status" not in item_columns
+        assert "final_status" not in item_columns
 
         job_sql = adapter._conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_job'"
@@ -146,15 +145,14 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
-            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            item_status=LlmItemStatus.QUEUED,
             skip_reason=None,
-            final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
         attempt_id = _insert_attempt(
             adapter,
             item_id=item_id,
             provider_message_id="msg_123",
-            response_model_id="sonnet",
+            response_model_id="claude-sonnet-4-6",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=901,
@@ -169,13 +167,13 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             attempt_id=attempt_id,
             system_prompt_text="system",
             user_message_text="user",
-            request_params_json={"model": "sonnet"},
+            request_params_json={"model": "claude-sonnet-4-6"},
             response_raw_text='{"note_key":"nk-1","edits":{"Question":"fixed"}}',
             response_full_json='{"id":"msg_123"}',
         )
-        adapter.update_job_item_result(
+        adapter.update_job_item_status(
             item_id=item_id,
-            final_status=LlmFinalStatus.SUCCEEDED_UPDATED,
+            item_status=LlmItemStatus.SUCCEEDED_UPDATED,
             changed_fields=["Question"],
         )
         adapter.set_applied_for_updated_items(job_id=job_id)
@@ -194,7 +192,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             (attempt_id,),
         ).fetchone()
         assert payload_row is not None
-        assert payload_row["request_params_json"] == '{"model":"sonnet"}'
+        assert '"model":"claude-sonnet-4-6"' in payload_row["request_params_json"]
         assert (
             payload_row["response_raw_text"]
             == '{"note_key":"nk-1","edits":{"Question":"fixed"}}'
@@ -213,8 +211,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
         assert detail.summary.output_tokens == 7
         assert len(detail.items) == 1
         assert detail.items[0].changed_fields == ["Question"]
-        assert detail.items[0].candidate_status is LlmCandidateStatus.ELIGIBLE
-        assert detail.items[0].final_status is LlmFinalStatus.SUCCEEDED_UPDATED
+        assert detail.items[0].item_status is LlmItemStatus.SUCCEEDED_UPDATED
     finally:
         adapter.close()
 
@@ -256,9 +253,8 @@ def test_enforces_uniqueness_constraints(tmp_path):
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
-            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            item_status=LlmItemStatus.QUEUED,
             skip_reason=None,
-            final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -268,16 +264,15 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 deck_name="Deck",
                 note_key="nk-2",
                 note_type="AnkiOpsQA",
-                candidate_status=LlmCandidateStatus.ELIGIBLE,
+                item_status=LlmItemStatus.QUEUED,
                 skip_reason=None,
-                final_status=LlmFinalStatus.NOT_ATTEMPTED,
             )
 
         _insert_attempt(
             adapter,
             item_id=item_id,
             provider_message_id="msg",
-            response_model_id="sonnet",
+            response_model_id="claude-sonnet-4-6",
             stop_reason="end_turn",
             result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=1,
@@ -293,7 +288,7 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 adapter,
                 item_id=item_id,
                 provider_message_id="msg2",
-                response_model_id="sonnet",
+                response_model_id="claude-sonnet-4-6",
                 stop_reason="end_turn",
                 result_type=LlmAttemptResultType.SUCCEEDED,
                 latency_ms=1,
@@ -316,16 +311,15 @@ def test_enforces_status_constraints(tmp_path):
                 """
                 INSERT INTO llm_job (
                     task_name, model, model_id,
-                    status, persisted, config_snapshot_json, created_at, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    status, persisted, created_at, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "grammar",
                     "sonnet",
-                    "sonnet",
+                    "claude-sonnet-4-6",
                     "not_a_status",
                     0,
-                    "{}",
                     "2026-03-21T10:00:00Z",
                     "2026-03-21T10:00:00Z",
                 ),
@@ -373,9 +367,8 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
-            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            item_status=LlmItemStatus.QUEUED,
             skip_reason=None,
-            final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
 
         with pytest.raises(RuntimeError, match="boom"):
@@ -384,7 +377,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     adapter,
                     item_id=item_id,
                     provider_message_id="msg",
-                    response_model_id="sonnet",
+                    response_model_id="claude-sonnet-4-6",
                     stop_reason="end_turn",
                     result_type=LlmAttemptResultType.ERRORED,
                     latency_ms=1,
@@ -399,7 +392,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     attempt_id=attempt_id,
                     system_prompt_text="system",
                     user_message_text="user",
-                    request_params_json={"model": "sonnet"},
+                    request_params_json={"model": "claude-sonnet-4-6"},
                     response_raw_text=None,
                     response_full_json=None,
                 )
@@ -417,7 +410,7 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
         adapter.close()
 
 
-def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
+def test_mark_unfinished_items_canceled_only_updates_pending_queued(tmp_path):
     adapter = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(adapter)
@@ -427,9 +420,8 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
-            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            item_status=LlmItemStatus.QUEUED,
             skip_reason=None,
-            final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
         skipped_id = adapter.insert_job_item(
             job_id=job_id,
@@ -437,9 +429,8 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
             deck_name="Deck",
             note_key="nk-skip",
             note_type="AnkiOpsChoice",
-            candidate_status=LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS,
+            item_status=LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS,
             skip_reason="No editable non-empty fields",
-            final_status=LlmFinalStatus.NOT_ATTEMPTED,
         )
         settled_id = adapter.insert_job_item(
             job_id=job_id,
@@ -447,9 +438,8 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
             deck_name="Deck",
             note_key="nk-3",
             note_type="AnkiOpsQA",
-            candidate_status=LlmCandidateStatus.ELIGIBLE,
+            item_status=LlmItemStatus.SUCCEEDED_UNCHANGED,
             skip_reason=None,
-            final_status=LlmFinalStatus.SUCCEEDED_UNCHANGED,
         )
 
         updated = adapter.mark_unfinished_items_canceled(job_id=job_id)
@@ -457,7 +447,7 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
 
         rows = adapter._conn.execute(
             """
-            SELECT id, candidate_status, final_status
+            SELECT id, item_status
             FROM llm_job_item
             WHERE job_id = ?
             ORDER BY ordinal ASC
@@ -469,12 +459,8 @@ def test_mark_unfinished_items_canceled_only_updates_pending_eligible(tmp_path):
 
     assert len(rows) == 3
     assert int(rows[0]["id"]) == pending_id
-    assert rows[0]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
-    assert rows[0]["final_status"] == LlmFinalStatus.CANCELED.value
+    assert rows[0]["item_status"] == LlmItemStatus.CANCELED.value
     assert int(rows[1]["id"]) == skipped_id
-    skipped_candidate_status = LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS.value
-    assert rows[1]["candidate_status"] == skipped_candidate_status
-    assert rows[1]["final_status"] == LlmFinalStatus.NOT_ATTEMPTED.value
+    assert rows[1]["item_status"] == LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS.value
     assert int(rows[2]["id"]) == settled_id
-    assert rows[2]["candidate_status"] == LlmCandidateStatus.ELIGIBLE.value
-    assert rows[2]["final_status"] == LlmFinalStatus.SUCCEEDED_UNCHANGED.value
+    assert rows[2]["item_status"] == LlmItemStatus.SUCCEEDED_UNCHANGED.value

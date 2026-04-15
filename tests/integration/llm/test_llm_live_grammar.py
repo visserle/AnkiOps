@@ -11,7 +11,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.runner import run_task
-from ankiops.llm.task_types import LlmFinalStatus
+from ankiops.llm.task_types import LlmItemStatus
 
 LIVE_DECK_NAME = "LiveGrammarDeck"
 STANDARD_TASK_NAME = "grammar"
@@ -115,7 +115,7 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
         assert detail.summary.errors == 0
         assert detail.summary.requests == 1
         assert len(detail.items) == 1
-        assert detail.items[0].final_status is LlmFinalStatus.SUCCEEDED_UPDATED
+        assert detail.items[0].item_status is LlmItemStatus.SUCCEEDED_UPDATED
 
         attempts_count = db._conn.execute(
             """
@@ -201,12 +201,12 @@ def test_live_grammar_three_note_end_to_end(tmp_path: Path) -> None:
     detail, job_id, db = _open_job_detail(tmp_path, result.job_id)
     try:
         assert detail is not None
-        status_by_note_key = {item.note_key: item.final_status for item in detail.items}
-        assert status_by_note_key["live-nk-a"] is LlmFinalStatus.SUCCEEDED_UPDATED
-        assert status_by_note_key["live-nk-c"] is LlmFinalStatus.SUCCEEDED_UPDATED
+        status_by_note_key = {item.note_key: item.item_status for item in detail.items}
+        assert status_by_note_key["live-nk-a"] is LlmItemStatus.SUCCEEDED_UPDATED
+        assert status_by_note_key["live-nk-c"] is LlmItemStatus.SUCCEEDED_UPDATED
         assert status_by_note_key["live-nk-b"] in {
-            LlmFinalStatus.SUCCEEDED_UNCHANGED,
-            LlmFinalStatus.SUCCEEDED_UPDATED,
+            LlmItemStatus.SUCCEEDED_UNCHANGED,
+            LlmItemStatus.SUCCEEDED_UPDATED,
         }
 
         totals_row = db._conn.execute(

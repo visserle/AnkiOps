@@ -7,7 +7,7 @@ AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a M
 ## Features
 
 - **Full Anki support**: Safe, performant bidirectional syncing of notes with custom note types, (sub-)decks, and media files
-- **Markdown-first**: Edit in your favourite editor; render Markdown features on Anki's desktop and mobile apps (including syntax highlighting)
+- **Markdown-first**: Edit in your favourite editor - render Markdown features on Anki's desktop and mobile apps (including syntax highlighting)
 - **Simple CLI interface**: After initialization, just two commands are needed for importing and exporting between Anki and your filesystem 
 - **LLM-integration**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations (wip)
 - **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands (nyi)

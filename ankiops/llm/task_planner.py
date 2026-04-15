@@ -2,22 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
-
-from ankiops.config import NOTE_TYPES_DIR
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
-from .discovery import DiscoveryItem, discover_candidates
-from .task_options import (
-    format_deck_scope,
-    format_request_defaults,
-    resolve_serializer_scope,
-)
+from .discovery import DiscoveryItem, DiscoverySnapshot
+from .task_options import format_deck_scope, format_request_defaults
 from .task_types import (
     FieldAccess,
-    LlmCandidateStatus,
+    LlmItemStatus,
     NotePayload,
     PlanFieldSurface,
     TaskConfig,
@@ -25,52 +16,37 @@ from .task_types import (
     TaskRunSummary,
 )
 
-CollectionSerializer = Callable[..., dict[str, Any]]
-
 
 def build_task_plan_result(
     *,
-    collection_dir: Path,
     task: TaskConfig,
     note_type_configs: dict[str, NoteTypeConfig],
-    serialize_collection_fn: CollectionSerializer,
+    snapshot: DiscoverySnapshot,
 ) -> TaskPlanResult:
-    deck, no_subdecks = resolve_serializer_scope(task)
-    data = serialize_collection_fn(
-        collection_dir,
-        deck=deck,
-        no_subdecks=no_subdecks,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-    snapshot = discover_candidates(
-        data=data,
-        task=task,
-        note_type_configs=note_type_configs,
-    )
     eligible_items = [
         item
         for item in snapshot.items
-        if item.candidate_status is LlmCandidateStatus.ELIGIBLE
-        and item.payload is not None
+        if item.item_status is LlmItemStatus.QUEUED and item.payload is not None
+    ]
+    eligible_payloads = [
+        item.payload for item in eligible_items if item.payload is not None
     ]
     eligible = len(eligible_items)
     skipped_deck_scope = sum(
         1
         for item in snapshot.items
-        if item.candidate_status is LlmCandidateStatus.SKIPPED_DECK_SCOPE
+        if item.item_status is LlmItemStatus.SKIPPED_DECK_SCOPE
     )
     skipped_no_editable_fields = sum(
         1
         for item in snapshot.items
-        if item.candidate_status is LlmCandidateStatus.SKIPPED_NO_EDITABLE_FIELDS
+        if item.item_status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS
     )
     errors = sum(
-        1
-        for item in snapshot.items
-        if item.candidate_status is LlmCandidateStatus.INVALID_NOTE
+        1 for item in snapshot.items if item.item_status is LlmItemStatus.INVALID_NOTE
     )
     input_tokens_estimate = sum(
-        _estimate_note_input_tokens(task, item.payload) for item in eligible_items
+        _estimate_note_input_tokens(task, payload) for payload in eligible_payloads
     )
     max_output_tokens = task.request.max_output_tokens or 2048
     output_tokens_cap = eligible * max_output_tokens
@@ -146,7 +122,7 @@ def _build_plan_field_surface(
         for item in snapshot_items
         if item.note_type is not None
         and item.note_type_config is not None
-        and item.candidate_status is not LlmCandidateStatus.SKIPPED_DECK_SCOPE
+        and item.item_status is not LlmItemStatus.SKIPPED_DECK_SCOPE
     }
     field_surface: list[PlanFieldSurface] = []
     for note_type in sorted(observed_note_types):
@@ -169,8 +145,7 @@ def _build_plan_field_surface(
         candidate_notes = sum(
             1
             for item in snapshot_items
-            if item.candidate_status is LlmCandidateStatus.ELIGIBLE
-            and item.note_type == note_type
+            if item.item_status is LlmItemStatus.QUEUED and item.note_type == note_type
         )
         field_surface.append(
             PlanFieldSurface(
