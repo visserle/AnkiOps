@@ -44,7 +44,9 @@ class DeckScope:
     def matches(self, deck_name: str) -> bool:
         if self.deck_root is None:
             return True
-        return deck_name == self.deck_root
+        if deck_name == self.deck_root:
+            return True
+        return deck_name.startswith(f"{self.deck_root}::")
 
 
 @dataclass(frozen=True)

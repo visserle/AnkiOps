@@ -12,7 +12,7 @@ from .task_types import DeckScope, TaskConfig
 def resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
     if task.decks.deck_root is None:
         return None, False
-    return task.decks.deck_root, True
+    return task.decks.deck_root, False
 
 
 def apply_deck_override(task: TaskConfig, deck_override: str | None) -> TaskConfig:

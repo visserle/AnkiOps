@@ -1185,12 +1185,12 @@ def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
         ),
         (
             TEST_DECK,
-            {"deck": TEST_DECK, "no_subdecks": True},
+            {"deck": TEST_DECK, "no_subdecks": False},
         ),
     ],
     ids=[
         "collection-default",
-        "deck-override-exact",
+        "deck-override-includes-subdecks",
     ],
 )
 def test_run_task_uses_expected_serialize_scope(

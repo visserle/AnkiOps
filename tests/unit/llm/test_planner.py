@@ -145,6 +145,24 @@ def test_plan_task_deck_override_forces_exact_scope(tmp_path: Path):
     assert plan.serializer_scope == f"deck:{TEST_DECK}"
 
 
+def test_plan_task_deck_override_includes_subdecks(tmp_path: Path):
+    collection = _prepare_collection(tmp_path)
+    parent_deck = "ScopedDeck"
+    _write(collection / "ScopedDeck__Child.md", TEST_DECK_MARKDOWN)
+
+    plan = plan_task(
+        collection_dir=collection,
+        task_name="grammar",
+        deck_override=parent_deck,
+    )
+
+    assert plan.deck_scope == f"deck:{parent_deck}"
+    assert plan.summary.decks_seen == 1
+    assert plan.summary.decks_matched == 1
+    assert plan.summary.notes_seen == 2
+    assert plan.summary.eligible == 2
+
+
 def test_plan_task_rejects_wildcard_deck_override(tmp_path: Path):
     collection = _prepare_collection(tmp_path)
 

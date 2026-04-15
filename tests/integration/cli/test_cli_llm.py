@@ -110,6 +110,32 @@ def test_cli_llm_dispatches_run_with_deck_override():
     assert run_task.call_args.kwargs["deck_override"] == "Target"
 
 
+@pytest.mark.parametrize(
+    ("deck_arg", "expected_deck"),
+    [
+        ("Parent__Child", "Parent::Child"),
+        ("Parent__Child.md", "Parent::Child"),
+    ],
+)
+def test_cli_llm_dispatches_run_with_deck_alias(deck_arg: str, expected_deck: str):
+    success_result = LlmJobResult(
+        job_id=24,
+        status="completed",
+        summary=TaskRunSummary(task_name="grammar", model=TEST_MODEL),
+        failed=False,
+        persisted=False,
+    )
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir"),
+        patch("ankiops.cli.run_task", return_value=success_result) as run_task,
+        patch("sys.argv", ["ankiops", "llm", "grammar", "--run", "--deck", deck_arg]),
+    ):
+        main()
+
+    run_task.assert_called_once()
+    assert run_task.call_args.kwargs["deck_override"] == expected_deck
+
+
 def test_cli_llm_dispatches_plan():
     with (
         patch("ankiops.cli.require_initialized_collection_dir"),
@@ -133,6 +159,25 @@ def test_cli_llm_dispatches_plan_with_deck_override():
 
     plan_task.assert_called_once()
     assert plan_task.call_args.kwargs["deck_override"] == "Target"
+
+
+@pytest.mark.parametrize(
+    ("deck_arg", "expected_deck"),
+    [
+        ("Parent__Child", "Parent::Child"),
+        ("Parent__Child.md", "Parent::Child"),
+    ],
+)
+def test_cli_llm_dispatches_plan_with_deck_alias(deck_arg: str, expected_deck: str):
+    with (
+        patch("ankiops.cli.require_initialized_collection_dir"),
+        patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
+        patch("sys.argv", ["ankiops", "llm", "grammar", "--deck", deck_arg]),
+    ):
+        main()
+
+    plan_task.assert_called_once()
+    assert plan_task.call_args.kwargs["deck_override"] == expected_deck
 
 
 def test_run_llm_plan_logs_system_prompt_path_and_full_prompt(tmp_path, caplog):

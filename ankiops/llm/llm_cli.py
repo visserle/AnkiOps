@@ -13,6 +13,7 @@ from typing import Any
 
 from ankiops.config import (
     LLM_DIR,
+    file_stem_to_deck_name,
     get_note_types_dir,
     require_initialized_collection_dir,
 )
@@ -47,11 +48,25 @@ def _normalize_deck_override(value: str | None) -> str | None:
     if value is None:
         return None
 
-    deck_name = value.strip()
-    if not deck_name:
+    deck_input = value.strip()
+    if not deck_input:
         _usage_error("--deck requires a non-empty deck name.")
+
+    trimmed_md_suffix = False
+    if deck_input.lower().endswith(".md"):
+        deck_input = deck_input[:-3]
+        trimmed_md_suffix = True
+        if not deck_input:
+            _usage_error("--deck requires a non-empty deck name.")
+
+    if trimmed_md_suffix or "__" in deck_input:
+        deck_name = file_stem_to_deck_name(deck_input)
+    else:
+        deck_name = deck_input
+
     if any(char in deck_name for char in ("*", "?", "[")):
         _usage_error("--deck must be an exact deck name (wildcards are not supported).")
+
     return deck_name
 
 
@@ -176,7 +191,10 @@ def configure_llm_parser(
     )
     llm_parser.add_argument(
         "--deck",
-        help="Override task scope to one exact deck (subdecks excluded by default)",
+        help=(
+            "Override task scope to one exact deck (includes subdecks by default). "
+            "Accepts 'Parent::Child' or markdown alias 'Parent__Child[.md]'."
+        ),
     )
     llm_parser.add_argument(
         "--no-auto-commit",
