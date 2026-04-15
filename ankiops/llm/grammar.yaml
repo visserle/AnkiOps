@@ -6,7 +6,7 @@ task_prompt: |
   Do not add facts or change correctness.
 
 fields:
-  default_access: edit
+  default_access: editable
   hidden:
     "*": ["AI Notes"]
   read_only:

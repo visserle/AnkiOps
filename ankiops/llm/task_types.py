@@ -43,7 +43,7 @@ class DeckScope:
 
 
 class FieldAccess(Enum):
-    EDIT = "edit"
+    EDITABLE = "editable"
     READ_ONLY = "read_only"
     HIDDEN = "hidden"
 
@@ -91,7 +91,7 @@ class TaskConfig:
     prompt_path: Path | None = None
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
-    default_field_access: FieldAccess = FieldAccess.EDIT
+    default_field_access: FieldAccess = FieldAccess.EDITABLE
     field_rules: list[FieldAccessRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
     concurrency: int = 8
@@ -115,7 +115,7 @@ class TaskConfig:
         if has_hidden_override:
             return FieldAccess.HIDDEN
         if has_editable_override:
-            return FieldAccess.EDIT
+            return FieldAccess.EDITABLE
         if has_read_only_override:
             return FieldAccess.READ_ONLY
         return self.default_field_access

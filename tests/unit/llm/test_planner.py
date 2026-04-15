@@ -57,7 +57,7 @@ def _prepare_collection(tmp_path: Path) -> Path:
         task_prompt: |
           fix grammar
         fields:
-                    default_access: edit
+                    default_access: editable
                     read_only:
                         "*": ["Source"]
                         "AnkiOpsChoice": ["Answer"]

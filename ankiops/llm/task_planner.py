@@ -128,7 +128,7 @@ def _build_plan_field_surface(
             if field.name == ANKIOPS_KEY_FIELD.name:
                 continue
             access = task.field_access(note_type, field.name)
-            if access is FieldAccess.EDIT:
+            if access is FieldAccess.EDITABLE:
                 editable_fields.append(field.name)
             elif access is FieldAccess.READ_ONLY:
                 read_only_fields.append(field.name)

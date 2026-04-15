@@ -150,7 +150,7 @@ def _parse_str_list(
 
 def _parse_field_access_value(value: Any, *, path: Path) -> FieldAccess:
     if value is None:
-        return FieldAccess.EDIT
+        return FieldAccess.EDITABLE
     if not isinstance(value, str):
         supported = ", ".join(access.value for access in FieldAccess)
         raise LlmConfigError(
@@ -262,7 +262,7 @@ def _parse_field_rules(
     path: Path,
 ) -> tuple[FieldAccess, list[FieldAccessRule]]:
     if value is None:
-        return FieldAccess.EDIT, []
+        return FieldAccess.EDITABLE, []
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'fields' must be a mapping")
 

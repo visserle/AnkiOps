@@ -220,7 +220,7 @@ task_prompt: |
   Do not add facts or change correctness.
 
 fields:
-  default_access: edit
+  default_access: editable
   hidden:
     "*": ["AI Notes"]
   read_only:
@@ -232,7 +232,7 @@ fields:
 - `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
 - Default templates use `system_prompt: !file _system_prompt.md`
 - `fields` is optional
-- `fields.default_access` sets the baseline access for all note fields (`edit`, `read_only`, `hidden`)
+- `fields.default_access` sets the baseline access for all note fields (`editable`, `read_only`, `hidden`)
 - `fields.editable`, `fields.read_only`, and `fields.hidden` map note-type patterns to field pattern lists
 - Access precedence is `hidden` > `editable` > `read_only` > `default_access`
 - Example: to make only `AI Notes` editable everywhere, set `default_access: read_only` and `editable: {"*": ["AI Notes"]}`

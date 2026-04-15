@@ -45,7 +45,7 @@ A: 1
 """
 DEFAULT_TASK_EXTRA = """
 fields:
-    default_access: edit
+    default_access: editable
     read_only:
         "*": ["Source"]
         "AnkiOpsChoice": ["Answer"]
@@ -354,7 +354,7 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
         content=_task_config(
             extra="""
             fields:
-                            default_access: edit
+                            default_access: editable
                             read_only:
                                 "*": ["Source"]
                                 "AnkiOpsChoice": ["Answer"]
@@ -401,7 +401,7 @@ def test_load_llm_task_catalog_supports_default_access_and_editable_override(
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
     assert task.default_field_access is FieldAccess.READ_ONLY
-    assert task.field_access("AnkiOpsQA", "AI Notes") is FieldAccess.EDIT
+    assert task.field_access("AnkiOpsQA", "AI Notes") is FieldAccess.EDITABLE
     assert task.field_access("AnkiOpsQA", "Question") is FieldAccess.READ_ONLY
     assert task.field_access("AnkiOpsChoice", "Answer") is FieldAccess.HIDDEN
 
