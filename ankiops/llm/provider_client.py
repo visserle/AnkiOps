@@ -104,6 +104,8 @@ class ProviderClient:
         }
         if request_options.temperature is not None:
             request_params["temperature"] = request_options.temperature
+        if self._provider == "ollama":
+            request_params["extra_body"] = {"think": False}
 
         return PreparedAttemptRequest(
             note_payload=note_payload,

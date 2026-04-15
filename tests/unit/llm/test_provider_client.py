@@ -38,6 +38,14 @@ GROQ_TEST_MODEL = ModelSpec(
     api_key="$GROQ_API_KEY",
 )
 
+OLLAMA_TEST_MODEL = ModelSpec(
+    model="gemma4-e2b",
+    model_id="gemma4:e2b",
+    provider="ollama",
+    base_url="http://localhost:11434/v1",
+    api_key="ollama",
+)
+
 
 def _extract_note_json(message: str) -> dict[str, object]:
     start = message.index("<note>\n") + len("<note>\n")
@@ -556,3 +564,70 @@ def test_prepare_attempt_request_disables_strict_for_groq(monkeypatch, note_payl
         prepared_request.request_params["response_format"]["json_schema"]["strict"]
         is False
     )
+
+
+def test_prepare_attempt_request_includes_ollama_think_toggle(note_payload):
+    task = TaskConfig(
+        name="grammar",
+        model=OLLAMA_TEST_MODEL,
+        system_prompt="System prompt for tests",
+        prompt="Fix grammar",
+    )
+    client = ProviderClient(task)
+
+    prepared_request = client.prepare_attempt_request(
+        note_payload=note_payload,
+        task_prompt="Fix grammar",
+        request_options=TaskRequestOptions(),
+        model_id="gemma4:e2b",
+    )
+
+    assert prepared_request.request_params["extra_body"] == {"think": False}
+
+
+def test_generate_update_succeeds_for_ollama_with_thinking_disabled(note_payload):
+    task = TaskConfig(
+        name="grammar",
+        model=OLLAMA_TEST_MODEL,
+        system_prompt="System prompt for tests",
+        prompt="Fix grammar",
+    )
+    client = ProviderClient(task)
+    response = _response(
+        content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}',
+        model="gemma4:e2b",
+    )
+
+    with patch.object(
+        client,
+        "_create_message_with_headers",
+        new=AsyncMock(return_value=(response, None, {})),
+    ) as create:
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=TaskRequestOptions(),
+            model_id="gemma4:e2b",
+        )
+        update_result = asyncio.run(
+            client.generate_update(
+                prepared_request=prepared_request,
+                request_options=TaskRequestOptions(),
+            )
+        )
+
+    call_kwargs = create.call_args.args[0]
+    assert call_kwargs["extra_body"] == {"think": False}
+    assert update_result.update.note_key == "nk-1"
+    assert update_result.update.edits == {"Question": "Fixed"}
+
+
+def test_prepare_attempt_request_omits_think_for_non_ollama(client, note_payload):
+    prepared_request = client.prepare_attempt_request(
+        note_payload=note_payload,
+        task_prompt="Fix grammar",
+        request_options=TaskRequestOptions(),
+        model_id="claude-sonnet-4-6",
+    )
+
+    assert "extra_body" not in prepared_request.request_params
