@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from ankiops.anki_client import AnkiConnectError
 from ankiops.cli import main, run_am, run_ma, run_serialize
 from ankiops.config import ANKIOPS_DB
 from ankiops.models import (
@@ -264,6 +265,25 @@ def test_cli_help_lists_version_flag(capsys):
     assert exc.value.code == 0
     captured = capsys.readouterr()
     assert "--version" in captured.out
+
+
+def test_cli_init_exits_cleanly_on_anki_connect_error(caplog):
+    fake_anki = MagicMock()
+    fake_anki.get_active_profile.side_effect = AnkiConnectError(
+        "Connection reset by peer"
+    )
+
+    with (
+        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.cli.configure_logging"),
+        patch("sys.argv", ["ankiops", "init"]),
+        caplog.at_level(logging.ERROR),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+    assert exc.value.code == 1
+    assert "Error communicating with AnkiConnect" in caplog.text
 
 
 def test_cli_welcome_mentions_version_and_version_flag(capsys):

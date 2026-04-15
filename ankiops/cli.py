@@ -3,6 +3,7 @@ import logging
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
 from ankiops.collection_serializer import (
     deserialize_collection_from_json,
@@ -434,7 +435,15 @@ def main():
     configure_logging(stream_level=log_level)
 
     if hasattr(args, "handler"):
-        args.handler(args)
+        try:
+            args.handler(args)
+        except AnkiConnectError as error:
+            logger.error(
+                "Error communicating with AnkiConnect. Make sure Anki is running and "
+                "AnkiConnect is installed."
+            )
+            logger.debug(f"AnkiConnect error details: {error}")
+            raise SystemExit(1) from error
     else:
         # Show welcome screen when no command is provided
         cli_version = _get_cli_version()

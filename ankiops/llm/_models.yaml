@@ -51,3 +51,9 @@
   provider: groq
   base_url: https://api.groq.com/openai/v1
   api_key: $GROQ_API_KEY
+
+- model: gemma4-local
+  model_id: "gemma4:e4b"
+  provider: openai
+  base_url: http://localhost:11434/v1
+  api_key: ollama
