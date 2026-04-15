@@ -6,8 +6,11 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
 from collections.abc import Iterable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
 
@@ -29,6 +32,29 @@ from .task_types import (
 
 logger = logging.getLogger(__name__)
 _MAX_RETRY_BACKOFF_SECONDS = 30.0
+_TRANSIENT_STATUS_CODES = {408, 409, 429}
+_PROVIDER_TRANSIENT_STATUS_CODES = {
+    # Groq can return 498 when flex capacity is exhausted.
+    "groq": {498},
+}
+_NON_RETRYABLE_429_MARKERS = {
+    "default": (
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+        "quota exhausted",
+        "insufficient credits",
+        "credit balance",
+    ),
+    # OpenRouter often maps exhausted credit state to payment-required semantics.
+    "openrouter": ("payment required",),
+}
+_RESET_DURATION_PART_PATTERN = re.compile(r"(?P<value>\d+(?:\.\d+)?)(?P<unit>[hms])")
+_THROTTLE_RESET_KEYS = (
+    ("x-ratelimit-remaining-requests", "x-ratelimit-reset-requests"),
+    ("x-ratelimit-remaining-tokens", "x-ratelimit-reset-tokens"),
+    ("anthropic-ratelimit-requests-remaining", "anthropic-ratelimit-requests-reset"),
+    ("anthropic-ratelimit-tokens-remaining", "anthropic-ratelimit-tokens-reset"),
+)
 
 
 class ProviderClient:
@@ -38,6 +64,8 @@ class ProviderClient:
         api_key = _resolve_api_key(task.model.api_key)
 
         self._system_prompt = task.system_prompt
+        self._provider = task.model.provider.strip().lower()
+        self._throttle = _InJobThrottle()
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=task.model.base_url,
@@ -60,6 +88,8 @@ class ProviderClient:
         max_tokens = request_options.max_output_tokens or 2048
         system_prompt_text = build_system_prompt(self._system_prompt)
         user_message_text = build_user_message(task_prompt, note_payload)
+        # Anthropic's OpenAI-compatible endpoint requires strict=true for json_schema.
+        strict_json_schema = self._provider == "anthropic"
         request_params: dict[str, object] = {
             "model": model_id,
             "max_tokens": max_tokens,
@@ -67,7 +97,7 @@ class ProviderClient:
                 "type": "json_schema",
                 "json_schema": {
                     "name": "note_update",
-                    "strict": True,
+                    "strict": strict_json_schema,
                     "schema": contract.schema,
                 },
             },
@@ -119,14 +149,19 @@ class ProviderClient:
         response: object | None = None
         request_id: str | None = None
         rate_limit_headers: dict[str, str] = {}
+        skip_throttle_once = False
         try:
             while True:
                 try:
+                    if not skip_throttle_once:
+                        await self._throttle.wait()
+                    skip_throttle_once = False
                     (
                         response,
                         request_id,
                         rate_limit_headers,
                     ) = await self._create_message_with_headers(kwargs)
+                    await self._throttle.observe_headers(rate_limit_headers)
                     break
                 except AuthenticationError as error:
                     raise LlmFatalError(
@@ -143,6 +178,8 @@ class ProviderClient:
                         retry_count=retry_count,
                         jitter=request_options.retry_backoff_jitter,
                     )
+                    await self._throttle.bump(delay)
+                    skip_throttle_once = True
                     logger.warning(
                         "Retrying %s after connection error (%d/%d) in %.2fs: %s",
                         note_payload.note_key,
@@ -155,8 +192,14 @@ class ProviderClient:
                 except APIStatusError as error:
                     status_code = _status_code(error)
                     message = _api_error_message(error)
-                    if status_code == 429 or (
-                        status_code is not None and status_code >= 500
+                    non_retryable_quota_429 = _is_non_retryable_429(
+                        error,
+                        provider=self._provider,
+                    )
+                    if _is_retryable_status_error(
+                        status_code,
+                        provider=self._provider,
+                        non_retryable_quota_429=non_retryable_quota_429,
                     ):
                         if retry_count >= request_options.retries:
                             raise LlmFatalError(
@@ -171,6 +214,8 @@ class ProviderClient:
                         retry_after = _retry_after_seconds(error)
                         if retry_after is not None:
                             delay = max(delay, retry_after)
+                        await self._throttle.bump(delay)
+                        skip_throttle_once = True
                         logger.warning(
                             "Retrying %s after HTTP %s (%d/%d) in %.2fs: %s",
                             note_payload.note_key,
@@ -182,6 +227,11 @@ class ProviderClient:
                         )
                         await asyncio.sleep(delay)
                         continue
+
+                    if non_retryable_quota_429:
+                        raise LlmFatalError(
+                            f"Provider quota or billing limit reached: {message}"
+                        ) from error
 
                     if status_code is None:
                         raise LlmNoteError(
@@ -409,8 +459,179 @@ def _extract_rate_limit_headers(headers: dict[str, str]) -> dict[str, str]:
     return {
         key: value
         for key, value in headers.items()
-        if key.startswith("x-ratelimit-") or key == "retry-after"
+        if key.startswith("x-ratelimit-")
+        or key.startswith("anthropic-ratelimit-")
+        or key in {"retry-after", "retry-after-ms"}
     }
+
+
+class _InJobThrottle:
+    """Best-effort in-process throttling shared across one job's provider calls."""
+
+    def __init__(self) -> None:
+        self._next_request_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        delay = 0.0
+        async with self._lock:
+            delay = self._next_request_at - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    async def bump(self, delay_seconds: float) -> None:
+        if delay_seconds <= 0:
+            return
+        async with self._lock:
+            now = time.monotonic()
+            self._next_request_at = max(self._next_request_at, now + delay_seconds)
+
+    async def observe_headers(self, headers: dict[str, str]) -> None:
+        delay = _throttle_delay_from_headers(headers)
+        if delay is None:
+            return
+        await self.bump(delay)
+
+
+def _throttle_delay_from_headers(headers: dict[str, str]) -> float | None:
+    delay_candidates: list[float] = []
+
+    retry_after_ms = _parse_non_negative_float(headers.get("retry-after-ms"))
+    if retry_after_ms is not None:
+        delay_candidates.append(retry_after_ms / 1000.0)
+    else:
+        retry_after = _parse_retry_after_header_value(headers.get("retry-after"))
+        if retry_after is not None:
+            delay_candidates.append(retry_after)
+
+    for remaining_key, reset_key in _THROTTLE_RESET_KEYS:
+        if not _is_limit_exhausted(headers.get(remaining_key)):
+            continue
+        reset_delay = _parse_reset_seconds(headers.get(reset_key))
+        if reset_delay is not None:
+            delay_candidates.append(reset_delay)
+
+    if not delay_candidates:
+        return None
+    return max(delay_candidates)
+
+
+def _is_limit_exhausted(raw: str | None) -> bool:
+    value = _parse_non_negative_float(raw)
+    if value is None:
+        return False
+    return value <= 0.0
+
+
+def _parse_reset_seconds(raw: str | None) -> float | None:
+    numeric = _parse_non_negative_float(raw)
+    if numeric is not None:
+        return numeric
+    if raw is None:
+        return None
+
+    compact_duration = _parse_compact_duration_seconds(raw)
+    if compact_duration is not None:
+        return compact_duration
+
+    http_date = _parse_retry_after_http_date(raw)
+    if http_date is not None:
+        return http_date
+
+    return _parse_iso_datetime_delta_seconds(raw)
+
+
+def _parse_compact_duration_seconds(raw: str) -> float | None:
+    normalized = "".join(raw.strip().lower().split())
+    if not normalized:
+        return None
+
+    consumed = 0
+    total = 0.0
+    for match in _RESET_DURATION_PART_PATTERN.finditer(normalized):
+        if match.start() != consumed:
+            return None
+        consumed = match.end()
+        value = float(match.group("value"))
+        unit = match.group("unit")
+        if unit == "h":
+            total += value * 3600
+        elif unit == "m":
+            total += value * 60
+        elif unit == "s":
+            total += value
+    if consumed != len(normalized):
+        return None
+    return max(total, 0.0)
+
+
+def _parse_iso_datetime_delta_seconds(raw: str) -> float | None:
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max((parsed - datetime.now(timezone.utc)).total_seconds(), 0.0)
+
+
+def _is_retryable_status_error(
+    status_code: int | None,
+    *,
+    provider: str,
+    non_retryable_quota_429: bool,
+) -> bool:
+    if status_code is None:
+        return False
+    if status_code == 429:
+        return not non_retryable_quota_429
+    if status_code in _TRANSIENT_STATUS_CODES:
+        return True
+    if status_code >= 500:
+        return True
+    provider_codes = _PROVIDER_TRANSIENT_STATUS_CODES.get(provider, set())
+    return status_code in provider_codes
+
+
+def _is_non_retryable_429(error: APIStatusError, *, provider: str) -> bool:
+    if _status_code(error) != 429:
+        return False
+    haystack = " ".join(_error_text_fragments(error)).lower()
+    if not haystack:
+        return False
+    markers = list(_NON_RETRYABLE_429_MARKERS["default"])
+    markers.extend(_NON_RETRYABLE_429_MARKERS.get(provider, ()))
+    return any(marker in haystack for marker in markers)
+
+
+def _error_text_fragments(error: APIStatusError) -> list[str]:
+    fragments = [_api_error_message(error)]
+    body = getattr(error, "body", None)
+    fragments.extend(_flatten_text_values(body))
+
+    response = getattr(error, "response", None)
+    if response is not None:
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            fragments.append(text)
+
+    return [fragment for fragment in fragments if fragment]
+
+
+def _flatten_text_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        output: list[str] = []
+        for nested in value.values():
+            output.extend(_flatten_text_values(nested))
+        return output
+    if isinstance(value, list):
+        output: list[str] = []
+        for nested in value:
+            output.extend(_flatten_text_values(nested))
+        return output
+    return []
 
 
 def _headers_to_dict(value: object) -> dict[str, str]:
@@ -478,7 +699,24 @@ def _retry_after_seconds(error: APIStatusError) -> float | None:
     if response is None:
         return None
     headers = _headers_to_dict(getattr(response, "headers", None))
-    raw = headers.get("retry-after")
+
+    retry_after_ms = _parse_non_negative_float(headers.get("retry-after-ms"))
+    if retry_after_ms is not None:
+        return retry_after_ms / 1000.0
+
+    return _parse_retry_after_header_value(headers.get("retry-after"))
+
+
+def _parse_retry_after_header_value(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    parsed = _parse_non_negative_float(raw)
+    if parsed is not None:
+        return parsed
+    return _parse_retry_after_http_date(raw)
+
+
+def _parse_non_negative_float(raw: str | None) -> float | None:
     if raw is None:
         return None
     try:
@@ -488,6 +726,18 @@ def _retry_after_seconds(error: APIStatusError) -> float | None:
     if parsed < 0:
         return None
     return parsed
+
+
+def _parse_retry_after_http_date(raw: str) -> float | None:
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max((parsed - datetime.now(timezone.utc)).total_seconds(), 0.0)
 
 
 def _retry_delay_seconds(

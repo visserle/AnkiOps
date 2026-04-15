@@ -342,12 +342,16 @@ class LlmTaskExecutor:
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
     ) -> None:
-        semaphore = asyncio.Semaphore(task.concurrency)
+        if not candidates:
+            return
+
+        in_flight_limit = min(max(task.concurrency, 1), len(candidates))
+        next_index = 0
         first_fatal_error: LlmFatalError | None = None
 
-        async def _run_with_semaphore(candidate: EligibleCandidate) -> None:
-            async with semaphore:
-                await self._process_online_candidate(
+        def _start_candidate(candidate: EligibleCandidate) -> asyncio.Task[None]:
+            return asyncio.create_task(
+                self._process_online_candidate(
                     db=db,
                     task=task,
                     model_id=model_id,
@@ -355,35 +359,39 @@ class LlmTaskExecutor:
                     candidate=candidate,
                     attempt_recorder=attempt_recorder,
                 )
+            )
 
-        tasks = [
-            asyncio.create_task(_run_with_semaphore(candidate))
-            for candidate in candidates
-        ]
+        in_flight: set[asyncio.Task[None]] = set()
+        while next_index < in_flight_limit:
+            in_flight.add(_start_candidate(candidates[next_index]))
+            next_index += 1
 
-        if not tasks:
-            return
+        while in_flight:
+            done, pending = await asyncio.wait(
+                in_flight,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            in_flight = set(pending)
 
-        for completed in asyncio.as_completed(tasks):
-            try:
-                await completed
-            except LlmFatalError as error:
-                if first_fatal_error is None:
-                    first_fatal_error = error
-                for pending in tasks:
-                    if not pending.done():
-                        pending.cancel()
-                break
-            except Exception as error:
-                if first_fatal_error is None:
-                    first_fatal_error = _unexpected_online_execution_error(error)
-                for pending in tasks:
-                    if not pending.done():
-                        pending.cancel()
-                break
-        await asyncio.gather(*tasks, return_exceptions=True)
-        if first_fatal_error is not None:
-            raise first_fatal_error
+            for completed in done:
+                try:
+                    await completed
+                except LlmFatalError as error:
+                    if first_fatal_error is None:
+                        first_fatal_error = error
+                except Exception as error:
+                    if first_fatal_error is None:
+                        first_fatal_error = _unexpected_online_execution_error(error)
+
+            if first_fatal_error is not None:
+                for pending_task in in_flight:
+                    pending_task.cancel()
+                await asyncio.gather(*in_flight, return_exceptions=True)
+                raise first_fatal_error
+
+            while next_index < len(candidates) and len(in_flight) < in_flight_limit:
+                in_flight.add(_start_candidate(candidates[next_index]))
+                next_index += 1
 
     async def _process_online_candidate(
         self,

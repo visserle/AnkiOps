@@ -268,3 +268,47 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 - If any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors
 - Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics
+
+### Live LLM Scenarios (Groq)
+
+AnkiOps includes opt-in live integration tests for end-to-end LLM execution using
+Groq's OpenAI-compatible API. These tests exercise correctness, robustness,
+retry/telemetry persistence, and throughput under larger note batches.
+
+Required environment variables:
+
+```bash
+export ANKIOPS_RUN_LIVE_LLM_TESTS=1
+export GROQ_API_KEY="your-groq-key"
+```
+
+Run live scenarios:
+
+```bash
+python -m pytest tests/integration/llm/test_llm_live_grammar.py -m live_llm
+```
+
+Optional stress scenario:
+
+```bash
+export ANKIOPS_RUN_LIVE_LLM_STRESS=1
+python -m pytest tests/integration/llm/test_llm_live_grammar.py -m live_llm
+```
+
+Optional tuning knobs (defaults shown):
+
+```bash
+export ANKIOPS_LIVE_LLM_CONCURRENCY=1
+export ANKIOPS_LIVE_LLM_MAX_OUTPUT_TOKENS=512
+export ANKIOPS_LIVE_LLM_MIXED_NOTES=12
+export ANKIOPS_LIVE_LLM_MIXED_MAX_SECONDS=300
+export ANKIOPS_LIVE_LLM_PRESSURE_NOTES=18
+export ANKIOPS_LIVE_LLM_PRESSURE_MAX_SECONDS=900
+export ANKIOPS_LIVE_LLM_PRESSURE_MAX_ERROR_RATIO=0.25
+export ANKIOPS_LIVE_LLM_STRESS_NOTES=48
+export ANKIOPS_LIVE_LLM_STRESS_MAX_SECONDS=1800
+export ANKIOPS_LIVE_LLM_STRESS_MAX_ERROR_RATIO=0.35
+```
+
+Each scenario emits a JSON metrics artifact in the temp collection directory,
+for example `llm-live-metrics-mixed.json`.

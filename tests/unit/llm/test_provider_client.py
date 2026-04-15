@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -13,7 +15,11 @@ from openai import APIConnectionError, APIStatusError
 from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError
 from ankiops.llm.model_registry import ModelSpec
 from ankiops.llm.prompting import build_system_prompt
-from ankiops.llm.provider_client import ProviderClient
+from ankiops.llm.provider_client import (
+    ProviderClient,
+    _retry_after_seconds,
+    _throttle_delay_from_headers,
+)
 from ankiops.llm.task_types import NotePayload, TaskConfig, TaskRequestOptions
 
 TEST_MODEL = ModelSpec(
@@ -22,6 +28,14 @@ TEST_MODEL = ModelSpec(
     provider="anthropic",
     base_url="https://api.anthropic.com/v1/",
     api_key="$ANTHROPIC_API_KEY",
+)
+
+GROQ_TEST_MODEL = ModelSpec(
+    model="groq-oss-120b",
+    model_id="openai/gpt-oss-120b",
+    provider="groq",
+    base_url="https://api.groq.com/openai/v1",
+    api_key="$GROQ_API_KEY",
 )
 
 
@@ -230,14 +244,16 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
     assert "Retrying nk-1 after connection error (1/1) in 0.20s" in caplog.text
 
 
+@pytest.mark.parametrize("status_code", [408, 409, 503])
 def test_generate_update_fails_after_exhausting_retries(
     client: ProviderClient,
     note_payload: NotePayload,
+    status_code: int,
 ):
     error = APIStatusError(
         message="upstream unavailable",
         response=httpx.Response(
-            503,
+            status_code,
             request=httpx.Request(
                 "POST", "https://api.example.com/v1/chat/completions"
             ),
@@ -263,7 +279,10 @@ def test_generate_update_fails_after_exhausting_retries(
             ),
             model_id="claude-sonnet-4-6",
         )
-        with pytest.raises(LlmFatalError, match="Provider returned HTTP 503"):
+        with pytest.raises(
+            LlmFatalError,
+            match=f"Provider returned HTTP {status_code}",
+        ):
             asyncio.run(
                 client.generate_update(
                     prepared_request=prepared_request,
@@ -277,6 +296,210 @@ def test_generate_update_fails_after_exhausting_retries(
 
     assert create.call_count == 2
     sleep.assert_called_once_with(0.25)
+
+
+def test_generate_update_handles_non_retryable_quota_429_without_sleep(
+    client: ProviderClient,
+    note_payload: NotePayload,
+):
+    error = APIStatusError(
+        message="insufficient_quota",
+        response=httpx.Response(
+            429,
+            request=httpx.Request(
+                "POST", "https://api.example.com/v1/chat/completions"
+            ),
+        ),
+        body={"error": {"type": "insufficient_quota"}},
+    )
+
+    with (
+        patch.object(
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(side_effect=[error]),
+        ) as create,
+        patch("ankiops.llm.provider_client.asyncio.sleep") as sleep,
+    ):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=TaskRequestOptions(
+                retries=3,
+                retry_backoff_seconds=0.25,
+                retry_backoff_jitter=False,
+            ),
+            model_id="claude-sonnet-4-6",
+        )
+        with pytest.raises(
+            LlmFatalError,
+            match="Provider quota or billing limit reached",
+        ):
+            asyncio.run(
+                client.generate_update(
+                    prepared_request=prepared_request,
+                    request_options=TaskRequestOptions(
+                        retries=3,
+                        retry_backoff_seconds=0.25,
+                        retry_backoff_jitter=False,
+                    ),
+                )
+            )
+
+    assert create.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_generate_update_respects_retry_after_seconds_hint(
+    client: ProviderClient,
+    note_payload: NotePayload,
+):
+    response = _response(content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}')
+    error = APIStatusError(
+        message="rate limited",
+        response=httpx.Response(
+            429,
+            headers={"Retry-After": "5"},
+            request=httpx.Request(
+                "POST", "https://api.example.com/v1/chat/completions"
+            ),
+        ),
+        body={"error": {"type": "rate_limit_exceeded"}},
+    )
+
+    request_options = TaskRequestOptions(
+        retries=1,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+
+    with (
+        patch.object(
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(side_effect=[error, (response, None, {})]),
+        ) as create,
+        patch("ankiops.llm.provider_client.asyncio.sleep") as sleep,
+    ):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=request_options,
+            model_id="claude-sonnet-4-6",
+        )
+        asyncio.run(
+            client.generate_update(
+                prepared_request=prepared_request,
+                request_options=request_options,
+            )
+        )
+
+    assert create.call_count == 2
+    sleep.assert_called_once_with(5.0)
+
+
+def test_generate_update_prefers_retry_after_ms_hint(
+    client: ProviderClient,
+    note_payload: NotePayload,
+):
+    response = _response(content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}')
+    error = APIStatusError(
+        message="rate limited",
+        response=httpx.Response(
+            429,
+            headers={"Retry-After": "5", "Retry-After-Ms": "1500"},
+            request=httpx.Request(
+                "POST", "https://api.example.com/v1/chat/completions"
+            ),
+        ),
+        body={"error": {"type": "rate_limit_exceeded"}},
+    )
+
+    request_options = TaskRequestOptions(
+        retries=1,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+
+    with (
+        patch.object(
+            client,
+            "_create_message_with_headers",
+            new=AsyncMock(side_effect=[error, (response, None, {})]),
+        ) as create,
+        patch("ankiops.llm.provider_client.asyncio.sleep") as sleep,
+    ):
+        prepared_request = client.prepare_attempt_request(
+            note_payload=note_payload,
+            task_prompt="Fix grammar",
+            request_options=request_options,
+            model_id="claude-sonnet-4-6",
+        )
+        asyncio.run(
+            client.generate_update(
+                prepared_request=prepared_request,
+                request_options=request_options,
+            )
+        )
+
+    assert create.call_count == 2
+    sleep.assert_called_once_with(1.5)
+
+
+def test_retry_after_seconds_parses_http_date_header():
+    retry_after_date = format_datetime(
+        datetime.now(timezone.utc) + timedelta(seconds=60),
+        usegmt=True,
+    )
+    error = APIStatusError(
+        message="rate limited",
+        response=httpx.Response(
+            429,
+            headers={"Retry-After": retry_after_date},
+            request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
+        ),
+        body={"error": {"type": "rate_limit_exceeded"}},
+    )
+
+    parsed = _retry_after_seconds(error)
+    assert parsed is not None
+    assert parsed >= 45
+    assert parsed <= 61
+
+
+def test_throttle_delay_from_headers_parses_compact_reset_duration():
+    delay = _throttle_delay_from_headers(
+        {
+            "x-ratelimit-remaining-tokens": "0",
+            "x-ratelimit-reset-tokens": "2m30.5s",
+        }
+    )
+    assert delay == pytest.approx(150.5)
+
+
+def test_throttle_delay_from_headers_prefers_retry_after_ms():
+    delay = _throttle_delay_from_headers(
+        {
+            "retry-after": "5",
+            "retry-after-ms": "1250",
+        }
+    )
+    assert delay == pytest.approx(1.25)
+
+
+def test_throttle_delay_from_headers_supports_iso_reset_timestamp():
+    reset_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=30)
+    ).isoformat().replace("+00:00", "Z")
+    delay = _throttle_delay_from_headers(
+        {
+            "anthropic-ratelimit-requests-remaining": "0",
+            "anthropic-ratelimit-requests-reset": reset_at,
+        }
+    )
+    assert delay is not None
+    assert delay >= 20
+    assert delay <= 31
 
 
 def test_missing_api_key_raises_fatal(task_config: TaskConfig, monkeypatch):
@@ -306,3 +529,26 @@ def test_literal_api_key_is_used_directly(monkeypatch):
         ProviderClient(task)
 
     assert client_class.call_args.kwargs["api_key"] == "sk-ant-literal-123"
+
+
+def test_prepare_attempt_request_disables_strict_for_groq(monkeypatch, note_payload):
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq-key")
+    task = TaskConfig(
+        name="grammar",
+        model=GROQ_TEST_MODEL,
+        system_prompt="System prompt for tests",
+        prompt="Fix grammar",
+    )
+    client = ProviderClient(task)
+
+    prepared_request = client.prepare_attempt_request(
+        note_payload=note_payload,
+        task_prompt="Fix grammar",
+        request_options=TaskRequestOptions(),
+        model_id="openai/gpt-oss-120b",
+    )
+
+    assert (
+        prepared_request.request_params["response_format"]["json_schema"]["strict"]
+        is False
+    )

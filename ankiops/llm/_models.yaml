@@ -45,3 +45,9 @@
   api_key: $OPENAI_API_KEY
   input_usd_per_mtok: 0.2
   output_usd_per_mtok: 1.25
+
+- model: groq-oss-120b
+  model_id: openai/gpt-oss-120b
+  provider: groq
+  base_url: https://api.groq.com/openai/v1
+  api_key: $GROQ_API_KEY

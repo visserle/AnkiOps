@@ -1,12 +1,9 @@
 model: haiku
 system_prompt: !file _system_prompt.md
 task_prompt: |
-  Correct grammar, spelling, and punctuation in editable fields.
-  Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
-  Do not add facts or change correctness.
+  Review the following note. If the information is correct, comprehensive and up to date, return nothing. 
+  If there are any issues with the content of the card, add a detailed explanation of the issues. 
 
 fields:
   exceptions:
-    - hidden: ["AI Notes"]
-    - note_types: ["AnkiOpsChoice"]
-      read_only: ["Answer"]
+    - editable: ["AI Notes"]
