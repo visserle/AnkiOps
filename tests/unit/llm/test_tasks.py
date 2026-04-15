@@ -876,6 +876,67 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     assert "A: 1" in content
 
 
+def test_run_task_emits_progress_snapshots(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ProviderClient",
+        lambda _task: _StubClient(
+            [
+                _result("nk-1", {"Question": "This is a fixed question."}),
+                _result("nk-2", {}),
+            ]
+        ),
+    )
+
+    snapshots = []
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+        progress_callback=snapshots.append,
+    )
+
+    assert not result.failed
+    assert snapshots
+    assert snapshots[0].total == 2
+    assert snapshots[0].completed == 0
+    assert snapshots[-1].completed == 2
+    assert snapshots[-1].updated == 1
+    assert snapshots[-1].unchanged == 1
+    assert snapshots[-1].errors == 0
+    completed = [snapshot.completed for snapshot in snapshots]
+    assert completed == sorted(completed)
+
+
+def test_run_task_progress_includes_canceled_items_on_fail_fast(tmp_path, monkeypatch):
+    collection = _prepare_runner_collection(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
+        "ankiops.llm.runner.ProviderClient",
+        lambda _task: _OnlineFailFastClient(),
+    )
+
+    snapshots = []
+    result = run_task(
+        collection_dir=collection,
+        task_name="grammar",
+        no_auto_commit=True,
+        progress_callback=snapshots.append,
+    )
+
+    assert result.failed
+    assert snapshots
+    assert snapshots[-1].total == 2
+    assert snapshots[-1].completed == 2
+    assert snapshots[-1].errors == 1
+    assert snapshots[-1].canceled == 1
+
+
 def test_run_task_logs_llm_persistence_summary_without_deserialize_noise(
     tmp_path,
     monkeypatch,

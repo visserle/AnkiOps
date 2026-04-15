@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shlex
 import shutil
+import sys
 import textwrap
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from ankiops.config import (
     LLM_DIR,
@@ -18,11 +30,13 @@ from ankiops.config import (
     require_initialized_collection_dir,
 )
 from ankiops.fs import FileSystemAdapter
+from ankiops.log import get_rich_console
 
 from .config_loader import load_llm_task_catalog
 from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .runner import list_jobs as list_llm_jobs
 from .runner import plan_task, run_task, show_job
+from .task_runtime_types import TaskExecutionProgress
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +169,63 @@ def _format_table(
 def _log_table(headers: list[str], rows: list[list[str]]) -> None:
     for line in _format_table(headers, rows):
         logger.info(line)
+
+
+def _is_progress_render_enabled() -> bool:
+    if os.environ.get("TERM", "").lower() == "dumb":
+        return False
+    return sys.stdout.isatty()
+
+
+def _format_progress_stats(progress: TaskExecutionProgress) -> str:
+    return (
+        f"upd={progress.updated} same={progress.unchanged} "
+        f"skip={progress.skipped} err={progress.errors} "
+        f"cancel={progress.canceled}"
+    )
+
+
+@contextmanager
+def _llm_progress_callback():
+    if not _is_progress_render_enabled():
+        yield None
+        return
+
+    console = get_rich_console()
+    progress_task_id: Any | None = None
+    with Progress(
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        TextColumn("[dim]{task.fields[stats]}"),
+        console=console,
+        transient=True,
+    ) as progress_view:
+
+        def _update(progress: TaskExecutionProgress) -> None:
+            nonlocal progress_task_id
+            if progress.total <= 0:
+                return
+
+            if progress_task_id is None:
+                progress_task_id = progress_view.add_task(
+                    description=f"LLM {progress.task_name}",
+                    total=progress.total,
+                    completed=progress.completed,
+                    stats=_format_progress_stats(progress),
+                )
+                return
+
+            progress_view.update(
+                progress_task_id,
+                total=progress.total,
+                completed=progress.completed,
+                stats=_format_progress_stats(progress),
+            )
+
+        yield _update
 
 
 def configure_llm_parser(
@@ -397,14 +468,18 @@ def run_llm(
         _usage_error("--no-auto-commit requires --run.")
 
     if run_mode:
+        run_task_kwargs: dict[str, Any] = {
+            "collection_dir": collection_dir,
+            "task_name": task_name,
+            "model_override": model_override,
+            "deck_override": deck_override,
+            "no_auto_commit": no_auto_commit,
+        }
+
         try:
-            result = run_task_fn(
-                collection_dir=collection_dir,
-                task_name=task_name,
-                model_override=model_override,
-                deck_override=deck_override,
-                no_auto_commit=no_auto_commit,
-            )
+            with _llm_progress_callback() as progress_callback:
+                run_task_kwargs["progress_callback"] = progress_callback
+                result = run_task_fn(**run_task_kwargs)
         except ValueError as error:
             logger.error(str(error))
             raise SystemExit(1) from error

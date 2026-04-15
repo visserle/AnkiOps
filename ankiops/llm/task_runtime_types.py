@@ -17,3 +17,28 @@ class EligibleCandidate:
     payload: NotePayload
     note_type_config: NoteTypeConfig
     serialized_note: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TaskExecutionProgress:
+    job_id: int
+    task_name: str
+    total: int
+    completed: int
+    in_flight: int
+    queued: int
+    updated: int
+    unchanged: int
+    skipped: int
+    errors: int
+    canceled: int
+
+    @property
+    def fraction(self) -> float:
+        if self.total <= 0:
+            return 1.0
+        return min(self.completed / self.total, 1.0)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.completed >= self.total

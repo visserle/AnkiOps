@@ -33,7 +33,7 @@ from .task_options import (
     resolve_serializer_scope,
 )
 from .task_planner import build_task_plan_result
-from .task_runtime_types import EligibleCandidate
+from .task_runtime_types import EligibleCandidate, TaskExecutionProgress
 from .task_types import (
     LlmItemStatus,
     LlmJobResult,
@@ -49,6 +49,7 @@ ProviderClientFactory = Callable[[TaskConfig], Any]
 CollectionSerializer = Callable[..., dict[str, Any]]
 CollectionDeserializer = Callable[..., None]
 Snapshotter = Callable[[Path, str], bool]
+ProgressCallback = Callable[[TaskExecutionProgress], None]
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,60 @@ class MaterializedTaskContext:
     note_type_configs: dict[str, NoteTypeConfig]
     serialized_data: dict[str, Any]
     discovery_snapshot: DiscoverySnapshot
+
+
+@dataclass
+class _ExecutionProgressState:
+    job_id: int
+    task_name: str
+    total: int
+    completed: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped: int = 0
+    errors: int = 0
+    canceled: int = 0
+
+    def record_status(self, status: LlmItemStatus, *, count: int = 1) -> None:
+        if count <= 0:
+            return
+
+        if status is LlmItemStatus.SUCCEEDED_UPDATED:
+            self.updated += count
+        elif status is LlmItemStatus.SUCCEEDED_UNCHANGED:
+            self.unchanged += count
+        elif status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS:
+            self.skipped += count
+        elif status is LlmItemStatus.CANCELED:
+            self.canceled += count
+        elif status in {
+            LlmItemStatus.INVALID_NOTE,
+            LlmItemStatus.NOTE_ERROR,
+            LlmItemStatus.PROVIDER_ERROR,
+            LlmItemStatus.FATAL_ERROR,
+        }:
+            self.errors += count
+        else:
+            return
+
+        self.completed += count
+
+    def snapshot(self, *, in_flight: int) -> TaskExecutionProgress:
+        pending = max(in_flight, 0)
+        queued = max(self.total - self.completed - pending, 0)
+        return TaskExecutionProgress(
+            job_id=self.job_id,
+            task_name=self.task_name,
+            total=self.total,
+            completed=self.completed,
+            in_flight=pending,
+            queued=queued,
+            updated=self.updated,
+            unchanged=self.unchanged,
+            skipped=self.skipped,
+            errors=self.errors,
+            canceled=self.canceled,
+        )
 
 
 def _default_provider_client_factory(task: TaskConfig) -> ProviderClient:
@@ -217,6 +272,7 @@ class LlmTaskExecutor:
         provider_client_factory: ProviderClientFactory | None = None,
         deserialize_collection_fn: CollectionDeserializer | None = None,
         snapshot_fn: Snapshotter | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.collection_dir = collection_dir
         self.materialized_context = materialized_context
@@ -228,6 +284,7 @@ class LlmTaskExecutor:
             deserialize_collection_fn or deserialize_collection_data
         )
         self.snapshot_fn = snapshot_fn or git_snapshot
+        self.progress_callback = progress_callback
 
     async def execute(self) -> LlmJobResult:
         task_context = self.materialized_context
@@ -265,6 +322,7 @@ class LlmTaskExecutor:
             fatal_error: str | None = None
             provider_client = None
             attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
+            progress_state: _ExecutionProgressState | None = None
             try:
                 provider_client = self.provider_client_factory(task)
                 candidates = record_discovery_snapshot(
@@ -273,6 +331,12 @@ class LlmTaskExecutor:
                     snapshot=task_context.discovery_snapshot,
                     logger=logger,
                 )
+                progress_state = self._build_progress_state(
+                    job_id=job_id,
+                    task_name=task.name,
+                    snapshot=task_context.discovery_snapshot,
+                )
+                self._emit_progress(progress_state, in_flight=0)
                 await self._execute_candidates_online(
                     db=db,
                     task=task,
@@ -280,6 +344,7 @@ class LlmTaskExecutor:
                     provider_client=provider_client,
                     candidates=candidates,
                     attempt_recorder=attempt_recorder,
+                    progress_state=progress_state,
                 )
             except LlmFatalError as error:
                 fatal_error = str(error)
@@ -298,6 +363,15 @@ class LlmTaskExecutor:
                         "Marked %d pending item(s) as canceled due to fatal error",
                         canceled,
                     )
+                if progress_state is not None:
+                    progress_state.record_status(
+                        LlmItemStatus.CANCELED,
+                        count=canceled,
+                    )
+                    self._emit_progress(progress_state, in_flight=0)
+
+            if progress_state is not None:
+                self._emit_progress(progress_state, in_flight=0)
 
             persisted = self._apply_updates(
                 db=db,
@@ -332,6 +406,37 @@ class LlmTaskExecutor:
         logger.debug("Usage: %s", summary.format_usage())
         logger.debug("Cost: %s", summary.format_cost())
 
+    @staticmethod
+    def _build_progress_state(
+        *,
+        job_id: int,
+        task_name: str,
+        snapshot: DiscoverySnapshot,
+    ) -> _ExecutionProgressState:
+        state = _ExecutionProgressState(
+            job_id=job_id,
+            task_name=task_name,
+            total=len(snapshot.items),
+        )
+        for item in snapshot.items:
+            state.record_status(item.item_status)
+        return state
+
+    def _emit_progress(
+        self,
+        progress_state: _ExecutionProgressState,
+        *,
+        in_flight: int,
+    ) -> None:
+        callback = self.progress_callback
+        if callback is None:
+            return
+
+        try:
+            callback(progress_state.snapshot(in_flight=in_flight))
+        except Exception:
+            logger.debug("Progress callback raised an exception", exc_info=True)
+
     async def _execute_candidates_online(
         self,
         *,
@@ -341,6 +446,7 @@ class LlmTaskExecutor:
         provider_client,
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
+        progress_state: _ExecutionProgressState,
     ) -> None:
         if not candidates:
             return
@@ -349,7 +455,9 @@ class LlmTaskExecutor:
         next_index = 0
         first_fatal_error: LlmFatalError | None = None
 
-        def _start_candidate(candidate: EligibleCandidate) -> asyncio.Task[None]:
+        def _start_candidate(
+            candidate: EligibleCandidate,
+        ) -> asyncio.Task[LlmItemStatus]:
             return asyncio.create_task(
                 self._process_online_candidate(
                     db=db,
@@ -361,7 +469,7 @@ class LlmTaskExecutor:
                 )
             )
 
-        in_flight: set[asyncio.Task[None]] = set()
+        in_flight: set[asyncio.Task[LlmItemStatus]] = set()
         while next_index < in_flight_limit:
             in_flight.add(_start_candidate(candidates[next_index]))
             next_index += 1
@@ -375,11 +483,17 @@ class LlmTaskExecutor:
 
             for completed in done:
                 try:
-                    await completed
+                    item_status = await completed
+                    progress_state.record_status(item_status)
+                    self._emit_progress(progress_state, in_flight=len(in_flight))
                 except LlmFatalError as error:
+                    progress_state.record_status(LlmItemStatus.FATAL_ERROR)
+                    self._emit_progress(progress_state, in_flight=len(in_flight))
                     if first_fatal_error is None:
                         first_fatal_error = error
                 except Exception as error:
+                    progress_state.record_status(LlmItemStatus.FATAL_ERROR)
+                    self._emit_progress(progress_state, in_flight=len(in_flight))
                     if first_fatal_error is None:
                         first_fatal_error = _unexpected_online_execution_error(error)
 
@@ -402,7 +516,7 @@ class LlmTaskExecutor:
         provider_client,
         candidate: EligibleCandidate,
         attempt_recorder: AttemptRecorder,
-    ) -> None:
+    ) -> LlmItemStatus:
         prepared_request = provider_client.prepare_attempt_request(
             note_payload=candidate.payload,
             task_prompt=task.prompt,
@@ -437,17 +551,18 @@ class LlmTaskExecutor:
             raise
         except LlmNoteError as error:
             provider_error = error.category is LlmNoteErrorCategory.PROVIDER
+            item_status = (
+                LlmItemStatus.PROVIDER_ERROR
+                if provider_error
+                else LlmItemStatus.NOTE_ERROR
+            )
             with db.write_tx():
                 attempt_recorder.record_error(
                     candidate=candidate,
                     prepared_request=prepared_request,
                     outcome=outcome,
                     error=error,
-                    item_status=(
-                        LlmItemStatus.PROVIDER_ERROR
-                        if provider_error
-                        else LlmItemStatus.NOTE_ERROR
-                    ),
+                    item_status=item_status,
                 )
             logger.error(
                 "LLM note error for %s in '%s' (%s): %s",
@@ -456,7 +571,7 @@ class LlmTaskExecutor:
                 candidate.payload.note_type,
                 error,
             )
-            return
+            return item_status
         except Exception as error:
             logger.exception(
                 "Unexpected online execution error for %s in '%s' (%s)",
@@ -494,7 +609,7 @@ class LlmTaskExecutor:
                 candidate.payload.note_type,
                 ",".join(changed_fields),
             )
-            return
+            return LlmItemStatus.SUCCEEDED_UPDATED
 
         with db.write_tx():
             attempt_recorder.record_success(
@@ -513,6 +628,7 @@ class LlmTaskExecutor:
             candidate.deck_name,
             candidate.payload.note_type,
         )
+        return LlmItemStatus.SUCCEEDED_UNCHANGED
 
     def _apply_updates(
         self,
@@ -593,6 +709,7 @@ async def run_task_async(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> LlmJobResult:
     task_context = _materialize_task_context(
         collection_dir=collection_dir,
@@ -605,6 +722,7 @@ async def run_task_async(
         collection_dir=collection_dir,
         materialized_context=task_context,
         no_auto_commit=no_auto_commit,
+        progress_callback=progress_callback,
     )
     return await executor.execute()
 
@@ -616,6 +734,7 @@ def run_task(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> LlmJobResult:
     return asyncio.run(
         run_task_async(
@@ -624,6 +743,7 @@ def run_task(
             model_override=model_override,
             deck_override=deck_override,
             no_auto_commit=no_auto_commit,
+            progress_callback=progress_callback,
         )
     )
 

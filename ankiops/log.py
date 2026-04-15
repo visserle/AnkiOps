@@ -2,9 +2,12 @@
 
 import logging
 import os
-import platform
 import sys
 from pathlib import Path
+
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.markup import escape as rich_escape
 
 DEFAULT_QUIET_LOGGERS = (
     "urllib3.connectionpool",
@@ -12,6 +15,33 @@ DEFAULT_QUIET_LOGGERS = (
     "httpx",
     "httpcore",
 )
+
+_RICH_CONSOLE: Console | None = None
+
+
+class _RichSeverityMessageFormatter(logging.Formatter):
+    """Format plain log messages with Rich markup by severity."""
+
+    def __init__(self) -> None:
+        super().__init__("%(message)s")
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = rich_escape(super().format(record))
+        if record.levelno >= logging.CRITICAL:
+            return f"[bold red]{message}[/]"
+        if record.levelno >= logging.ERROR:
+            return f"[red]{message}[/]"
+        if record.levelno >= logging.WARNING:
+            return f"[orange3]{message}[/]"
+        return message
+
+
+def get_rich_console() -> Console:
+    """Return a shared Rich console bound to the current stdout stream."""
+    global _RICH_CONSOLE
+    if _RICH_CONSOLE is None or _RICH_CONSOLE.file is not sys.stdout:
+        _RICH_CONSOLE = Console(file=sys.stdout)
+    return _RICH_CONSOLE
 
 
 def format_changes(**counts: int) -> str:
@@ -94,26 +124,24 @@ def configure_logging(
 
     handlers = []
 
-    # StreamHandler for console logging
+    # Console logging via Rich (single renderer for log + progress output)
     if stream:
-        stream_handler = logging.StreamHandler(sys.stdout)
+        verbose = stream_level <= logging.DEBUG
+        stream_handler = RichHandler(
+            console=get_rich_console(),
+            show_time=verbose,
+            show_level=verbose,
+            show_path=verbose,
+            enable_link_path=False,
+            rich_tracebacks=verbose,
+            markup=not verbose,
+            log_time_format="%H:%M:%S",
+        )
         stream_handler.setLevel(stream_level)
-
-        if stream_level <= logging.DEBUG:
-            # Verbose format for debug mode
-            stream_format = (
-                "{asctime} | {color}{levelname:8}{reset} | {name} | {message}"
-            )
-            stream_formatter = ColoredFormatter(
-                stream_format,
-                style="{",
-                datefmt="%H:%M:%S",
-            )
+        if verbose:
+            stream_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
         else:
-            # Clean format for normal CLI use
-            stream_formatter = CleanFormatter()
-
-        stream_handler.setFormatter(stream_formatter)
+            stream_handler.setFormatter(_RichSeverityMessageFormatter())
         handlers.append(stream_handler)
 
     # FileHandler for file logging, added only if file path is provided
@@ -159,70 +187,6 @@ def close_root_logging() -> None:
     for handler in root_logger.handlers[:]:
         handler.close()
         root_logger.removeHandler(handler)
-
-
-class Color:
-    """A class for terminal color codes using ANSI escape sequences."""
-
-    BLUE = "\033[36m"
-    WHITE = "\033[97m"
-    GREEN = "\033[92m"
-    YELLOW = "\033[93m"
-    RED = "\033[91m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
-    BOLD_RED = BOLD + RED + UNDERLINE
-    END = "\033[0m"
-
-
-class ColoredFormatter(logging.Formatter):
-    """Logging Formatter class that adds colors and styles to log messages."""
-
-    COLORS = {
-        "DEBUG": Color.BLUE,
-        "INFO": Color.GREEN,
-        "WARNING": Color.YELLOW,
-        "ERROR": Color.RED,
-        "CRITICAL": Color.BOLD_RED,
-        "RESET": Color.END,
-    }
-
-    # Enable ANSI escape sequences on Windows
-    if platform.system() == "Windows":
-        try:
-            from colorama import just_fix_windows_console
-
-            just_fix_windows_console()
-        except ImportError:
-            print("Colorama module not found, proceeding without colored logging.")
-            # No colors, but include 'RESET' for consistency
-            COLORS = {"RESET": ""}
-
-    def __init__(self, *args, **kwargs) -> None:
-        """Initialize the formatter with specified format strings."""
-        super().__init__(*args, **kwargs)
-        self.colors = ColoredFormatter.COLORS
-
-    def format(self, record) -> str:
-        """Format the specified record as text."""
-        record.color = self.colors.get(record.levelname, "")
-        record.reset = self.colors["RESET"]
-        return super().format(record)
-
-
-class CleanFormatter(logging.Formatter):
-    """Minimal formatter for CLI output — message only, color for warnings/errors."""
-
-    LEVEL_COLORS = {
-        "WARNING": Color.YELLOW,
-        "ERROR": Color.RED,
-        "CRITICAL": Color.BOLD_RED,
-    }
-
-    def format(self, record) -> str:
-        color = self.LEVEL_COLORS.get(record.levelname, "")
-        reset = Color.END if color else ""
-        return f"{color}{record.getMessage()}{reset}"
 
 
 def main():

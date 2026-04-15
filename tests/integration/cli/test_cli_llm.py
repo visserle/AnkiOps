@@ -88,6 +88,8 @@ def test_cli_llm_dispatches_run():
     run_task.assert_called_once()
     assert run_task.call_args.kwargs["task_name"] == "grammar"
     assert run_task.call_args.kwargs["deck_override"] is None
+    callback = run_task.call_args.kwargs.get("progress_callback")
+    assert callback is None or callable(callback)
 
 
 def test_cli_llm_dispatches_run_with_deck_override():
