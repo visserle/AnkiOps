@@ -31,11 +31,6 @@ class LlmItemStatus(Enum):
     CANCELED = "canceled"
 
 
-class LlmAttemptResultType(Enum):
-    SUCCEEDED = "succeeded"
-    ERRORED = "errored"
-
-
 class LlmJobStatus(Enum):
     RUNNING = "running"
     COMPLETED = "completed"

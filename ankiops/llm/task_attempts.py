@@ -8,7 +8,6 @@ from .llm_db import LlmDb
 from .llm_errors import LlmFatalError, LlmNoteError
 from .task_runtime_types import EligibleCandidate
 from .task_types import (
-    LlmAttemptResultType,
     LlmItemStatus,
     PreparedAttemptRequest,
     ProviderAttemptErrorContext,
@@ -43,7 +42,6 @@ class AttemptRecorder:
         self._write_attempt(
             candidate=candidate,
             prepared_request=prepared_request,
-            result_type=LlmAttemptResultType.SUCCEEDED,
             provider_message_id=outcome.provider_message_id,
             response_model_id=outcome.response_model_id,
             provider_request_id=outcome.request_id,
@@ -52,7 +50,6 @@ class AttemptRecorder:
             input_tokens=outcome.input_tokens,
             output_tokens=outcome.output_tokens,
             retry_count=outcome.retry_count,
-            error_type=None,
             error_message=None,
             parsed_update_json=parsed_update,
             rate_limit_headers_json=outcome.rate_limit_headers,
@@ -67,9 +64,7 @@ class AttemptRecorder:
         prepared_request: PreparedAttemptRequest,
         outcome: ProviderAttemptOutcome | None,
         error: LlmNoteError | LlmFatalError,
-        error_type: str,
         item_status: LlmItemStatus,
-        result_type: LlmAttemptResultType,
     ) -> None:
         context = _error_context_for_attempt(outcome=outcome, error=error)
         parsed_update = None
@@ -81,7 +76,6 @@ class AttemptRecorder:
         self._write_attempt(
             candidate=candidate,
             prepared_request=prepared_request,
-            result_type=result_type,
             provider_message_id=(
                 context.provider_message_id if context is not None else None
             ),
@@ -94,7 +88,6 @@ class AttemptRecorder:
             input_tokens=context.input_tokens if context is not None else 0,
             output_tokens=context.output_tokens if context is not None else 0,
             retry_count=context.retry_count if context is not None else 0,
-            error_type=error_type,
             error_message=str(error),
             parsed_update_json=parsed_update,
             rate_limit_headers_json=(
@@ -118,7 +111,6 @@ class AttemptRecorder:
         *,
         candidate: EligibleCandidate,
         prepared_request: PreparedAttemptRequest,
-        result_type: LlmAttemptResultType,
         provider_message_id: str | None,
         response_model_id: str | None,
         provider_request_id: str | None,
@@ -127,7 +119,6 @@ class AttemptRecorder:
         input_tokens: int,
         output_tokens: int,
         retry_count: int,
-        error_type: str | None,
         error_message: str | None,
         parsed_update_json: dict[str, Any] | None,
         rate_limit_headers_json: dict[str, str] | None,
@@ -136,18 +127,15 @@ class AttemptRecorder:
     ) -> None:
         attempt_id = self._db.insert_attempt(
             item_id=candidate.item_id,
-            attempt_no=1,
             provider=self._provider,
             provider_message_id=provider_message_id,
             response_model_id=response_model_id,
             provider_request_id=provider_request_id,
             stop_reason=stop_reason,
-            result_type=result_type,
             latency_ms=latency_ms,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             retry_count=retry_count,
-            error_type=error_type,
             error_message=error_message,
             parsed_update_json=parsed_update_json,
             rate_limit_headers_json=rate_limit_headers_json,

@@ -35,7 +35,6 @@ from .task_options import (
 from .task_planner import build_task_plan_result
 from .task_runtime_types import EligibleCandidate
 from .task_types import (
-    LlmAttemptResultType,
     LlmItemStatus,
     LlmJobResult,
     LlmJobStatus,
@@ -426,9 +425,7 @@ class LlmTaskExecutor:
                     prepared_request=prepared_request,
                     outcome=outcome,
                     error=error,
-                    error_type="fatal_error",
                     item_status=LlmItemStatus.FATAL_ERROR,
-                    result_type=LlmAttemptResultType.ERRORED,
                 )
             raise
         except LlmNoteError as error:
@@ -439,13 +436,11 @@ class LlmTaskExecutor:
                     prepared_request=prepared_request,
                     outcome=outcome,
                     error=error,
-                    error_type="provider_error" if provider_error else "note_error",
                     item_status=(
                         LlmItemStatus.PROVIDER_ERROR
                         if provider_error
                         else LlmItemStatus.NOTE_ERROR
                     ),
-                    result_type=LlmAttemptResultType.ERRORED,
                 )
             logger.error(
                 "LLM note error for %s in '%s' (%s): %s",
@@ -469,9 +464,7 @@ class LlmTaskExecutor:
                     prepared_request=prepared_request,
                     outcome=outcome,
                     error=fatal_error,
-                    error_type="fatal_error",
                     item_status=LlmItemStatus.FATAL_ERROR,
-                    result_type=LlmAttemptResultType.ERRORED,
                 )
             raise fatal_error from error
 

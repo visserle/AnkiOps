@@ -6,7 +6,7 @@ from importlib import resources
 import pytest
 
 from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.task_types import LlmAttemptResultType, LlmItemStatus, LlmJobStatus
+from ankiops.llm.task_types import LlmItemStatus, LlmJobStatus
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -34,29 +34,24 @@ def _insert_attempt(
     provider_message_id: str,
     response_model_id: str,
     stop_reason: str,
-    result_type: LlmAttemptResultType,
     latency_ms: int,
     input_tokens: int,
     output_tokens: int,
     retry_count: int,
-    error_type: str | None,
     error_message: str | None,
     parsed_update_json: dict[str, object] | None,
 ) -> int:
     return adapter.insert_attempt(
         item_id=item_id,
-        attempt_no=1,
         provider="anthropic",
         provider_message_id=provider_message_id,
         response_model_id=response_model_id,
         provider_request_id=None,
         stop_reason=stop_reason,
-        result_type=result_type,
         latency_ms=latency_ms,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         retry_count=retry_count,
-        error_type=error_type,
         error_message=error_message,
         parsed_update_json=parsed_update_json,
         rate_limit_headers_json=None,
@@ -92,7 +87,6 @@ def test_open_creates_schema_and_indexes(tmp_path):
         assert "idx_llm_job_created" in indexes
         assert "idx_llm_job_item_job" in indexes
         assert "idx_llm_job_item_note_key" in indexes
-        assert "idx_llm_attempt_result" in indexes
 
         job_columns = [
             row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job)")
@@ -154,12 +148,10 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
             provider_message_id="msg_123",
             response_model_id="claude-sonnet-4-6",
             stop_reason="end_turn",
-            result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=901,
             input_tokens=11,
             output_tokens=7,
             retry_count=0,
-            error_type=None,
             error_message=None,
             parsed_update_json={"note_key": "nk-1", "edits": {"Question": "fixed"}},
         )
@@ -274,12 +266,10 @@ def test_enforces_uniqueness_constraints(tmp_path):
             provider_message_id="msg",
             response_model_id="claude-sonnet-4-6",
             stop_reason="end_turn",
-            result_type=LlmAttemptResultType.SUCCEEDED,
             latency_ms=1,
             input_tokens=1,
             output_tokens=1,
             retry_count=0,
-            error_type=None,
             error_message=None,
             parsed_update_json=None,
         )
@@ -290,12 +280,10 @@ def test_enforces_uniqueness_constraints(tmp_path):
                 provider_message_id="msg2",
                 response_model_id="claude-sonnet-4-6",
                 stop_reason="end_turn",
-                result_type=LlmAttemptResultType.SUCCEEDED,
                 latency_ms=1,
                 input_tokens=1,
                 output_tokens=1,
                 retry_count=0,
-                error_type=None,
                 error_message=None,
                 parsed_update_json=None,
             )
@@ -379,12 +367,10 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                     provider_message_id="msg",
                     response_model_id="claude-sonnet-4-6",
                     stop_reason="end_turn",
-                    result_type=LlmAttemptResultType.ERRORED,
                     latency_ms=1,
                     input_tokens=1,
                     output_tokens=1,
                     retry_count=0,
-                    error_type="note_error",
                     error_message="broken",
                     parsed_update_json=None,
                 )

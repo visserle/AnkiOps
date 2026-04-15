@@ -15,7 +15,6 @@ from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 
 from .model_registry import parse_model
 from .task_types import (
-    LlmAttemptResultType,
     LlmItemStatus,
     LlmJobStatus,
     TaskRunSummary,
@@ -180,9 +179,6 @@ class LlmDb:
 
     def _create_schema(self) -> None:
         item_status_check = _enum_check_sql([status.value for status in LlmItemStatus])
-        attempt_result_check = _enum_check_sql(
-            [result.value for result in LlmAttemptResultType]
-        )
         job_status_check = _enum_check_sql([status.value for status in LlmJobStatus])
 
         with self._conn:
@@ -224,26 +220,21 @@ class LlmDb:
 
                 CREATE TABLE IF NOT EXISTS llm_item_attempt (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_item_id INTEGER NOT NULL,
-                    attempt_no INTEGER NOT NULL,
+                    job_item_id INTEGER NOT NULL UNIQUE,
                     provider TEXT NOT NULL,
                     provider_message_id TEXT,
                     response_model_id TEXT,
                     provider_request_id TEXT,
                     stop_reason TEXT,
-                    result_type TEXT NOT NULL
-                        CHECK (result_type IN {attempt_result_check}),
                     latency_ms INTEGER NOT NULL,
                     input_tokens INTEGER NOT NULL,
                     output_tokens INTEGER NOT NULL,
                     retry_count INTEGER NOT NULL,
-                    error_type TEXT,
                     error_message TEXT,
                     rate_limit_headers_json TEXT,
                     parsed_update_json TEXT,
                     created_at TEXT NOT NULL,
                     completed_at TEXT NOT NULL,
-                    UNIQUE(job_item_id, attempt_no),
                     FOREIGN KEY(job_item_id)
                         REFERENCES llm_job_item(id) ON DELETE CASCADE
                 );
@@ -274,10 +265,6 @@ class LlmDb:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_llm_job_item_note_key "
                 "ON llm_job_item(note_key)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_llm_attempt_result "
-                "ON llm_item_attempt(result_type)"
             )
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_llm_attempt_item "
@@ -435,18 +422,15 @@ class LlmDb:
         self,
         *,
         item_id: int,
-        attempt_no: int,
         provider: str,
         provider_message_id: str | None,
         response_model_id: str | None,
         provider_request_id: str | None,
         stop_reason: str | None,
-        result_type: LlmAttemptResultType,
         latency_ms: int,
         input_tokens: int,
         output_tokens: int,
         retry_count: int,
-        error_type: str | None,
         error_message: str | None,
         parsed_update_json: dict[str, Any] | None,
         rate_limit_headers_json: dict[str, str] | None,
@@ -455,28 +439,25 @@ class LlmDb:
         cursor = self._write(
             """
             INSERT INTO llm_item_attempt (
-                job_item_id, attempt_no, provider, provider_message_id,
+                job_item_id, provider, provider_message_id,
                 response_model_id, provider_request_id,
-                stop_reason, result_type, latency_ms,
-                input_tokens, output_tokens, retry_count, error_type,
+                stop_reason, latency_ms,
+                input_tokens, output_tokens, retry_count,
                 error_message, rate_limit_headers_json, parsed_update_json,
                 created_at, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 item_id,
-                attempt_no,
                 provider,
                 provider_message_id,
                 response_model_id,
                 provider_request_id,
                 stop_reason,
-                result_type.value,
                 latency_ms,
                 input_tokens,
                 output_tokens,
                 retry_count,
-                error_type,
                 error_message,
                 (
                     self._as_json(rate_limit_headers_json)
