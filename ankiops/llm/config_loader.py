@@ -161,9 +161,7 @@ def _parse_field_access_value(value: Any, *, path: Path) -> FieldAccess:
         if normalized == access.value:
             return access
     supported = ", ".join(access.value for access in FieldAccess)
-    raise LlmConfigError(
-        f"{path}: 'fields.default_access' must be one of: {supported}"
-    )
+    raise LlmConfigError(f"{path}: 'fields.default_access' must be one of: {supported}")
 
 
 def _validate_field_patterns(
