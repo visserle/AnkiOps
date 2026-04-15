@@ -20,7 +20,6 @@ class FieldAccess(Enum):
 
 class LlmItemStatus(Enum):
     QUEUED = "queued"
-    SKIPPED_DECK_SCOPE = "skipped_deck_scope"
     SKIPPED_NO_EDITABLE_FIELDS = "skipped_no_editable_fields"
     INVALID_NOTE = "invalid_note"
     SUCCEEDED_UPDATED = "succeeded_updated"
@@ -159,7 +158,6 @@ class TaskRunSummary:
     eligible: int = 0
     updated: int = 0
     unchanged: int = 0
-    skipped_deck_scope: int = 0
     skipped_no_editable_fields: int = 0
     errors: int = 0
     canceled: int = 0
@@ -171,7 +169,7 @@ class TaskRunSummary:
 
     @property
     def skipped(self) -> int:
-        return self.skipped_deck_scope + self.skipped_no_editable_fields
+        return self.skipped_no_editable_fields
 
     def format(self) -> str:
         base = (

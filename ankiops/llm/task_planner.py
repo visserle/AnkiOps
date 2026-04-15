@@ -32,11 +32,6 @@ def build_task_plan_result(
         item.payload for item in eligible_items if item.payload is not None
     ]
     eligible = len(eligible_items)
-    skipped_deck_scope = sum(
-        1
-        for item in snapshot.items
-        if item.item_status is LlmItemStatus.SKIPPED_DECK_SCOPE
-    )
     skipped_no_editable_fields = sum(
         1
         for item in snapshot.items
@@ -57,7 +52,6 @@ def build_task_plan_result(
         decks_matched=snapshot.counts.decks_matched,
         notes_seen=snapshot.counts.notes_seen,
         eligible=eligible,
-        skipped_deck_scope=skipped_deck_scope,
         skipped_no_editable_fields=skipped_no_editable_fields,
         errors=errors,
         requests=eligible,
@@ -120,9 +114,7 @@ def _build_plan_field_surface(
     observed_note_types = {
         item.note_type
         for item in snapshot_items
-        if item.note_type is not None
-        and item.note_type_config is not None
-        and item.item_status is not LlmItemStatus.SKIPPED_DECK_SCOPE
+        if item.note_type is not None and item.note_type_config is not None
     }
     field_surface: list[PlanFieldSurface] = []
     for note_type in sorted(observed_note_types):

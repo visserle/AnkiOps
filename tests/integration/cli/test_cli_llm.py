@@ -51,7 +51,6 @@ def _plan_result() -> TaskPlanResult:
             decks_matched=1,
             notes_seen=2,
             eligible=2,
-            skipped_deck_scope=0,
             skipped_no_editable_fields=0,
             errors=0,
             requests=2,

@@ -17,8 +17,6 @@ def record_discovery_snapshot(
     snapshot: DiscoverySnapshot,
     logger: logging.Logger,
 ) -> list[EligibleCandidate]:
-    _log_skipped_decks(snapshot.items, logger=logger)
-
     candidates: list[EligibleCandidate] = []
     for item in snapshot.items:
         candidate = _record_discovery_item(
@@ -37,22 +35,6 @@ def record_discovery_snapshot(
         notes_seen=snapshot.counts.notes_seen,
     )
     return candidates
-
-
-def _log_skipped_decks(items: list[DiscoveryItem], *, logger: logging.Logger) -> None:
-    skipped_deck_counts: dict[str, int] = {}
-    for item in items:
-        if item.item_status is not LlmItemStatus.SKIPPED_DECK_SCOPE:
-            continue
-        skipped_deck_counts[item.deck_name] = (
-            skipped_deck_counts.get(item.deck_name, 0) + 1
-        )
-    for deck_name, skipped_count in skipped_deck_counts.items():
-        logger.debug(
-            "Skipping deck '%s' (%d notes): outside task scope",
-            deck_name,
-            skipped_count,
-        )
 
 
 def _record_discovery_item(

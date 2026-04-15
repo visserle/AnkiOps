@@ -571,7 +571,6 @@ class LlmDb:
                 SUM(
                     CASE
                         WHEN item_status NOT IN (
-                            'skipped_deck_scope',
                             'skipped_no_editable_fields',
                             'invalid_note'
                         )
@@ -585,9 +584,6 @@ class LlmDb:
                 SUM(
                     CASE WHEN item_status = 'succeeded_unchanged' THEN 1 ELSE 0 END
                 ) AS unchanged,
-                SUM(
-                    CASE WHEN item_status = 'skipped_deck_scope' THEN 1 ELSE 0 END
-                ) AS skipped_deck_scope,
                 SUM(
                     CASE
                         WHEN item_status = 'skipped_no_editable_fields'
@@ -634,7 +630,6 @@ class LlmDb:
         summary.eligible = int(item_counts["eligible"] or 0)
         summary.updated = int(item_counts["updated"] or 0)
         summary.unchanged = int(item_counts["unchanged"] or 0)
-        summary.skipped_deck_scope = int(item_counts["skipped_deck_scope"] or 0)
         summary.skipped_no_editable_fields = int(
             item_counts["skipped_no_editable_fields"] or 0
         )

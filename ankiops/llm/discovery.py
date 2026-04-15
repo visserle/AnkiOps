@@ -124,8 +124,9 @@ def discover_candidates(
         decks_seen += 1
         notes_seen += len(notes)
         in_scope = task.decks.matches(deck_name)
-        if in_scope:
-            decks_matched += 1
+        if not in_scope:
+            continue
+        decks_matched += 1
 
         for note in notes:
             if not isinstance(note, dict):
@@ -137,23 +138,6 @@ def discover_candidates(
             note_type_value = (
                 note_type_name if isinstance(note_type_name, str) else None
             )
-
-            if not in_scope:
-                items.append(
-                    DiscoveryItem(
-                        ordinal=ordinal,
-                        deck_name=deck_name,
-                        note_key=note_key_value,
-                        note_type=note_type_value,
-                        item_status=LlmItemStatus.SKIPPED_DECK_SCOPE,
-                        skip_reason="outside task scope",
-                        error_message=None,
-                        payload=None,
-                        note_type_config=None,
-                        serialized_note=None,
-                    )
-                )
-                continue
 
             note_type_config = (
                 note_type_configs.get(note_type_name)
