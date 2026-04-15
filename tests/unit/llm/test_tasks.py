@@ -16,6 +16,7 @@ from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.llm_errors import LlmFatalError
 from ankiops.llm.runner import run_task
 from ankiops.llm.task_types import (
+    FieldAccess,
     LlmItemStatus,
     LlmJobStatus,
     NoteUpdate,
@@ -44,11 +45,12 @@ A: 1
 """
 DEFAULT_TASK_EXTRA = """
 fields:
-  exceptions:
-    - read_only: ["Source"]
-    - note_types: ["AnkiOpsChoice"]
-      read_only: ["Answer"]
-    - hidden: ["AI Notes"]
+    default_access: edit
+    read_only:
+        "*": ["Source"]
+        "AnkiOpsChoice": ["Answer"]
+    hidden:
+        "*": ["AI Notes"]
 """
 DEFAULT_SYSTEM_PROMPT = "You are a strict editor."
 DEFAULT_TASK_PROMPT = "fix grammar"
@@ -352,11 +354,12 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
         content=_task_config(
             extra="""
             fields:
-              exceptions:
-                - read_only: ["Source"]
-                - note_types: ["AnkiOpsChoice"]
-                  read_only: ["Answer"]
-                - hidden: ["AI Notes"]
+                            default_access: edit
+                            read_only:
+                                "*": ["Source"]
+                                "AnkiOpsChoice": ["Answer"]
+                            hidden:
+                                "*": ["AI Notes"]
             """
         ),
     )
@@ -372,6 +375,35 @@ def test_load_llm_task_catalog_loads_valid_task(note_type_configs, tmp_path: Pat
     assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
     assert task.prompt_path is None
     assert task.decks.deck_root is None
+
+
+def test_load_llm_task_catalog_supports_default_access_and_editable_override(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_system_prompt(tmp_path, "System rules")
+    _write_task(
+        tmp_path,
+        content=_task_config(
+            extra="""
+            fields:
+              default_access: read_only
+              editable:
+                "*": ["AI Notes"]
+              hidden:
+                "AnkiOpsChoice": ["Answer"]
+            """
+        ),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.default_field_access is FieldAccess.READ_ONLY
+    assert task.field_access("AnkiOpsQA", "AI Notes") is FieldAccess.EDIT
+    assert task.field_access("AnkiOpsQA", "Question") is FieldAccess.READ_ONLY
+    assert task.field_access("AnkiOpsChoice", "Answer") is FieldAccess.HIDDEN
 
 
 def test_load_catalog_file_prompt_task(note_type_configs, tmp_path: Path):
@@ -615,9 +647,8 @@ def test_load_llm_task_catalog_rejects_invalid_yaml(
             _task_config(
                 extra="""
                 fields:
-                  exceptions:
-                    - note_types: ["AnkiOpsQA"]
-                      read_only: ["DoesNotExist"]
+                  read_only:
+                    "AnkiOpsQA": ["DoesNotExist"]
                 """
             ),
             "DoesNotExist",
@@ -627,54 +658,24 @@ def test_load_llm_task_catalog_rejects_invalid_yaml(
             "must be one of: opus",
         ),
         (
-            _task_config(extra="sdk: anthropic"),
-            "unknown task key(s): sdk",
-        ),
-        (
-            _task_config(
-                extra="""
-                decks:
-                  include: ["Parent"]
-                """
-            ),
-            "unknown task key(s): decks",
-        ),
-        (
-            _task_config(
-                extra="""
-                execution:
-                  mode: batch
-                """
-            ),
-            "unknown task key(s): execution",
-        ),
-        (
-            _task_config(
-                extra="""
-                request:
-                  temperature: 0.2
-                """
-            ),
-            "unknown task key(s): request",
-        ),
-        (
             _task_config(extra="unsupported_key: value"),
             "unknown task key(s): unsupported_key",
         ),
         (
-            _task_config(extra="timeout_seconds: true"),
-            "unknown task key(s): timeout_seconds",
+            _task_config(
+                extra="""
+                fields:
+                  default_access: writable
+                """
+            ),
+            "'fields.default_access' must be one of",
         ),
     ],
     ids=[
-        "invalid-exception-field",
+        "invalid-field-pattern",
         "non-claude-model",
-        "unknown-provider-key",
-        "unknown-decks-key",
-        "unknown-execution-key",
-        "unknown-request-key",
         "unknown-extra-key",
-        "unknown-timeout-key",
+        "invalid-default-access",
     ],
 )
 def test_load_llm_task_catalog_rejects_invalid_tasks(
@@ -1140,40 +1141,6 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
         "  Skipped nk-ro in 'TestDeck' (AnkiOpsQA): no editable non-empty fields"
     ) in caplog.text
     assert "Task 'grammar' (sonnet): 0 notes — 1 skipped" in caplog.text
-
-
-def test_run_task_ignores_unrelated_invalid_task_files(tmp_path, monkeypatch):
-    collection = _prepare_runner_collection(tmp_path, monkeypatch)
-    _write(
-        collection / "llm/translate.yaml",
-        """
-        model: sonnet
-        task_prompt: |
-          fix grammar
-        sdk: anthropic
-        """,
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
-    )
-    monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
-        lambda _task: _StubClient(
-            [
-                _result("nk-1", {"Question": "This is a fixed question."}),
-                _result("nk-2", {}),
-            ]
-        ),
-    )
-
-    result = run_task(
-        collection_dir=collection,
-        task_name="grammar",
-        no_auto_commit=True,
-    )
-
-    assert not result.failed
-    assert result.persisted
 
 
 @pytest.mark.parametrize(

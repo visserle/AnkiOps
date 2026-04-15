@@ -456,7 +456,9 @@ def test_retry_after_seconds_parses_http_date_header():
         response=httpx.Response(
             429,
             headers={"Retry-After": retry_after_date},
-            request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
+            request=httpx.Request(
+                "POST", "https://api.example.com/v1/chat/completions"
+            ),
         ),
         body={"error": {"type": "rate_limit_exceeded"}},
     )
@@ -489,8 +491,10 @@ def test_throttle_delay_from_headers_prefers_retry_after_ms():
 
 def test_throttle_delay_from_headers_supports_iso_reset_timestamp():
     reset_at = (
-        datetime.now(timezone.utc) + timedelta(seconds=30)
-    ).isoformat().replace("+00:00", "Z")
+        (datetime.now(timezone.utc) + timedelta(seconds=30))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     delay = _throttle_delay_from_headers(
         {
             "anthropic-ratelimit-requests-remaining": "0",

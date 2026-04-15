@@ -5,5 +5,6 @@ task_prompt: |
   If there are any issues with the content of the card, add a detailed explanation of the issues. 
 
 fields:
-  exceptions:
-    - editable: ["AI Notes"]
+  default_access: read_only
+  editable:
+    "*": ["AI Notes"]

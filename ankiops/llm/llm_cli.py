@@ -354,11 +354,11 @@ def run_llm(
                     [
                         task.name,
                         str(task.model),
-                        str(len(task.field_exceptions)),
+                        str(len(task.field_rules)),
                     ]
                 )
             _log_table(
-                ["Name", "Model", "Exceptions"],
+                ["Name", "Model", "Field rules"],
                 task_rows,
             )
         else:

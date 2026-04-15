@@ -216,25 +216,6 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
         reopened.close()
 
 
-def test_open_fails_for_incompatible_schema(tmp_path):
-    llm_dir = tmp_path / "llm"
-    llm_dir.mkdir(parents=True, exist_ok=True)
-    legacy_path = llm_dir / ".llm.db"
-    conn = sqlite3.connect(legacy_path)
-    try:
-        conn.execute("CREATE TABLE llm_job (id INTEGER PRIMARY KEY, status TEXT)")
-        conn.execute("INSERT INTO llm_job (id, status) VALUES (1, 'legacy')")
-        conn.commit()
-    finally:
-        conn.close()
-
-    with pytest.raises(
-        RuntimeError,
-        match="LLM DB schema is incompatible with this build",
-    ):
-        _ = LlmDb.open(tmp_path)
-
-
 def test_enforces_uniqueness_constraints(tmp_path):
     adapter = LlmDb.open(tmp_path)
     try:

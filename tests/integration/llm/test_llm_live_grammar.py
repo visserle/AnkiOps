@@ -52,7 +52,9 @@ def _env_float(name: str, default: float) -> float:
     return max(value, 0.0)
 
 
-def _max_allowed_errors(*, total_notes: int, env_name: str, default_ratio: float) -> int:
+def _max_allowed_errors(
+    *, total_notes: int, env_name: str, default_ratio: float
+) -> int:
     ratio = min(_env_float(env_name, default_ratio), 1.0)
     return int(total_notes * ratio)
 
@@ -139,9 +141,9 @@ def _eject_groq_llm_files(collection_dir: Path) -> None:
     )
 
     grammar_task = (
-        resources.files("ankiops.llm").joinpath("grammar.yaml").read_text(
-            encoding="utf-8"
-        )
+        resources.files("ankiops.llm")
+        .joinpath("grammar.yaml")
+        .read_text(encoding="utf-8")
     )
     grammar_lines = grammar_task.splitlines()
     if grammar_lines and grammar_lines[0].startswith("model:"):
@@ -316,9 +318,7 @@ def require_live_llm() -> None:
 @pytest.fixture(scope="module")
 def require_live_llm_stress() -> None:
     if os.getenv("ANKIOPS_RUN_LIVE_LLM_STRESS") != "1":
-        pytest.skip(
-            "Set ANKIOPS_RUN_LIVE_LLM_STRESS=1 to run stress live LLM tests."
-        )
+        pytest.skip("Set ANKIOPS_RUN_LIVE_LLM_STRESS=1 to run stress live LLM tests.")
 
 
 @pytest.mark.live_llm
@@ -406,7 +406,9 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
 
 @pytest.mark.live_llm
 @pytest.mark.usefixtures("require_live_llm")
-def test_live_grammar_mixed_correctness_robustness_and_telemetry(tmp_path: Path) -> None:
+def test_live_grammar_mixed_correctness_robustness_and_telemetry(
+    tmp_path: Path,
+) -> None:
     mixed_notes = _env_int("ANKIOPS_LIVE_LLM_MIXED_NOTES", 12)
     source_markdown = _build_mixed_deck_markdown(mixed_notes)
     _bootstrap_collection(tmp_path, deck_markdown=source_markdown)
@@ -515,8 +517,7 @@ def test_live_grammar_pressure_robustness_and_speed(tmp_path: Path) -> None:
             for item in detail.items
         )
         assert all(
-            item.item_status
-            not in {LlmItemStatus.FATAL_ERROR, LlmItemStatus.CANCELED}
+            item.item_status not in {LlmItemStatus.FATAL_ERROR, LlmItemStatus.CANCELED}
             for item in detail.items
         )
         attempt_metrics = _collect_attempt_metrics(db, job_id=job_id)
@@ -579,8 +580,7 @@ def test_live_grammar_stress_large_batch_optional(tmp_path: Path) -> None:
             for item in detail.items
         )
         assert all(
-            item.item_status
-            not in {LlmItemStatus.FATAL_ERROR, LlmItemStatus.CANCELED}
+            item.item_status not in {LlmItemStatus.FATAL_ERROR, LlmItemStatus.CANCELED}
             for item in detail.items
         )
         attempt_metrics = _collect_attempt_metrics(db, job_id=job_id)

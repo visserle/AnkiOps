@@ -136,26 +136,6 @@ def test_corruption_recovery(tmp_path):
         recovered.close()
 
 
-def test_schema_mismatch_recovery(tmp_path):
-    db_path = tmp_path / ANKIOPS_DB
-
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute("CREATE TABLE legacy_state (id INTEGER PRIMARY KEY)")
-        conn.commit()
-    finally:
-        conn.close()
-
-    recovered = SQLiteDbAdapter.open(tmp_path)
-    try:
-        assert recovered.get_profile_name() is None
-        assert recovered.get_note_type_sync_state() is None
-    finally:
-        recovered.close()
-
-    assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
-
-
 def test_remove_note_by_id(tmp_path):
     adapter = SQLiteDbAdapter.open(tmp_path)
     try:

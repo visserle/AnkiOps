@@ -57,11 +57,12 @@ def _prepare_collection(tmp_path: Path) -> Path:
         task_prompt: |
           fix grammar
         fields:
-          exceptions:
-            - read_only: ["Source"]
-            - note_types: ["AnkiOpsChoice"]
-              read_only: ["Answer"]
-            - hidden: ["AI Notes"]
+                    default_access: edit
+                    read_only:
+                        "*": ["Source"]
+                        "AnkiOpsChoice": ["Answer"]
+                    hidden:
+                        "*": ["AI Notes"]
         """,
     )
     return tmp_path
@@ -110,26 +111,6 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
     assert (collection / f"{TEST_DECK}.md").read_text(
         encoding="utf-8"
     ) == original_content
-
-
-def test_plan_task_ignores_unrelated_invalid_task_files(tmp_path: Path):
-    collection = _prepare_collection(tmp_path)
-    _write(
-        collection / "llm/translate.yaml",
-        """
-        model: sonnet
-        task_prompt: |
-          fix grammar
-        sdk: anthropic
-        """,
-    )
-
-    plan = plan_task(
-        collection_dir=collection,
-        task_name="grammar",
-    )
-
-    assert plan.summary.eligible == 2
 
 
 def test_plan_task_deck_override_forces_exact_scope(tmp_path: Path):

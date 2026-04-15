@@ -220,18 +220,22 @@ task_prompt: |
   Do not add facts or change correctness.
 
 fields:
-  exceptions:
-    - hidden: ["AI Notes"]
-    - note_types: ["AnkiOpsChoice"]
-      read_only: ["Answer"]
+  default_access: edit
+  hidden:
+    "*": ["AI Notes"]
+  read_only:
+    "AnkiOpsChoice": ["Answer"]
 ```
 
 - Required keys: `model`, `system_prompt`, `task_prompt`
 - `model` must reference a model name from `llm/_models.yaml`
 - `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
 - Default templates use `system_prompt: !file _system_prompt.md`
-- `fields.exceptions` is optional
-- `fields.exceptions` controls per-note-type field access: `read_only` fields are sent for context but cannot be edited, while `hidden` fields are omitted from LLM input/output
+- `fields` is optional
+- `fields.default_access` sets the baseline access for all note fields (`edit`, `read_only`, `hidden`)
+- `fields.editable`, `fields.read_only`, and `fields.hidden` map note-type patterns to field pattern lists
+- Access precedence is `hidden` > `editable` > `read_only` > `default_access`
+- Example: to make only `AI Notes` editable everywhere, set `default_access: read_only` and `editable: {"*": ["AI Notes"]}`
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
 - Request/execution tuning uses internal defaults; only model can be overridden from CLI (`--model`)
 

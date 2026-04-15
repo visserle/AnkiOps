@@ -12,12 +12,6 @@ from ankiops.log import format_changes
 from .model_registry import ModelSpec
 
 
-class FieldAccess(Enum):
-    EDIT = "edit"
-    READ_ONLY = "read_only"
-    HIDDEN = "hidden"
-
-
 class LlmItemStatus(Enum):
     QUEUED = "queued"
     SKIPPED_NO_EDITABLE_FIELDS = "skipped_no_editable_fields"
@@ -48,14 +42,34 @@ class DeckScope:
         return deck_name.startswith(f"{self.deck_root}::")
 
 
+class FieldAccess(Enum):
+    EDIT = "edit"
+    READ_ONLY = "read_only"
+    HIDDEN = "hidden"
+
+
 @dataclass(frozen=True)
-class FieldExceptionRule:
+class FieldAccessRule:
     note_types: list[str] = field(default_factory=lambda: ["*"])
+    editable: list[str] = field(default_factory=list)
     read_only: list[str] = field(default_factory=list)
     hidden: list[str] = field(default_factory=list)
 
     def matches_note_type(self, note_type: str) -> bool:
         return any(fnmatchcase(note_type, pattern) for pattern in self.note_types)
+
+    def marks_editable(self, field_name: str) -> bool:
+        return self._matches_field_name(self.editable, field_name)
+
+    def marks_read_only(self, field_name: str) -> bool:
+        return self._matches_field_name(self.read_only, field_name)
+
+    def marks_hidden(self, field_name: str) -> bool:
+        return self._matches_field_name(self.hidden, field_name)
+
+    @staticmethod
+    def _matches_field_name(patterns: list[str], field_name: str) -> bool:
+        return any(fnmatchcase(field_name, pattern) for pattern in patterns)
 
 
 @dataclass(frozen=True)
@@ -77,20 +91,34 @@ class TaskConfig:
     prompt_path: Path | None = None
     timeout_seconds: int = 60
     decks: DeckScope = field(default_factory=DeckScope)
-    field_exceptions: list[FieldExceptionRule] = field(default_factory=list)
+    default_field_access: FieldAccess = FieldAccess.EDIT
+    field_rules: list[FieldAccessRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
     concurrency: int = 8
 
     def field_access(self, note_type: str, field_name: str) -> FieldAccess:
-        access = FieldAccess.EDIT
-        for rule in self.field_exceptions:
+        has_editable_override = False
+        has_read_only_override = False
+        has_hidden_override = False
+        for rule in self.field_rules:
             if not rule.matches_note_type(note_type):
                 continue
-            if field_name in rule.read_only and access == FieldAccess.EDIT:
-                access = FieldAccess.READ_ONLY
-            if field_name in rule.hidden:
-                access = FieldAccess.HIDDEN
-        return access
+            if rule.marks_editable(field_name):
+                has_editable_override = True
+            if rule.marks_read_only(field_name):
+                has_read_only_override = True
+            if rule.marks_hidden(field_name):
+                has_hidden_override = True
+
+        # Hidden always wins, editable can override read_only, and read_only
+        # applies when no explicit editable override exists.
+        if has_hidden_override:
+            return FieldAccess.HIDDEN
+        if has_editable_override:
+            return FieldAccess.EDIT
+        if has_read_only_override:
+            return FieldAccess.READ_ONLY
+        return self.default_field_access
 
 
 @dataclass(frozen=True)

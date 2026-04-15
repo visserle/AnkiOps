@@ -19,7 +19,7 @@ from .model_registry import (
     load_model_registry,
     model_registry_path,
 )
-from .task_types import FieldExceptionRule, TaskCatalog, TaskConfig
+from .task_types import FieldAccess, FieldAccessRule, TaskCatalog, TaskConfig
 
 
 class LlmConfigError(ValueError):
@@ -148,100 +148,175 @@ def _parse_str_list(
     return items
 
 
-def _parse_field_exceptions(
+def _parse_field_access_value(value: Any, *, path: Path) -> FieldAccess:
+    if value is None:
+        return FieldAccess.EDIT
+    if not isinstance(value, str):
+        supported = ", ".join(access.value for access in FieldAccess)
+        raise LlmConfigError(
+            f"{path}: 'fields.default_access' must be one of: {supported}"
+        )
+    normalized = value.strip()
+    for access in FieldAccess:
+        if normalized == access.value:
+            return access
+    supported = ", ".join(access.value for access in FieldAccess)
+    raise LlmConfigError(
+        f"{path}: 'fields.default_access' must be one of: {supported}"
+    )
+
+
+def _validate_field_patterns(
+    patterns: list[str],
+    *,
+    available_fields: set[str],
+    entry_path: Path,
+) -> None:
+    for pattern in patterns:
+        if not any(fnmatchcase(field_name, pattern) for field_name in available_fields):
+            raise LlmConfigError(
+                f"{entry_path}: field pattern '{pattern}' does not exist on any "
+                "matched note type"
+            )
+
+
+def _match_note_types(
+    note_types: list[str],
+    *,
+    note_type_names: list[str],
+    entry_path: Path,
+) -> set[str]:
+    matched_types = {
+        note_type_name
+        for note_type_name in note_type_names
+        if any(fnmatchcase(note_type_name, pattern) for pattern in note_types)
+    }
+    if not matched_types:
+        patterns = ", ".join(note_types)
+        raise LlmConfigError(
+            f"{entry_path}: note type pattern(s) match no note types: {patterns}"
+        )
+    return matched_types
+
+
+def _parse_access_rules_by_note_type(
+    value: Any,
+    *,
+    key: str,
+    note_type_names: list[str],
+    field_names: dict[str, set[str]],
+    path: Path,
+) -> list[FieldAccessRule]:
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        raise LlmConfigError(
+            f"{path}: 'fields.{key}' must be a mapping of note-type patterns to "
+            "non-empty field pattern lists"
+        )
+
+    parsed: list[FieldAccessRule] = []
+    for raw_note_type_pattern, raw_field_patterns in value.items():
+        if (
+            not isinstance(raw_note_type_pattern, str)
+            or not raw_note_type_pattern.strip()
+        ):
+            raise LlmConfigError(
+                f"{path}: 'fields.{key}' note type pattern keys must be non-empty "
+                "strings"
+            )
+        note_type_pattern = raw_note_type_pattern.strip()
+        entry_path = Path(f"{path}#fields.{key}.{note_type_pattern}")
+        field_patterns = _parse_str_list(
+            raw_field_patterns,
+            f"fields.{key}.{note_type_pattern}",
+            entry_path,
+            required=True,
+        )
+        matched_types = _match_note_types(
+            [note_type_pattern],
+            note_type_names=note_type_names,
+            entry_path=entry_path,
+        )
+        available_fields = set().union(*(field_names[name] for name in matched_types))
+        _validate_field_patterns(
+            field_patterns,
+            available_fields=available_fields,
+            entry_path=entry_path,
+        )
+
+        parsed.append(
+            FieldAccessRule(
+                note_types=[note_type_pattern],
+                editable=field_patterns if key == "editable" else [],
+                read_only=field_patterns if key == "read_only" else [],
+                hidden=field_patterns if key == "hidden" else [],
+            )
+        )
+
+    return parsed
+
+
+def _parse_field_rules(
     value: Any,
     *,
     note_type_configs: list[NoteTypeConfig],
     path: Path,
-) -> list[FieldExceptionRule]:
+) -> tuple[FieldAccess, list[FieldAccessRule]]:
     if value is None:
-        return []
+        return FieldAccess.EDIT, []
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'fields' must be a mapping")
 
-    unknown_fields = sorted(set(value.keys()) - {"exceptions"})
+    unknown_fields = sorted(
+        set(value.keys()) - {"default_access", "editable", "read_only", "hidden"}
+    )
     if unknown_fields:
         raise LlmConfigError(
             f"{path}: unknown fields config key(s): {', '.join(unknown_fields)}"
         )
 
-    exceptions_value = value.get("exceptions", [])
-    if not isinstance(exceptions_value, list):
-        raise LlmConfigError(f"{path}: 'fields.exceptions' must be a list")
+    default_access = _parse_field_access_value(
+        value.get("default_access"),
+        path=path,
+    )
 
     note_type_names = [config.name for config in note_type_configs]
     field_names = {
         config.name: {field.name for field in config.fields}
         for config in note_type_configs
     }
-    parsed: list[FieldExceptionRule] = []
+    parsed: list[FieldAccessRule] = []
 
-    for index, entry in enumerate(exceptions_value):
-        entry_path = Path(f"{path}#fields.exceptions[{index}]")
-        if not isinstance(entry, dict):
-            raise LlmConfigError(f"{entry_path}: exception must be a mapping")
-
-        unknown = sorted(set(entry.keys()) - {"note_types", "read_only", "hidden"})
-        if unknown:
-            raise LlmConfigError(
-                f"{entry_path}: unknown exception key(s): {', '.join(unknown)}"
-            )
-
-        note_types = (
-            _parse_str_list(
-                entry.get("note_types"),
-                "note_types",
-                entry_path,
-                required=True,
-            )
-            if "note_types" in entry
-            else ["*"]
+    parsed.extend(
+        _parse_access_rules_by_note_type(
+            value.get("editable"),
+            key="editable",
+            note_type_names=note_type_names,
+            field_names=field_names,
+            path=path,
         )
-        read_only = _parse_str_list(
-            entry.get("read_only"),
-            "read_only",
-            entry_path,
-            required=False,
+    )
+    parsed.extend(
+        _parse_access_rules_by_note_type(
+            value.get("read_only"),
+            key="read_only",
+            note_type_names=note_type_names,
+            field_names=field_names,
+            path=path,
         )
-        hidden = _parse_str_list(
-            entry.get("hidden"),
-            "hidden",
-            entry_path,
-            required=False,
+    )
+    parsed.extend(
+        _parse_access_rules_by_note_type(
+            value.get("hidden"),
+            key="hidden",
+            note_type_names=note_type_names,
+            field_names=field_names,
+            path=path,
         )
-        if not read_only and not hidden:
-            raise LlmConfigError(
-                f"{entry_path}: exception must declare 'read_only' or 'hidden'"
-            )
+    )
 
-        matched_types = {
-            note_type_name
-            for note_type_name in note_type_names
-            if any(fnmatchcase(note_type_name, pattern) for pattern in note_types)
-        }
-        if not matched_types:
-            patterns = ", ".join(note_types)
-            raise LlmConfigError(
-                f"{entry_path}: note type pattern(s) match no note types: {patterns}"
-            )
-
-        available_fields = set().union(*(field_names[name] for name in matched_types))
-        for field_name in read_only + hidden:
-            if field_name not in available_fields:
-                raise LlmConfigError(
-                    f"{entry_path}: field '{field_name}' does not exist on any matched "
-                    "note type"
-                )
-
-        parsed.append(
-            FieldExceptionRule(
-                note_types=note_types,
-                read_only=read_only,
-                hidden=hidden,
-            )
-        )
-
-    return parsed
+    return default_access, parsed
 
 
 def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
@@ -296,7 +371,7 @@ def _parse_task(
         key="task_prompt",
         path=path,
     )
-    field_exceptions = _parse_field_exceptions(
+    default_field_access, field_rules = _parse_field_rules(
         mapping.get("fields"),
         note_type_configs=note_type_configs,
         path=path,
@@ -309,7 +384,8 @@ def _parse_task(
         prompt=task_prompt,
         system_prompt_path=system_prompt_path,
         prompt_path=task_prompt_path,
-        field_exceptions=field_exceptions,
+        default_field_access=default_field_access,
+        field_rules=field_rules,
     )
 
 
