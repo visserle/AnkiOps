@@ -156,6 +156,48 @@ def test_parse_model_uses_collection_local_registry(tmp_path):
     assert model.api_key == "$EXAMPLE_API_KEY"
 
 
+def test_parse_model_supports_model_concurrency(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          concurrency: 3
+        """,
+    )
+
+    model = parse_model("local-fast", collection_dir=tmp_path)
+
+    assert model is not None
+    assert model.concurrency == 3
+
+
+def test_parse_model_supports_model_retry_policy(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          retries: 4
+          retry_backoff_seconds: 1.25
+          retry_backoff_jitter: false
+        """,
+    )
+
+    model = parse_model("local-fast", collection_dir=tmp_path)
+
+    assert model is not None
+    assert model.retries == 4
+    assert model.retry_backoff_seconds == 1.25
+    assert model.retry_backoff_jitter is False
+
+
 def test_load_model_registry_rejects_invalid_registry(tmp_path):
     _write_models_file(
         tmp_path,
@@ -168,6 +210,74 @@ def test_load_model_registry_rejects_invalid_registry(tmp_path):
     )
 
     with pytest.raises(ModelRegistryError, match="api_key"):
+        load_model_registry(collection_dir=tmp_path)
+
+
+def test_load_model_registry_rejects_invalid_concurrency(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          concurrency: 0
+        """,
+    )
+
+    with pytest.raises(ModelRegistryError, match="concurrency"):
+        load_model_registry(collection_dir=tmp_path)
+
+
+def test_load_model_registry_rejects_invalid_retries(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          retries: -1
+        """,
+    )
+
+    with pytest.raises(ModelRegistryError, match="retries"):
+        load_model_registry(collection_dir=tmp_path)
+
+
+def test_load_model_registry_rejects_invalid_retry_backoff_seconds(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          retry_backoff_seconds: -0.1
+        """,
+    )
+
+    with pytest.raises(ModelRegistryError, match="retry_backoff_seconds"):
+        load_model_registry(collection_dir=tmp_path)
+
+
+def test_load_model_registry_rejects_invalid_retry_backoff_jitter(tmp_path):
+    _write_models_file(
+        tmp_path,
+        """
+        - model: local-fast
+          model_id: local-fast
+          provider: openai-compatible
+          base_url: https://api.example.com/v1
+          api_key: $EXAMPLE_API_KEY
+          retry_backoff_jitter: nope
+        """,
+    )
+
+    with pytest.raises(ModelRegistryError, match="retry_backoff_jitter"):
         load_model_registry(collection_dir=tmp_path)
 
 

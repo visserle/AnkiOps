@@ -19,15 +19,32 @@ from .model_registry import (
     load_model_registry,
     model_registry_path,
 )
-from .task_types import FieldAccess, FieldAccessRule, TaskCatalog, TaskConfig
+from .task_types import (
+    FieldAccess,
+    FieldAccessRule,
+    TaskCatalog,
+    TaskConfig,
+    TaskRequestOptions,
+)
 
 
 class LlmConfigError(ValueError):
     """Raised when an LLM task config is invalid."""
 
 
-_SUPPORTED_TASK_KEYS_ORDERED = ("model", "system_prompt", "task_prompt", "fields")
+_SUPPORTED_TASK_KEYS_ORDERED = (
+    "model",
+    "system_prompt",
+    "task_prompt",
+    "request",
+    "fields",
+)
 _SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
+_SUPPORTED_REQUEST_KEYS_ORDERED = (
+    "temperature",
+    "max_output_tokens",
+)
+_SUPPORTED_REQUEST_KEYS = set(_SUPPORTED_REQUEST_KEYS_ORDERED)
 
 
 class _FileSource:
@@ -317,6 +334,54 @@ def _parse_field_rules(
     return default_access, parsed
 
 
+def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
+    defaults = TaskRequestOptions()
+    if value is None:
+        return defaults
+    if not isinstance(value, dict):
+        raise LlmConfigError(f"{path}: 'request' must be a mapping")
+
+    unknown = sorted(set(value.keys()) - _SUPPORTED_REQUEST_KEYS)
+    if unknown:
+        allowed = ", ".join(_SUPPORTED_REQUEST_KEYS_ORDERED)
+        raise LlmConfigError(
+            f"{path}: unknown request key(s): {', '.join(unknown)}. "
+            f"Allowed request keys: {allowed}"
+        )
+
+    temperature = defaults.temperature
+    if "temperature" in value:
+        raw_temperature = value.get("temperature")
+        if raw_temperature is None:
+            temperature = None
+        elif isinstance(raw_temperature, bool) or not isinstance(
+            raw_temperature,
+            (int, float),
+        ):
+            raise LlmConfigError(f"{path}: 'request.temperature' must be numeric")
+        else:
+            temperature = float(raw_temperature)
+
+    max_output_tokens = defaults.max_output_tokens
+    if "max_output_tokens" in value:
+        raw_max_output_tokens = value.get("max_output_tokens")
+        if isinstance(raw_max_output_tokens, bool) or not isinstance(
+            raw_max_output_tokens,
+            int,
+        ):
+            raise LlmConfigError(
+                f"{path}: 'request.max_output_tokens' must be an integer"
+            )
+        if raw_max_output_tokens < 1:
+            raise LlmConfigError(f"{path}: 'request.max_output_tokens' must be >= 1")
+        max_output_tokens = raw_max_output_tokens
+
+    return TaskRequestOptions(
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+    )
+
+
 def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
     unknown = sorted(set(mapping.keys()) - _SUPPORTED_TASK_KEYS)
     if unknown:
@@ -374,6 +439,7 @@ def _parse_task(
         note_type_configs=note_type_configs,
         path=path,
     )
+    request = _parse_request_options(mapping.get("request"), path=path)
 
     return TaskConfig(
         name=name,
@@ -384,6 +450,7 @@ def _parse_task(
         prompt_path=task_prompt_path,
         default_field_access=default_field_access,
         field_rules=field_rules,
+        request=request,
     )
 
 

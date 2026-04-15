@@ -56,10 +56,12 @@
   model_id: "gemma4:e4b"
   provider: ollama
   base_url: http://localhost:11434/v1
-  api_key: ollama
+  api_key: none
+  concurrency: 1
 
 - model: gemma4-e2b
   model_id: "gemma4:e2b"
   provider: ollama
   base_url: http://localhost:11434/v1
-  api_key: ollama
+  api_key: none
+  concurrency: 1

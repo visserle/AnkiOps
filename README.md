@@ -231,13 +231,26 @@ fields:
 - `model` must reference a model name from `llm/_models.yaml`
 - `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
 - Default templates use `system_prompt: !file _system_prompt.md`
+- `request` is optional and controls provider request defaults for this task
+  (`temperature`, `max_output_tokens`)
+- Retry and backoff policy is model-level (`llm/_models.yaml`) so provider/infra defaults stay centralized
 - `fields` is optional
 - `fields.default_access` sets the baseline access for all note fields (`editable`, `read_only`, `hidden`)
 - `fields.editable`, `fields.read_only`, and `fields.hidden` map note-type patterns to field pattern lists
 - Access precedence is `hidden` > `editable` > `read_only` > `default_access`
 - Example: to make only `AI Notes` editable everywhere, set `default_access: read_only` and `editable: {"*": ["AI Notes"]}`
 - Without `--deck`, tasks run against the full collection; `--deck <name>` scopes to one exact deck
-- Request/execution tuning uses internal defaults; only model can be overridden from CLI (`--model`)
+
+Optional request tuning example:
+
+```yaml
+model: sonnet
+system_prompt: !file _system_prompt.md
+task_prompt: |
+  Fix grammar while preserving meaning.
+request:
+  max_output_tokens: 1024
+```
 
 Optional file-linked prompt example:
 
@@ -257,9 +270,16 @@ task_prompt: !file grammar.md
   provider: my-openai-compatible
   base_url: https://api.example.com/v1
   api_key: $EXAMPLE_API_KEY
+  concurrency: 8
+  retries: 2
+  retry_backoff_seconds: 0.5
+  retry_backoff_jitter: true
 ```
 
 `api_key` accepts either an env-var reference (`$EXAMPLE_API_KEY`) or a literal API key string.
+`concurrency` is optional and defaults to `8` when omitted.
+`retries`, `retry_backoff_seconds`, and `retry_backoff_jitter` are optional and default to
+`2`, `0.5`, and `true`.
 
 Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and only used for cost estimates.
 

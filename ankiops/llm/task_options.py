@@ -37,18 +37,18 @@ def format_deck_scope(task: TaskConfig) -> str:
 
 
 def format_request_defaults(task: TaskConfig) -> str:
-    max_tokens = task.request.max_output_tokens or 2048
+    max_tokens = task.request.max_output_tokens
     temperature = (
         task.request.temperature if task.request.temperature is not None else "default"
     )
-    execution_text = f"concurrency={task.concurrency}"
+    execution_text = f"concurrency={task.model.concurrency}"
 
     return (
         f"timeout={task.timeout_seconds}s "
         f"max_tokens={max_tokens} temperature={temperature} "
-        f"retries={task.request.retries} "
-        f"retry_backoff={task.request.retry_backoff_seconds}s "
-        f"retry_jitter={str(task.request.retry_backoff_jitter).lower()} "
+        f"retries={task.model.retries} "
+        f"retry_backoff={task.model.retry_backoff_seconds}s "
+        f"retry_jitter={str(task.model.retry_backoff_jitter).lower()} "
         f"{execution_text}"
     )
 

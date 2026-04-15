@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -126,10 +127,6 @@ def test_generate_update_builds_request_and_returns_update(
         update_result = asyncio.run(
             client.generate_update(
                 prepared_request=prepared_request,
-                request_options=TaskRequestOptions(
-                    temperature=0,
-                    max_output_tokens=200,
-                ),
             )
         )
 
@@ -202,25 +199,35 @@ def test_generate_update_rejects_note_level_failures(
             asyncio.run(
                 client.generate_update(
                     prepared_request=prepared_request,
-                    request_options=TaskRequestOptions(),
                 )
             )
 
 
 def test_generate_update_retries_connection_error_once_then_succeeds(
-    client: ProviderClient,
+    monkeypatch,
     note_payload: NotePayload,
     caplog,
 ):
+    retrying_model = replace(
+        TEST_MODEL,
+        retries=1,
+        retry_backoff_seconds=0.2,
+        retry_backoff_jitter=False,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = ProviderClient(
+        TaskConfig(
+            name="grammar",
+            model=retrying_model,
+            system_prompt="System prompt for tests",
+            prompt="Fix grammar",
+        )
+    )
+
     response = _response(content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}')
     connection_error = APIConnectionError(
         message="Connection error.",
         request=httpx.Request("POST", "https://api.example.com/v1/chat/completions"),
-    )
-    request_options = TaskRequestOptions(
-        retries=1,
-        retry_backoff_seconds=0.2,
-        retry_backoff_jitter=False,
     )
 
     with (
@@ -235,13 +242,12 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
-            request_options=request_options,
+            request_options=TaskRequestOptions(),
             model_id="claude-sonnet-4-6",
         )
         update_result = asyncio.run(
             client.generate_update(
                 prepared_request=prepared_request,
-                request_options=request_options,
             )
         )
 
@@ -254,10 +260,26 @@ def test_generate_update_retries_connection_error_once_then_succeeds(
 
 @pytest.mark.parametrize("status_code", [408, 409, 503])
 def test_generate_update_fails_after_exhausting_retries(
-    client: ProviderClient,
+    monkeypatch,
     note_payload: NotePayload,
     status_code: int,
 ):
+    retrying_model = replace(
+        TEST_MODEL,
+        retries=1,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = ProviderClient(
+        TaskConfig(
+            name="grammar",
+            model=retrying_model,
+            system_prompt="System prompt for tests",
+            prompt="Fix grammar",
+        )
+    )
+
     error = APIStatusError(
         message="upstream unavailable",
         response=httpx.Response(
@@ -280,11 +302,7 @@ def test_generate_update_fails_after_exhausting_retries(
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
-            request_options=TaskRequestOptions(
-                retries=1,
-                retry_backoff_seconds=0.25,
-                retry_backoff_jitter=False,
-            ),
+            request_options=TaskRequestOptions(),
             model_id="claude-sonnet-4-6",
         )
         with pytest.raises(
@@ -294,11 +312,6 @@ def test_generate_update_fails_after_exhausting_retries(
             asyncio.run(
                 client.generate_update(
                     prepared_request=prepared_request,
-                    request_options=TaskRequestOptions(
-                        retries=1,
-                        retry_backoff_seconds=0.25,
-                        retry_backoff_jitter=False,
-                    ),
                 )
             )
 
@@ -307,9 +320,25 @@ def test_generate_update_fails_after_exhausting_retries(
 
 
 def test_generate_update_handles_non_retryable_quota_429_without_sleep(
-    client: ProviderClient,
+    monkeypatch,
     note_payload: NotePayload,
 ):
+    retrying_model = replace(
+        TEST_MODEL,
+        retries=3,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = ProviderClient(
+        TaskConfig(
+            name="grammar",
+            model=retrying_model,
+            system_prompt="System prompt for tests",
+            prompt="Fix grammar",
+        )
+    )
+
     error = APIStatusError(
         message="insufficient_quota",
         response=httpx.Response(
@@ -332,11 +361,7 @@ def test_generate_update_handles_non_retryable_quota_429_without_sleep(
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
-            request_options=TaskRequestOptions(
-                retries=3,
-                retry_backoff_seconds=0.25,
-                retry_backoff_jitter=False,
-            ),
+            request_options=TaskRequestOptions(),
             model_id="claude-sonnet-4-6",
         )
         with pytest.raises(
@@ -346,11 +371,6 @@ def test_generate_update_handles_non_retryable_quota_429_without_sleep(
             asyncio.run(
                 client.generate_update(
                     prepared_request=prepared_request,
-                    request_options=TaskRequestOptions(
-                        retries=3,
-                        retry_backoff_seconds=0.25,
-                        retry_backoff_jitter=False,
-                    ),
                 )
             )
 
@@ -359,9 +379,25 @@ def test_generate_update_handles_non_retryable_quota_429_without_sleep(
 
 
 def test_generate_update_respects_retry_after_seconds_hint(
-    client: ProviderClient,
+    monkeypatch,
     note_payload: NotePayload,
 ):
+    retrying_model = replace(
+        TEST_MODEL,
+        retries=1,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = ProviderClient(
+        TaskConfig(
+            name="grammar",
+            model=retrying_model,
+            system_prompt="System prompt for tests",
+            prompt="Fix grammar",
+        )
+    )
+
     response = _response(content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}')
     error = APIStatusError(
         message="rate limited",
@@ -375,12 +411,6 @@ def test_generate_update_respects_retry_after_seconds_hint(
         body={"error": {"type": "rate_limit_exceeded"}},
     )
 
-    request_options = TaskRequestOptions(
-        retries=1,
-        retry_backoff_seconds=0.25,
-        retry_backoff_jitter=False,
-    )
-
     with (
         patch.object(
             client,
@@ -392,13 +422,12 @@ def test_generate_update_respects_retry_after_seconds_hint(
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
-            request_options=request_options,
+            request_options=TaskRequestOptions(),
             model_id="claude-sonnet-4-6",
         )
         asyncio.run(
             client.generate_update(
                 prepared_request=prepared_request,
-                request_options=request_options,
             )
         )
 
@@ -407,9 +436,25 @@ def test_generate_update_respects_retry_after_seconds_hint(
 
 
 def test_generate_update_prefers_retry_after_ms_hint(
-    client: ProviderClient,
+    monkeypatch,
     note_payload: NotePayload,
 ):
+    retrying_model = replace(
+        TEST_MODEL,
+        retries=1,
+        retry_backoff_seconds=0.25,
+        retry_backoff_jitter=False,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    client = ProviderClient(
+        TaskConfig(
+            name="grammar",
+            model=retrying_model,
+            system_prompt="System prompt for tests",
+            prompt="Fix grammar",
+        )
+    )
+
     response = _response(content='{"note_key":"nk-1","edits":{"Question":"Fixed"}}')
     error = APIStatusError(
         message="rate limited",
@@ -423,12 +468,6 @@ def test_generate_update_prefers_retry_after_ms_hint(
         body={"error": {"type": "rate_limit_exceeded"}},
     )
 
-    request_options = TaskRequestOptions(
-        retries=1,
-        retry_backoff_seconds=0.25,
-        retry_backoff_jitter=False,
-    )
-
     with (
         patch.object(
             client,
@@ -440,13 +479,12 @@ def test_generate_update_prefers_retry_after_ms_hint(
         prepared_request = client.prepare_attempt_request(
             note_payload=note_payload,
             task_prompt="Fix grammar",
-            request_options=request_options,
+            request_options=TaskRequestOptions(),
             model_id="claude-sonnet-4-6",
         )
         asyncio.run(
             client.generate_update(
                 prepared_request=prepared_request,
-                request_options=request_options,
             )
         )
 
@@ -612,7 +650,6 @@ def test_generate_update_succeeds_for_ollama_with_thinking_disabled(note_payload
         update_result = asyncio.run(
             client.generate_update(
                 prepared_request=prepared_request,
-                request_options=TaskRequestOptions(),
             )
         )
 

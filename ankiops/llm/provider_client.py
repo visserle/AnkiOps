@@ -65,6 +65,9 @@ class ProviderClient:
 
         self._system_prompt = task.system_prompt
         self._provider = task.model.provider.strip().lower()
+        self._retries = task.model.retries
+        self._retry_backoff_seconds = task.model.retry_backoff_seconds
+        self._retry_backoff_jitter = task.model.retry_backoff_jitter
         self._throttle = _InJobThrottle()
         self._client = AsyncOpenAI(
             api_key=api_key,
@@ -85,7 +88,7 @@ class ProviderClient:
         model_id: str,
     ) -> PreparedAttemptRequest:
         contract = build_note_update_contract(note_payload)
-        max_tokens = request_options.max_output_tokens or 2048
+        max_tokens = request_options.max_output_tokens
         system_prompt_text = build_system_prompt(self._system_prompt)
         user_message_text = build_user_message(task_prompt, note_payload)
         # Anthropic's OpenAI-compatible endpoint requires strict=true for json_schema.
@@ -120,7 +123,6 @@ class ProviderClient:
         self,
         *,
         prepared_request: PreparedAttemptRequest,
-        request_options: TaskRequestOptions,
     ) -> ProviderAttemptOutcome:
         note_payload = prepared_request.note_payload
         model_id = str(prepared_request.request_params.get("model") or "")
@@ -170,15 +172,15 @@ class ProviderClient:
                         f"Provider authentication failed: {_api_error_message(error)}"
                     ) from error
                 except APIConnectionError as error:
-                    if retry_count >= request_options.retries:
+                    if retry_count >= self._retries:
                         raise LlmFatalError(
                             f"Provider connection error: {_api_error_message(error)}"
                         ) from error
                     retry_count += 1
                     delay = _retry_delay_seconds(
-                        base_seconds=request_options.retry_backoff_seconds,
+                        base_seconds=self._retry_backoff_seconds,
                         retry_count=retry_count,
-                        jitter=request_options.retry_backoff_jitter,
+                        jitter=self._retry_backoff_jitter,
                     )
                     await self._throttle.bump(delay)
                     skip_throttle_once = True
@@ -186,7 +188,7 @@ class ProviderClient:
                         "Retrying %s after connection error (%d/%d) in %.2fs: %s",
                         note_payload.note_key,
                         retry_count,
-                        request_options.retries,
+                        self._retries,
                         delay,
                         _api_error_message(error),
                     )
@@ -203,15 +205,15 @@ class ProviderClient:
                         provider=self._provider,
                         non_retryable_quota_429=non_retryable_quota_429,
                     ):
-                        if retry_count >= request_options.retries:
+                        if retry_count >= self._retries:
                             raise LlmFatalError(
                                 f"Provider returned HTTP {status_code}: {message}"
                             ) from error
                         retry_count += 1
                         delay = _retry_delay_seconds(
-                            base_seconds=request_options.retry_backoff_seconds,
+                            base_seconds=self._retry_backoff_seconds,
                             retry_count=retry_count,
-                            jitter=request_options.retry_backoff_jitter,
+                            jitter=self._retry_backoff_jitter,
                         )
                         retry_after = _retry_after_seconds(error)
                         if retry_after is not None:
@@ -223,7 +225,7 @@ class ProviderClient:
                             note_payload.note_key,
                             status_code if status_code is not None else "unknown",
                             retry_count,
-                            request_options.retries,
+                            self._retries,
                             delay,
                             message,
                         )

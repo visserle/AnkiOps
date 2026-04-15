@@ -43,7 +43,7 @@ def build_task_plan_result(
     input_tokens_estimate = sum(
         _estimate_note_input_tokens(task, payload) for payload in eligible_payloads
     )
-    max_output_tokens = task.request.max_output_tokens or 2048
+    max_output_tokens = task.request.max_output_tokens
     output_tokens_cap = eligible * max_output_tokens
     summary = TaskRunSummary(
         task_name=task.name,

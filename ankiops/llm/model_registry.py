@@ -19,6 +19,10 @@ _SUPPORTED_MODEL_KEYS = {
     "provider",
     "base_url",
     "api_key",
+    "concurrency",
+    "retries",
+    "retry_backoff_seconds",
+    "retry_backoff_jitter",
     "input_usd_per_mtok",
     "output_usd_per_mtok",
 }
@@ -50,6 +54,10 @@ class ModelSpec:
     provider: str
     base_url: str
     api_key: str
+    concurrency: int = 8
+    retries: int = 2
+    retry_backoff_seconds: float = 0.5
+    retry_backoff_jitter: bool = True
     input_usd_per_mtok: Decimal | None = None
     output_usd_per_mtok: Decimal | None = None
 
@@ -139,6 +147,69 @@ def _parse_decimal(
         raise ModelRegistryError(f"{item_label}: '{key}' must be numeric") from error
 
 
+def _parse_positive_int(
+    value: Any,
+    *,
+    key: str,
+    item_label: str,
+    default: int,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ModelRegistryError(f"{item_label}: '{key}' must be an integer")
+    if value < 1:
+        raise ModelRegistryError(f"{item_label}: '{key}' must be >= 1")
+    return value
+
+
+def _parse_non_negative_int(
+    value: Any,
+    *,
+    key: str,
+    item_label: str,
+    default: int,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ModelRegistryError(f"{item_label}: '{key}' must be an integer")
+    if value < 0:
+        raise ModelRegistryError(f"{item_label}: '{key}' must be >= 0")
+    return value
+
+
+def _parse_non_negative_float(
+    value: Any,
+    *,
+    key: str,
+    item_label: str,
+    default: float,
+) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ModelRegistryError(f"{item_label}: '{key}' must be numeric")
+    parsed = float(value)
+    if parsed < 0:
+        raise ModelRegistryError(f"{item_label}: '{key}' must be >= 0")
+    return parsed
+
+
+def _parse_bool(
+    value: Any,
+    *,
+    key: str,
+    item_label: str,
+    default: bool,
+) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ModelRegistryError(f"{item_label}: '{key}' must be a boolean")
+    return value
+
+
 def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
     item_label = f"models[{index}]"
     if not isinstance(entry, dict):
@@ -173,6 +244,30 @@ def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
             entry.get("api_key"),
             key="api_key",
             item_label=item_label,
+        ),
+        concurrency=_parse_positive_int(
+            entry.get("concurrency"),
+            key="concurrency",
+            item_label=item_label,
+            default=8,
+        ),
+        retries=_parse_non_negative_int(
+            entry.get("retries"),
+            key="retries",
+            item_label=item_label,
+            default=2,
+        ),
+        retry_backoff_seconds=_parse_non_negative_float(
+            entry.get("retry_backoff_seconds"),
+            key="retry_backoff_seconds",
+            item_label=item_label,
+            default=0.5,
+        ),
+        retry_backoff_jitter=_parse_bool(
+            entry.get("retry_backoff_jitter"),
+            key="retry_backoff_jitter",
+            item_label=item_label,
+            default=True,
         ),
         input_usd_per_mtok=_parse_decimal(
             entry.get("input_usd_per_mtok"),

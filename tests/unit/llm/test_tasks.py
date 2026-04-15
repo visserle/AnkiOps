@@ -22,6 +22,7 @@ from ankiops.llm.task_types import (
     NoteUpdate,
     PreparedAttemptRequest,
     ProviderAttemptOutcome,
+    TaskRequestOptions,
 )
 
 TASK_FILE = Path("llm/grammar.yaml")
@@ -175,7 +176,7 @@ class _StubClient:
         model_id,
     ) -> PreparedAttemptRequest:
         del task_prompt
-        max_tokens = request_options.max_output_tokens or 2048
+        max_tokens = request_options.max_output_tokens
         request_params: dict[str, object] = {
             "model": model_id,
             "max_tokens": max_tokens,
@@ -212,7 +213,7 @@ class _OnlineFailFastClient:
         model_id,
     ) -> PreparedAttemptRequest:
         del task_prompt
-        max_tokens = request_options.max_output_tokens or 2048
+        max_tokens = request_options.max_output_tokens
         request_params: dict[str, object] = {
             "model": model_id,
             "max_tokens": max_tokens,
@@ -433,13 +434,15 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
 ):
     _write(
         tmp_path / "llm/_models.yaml",
-        """
-        - model: qwen3-32b
-          model_id: qwen3-32b
-          provider: openai-compatible
-          base_url: https://api.example.com/v1
-          api_key: $EXAMPLE_API_KEY
-        """,
+        "- model: qwen3-32b\n"
+        "  model_id: qwen3-32b\n"
+        "  provider: openai-compatible\n"
+        "  base_url: https://api.example.com/v1\n"
+        "  api_key: $EXAMPLE_API_KEY\n"
+        "  concurrency: 3\n"
+        "  retries: 4\n"
+        "  retry_backoff_seconds: 1.25\n"
+        "  retry_backoff_jitter: false\n",
     )
     _write_task(
         tmp_path,
@@ -455,6 +458,10 @@ def test_load_llm_task_catalog_loads_custom_openai_compatible_model(
     assert task.model.provider == "openai-compatible"
     assert task.model.base_url == "https://api.example.com/v1"
     assert task.model.api_key == "$EXAMPLE_API_KEY"
+    assert task.model.concurrency == 3
+    assert task.model.retries == 4
+    assert task.model.retry_backoff_seconds == 1.25
+    assert task.model.retry_backoff_jitter is False
 
 
 def test_load_llm_task_catalog_rejects_invalid_models_registry(
@@ -511,9 +518,108 @@ def test_load_llm_task_catalog_defaults_execution_when_omitted(
 
     assert not catalog.errors
     task = catalog.tasks_by_name["grammar"]
-    assert task.concurrency == 8
+    assert task.model.concurrency == 8
+    assert task.request == TaskRequestOptions()
     assert task.system_prompt_path == (tmp_path / SYSTEM_PROMPT_FILE).resolve()
     assert task.prompt_path is None
+
+
+def test_load_llm_task_catalog_supports_request_overrides(
+    note_type_configs,
+    tmp_path: Path,
+):
+    _write_system_prompt(tmp_path, "System rules")
+    _write_task(
+        tmp_path,
+        content=_task_config(
+            extra="""
+            request:
+              temperature: 0.25
+              max_output_tokens: 1024
+            """
+        ),
+    )
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.errors
+    task = catalog.tasks_by_name["grammar"]
+    assert task.request == TaskRequestOptions(
+        temperature=0.25,
+        max_output_tokens=1024,
+    )
+
+
+@pytest.mark.parametrize(
+    ("task_content", "expected_error"),
+    [
+        (
+            _task_config(
+                extra="""
+                request: should-be-a-mapping
+                """
+            ),
+            "'request' must be a mapping",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  unsupported: true
+                """
+            ),
+            "unknown request key(s): unsupported",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  max_output_tokens: 0
+                """
+            ),
+            "'request.max_output_tokens' must be >= 1",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  retries: 1
+                """
+            ),
+            "unknown request key(s): retries",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  retry_backoff_seconds: 0.5
+                """
+            ),
+            "unknown request key(s): retry_backoff_seconds",
+        ),
+        (
+            _task_config(
+                extra="""
+                request:
+                  retry_backoff_jitter: true
+                """
+            ),
+            "unknown request key(s): retry_backoff_jitter",
+        ),
+    ],
+)
+def test_load_llm_task_catalog_rejects_invalid_request_options(
+    note_type_configs,
+    tmp_path: Path,
+    task_content: str,
+    expected_error: str,
+):
+    _write_task(tmp_path, content=task_content)
+
+    catalog = load_llm_task_catalog(tmp_path, note_type_configs=note_type_configs)
+
+    assert not catalog.tasks_by_name
+    assert expected_error in next(iter(catalog.errors.values()))
 
 
 def test_load_llm_task_catalog_requires_system_prompt(

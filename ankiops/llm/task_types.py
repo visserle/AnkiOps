@@ -75,10 +75,7 @@ class FieldAccessRule:
 @dataclass(frozen=True)
 class TaskRequestOptions:
     temperature: float | None = None
-    max_output_tokens: int | None = None
-    retries: int = 2
-    retry_backoff_seconds: float = 0.5
-    retry_backoff_jitter: bool = True
+    max_output_tokens: int = 2048
 
 
 @dataclass(frozen=True)
@@ -94,7 +91,6 @@ class TaskConfig:
     default_field_access: FieldAccess = FieldAccess.EDITABLE
     field_rules: list[FieldAccessRule] = field(default_factory=list)
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
-    concurrency: int = 8
 
     def field_access(self, note_type: str, field_name: str) -> FieldAccess:
         has_editable_override = False

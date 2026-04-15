@@ -345,7 +345,7 @@ class LlmTaskExecutor:
         if not candidates:
             return
 
-        in_flight_limit = min(max(task.concurrency, 1), len(candidates))
+        in_flight_limit = min(max(task.model.concurrency, 1), len(candidates))
         next_index = 0
         first_fatal_error: LlmFatalError | None = None
 
@@ -414,7 +414,6 @@ class LlmTaskExecutor:
         try:
             outcome = await provider_client.generate_update(
                 prepared_request=prepared_request,
-                request_options=task.request,
             )
             update = outcome.update
             if update.note_key != candidate.payload.note_key:

@@ -189,9 +189,13 @@ def _run_live_grammar_task(collection_dir: Path):
         context.task.request,
         max_output_tokens=live_max_output_tokens,
     )
+    tuned_model = replace(
+        context.task.model,
+        concurrency=live_concurrency,
+    )
     tuned_task = replace(
         context.task,
-        concurrency=live_concurrency,
+        model=tuned_model,
         request=tuned_request,
     )
     executor = LlmTaskExecutor(
