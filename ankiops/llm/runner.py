@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Protocol
 
 from ankiops.collection_serializer import (
     deserialize_collection_data,
@@ -29,6 +30,7 @@ from .task_options import (
     apply_deck_override,
     format_deck_scope,
     format_request_defaults,
+    format_serializer_scope,
     resolve_model,
     resolve_serializer_scope,
 )
@@ -38,6 +40,7 @@ from .task_types import (
     LlmItemStatus,
     LlmJobResult,
     LlmJobStatus,
+    NotePayload,
     TaskConfig,
     TaskPlanResult,
     TaskRunSummary,
@@ -45,11 +48,9 @@ from .task_types import (
 
 logger = logging.getLogger(__name__)
 
-ProviderClientFactory = Callable[[TaskConfig], Any]
-CollectionSerializer = Callable[..., dict[str, Any]]
-CollectionDeserializer = Callable[..., None]
-Snapshotter = Callable[[Path, str], bool]
-ProgressCallback = Callable[[TaskExecutionProgress], None]
+
+class ProgressReporter(Protocol):
+    def __call__(self, progress: TaskExecutionProgress) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -114,10 +115,6 @@ class _ExecutionProgressState:
         )
 
 
-def _default_provider_client_factory(task: TaskConfig) -> ProviderClient:
-    return ProviderClient(task)
-
-
 @contextmanager
 def _open_llm_db(collection_dir: Path) -> Iterator[LlmDb]:
     db = LlmDb.open(collection_dir)
@@ -130,7 +127,7 @@ def _open_llm_db(collection_dir: Path) -> Iterator[LlmDb]:
 def _apply_note_update(
     *,
     serialized_note: dict[str, Any],
-    payload,
+    payload: NotePayload,
     edits: dict[str, str],
     note_type_config: NoteTypeConfig,
 ) -> list[str]:
@@ -215,7 +212,6 @@ def _materialize_task_context(
     task_name: str,
     model_override: str | None,
     deck_override: str | None,
-    serialize_collection_fn: CollectionSerializer,
 ) -> MaterializedTaskContext:
     task, note_type_configs = _load_task(
         collection_dir=collection_dir,
@@ -226,7 +222,7 @@ def _materialize_task_context(
     task = replace(task, model=model)
 
     deck, no_subdecks = resolve_serializer_scope(task)
-    serialized_data = serialize_collection_fn(
+    serialized_data = serialize_collection(
         collection_dir,
         deck=deck,
         no_subdecks=no_subdecks,
@@ -269,21 +265,11 @@ class LlmTaskExecutor:
         collection_dir: Path,
         materialized_context: MaterializedTaskContext,
         no_auto_commit: bool,
-        provider_client_factory: ProviderClientFactory | None = None,
-        deserialize_collection_fn: CollectionDeserializer | None = None,
-        snapshot_fn: Snapshotter | None = None,
-        progress_callback: ProgressCallback | None = None,
+        progress_callback: ProgressReporter | None = None,
     ) -> None:
         self.collection_dir = collection_dir
         self.materialized_context = materialized_context
         self.no_auto_commit = no_auto_commit
-        self.provider_client_factory = (
-            provider_client_factory or _default_provider_client_factory
-        )
-        self.deserialize_collection_fn = (
-            deserialize_collection_fn or deserialize_collection_data
-        )
-        self.snapshot_fn = snapshot_fn or git_snapshot
         self.progress_callback = progress_callback
 
     async def execute(self) -> LlmJobResult:
@@ -310,21 +296,21 @@ class LlmTaskExecutor:
             logger.debug("LLM request defaults: %s", format_request_defaults(task))
             logger.debug(
                 "LLM serializer scope: %s",
-                format_deck_scope(task),
+                format_serializer_scope(task),
             )
 
             if not self.no_auto_commit:
                 logger.debug("Creating pre-LLM git snapshot")
-                self.snapshot_fn(self.collection_dir, f"llm:{task.name}")
+                git_snapshot(self.collection_dir, f"llm:{task.name}")
             else:
                 logger.debug("Auto-commit disabled (--no-auto-commit)")
 
             fatal_error: str | None = None
-            provider_client = None
+            provider_client: ProviderClient | None = None
             attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
             progress_state: _ExecutionProgressState | None = None
             try:
-                provider_client = self.provider_client_factory(task)
+                provider_client = ProviderClient(task)
                 candidates = record_discovery_snapshot(
                     db=db,
                     job_id=job_id,
@@ -353,8 +339,10 @@ class LlmTaskExecutor:
                 fatal_error = str(_unexpected_online_execution_error(error))
                 logger.error(fatal_error)
             finally:
-                if provider_client is not None:
-                    await provider_client.close()
+                fatal_error = await self._close_provider_client(
+                    provider_client=provider_client,
+                    fatal_error=fatal_error,
+                )
 
             if fatal_error is not None:
                 canceled = db.mark_unfinished_items_canceled(job_id=job_id)
@@ -407,6 +395,24 @@ class LlmTaskExecutor:
         logger.debug("Cost: %s", summary.format_cost())
 
     @staticmethod
+    async def _close_provider_client(
+        *,
+        provider_client: ProviderClient | None,
+        fatal_error: str | None,
+    ) -> str | None:
+        if provider_client is None:
+            return fatal_error
+
+        try:
+            await provider_client.close()
+        except Exception as error:
+            close_error = str(_unexpected_online_execution_error(error))
+            logger.error(close_error)
+            if fatal_error is None:
+                return close_error
+        return fatal_error
+
+    @staticmethod
     def _build_progress_state(
         *,
         job_id: int,
@@ -443,7 +449,7 @@ class LlmTaskExecutor:
         db: LlmDb,
         task: TaskConfig,
         model_id: str,
-        provider_client,
+        provider_client: ProviderClient,
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
         progress_state: _ExecutionProgressState,
@@ -513,7 +519,7 @@ class LlmTaskExecutor:
         db: LlmDb,
         task: TaskConfig,
         model_id: str,
-        provider_client,
+        provider_client: ProviderClient,
         candidate: EligibleCandidate,
         attempt_recorder: AttemptRecorder,
     ) -> LlmItemStatus:
@@ -642,7 +648,7 @@ class LlmTaskExecutor:
         persisted = False
 
         if summary.updated > 0:
-            self.deserialize_collection_fn(
+            deserialize_collection_data(
                 data,
                 root_dir=self.collection_dir,
                 note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
@@ -693,7 +699,6 @@ def plan_task(
         task_name=task_name,
         model_override=model_override,
         deck_override=deck_override,
-        serialize_collection_fn=serialize_collection,
     )
     return build_task_plan_result(
         task=task_context.task,
@@ -709,14 +714,13 @@ async def run_task_async(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
-    progress_callback: ProgressCallback | None = None,
+    progress_callback: ProgressReporter | None = None,
 ) -> LlmJobResult:
     task_context = _materialize_task_context(
         collection_dir=collection_dir,
         task_name=task_name,
         model_override=model_override,
         deck_override=deck_override,
-        serialize_collection_fn=serialize_collection,
     )
     executor = LlmTaskExecutor(
         collection_dir=collection_dir,
@@ -734,7 +738,7 @@ def run_task(
     model_override: str | None = None,
     deck_override: str | None = None,
     no_auto_commit: bool = False,
-    progress_callback: ProgressCallback | None = None,
+    progress_callback: ProgressReporter | None = None,
 ) -> LlmJobResult:
     return asyncio.run(
         run_task_async(

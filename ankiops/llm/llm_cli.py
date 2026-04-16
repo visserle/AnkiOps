@@ -201,7 +201,7 @@ def _llm_progress_callback():
         TimeElapsedColumn(),
         TextColumn("[dim]{task.fields[stats]}"),
         console=console,
-        transient=True,
+        transient=False,
     ) as progress_view:
 
         def _update(progress: TaskExecutionProgress) -> None:

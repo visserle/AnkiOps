@@ -5,7 +5,11 @@ from __future__ import annotations
 from ankiops.models import ANKIOPS_KEY_FIELD, NoteTypeConfig
 
 from .discovery import DiscoveryItem, DiscoverySnapshot
-from .task_options import format_deck_scope, format_request_defaults
+from .task_options import (
+    format_deck_scope,
+    format_request_defaults,
+    format_serializer_scope,
+)
 from .task_types import (
     FieldAccess,
     LlmItemStatus,
@@ -60,7 +64,7 @@ def build_task_plan_result(
         task_name=task.name,
         model=task.model,
         deck_scope=format_deck_scope(task),
-        serializer_scope=format_deck_scope(task),
+        serializer_scope=format_serializer_scope(task),
         system_prompt_path=(
             str(task.system_prompt_path)
             if task.system_prompt_path is not None

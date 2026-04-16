@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from rich.console import Console
+from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
 from rich.markup import escape as rich_escape
 
@@ -20,7 +21,7 @@ _RICH_CONSOLE: Console | None = None
 
 
 class _RichSeverityMessageFormatter(logging.Formatter):
-    """Format plain log messages with Rich markup by severity."""
+    """Format plain log messages with severity prefixes for non-debug output."""
 
     def __init__(self) -> None:
         super().__init__("%(message)s")
@@ -28,11 +29,11 @@ class _RichSeverityMessageFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         message = rich_escape(super().format(record))
         if record.levelno >= logging.CRITICAL:
-            return f"[bold red]{message}[/]"
+            return f"[bold red]CRITICAL:[/] {message}"
         if record.levelno >= logging.ERROR:
-            return f"[red]{message}[/]"
+            return f"[red]ERROR:[/] {message}"
         if record.levelno >= logging.WARNING:
-            return f"[orange3]{message}[/]"
+            return f"[orange3]WARNING:[/] {message}"
         return message
 
 
@@ -135,6 +136,7 @@ def configure_logging(
             enable_link_path=False,
             rich_tracebacks=verbose,
             markup=not verbose,
+            highlighter=NullHighlighter(),
             log_time_format="%H:%M:%S",
         )
         stream_handler.setLevel(stream_level)

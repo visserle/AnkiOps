@@ -11,7 +11,6 @@ from textwrap import dedent
 
 import pytest
 
-from ankiops.collection_serializer import serialize_collection
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
@@ -183,7 +182,6 @@ def _run_live_grammar_task(collection_dir: Path):
         task_name=STANDARD_TASK_NAME,
         model_override=None,
         deck_override=None,
-        serialize_collection_fn=serialize_collection,
     )
     tuned_request = replace(
         context.task.request,

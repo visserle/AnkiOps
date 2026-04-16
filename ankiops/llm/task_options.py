@@ -36,6 +36,16 @@ def format_deck_scope(task: TaskConfig) -> str:
     )
 
 
+def format_serializer_scope(task: TaskConfig) -> str:
+    deck, no_subdecks = resolve_serializer_scope(task)
+    if deck is None:
+        return "collection"
+    scope = f"deck:{deck}"
+    if no_subdecks:
+        return f"{scope} (no-subdecks)"
+    return scope
+
+
 def format_request_defaults(task: TaskConfig) -> str:
     max_tokens = task.request.max_output_tokens
     temperature = (
