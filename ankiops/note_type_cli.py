@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import re
-import shutil
-import textwrap
+from io import StringIO
 
 import yaml
+from rich.console import Console
+from rich.table import Table
 
 from ankiops.cli_anki import connect_or_exit
 from ankiops.config import (
@@ -20,7 +20,6 @@ from ankiops.log import clickable_path
 from ankiops.models import Field, NoteTypeConfig
 
 logger = logging.getLogger(__name__)
-_VALID_FIELD_LABEL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 def _parse_identifying_answer(value: str) -> bool:
@@ -38,11 +37,6 @@ def _validate_label_input(label: str, *, used_labels: set[str]) -> str:
         normalized = normalized[:-1].strip()
     if not normalized:
         raise ValueError("Label cannot be empty.")
-    if not _VALID_FIELD_LABEL_PATTERN.match(normalized):
-        raise ValueError(
-            "Label must start with a letter and contain only letters, "
-            "numbers, '_' or '-'."
-        )
     canonical = f"{normalized}:"
     if canonical in used_labels:
         raise ValueError(f"Label '{canonical}' is already used in this note type.")
@@ -85,82 +79,26 @@ def _format_table(
     *,
     max_width: int | None = None,
 ) -> list[str]:
+    """Format a table using Rich and return lines for logging."""
     if not headers:
         return []
 
-    if max_width is None:
-        max_width = shutil.get_terminal_size(fallback=(120, 24)).columns
+    table = Table(show_header=True, header_style="bold")
+    for header in headers:
+        table.add_column(header)
 
-    max_width = max(max_width, 40)
-    separator_width = 2 * (len(headers) - 1)
-    max_cell_lengths = [len(header) for header in headers]
     for row in rows:
-        for index, cell in enumerate(row):
-            max_cell_lengths[index] = max(max_cell_lengths[index], len(cell))
+        table.add_row(*row)
 
-    widths = [len(header) for header in headers]
-    available = max(0, max_width - separator_width - sum(widths))
-    expansion_needs = [
-        max_cell_lengths[index] - widths[index] for index in range(len(headers))
-    ]
-    # Distribute extra width fairly across columns so one very long column
-    # does not starve the others and force awkward wraps in short labels/fields.
-    while available > 0:
-        grew = False
-        for index, need in enumerate(expansion_needs):
-            if available == 0:
-                break
-            if need <= 0:
-                continue
-            widths[index] += 1
-            expansion_needs[index] -= 1
-            available -= 1
-            grew = True
-        if not grew:
-            break
+    # Render the table to a string by capturing console output
+    string_output = StringIO()
+    temp_console = Console(
+        file=string_output, width=max_width or 120, force_terminal=True
+    )
+    temp_console.print(table)
 
-    def _wrap_cell(value: str, width: int) -> list[str]:
-        wrapped = textwrap.wrap(
-            value,
-            width=width,
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        if wrapped:
-            return wrapped
-        if not value:
-            return [""]
-        return textwrap.wrap(
-            value,
-            width=width,
-            break_long_words=True,
-            break_on_hyphens=True,
-        )
-
-    def _render_row(values: list[str]) -> list[str]:
-        wrapped_cells = [
-            _wrap_cell(values[index], widths[index]) for index in range(len(values))
-        ]
-        row_height = max(len(lines) for lines in wrapped_cells)
-        rendered: list[str] = []
-        for line_index in range(row_height):
-            rendered.append(
-                "  ".join(
-                    (
-                        wrapped_cells[column_index][line_index]
-                        if line_index < len(wrapped_cells[column_index])
-                        else ""
-                    ).ljust(widths[column_index])
-                    for column_index in range(len(values))
-                ).rstrip()
-            )
-        return rendered
-
-    separator = ["-" * width for width in widths]
-    rendered_lines = [*(_render_row(headers)), *(_render_row(separator))]
-    for row in rows:
-        rendered_lines.extend(_render_row(row))
-    return rendered_lines
+    rendered = string_output.getvalue()
+    return rendered.rstrip("\n").split("\n")
 
 
 def _build_global_label_constraints(
@@ -327,7 +265,7 @@ def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
 
 def run(args) -> None:
     """Handle note-types CLI actions."""
-    add_name = str(getattr(args, "add_name", "")).strip()
+    add_name = (getattr(args, "add_name", None) or "").strip()
     action_value = getattr(args, "action", "list")
     if add_name:
         action = "add"
