@@ -12,7 +12,6 @@ from typing import Any
 from rich import get_console as rich_get_console
 from rich import reconfigure as rich_reconfigure
 from rich.highlighter import NullHighlighter
-from rich.markup import escape as rich_escape
 
 DEFAULT_QUIET_LOGGERS = (
     "urllib3.connectionpool",
@@ -21,23 +20,6 @@ DEFAULT_QUIET_LOGGERS = (
     "httpcore",
 )
 DEFAULT_TRACEBACK_SUPPRESS: tuple[str | ModuleType, ...] = (argparse,)
-
-
-class _RichSeverityMessageFormatter(logging.Formatter):
-    """Format plain log messages with severity prefixes for non-debug output."""
-
-    def __init__(self) -> None:
-        super().__init__("%(message)s")
-
-    def format(self, record: logging.LogRecord) -> str:
-        message = rich_escape(super().format(record))
-        if record.levelno >= logging.CRITICAL:
-            return f"[bold red]CRITICAL:[/] {message}"
-        if record.levelno >= logging.ERROR:
-            return f"[red]ERROR:[/] {message}"
-        if record.levelno >= logging.WARNING:
-            return f"[orange3]WARNING:[/] {message}"
-        return message
 
 
 def format_changes(**counts: int) -> str:
@@ -126,8 +108,8 @@ def configure_logging(
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "stream_verbose": {"format": "%(name)s | %(message)s"},
-            "stream_compact": {"()": _RichSeverityMessageFormatter},
+            "stream_verbose": {"format": "%(message)s"},
+            "stream_compact": {"format": "%(message)s"},
             "file": {
                 "format": "{asctime} | {levelname:8} | {name} | {message}",
                 "style": "{",
@@ -154,12 +136,12 @@ def configure_logging(
             "level": stream_level,
             "console": console,
             "show_time": verbose,
-            "show_level": verbose,
+            "show_level": True,
             "show_path": verbose,
             "enable_link_path": False,
             "rich_tracebacks": verbose,
             "tracebacks_suppress": suppress_targets,
-            "markup": not verbose,
+            "markup": False,
             "highlighter": NullHighlighter(),
             "log_time_format": "%H:%M:%S",
             "formatter": "stream_verbose" if verbose else "stream_compact",

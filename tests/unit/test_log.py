@@ -64,3 +64,23 @@ def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
         close_root_logging()
         for name, level in original_levels.items():
             logging.getLogger(name).setLevel(level)
+
+
+def test_configure_logging_compact_uses_rich_level_column(monkeypatch):
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    try:
+        configure_logging(stream_level=logging.INFO)
+
+        logging.info("compact info message")
+        logging.warning("compact warning message")
+
+        rendered = stream.getvalue()
+        assert "compact info message" in rendered
+        assert "compact warning message" in rendered
+        assert "INFO" in rendered
+        assert "WARNING" in rendered
+        assert "WARNING:" not in rendered
+    finally:
+        close_root_logging()
