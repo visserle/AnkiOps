@@ -3,11 +3,11 @@
 import json
 import logging
 import subprocess
+from importlib import resources
 from pathlib import Path
 
 from ankiops.config import (
     ANKIOPS_DB,
-    LLM_DB_FILENAME,
     LLM_DIR,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -40,6 +40,7 @@ def _setup_vscode_settings(collection_dir: Path):
             pass
 
     settings["markdown.preview.breaks"] = True
+    settings["markdown.preview.stickyScroll.enabled"] = False
     settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
@@ -53,12 +54,10 @@ def _setup_gitignore(collection_dir: Path):
         content = gitignore_path.read_text()
 
     entries = [
+        ".DS_Store",
         ANKIOPS_DB,
         f"{ANKIOPS_DB}-shm",
         f"{ANKIOPS_DB}-wal",
-        f"{LLM_DIR}/{LLM_DB_FILENAME}",
-        f"{LLM_DIR}/{LLM_DB_FILENAME}-shm",
-        f"{LLM_DIR}/{LLM_DB_FILENAME}-wal",
     ]
     missing = [entry for entry in entries if entry not in content]
     if missing:
@@ -93,7 +92,6 @@ def _setup_git(collection_dir: Path):
 
 
 def _eject_llm_configs(collection_dir: Path) -> None:
-    from importlib import resources
 
     llm_dir = collection_dir / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
@@ -156,8 +154,6 @@ def initialize_collection(profile: str) -> Path:
 
 def create_tutorial(collection_dir: Path) -> Path:
     """Copy the tutorial markdown file to the collection directory."""
-    from importlib import resources
-
     tutorial_dst = collection_dir / f"{deck_name_to_file_stem('AnkiOps Tutorial')}.md"
 
     try:
