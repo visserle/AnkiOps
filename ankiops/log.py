@@ -1,13 +1,17 @@
 """Logging configuration for the root logger (Python >= 3.10)."""
 
+import argparse
 import logging
+import logging.config
 import os
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
-from rich.console import Console
+from rich import get_console as rich_get_console
+from rich import reconfigure as rich_reconfigure
 from rich.highlighter import NullHighlighter
-from rich.logging import RichHandler
 from rich.markup import escape as rich_escape
 
 DEFAULT_QUIET_LOGGERS = (
@@ -16,8 +20,7 @@ DEFAULT_QUIET_LOGGERS = (
     "httpx",
     "httpcore",
 )
-
-_RICH_CONSOLE: Console | None = None
+DEFAULT_TRACEBACK_SUPPRESS: tuple[str | ModuleType, ...] = (argparse,)
 
 
 class _RichSeverityMessageFormatter(logging.Formatter):
@@ -35,14 +38,6 @@ class _RichSeverityMessageFormatter(logging.Formatter):
         if record.levelno >= logging.WARNING:
             return f"[orange3]WARNING:[/] {message}"
         return message
-
-
-def get_rich_console() -> Console:
-    """Return a shared Rich console bound to the current stdout stream."""
-    global _RICH_CONSOLE
-    if _RICH_CONSOLE is None or _RICH_CONSOLE.file is not sys.stdout:
-        _RICH_CONSOLE = Console(file=sys.stdout)
-    return _RICH_CONSOLE
 
 
 def format_changes(**counts: int) -> str:
@@ -104,6 +99,7 @@ def configure_logging(
     file_path: Path | str | None = None,
     stream: bool = True,
     ignore_libs: str | list[str] | None = None,
+    tracebacks_suppress: tuple[str | ModuleType, ...] | None = None,
 ) -> None:
     """
     Configures the root logger for console and file logging with the specified
@@ -115,6 +111,7 @@ def configure_logging(
     - file_path: The path to the log file (if None, file logging is disabled).
     - stream: Whether to enable console logging (default is True).
     - ignore_libs: A list of library names to ignore in the logs.
+    - tracebacks_suppress: Optional modules/paths to suppress in Rich tracebacks.
 
     Example usage in main script:
     >>> import logging
@@ -123,40 +120,66 @@ def configure_logging(
     >>> logging.debug("This is a debug message.")
     """
 
-    handlers = []
+    root_handlers: list[str] = []
+    active_levels: list[int] = []
+    logging_config: dict[str, Any] = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "stream_verbose": {"format": "%(name)s | %(message)s"},
+            "stream_compact": {"()": _RichSeverityMessageFormatter},
+            "file": {
+                "format": "{asctime} | {levelname:8} | {name} | {message}",
+                "style": "{",
+            },
+        },
+        "handlers": {},
+        "root": {"level": logging.WARNING, "handlers": root_handlers},
+    }
+    suppress_targets = (
+        DEFAULT_TRACEBACK_SUPPRESS
+        if tracebacks_suppress is None
+        else tracebacks_suppress
+    )
 
     # Console logging via Rich (single renderer for log + progress output)
     if stream:
         verbose = stream_level <= logging.DEBUG
-        stream_handler = RichHandler(
-            console=get_rich_console(),
-            show_time=verbose,
-            show_level=verbose,
-            show_path=verbose,
-            enable_link_path=False,
-            rich_tracebacks=verbose,
-            markup=not verbose,
-            highlighter=NullHighlighter(),
-            log_time_format="%H:%M:%S",
-        )
-        stream_handler.setLevel(stream_level)
-        if verbose:
-            stream_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
-        else:
-            stream_handler.setFormatter(_RichSeverityMessageFormatter())
-        handlers.append(stream_handler)
+        console = rich_get_console()
+        if console.file is not sys.stdout:
+            rich_reconfigure(file=sys.stdout)
+            console = rich_get_console()
+        logging_config["handlers"]["rich_stream"] = {
+            "class": "rich.logging.RichHandler",
+            "level": stream_level,
+            "console": console,
+            "show_time": verbose,
+            "show_level": verbose,
+            "show_path": verbose,
+            "enable_link_path": False,
+            "rich_tracebacks": verbose,
+            "tracebacks_suppress": suppress_targets,
+            "markup": not verbose,
+            "highlighter": NullHighlighter(),
+            "log_time_format": "%H:%M:%S",
+            "formatter": "stream_verbose" if verbose else "stream_compact",
+        }
+        root_handlers.append("rich_stream")
+        active_levels.append(stream_level)
 
     # FileHandler for file logging, added only if file path is provided
     if file_path:
         file_path = Path(file_path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(file_path, encoding="utf-8")
-        file_handler.setLevel(file_level)
-        file_formatter = logging.Formatter(
-            "{asctime} | {levelname:8} | {name} | {message}", style="{"
-        )
-        file_handler.setFormatter(file_formatter)
-        handlers.append(file_handler)
+        logging_config["handlers"]["file"] = {
+            "class": "logging.FileHandler",
+            "level": file_level,
+            "filename": str(file_path),
+            "encoding": "utf-8",
+            "formatter": "file",
+        }
+        root_handlers.append("file")
+        active_levels.append(file_level)
 
     # Set the logging level for ignored libraries to WARNING
     extra_ignored_libs: list[str] = []
@@ -170,11 +193,11 @@ def configure_logging(
     for lib in quiet_loggers:
         logging.getLogger(lib).setLevel(logging.WARNING)
 
-    # Clear any previously added handlers from the root logger
-    logging.getLogger().handlers = []
-
-    # Set up the root logger configuration with the specified handlers
-    logging.basicConfig(level=min(stream_level, file_level), handlers=handlers)
+    # Reconfigure root logging atomically using dictConfig.
+    root_level = min(active_levels, default=logging.WARNING)
+    logging_config["root"]["level"] = root_level
+    logging_config["root"]["handlers"] = root_handlers
+    logging.config.dictConfig(logging_config)
 
 
 def close_root_logging() -> None:

@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from rich import get_console as rich_get_console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -30,7 +31,6 @@ from ankiops.config import (
     require_initialized_collection_dir,
 )
 from ankiops.fs import FileSystemAdapter
-from ankiops.log import get_rich_console
 
 from .config_loader import load_llm_task_catalog
 from .model_registry import MODEL_REGISTRY_FILE_NAME
@@ -191,7 +191,7 @@ def _llm_progress_callback():
         yield None
         return
 
-    console = get_rich_console()
+    console = rich_get_console()
     progress_task_id: Any | None = None
     with Progress(
         TextColumn("{task.description}"),

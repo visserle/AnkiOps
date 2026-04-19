@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from io import StringIO
 
 import yaml
-from rich.console import Console
+from rich import get_console as rich_get_console
 from rich.table import Table
 
 from ankiops.cli_anki import connect_or_exit
@@ -20,6 +19,7 @@ from ankiops.log import clickable_path
 from ankiops.models import Field, NoteTypeConfig
 
 logger = logging.getLogger(__name__)
+_TABLE_MAX_WIDTH = 120
 
 
 def _parse_identifying_answer(value: str) -> bool:
@@ -73,32 +73,13 @@ def _render_bool_values(values: set[bool]) -> str:
     return "mixed"
 
 
-def _format_table(
-    headers: list[str],
-    rows: list[list[str]],
-    *,
-    max_width: int | None = None,
-) -> list[str]:
-    """Format a table using Rich and return lines for logging."""
-    if not headers:
-        return []
-
+def _new_table(headers: list[str], rows: list[list[str]]) -> Table:
     table = Table(show_header=True, header_style="bold")
     for header in headers:
         table.add_column(header)
-
     for row in rows:
         table.add_row(*row)
-
-    # Render the table to a string by capturing console output
-    string_output = StringIO()
-    temp_console = Console(
-        file=string_output, width=max_width or 120, force_terminal=True
-    )
-    temp_console.print(table)
-
-    rendered = string_output.getvalue()
-    return rendered.rstrip("\n").split("\n")
+    return table
 
 
 def _build_global_label_constraints(
@@ -138,6 +119,7 @@ def _validate_global_label_reuse(
 
 
 def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
+    console = rich_get_console()
     sorted_configs = sorted(note_type_configs, key=lambda config_item: config_item.name)
 
     note_type_rows: list[list[str]] = []
@@ -173,13 +155,12 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
         note_type_rows.append([config.name, labels_rendered, identifying_rendered])
 
     logger.info("Note types:")
-    for line in _format_table(
+    note_types_table = _new_table(
         headers=["Note type", "Labels", "Identifying"],
         rows=note_type_rows,
-    ):
-        logger.info(line)
-
-    logger.info("")
+    )
+    console.print(note_types_table, width=_TABLE_MAX_WIDTH)
+    console.print()
 
     label_index: dict[str, list[tuple[str, str, bool]]] = {}
     for config in sorted(note_type_configs, key=lambda config_item: config_item.name):
@@ -212,16 +193,11 @@ def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
         )
 
     logger.info("Label registry:")
-    for line in _format_table(
-        headers=[
-            "Label",
-            "Field",
-            "Identifying",
-            "Used by",
-        ],
+    registry_table = _new_table(
+        headers=["Label", "Field", "Identifying", "Used by"],
         rows=registry_rows,
-    ):
-        logger.info(line)
+    )
+    console.print(registry_table, width=_TABLE_MAX_WIDTH)
 
 
 def _build_template_output_files(
