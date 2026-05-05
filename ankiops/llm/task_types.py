@@ -137,12 +137,15 @@ class PreparedAttemptRequest:
     system_prompt_text: str
     user_message_text: str
     request_params: dict[str, object]
-    output_schema: dict[str, object]
-    editable_fields: frozenset[str]
+    contract_fingerprint: str
+    transport_mode: str
+    capability_snapshot: dict[str, object]
 
 
 @dataclass(frozen=True)
 class ProviderAttemptErrorContext:
+    outcome_kind: str | None
+    refusal_reason: str | None
     provider_message_id: str | None
     response_model_id: str | None
     stop_reason: str | None
@@ -196,16 +199,15 @@ class TaskRunSummary:
         return self.skipped_no_editable_fields
 
     def format(self) -> str:
+        changes = format_changes(
+            updated=self.updated,
+            unchanged=self.unchanged,
+            skipped=self.skipped,
+            errors=self.errors,
+        )
         base = (
             f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — "
-            f"{
-                format_changes(
-                    updated=self.updated,
-                    unchanged=self.unchanged,
-                    skipped=self.skipped,
-                    errors=self.errors,
-                )
-            }"
+            f"{changes}"
         )
         suffix_parts: list[str] = []
         if self.canceled:

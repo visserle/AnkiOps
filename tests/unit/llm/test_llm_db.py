@@ -7,6 +7,7 @@ import pytest
 
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.task_types import LlmItemStatus, LlmJobStatus
+from ankiops.llm_v2.domain.outcomes import ProviderOutcomeKind
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -44,6 +45,16 @@ def _insert_attempt(
     return adapter.insert_attempt(
         item_id=item_id,
         provider="anthropic",
+        outcome_kind=ProviderOutcomeKind.SUCCESS.value,
+        transport_mode="anthropic_tool_use_strict",
+        capability_snapshot_json={
+            "provider": "anthropic",
+            "model_id": "claude-sonnet-4-6",
+            "transport_mode": "anthropic_tool_use_strict",
+            "supports_strict_json": True,
+        },
+        contract_fingerprint="contract-fingerprint",
+        refusal_reason=None,
         provider_message_id=provider_message_id,
         response_model_id=response_model_id,
         provider_request_id=None,
@@ -77,19 +88,19 @@ def test_open_creates_schema_and_indexes(tmp_path):
 
         tables = _table_names(adapter._conn)
         assert {
-            "llm_job",
-            "llm_job_item",
-            "llm_item_attempt",
-            "llm_attempt_payload",
+            "llm_job_v2",
+            "llm_job_item_v2",
+            "llm_attempt_v2",
+            "llm_attempt_payload_v2",
         }.issubset(tables)
 
         indexes = _index_names(adapter._conn)
-        assert "idx_llm_job_created" in indexes
-        assert "idx_llm_job_item_job" in indexes
-        assert "idx_llm_job_item_note_key" in indexes
+        assert "idx_llm_job_v2_created" in indexes
+        assert "idx_llm_job_item_v2_job" in indexes
+        assert "idx_llm_job_item_v2_note_key" in indexes
 
         job_columns = [
-            row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job)")
+            row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job_v2)")
         ]
         assert set(job_columns) == {
             "id",
@@ -108,14 +119,15 @@ def test_open_creates_schema_and_indexes(tmp_path):
         }
 
         item_columns = [
-            row[1] for row in adapter._conn.execute("PRAGMA table_info(llm_job_item)")
+            row[1]
+            for row in adapter._conn.execute("PRAGMA table_info(llm_job_item_v2)")
         ]
         assert "item_status" in item_columns
         assert "candidate_status" not in item_columns
         assert "final_status" not in item_columns
 
         job_sql = adapter._conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_job'"
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_job_v2'"
         ).fetchone()[0]
         assert "CHECK (status IN ('running', 'completed', 'failed'))" in job_sql
     finally:
@@ -124,7 +136,7 @@ def test_open_creates_schema_and_indexes(tmp_path):
 
 def test_roundtrip_job_item_attempt_payload(tmp_path):
     _write_models_registry(tmp_path)
-    adapter = LlmDb.open(tmp_path)
+    adapter = LlmDb.open(tmp_path, persist_raw_payloads=True)
     try:
         job_id = _start_job(adapter)
         adapter.set_discovery_counts(
@@ -178,7 +190,7 @@ def test_roundtrip_job_item_attempt_payload(tmp_path):
         payload_row = adapter._conn.execute(
             """
             SELECT request_params_json, response_raw_text, response_full_json
-            FROM llm_attempt_payload
+            FROM llm_attempt_payload_v2
             WHERE attempt_id = ?
             """,
             (attempt_id,),
@@ -278,7 +290,7 @@ def test_enforces_status_constraints(tmp_path):
         with pytest.raises(sqlite3.IntegrityError):
             adapter._conn.execute(
                 """
-                INSERT INTO llm_job (
+                INSERT INTO llm_job_v2 (
                     task_name, model, model_id,
                     status, persisted, created_at, started_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -366,10 +378,10 @@ def test_write_tx_rolls_back_partial_attempt_persistence(tmp_path):
                 raise RuntimeError("boom")
 
         attempts = adapter._conn.execute(
-            "SELECT COUNT(*) FROM llm_item_attempt"
+            "SELECT COUNT(*) FROM llm_attempt_v2"
         ).fetchone()[0]
         payloads = adapter._conn.execute(
-            "SELECT COUNT(*) FROM llm_attempt_payload"
+            "SELECT COUNT(*) FROM llm_attempt_payload_v2"
         ).fetchone()[0]
         assert attempts == 0
         assert payloads == 0
@@ -414,9 +426,9 @@ def test_mark_unfinished_items_canceled_only_updates_pending_queued(tmp_path):
 
         rows = adapter._conn.execute(
             """
-            SELECT id, item_status
-            FROM llm_job_item
-            WHERE job_id = ?
+                SELECT id, item_status
+                FROM llm_job_item_v2
+                WHERE job_id = ?
             ORDER BY ordinal ASC
             """,
             (job_id,),

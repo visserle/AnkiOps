@@ -189,8 +189,14 @@ class _StubClient:
             system_prompt_text="system",
             user_message_text="user",
             request_params=request_params,
-            output_schema={},
-            editable_fields=frozenset(note_payload.editable_fields.keys()),
+            contract_fingerprint="contract-fingerprint",
+            transport_mode="openai_compat_json_schema_strict",
+            capability_snapshot={
+                "provider": "anthropic",
+                "model_id": model_id,
+                "transport_mode": "openai_compat_json_schema_strict",
+                "supports_strict_json": True,
+            },
         )
 
     async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
@@ -226,8 +232,14 @@ class _OnlineFailFastClient:
             system_prompt_text="system",
             user_message_text="user",
             request_params=request_params,
-            output_schema={},
-            editable_fields=frozenset(note_payload.editable_fields.keys()),
+            contract_fingerprint="contract-fingerprint",
+            transport_mode="openai_compat_json_schema_strict",
+            capability_snapshot={
+                "provider": "anthropic",
+                "model_id": model_id,
+                "transport_mode": "openai_compat_json_schema_strict",
+                "supports_strict_json": True,
+            },
         )
 
     async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
@@ -1039,7 +1051,7 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
         payload_rows = db._conn.execute(
             """
             SELECT system_prompt_text, user_message_text, request_params_json
-            FROM llm_attempt_payload
+            FROM llm_attempt_payload_v2
             ORDER BY attempt_id ASC
             """
         ).fetchall()

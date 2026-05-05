@@ -10,6 +10,7 @@ import yaml
 from yaml.nodes import ScalarNode
 
 from ankiops.config import LLM_DIR
+from ankiops.llm_v2.catalog import ensure_model_supported
 from ankiops.models import NoteTypeConfig
 
 from .model_registry import (
@@ -423,6 +424,10 @@ def _parse_task(
     if model is None:
         supported = model_registry.format_models()
         raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
+    try:
+        ensure_model_supported(model)
+    except ValueError as error:
+        raise LlmConfigError(f"{path}: {error}") from error
 
     system_prompt, system_prompt_path = _parse_text_source(
         mapping,

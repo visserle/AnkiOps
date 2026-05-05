@@ -102,7 +102,7 @@ def test_plan_task_summarizes_scope_surface_and_cost_cap(tmp_path: Path):
 
     db = LlmDb.open(collection)
     try:
-        row = db._conn.execute("SELECT COUNT(*) AS total FROM llm_job").fetchone()
+        row = db._conn.execute("SELECT COUNT(*) AS total FROM llm_job_v2").fetchone()
     finally:
         db.close()
 

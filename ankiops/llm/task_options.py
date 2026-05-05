@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from ankiops.llm_v2.catalog import ensure_model_supported
+
 from .model_registry import ModelSpec, load_model_registry
 from .task_types import DeckScope, TaskConfig
 
@@ -70,6 +72,7 @@ def resolve_model(
     collection_dir: Path,
 ) -> ModelSpec:
     if model_override is None:
+        ensure_model_supported(task.model)
         return task.model
 
     registry = load_model_registry(collection_dir=collection_dir)
@@ -77,4 +80,5 @@ def resolve_model(
     if model is None:
         supported = registry.format_models()
         raise ValueError(f"Model must be one of: {supported}")
+    ensure_model_supported(model)
     return model

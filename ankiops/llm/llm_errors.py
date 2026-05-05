@@ -12,6 +12,15 @@ if TYPE_CHECKING:
 class LlmFatalError(RuntimeError):
     """Raised for fatal provider API failures that should abort the run."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        attempt_context: ProviderAttemptErrorContext | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.attempt_context = attempt_context
+
 
 class LlmNoteErrorCategory(Enum):
     NOTE = "note_error"

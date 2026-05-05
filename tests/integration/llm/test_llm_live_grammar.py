@@ -51,6 +51,11 @@ def _env_float(name: str, default: float) -> float:
     return max(value, 0.0)
 
 
+def _raw_payload_persistence_enabled() -> bool:
+    raw = os.getenv("ANKIOPS_LLM_V2_PERSIST_RAW_PAYLOADS", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _max_allowed_errors(
     *, total_notes: int, env_name: str, default_ratio: float
 ) -> int:
@@ -235,9 +240,9 @@ def _collect_attempt_metrics(db: LlmDb, *, job_id: int) -> dict[str, int]:
                 ),
                 0
             ) AS attempts_with_raw_text
-        FROM llm_job_item i
-        LEFT JOIN llm_item_attempt a ON a.job_item_id = i.id
-        LEFT JOIN llm_attempt_payload p ON p.attempt_id = a.id
+        FROM llm_job_item_v2 i
+        LEFT JOIN llm_attempt_v2 a ON a.job_item_id = i.id
+        LEFT JOIN llm_attempt_payload_v2 p ON p.attempt_id = a.id
         WHERE i.job_id = ?
         """,
         (job_id,),
@@ -369,8 +374,8 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
         attempts_count = db._conn.execute(
             """
             SELECT COUNT(*) AS total
-            FROM llm_item_attempt a
-            JOIN llm_job_item i ON i.id = a.job_item_id
+            FROM llm_attempt_v2 a
+            JOIN llm_job_item_v2 i ON i.id = a.job_item_id
             WHERE i.job_id = ?
             """,
             (job_id,),
@@ -378,9 +383,9 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
         payload_rows = db._conn.execute(
             """
             SELECT p.response_raw_text
-            FROM llm_attempt_payload p
-            JOIN llm_item_attempt a ON a.id = p.attempt_id
-            JOIN llm_job_item i ON i.id = a.job_item_id
+            FROM llm_attempt_payload_v2 p
+            JOIN llm_attempt_v2 a ON a.id = p.attempt_id
+            JOIN llm_job_item_v2 i ON i.id = a.job_item_id
             WHERE i.job_id = ?
             ORDER BY a.id ASC
             """,
@@ -393,8 +398,11 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
     assert attempts_count is not None
     assert int(attempts_count["total"]) == 1
     assert len(payload_rows) == 1
-    assert isinstance(payload_rows[0]["response_raw_text"], str)
-    assert payload_rows[0]["response_raw_text"].strip()
+    if _raw_payload_persistence_enabled():
+        assert isinstance(payload_rows[0]["response_raw_text"], str)
+        assert payload_rows[0]["response_raw_text"].strip()
+    else:
+        assert payload_rows[0]["response_raw_text"] is None
 
     metrics_path = _emit_metrics(
         collection_dir=tmp_path,
@@ -451,9 +459,9 @@ def test_live_grammar_mixed_correctness_robustness_and_telemetry(
             SELECT
                 COUNT(a.id) AS attempts_count,
                 COUNT(p.attempt_id) AS payload_count
-            FROM llm_job_item i
-            LEFT JOIN llm_item_attempt a ON a.job_item_id = i.id
-            LEFT JOIN llm_attempt_payload p ON p.attempt_id = a.id
+            FROM llm_job_item_v2 i
+            LEFT JOIN llm_attempt_v2 a ON a.job_item_id = i.id
+            LEFT JOIN llm_attempt_payload_v2 p ON p.attempt_id = a.id
             WHERE i.job_id = ?
             """,
             (job_id,),
@@ -465,7 +473,10 @@ def test_live_grammar_mixed_correctness_robustness_and_telemetry(
     assert totals_row is not None
     assert int(totals_row["attempts_count"]) == mixed_notes
     assert int(totals_row["payload_count"]) == mixed_notes
-    assert attempt_metrics["attempts_with_raw_text"] == mixed_notes
+    if _raw_payload_persistence_enabled():
+        assert attempt_metrics["attempts_with_raw_text"] == mixed_notes
+    else:
+        assert attempt_metrics["attempts_with_raw_text"] == 0
     assert attempt_metrics["max_retry_count"] <= 2
 
     metrics_path = _emit_metrics(
@@ -527,9 +538,12 @@ def test_live_grammar_pressure_robustness_and_speed(tmp_path: Path) -> None:
         db.close()
 
     assert attempt_metrics["attempts_count"] == pressure_notes
-    assert attempt_metrics["attempts_with_raw_text"] >= (
-        pressure_notes - result.summary.errors
-    )
+    if _raw_payload_persistence_enabled():
+        assert attempt_metrics["attempts_with_raw_text"] >= (
+            pressure_notes - result.summary.errors
+        )
+    else:
+        assert attempt_metrics["attempts_with_raw_text"] == 0
     assert attempt_metrics["max_retry_count"] <= 2
 
     metrics_path = _emit_metrics(
@@ -590,9 +604,12 @@ def test_live_grammar_stress_large_batch_optional(tmp_path: Path) -> None:
         db.close()
 
     assert attempt_metrics["attempts_count"] == stress_notes
-    assert attempt_metrics["attempts_with_raw_text"] >= (
-        stress_notes - result.summary.errors
-    )
+    if _raw_payload_persistence_enabled():
+        assert attempt_metrics["attempts_with_raw_text"] >= (
+            stress_notes - result.summary.errors
+        )
+    else:
+        assert attempt_metrics["attempts_with_raw_text"] == 0
 
     metrics_path = _emit_metrics(
         collection_dir=tmp_path,

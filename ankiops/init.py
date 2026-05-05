@@ -39,8 +39,8 @@ def _setup_vscode_settings(collection_dir: Path):
         except (json.JSONDecodeError, ValueError):
             pass
 
+    settings["[markdown]"] = {"editor.formatOnSave": False}
     settings["markdown.preview.breaks"] = True
-    settings["markdown.preview.stickyScroll.enabled"] = False
     settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 

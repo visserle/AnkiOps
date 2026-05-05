@@ -2,15 +2,15 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, sync changes both ways. 
+AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
 
 ## Features
 
 - **Full Anki support**: Safe, performant bidirectional syncing of notes with custom note types, (sub-)decks, and media files
-- **Markdown-first**: Edit in your favourite editor - render Markdown features on Anki's desktop and mobile apps (including syntax highlighting)
-- **Simple CLI interface**: After initialization, just two commands are needed for importing and exporting between Anki and your filesystem 
-- **LLM-integration**: Serialize your collection to JSON for batch processing tasks such as content review, grammar fixes, or translations (wip)
-- **Git-based collaboration**: Stable note keys allow for sharing decks via GitHub repositories with built-in sync commands (nyi)
+- **Markdown-first**: Edit in your favourite editor and render Markdown features in Anki (including syntax highlighting)
+- **Simple CLI interface** for importing and exporting between Anki and the filesystem
+- **LLM-integration**: Run automated tasks such as content review, grammar fixes, or translations (wip)
+- **Git-based**: Collaborate on your decks via Github repositories with built-in sync commands (nyi)
 
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using `ankiops note-types --add <name>`.

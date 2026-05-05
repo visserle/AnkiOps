@@ -312,13 +312,7 @@ class HTMLToMarkdown:
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
-            result = convert(html, self._OPTIONS)
-            content = result.get("content")
-            if not isinstance(content, str):
-                raise TypeError(
-                    "html_to_markdown.convert() did not return markdown content"
-                )
-            md = content
+            md = convert(html, self._OPTIONS)
             md = _restore_custom_tag_placeholders(md, replacements)
             md = _enforce_link_angle_brackets(md)
         else:
