@@ -4,7 +4,16 @@ import re
 import warnings
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-from html_to_markdown import ConversionOptions, convert
+from html_to_markdown import ConversionOptions
+from html_to_markdown._html_to_markdown import (
+    HeadingStyle as _HTMHeadingStyle,
+)
+from html_to_markdown._html_to_markdown import (
+    HighlightStyle as _HTMHighlightStyle,
+)
+from html_to_markdown._html_to_markdown import (
+    convert as _htm_convert,
+)
 
 from ankiops.config import LOCAL_MEDIA_DIR
 
@@ -284,10 +293,10 @@ class HTMLToMarkdown:
     """Convert HTML to clean Markdown."""
 
     _OPTIONS = ConversionOptions(
-        heading_style="atx",
+        heading_style=_HTMHeadingStyle.Atx,
         bullets="-",
         list_indent_width=3,
-        highlight_style="double-equal",
+        highlight_style=_HTMHighlightStyle.DoubleEqual,
         autolinks=False,
         extract_metadata=False,
     )
@@ -312,7 +321,12 @@ class HTMLToMarkdown:
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
-            md = convert(html, self._OPTIONS)
+            result = _htm_convert(html, self._OPTIONS, None)
+            md = getattr(result, "content", None)
+            if md is None and isinstance(result, dict):
+                md = result.get("content")
+            if md is None:
+                md = ""
             md = _restore_custom_tag_placeholders(md, replacements)
             md = _enforce_link_angle_brackets(md)
         else:
