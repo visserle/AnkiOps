@@ -110,8 +110,7 @@ class OpenAICompatStructuredAdapter:
                         return ProviderOutcome(
                             kind=ProviderOutcomeKind.PROVIDER_ERROR,
                             error_message=(
-                                "Provider returned HTTP "
-                                f"{status_text}: {error}"
+                                f"Provider returned HTTP {status_text}: {error}"
                             ),
                         )
                     retry_count += 1

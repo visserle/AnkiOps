@@ -147,8 +147,7 @@ class AnthropicToolStrictAdapter:
             return ProviderOutcome(
                 kind=ProviderOutcomeKind.FATAL_ERROR,
                 error_message=(
-                    "Provider authentication failed with HTTP "
-                    f"{status_code}"
+                    f"Provider authentication failed with HTTP {status_code}"
                 ),
             )
 
@@ -175,8 +174,7 @@ class AnthropicToolStrictAdapter:
             _as_non_empty_str(response_data.get("model")) or request.model_id
         )
         request_id = _as_non_empty_str(
-            response.headers.get("request-id")
-            or response.headers.get("x-request-id")
+            response.headers.get("request-id") or response.headers.get("x-request-id")
         )
 
         usage_raw = response_data.get("usage")

@@ -50,9 +50,7 @@ def resolve_model_capabilities(
 
 def require_strict_json_support(capabilities: ModelCapabilities) -> None:
     if not capabilities.supports_strict_json:
-        raise CapabilityError(
-            "Model does not support strict structured JSON output"
-        )
+        raise CapabilityError("Model does not support strict structured JSON output")
 
 
 def _default_transport(provider: str) -> TransportMode:

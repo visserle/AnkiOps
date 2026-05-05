@@ -206,8 +206,7 @@ class TaskRunSummary:
             errors=self.errors,
         )
         base = (
-            f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — "
-            f"{changes}"
+            f"Task '{self.task_name}' ({self.model}): {self.eligible} notes — {changes}"
         )
         suffix_parts: list[str] = []
         if self.canceled:

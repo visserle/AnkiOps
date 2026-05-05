@@ -154,8 +154,7 @@ class GeminiStructuredAdapter:
             return ProviderOutcome(
                 kind=ProviderOutcomeKind.FATAL_ERROR,
                 error_message=(
-                    "Provider authentication failed with HTTP "
-                    f"{status_code}"
+                    f"Provider authentication failed with HTTP {status_code}"
                 ),
             )
 
@@ -178,8 +177,7 @@ class GeminiStructuredAdapter:
         latency_ms = round((time.monotonic() - started_at) * 1000)
         raw_json = _response_json(response, response_data)
         request_id = _as_non_empty_str(
-            response.headers.get("x-request-id")
-            or response.headers.get("request-id")
+            response.headers.get("x-request-id") or response.headers.get("request-id")
         )
 
         usage_raw = response_data.get("usageMetadata")

@@ -48,9 +48,7 @@ class NoteUpdateContract:
             if field_name not in self.editable_fields:
                 raise ContractValidationError(f"edits.{field_name} is not editable")
             if not isinstance(value, str):
-                raise ContractValidationError(
-                    f"edits.{field_name} must be a string"
-                )
+                raise ContractValidationError(f"edits.{field_name} must be a string")
             parsed_edits[field_name] = value
 
         return NoteUpdate(note_key=note_key, edits=parsed_edits)

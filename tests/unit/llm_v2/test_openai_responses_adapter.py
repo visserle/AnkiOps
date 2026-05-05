@@ -70,7 +70,7 @@ def test_generate_uses_output_parsed_when_available() -> None:
         model="gpt-5.4",
         output_parsed={"note_key": "nk-1", "edits": {"Question": "Fixed"}},
         usage=SimpleNamespace(input_tokens=11, output_tokens=5),
-        model_dump_json=lambda: "{\"id\":\"resp_123\"}",
+        model_dump_json=lambda: '{"id":"resp_123"}',
     )
     client = _FakeClient(response=response)
     adapter = OpenAIResponsesStructuredAdapter(
