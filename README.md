@@ -293,23 +293,29 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 - Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors
 - Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics
 
-### Live LLM Scenarios (Groq)
+### Live LLM Scenarios
 
-AnkiOps includes opt-in live integration tests for end-to-end LLM execution using
-Groq's OpenAI-compatible API. These tests exercise correctness, robustness,
-retry/telemetry persistence, and throughput under larger note batches.
+AnkiOps includes opt-in live integration tests for end-to-end LLM execution.
+These tests exercise correctness, robustness, retry/telemetry persistence, and
+throughput under larger note batches.
 
 Required environment variables:
 
 ```bash
 export ANKIOPS_RUN_LIVE_LLM_TESTS=1
-export GROQ_API_KEY="your-groq-key"
 ```
+
+Choose a model from `llm/_models.yaml` (or `collection/llm/_models.yaml` in an initialized collection),
+then export the model's required API key env var. You can set the model via
+`ANKIOPS_LIVE_LLM_MODEL` or `--live-llm-model`.
 
 Run live scenarios:
 
 ```bash
+export ANKIOPS_LIVE_LLM_MODEL=groq-oss-120b
 python -m pytest tests/integration/llm/test_llm_live_grammar.py -m live_llm
+# or:
+python -m pytest tests/integration/llm/test_llm_live_grammar.py -m live_llm --live-llm-model=groq-oss-120b
 ```
 
 Optional stress scenario:

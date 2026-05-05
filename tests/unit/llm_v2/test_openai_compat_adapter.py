@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from httpx import Request
+from openai import APIConnectionError
+
 from ankiops.llm_v2.domain.contracts import build_note_update_contract
 from ankiops.llm_v2.domain.outcomes import ProviderOutcomeKind
 from ankiops.llm_v2.domain.payloads import NotePayload
@@ -23,6 +26,23 @@ class _FakeCompletions:
 class _FakeClient:
     def __init__(self, response: object):
         self.chat = SimpleNamespace(completions=_FakeCompletions(response))
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _RaisingCompletions:
+    def __init__(self, error: Exception):
+        self._error = error
+
+    async def create(self, **kwargs: object) -> object:
+        raise self._error
+
+
+class _RaisingClient:
+    def __init__(self, error: Exception):
+        self.chat = SimpleNamespace(completions=_RaisingCompletions(error))
         self.closed = False
 
     async def close(self) -> None:
@@ -111,4 +131,26 @@ def test_generate_validation_error_for_bad_json() -> None:
     outcome = asyncio.run(adapter.generate(_build_request()))
 
     assert outcome.kind is ProviderOutcomeKind.VALIDATION_ERROR
+    assert outcome.error_message is not None
+
+
+def test_connection_error_exhaustion_is_provider_error() -> None:
+    fake_client = _RaisingClient(
+        APIConnectionError(
+            message="Connection error.",
+            request=Request("POST", "https://api.example.com/v1/chat/completions"),
+        )
+    )
+    adapter = OpenAICompatStructuredAdapter(
+        api_key="key",
+        base_url="https://api.example.com/v1",
+        provider="groq",
+        retries=0,
+        retry_backoff_jitter=False,
+        client=fake_client,
+    )
+
+    outcome = asyncio.run(adapter.generate(_build_request()))
+
+    assert outcome.kind is ProviderOutcomeKind.PROVIDER_ERROR
     assert outcome.error_message is not None

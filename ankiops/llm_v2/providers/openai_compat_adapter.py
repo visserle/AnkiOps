@@ -91,7 +91,7 @@ class OpenAICompatStructuredAdapter:
             except APIConnectionError as error:
                 if retry_count >= self._retries:
                     return ProviderOutcome(
-                        kind=ProviderOutcomeKind.FATAL_ERROR,
+                        kind=ProviderOutcomeKind.PROVIDER_ERROR,
                         error_message=f"Provider connection error: {error}",
                     )
                 retry_count += 1

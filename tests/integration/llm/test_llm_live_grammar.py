@@ -14,19 +14,52 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.llm_db import LlmDb
+from ankiops.llm.model_registry import load_model_registry
 from ankiops.llm.runner import LlmTaskExecutor, _materialize_task_context
 from ankiops.llm.task_types import LlmItemStatus
 
 LIVE_DECK_NAME = "LiveGrammarDeck"
 STANDARD_TASK_NAME = "grammar"
-GROQ_MODEL_NAME = "groq-oss-120b"
-GROQ_MODEL_ID = "openai/gpt-oss-120b"
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+LIVE_MODEL_OPTION = "live_llm_model"
 
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dedent(content).strip() + "\n", encoding="utf-8")
+
+
+def _default_live_model_name() -> str:
+    grammar_task = (
+        resources.files("ankiops.llm")
+        .joinpath("grammar.yaml")
+        .read_text(encoding="utf-8")
+    )
+    for line in grammar_task.splitlines():
+        if line.startswith("model:"):
+            model = line.partition(":")[2].strip()
+            if model:
+                return model
+            break
+    raise RuntimeError("ankiops.llm/grammar.yaml must define a non-empty model")
+
+
+def _resolve_live_model_name(pytestconfig: pytest.Config) -> str:
+    configured = str(pytestconfig.getoption(LIVE_MODEL_OPTION) or "").strip()
+    return configured or _default_live_model_name()
+
+
+def _resolve_required_api_key_env_var(
+    *,
+    collection_dir: Path,
+    model_name: str,
+) -> str | None:
+    model = load_model_registry(collection_dir=collection_dir).parse(model_name)
+    if model is None:
+        return None
+    api_key = model.api_key.strip()
+    if api_key.startswith("$"):
+        return api_key[1:]
+    return None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -125,17 +158,13 @@ def _build_pressure_deck_markdown(total_notes: int) -> str:
     return _join_notes(notes)
 
 
-def _eject_groq_llm_files(collection_dir: Path) -> None:
+def _eject_live_llm_files(collection_dir: Path, *, model_name: str) -> None:
     llm_dir = collection_dir / "llm"
     _write(
         llm_dir / "_models.yaml",
-        f"""
-        - model: {GROQ_MODEL_NAME}
-          model_id: {GROQ_MODEL_ID}
-          provider: groq
-          base_url: {GROQ_BASE_URL}
-          api_key: $GROQ_API_KEY
-        """,
+        resources.files("ankiops.llm")
+        .joinpath("_models.yaml")
+        .read_text(encoding="utf-8"),
     )
     _write(
         llm_dir / "_system_prompt.md",
@@ -151,20 +180,31 @@ def _eject_groq_llm_files(collection_dir: Path) -> None:
     )
     grammar_lines = grammar_task.splitlines()
     if grammar_lines and grammar_lines[0].startswith("model:"):
-        grammar_lines[0] = f"model: {GROQ_MODEL_NAME}"
+        grammar_lines[0] = f"model: {model_name}"
+    registry = load_model_registry(collection_dir=collection_dir)
+    if registry.parse(model_name) is None:
+        raise pytest.UsageError(
+            "Invalid live LLM model "
+            f"'{model_name}'. Supported models: {registry.format_models()}"
+        )
     _write(
         llm_dir / "grammar.yaml",
         "\n".join(grammar_lines),
     )
 
 
-def _bootstrap_collection(collection_dir: Path, *, deck_markdown: str) -> None:
+def _bootstrap_collection(
+    collection_dir: Path,
+    *,
+    deck_markdown: str,
+    model_name: str,
+) -> None:
     db = SQLiteDbAdapter.open(collection_dir)
     db.close()
 
     note_types_dir = collection_dir / "note_types"
     FileSystemAdapter().eject_builtin_note_types(note_types_dir)
-    _eject_groq_llm_files(collection_dir)
+    _eject_live_llm_files(collection_dir, model_name=model_name)
     _write(collection_dir / f"{LIVE_DECK_NAME}.md", deck_markdown)
 
 
@@ -313,13 +353,39 @@ def _emit_metrics(
 
 
 @pytest.fixture(scope="module")
-def require_live_llm() -> None:
+def live_llm_model(pytestconfig: pytest.Config) -> str:
+    return _resolve_live_model_name(pytestconfig)
+
+
+@pytest.fixture(scope="module")
+def require_live_llm(live_llm_model: str) -> None:
     if os.getenv("ANKIOPS_RUN_LIVE_LLM_TESTS") != "1":
         pytest.skip(
             "Set ANKIOPS_RUN_LIVE_LLM_TESTS=1 to run live LLM integration tests."
         )
-    if not os.getenv("GROQ_API_KEY"):
-        pytest.skip("GROQ_API_KEY is required for live LLM integration tests.")
+    try:
+        import openai  # noqa: F401
+    except ModuleNotFoundError:
+        pytest.skip("openai package is required for live LLM integration tests.")
+
+
+@pytest.fixture(scope="module")
+def _validated_live_model(
+    live_llm_model: str,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> str:
+    collection_dir = tmp_path_factory.mktemp("live-llm-config-check")
+    _eject_live_llm_files(collection_dir, model_name=live_llm_model)
+    required_env_var = _resolve_required_api_key_env_var(
+        collection_dir=collection_dir,
+        model_name=live_llm_model,
+    )
+    if required_env_var and not os.getenv(required_env_var):
+        pytest.skip(
+            f"{required_env_var} is required for live LLM integration tests "
+            f"when using model '{live_llm_model}'."
+        )
+    return live_llm_model
 
 
 @pytest.fixture(scope="module")
@@ -330,7 +396,10 @@ def require_live_llm_stress() -> None:
 
 @pytest.mark.live_llm
 @pytest.mark.usefixtures("require_live_llm")
-def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
+def test_live_grammar_single_note_smoke(
+    tmp_path: Path,
+    _validated_live_model: str,
+) -> None:
     source_markdown = """
     <!-- note_key: live-nk-1 -->
     Q: teh cat dont recieve treats.
@@ -338,7 +407,11 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
     S: style guide
     AI: internal notes
     """
-    _bootstrap_collection(tmp_path, deck_markdown=source_markdown)
+    _bootstrap_collection(
+        tmp_path,
+        deck_markdown=source_markdown,
+        model_name=_validated_live_model,
+    )
 
     started = time.monotonic()
     result = _run_live_grammar_task(tmp_path)
@@ -418,10 +491,15 @@ def test_live_grammar_single_note_smoke(tmp_path: Path) -> None:
 @pytest.mark.usefixtures("require_live_llm")
 def test_live_grammar_mixed_correctness_robustness_and_telemetry(
     tmp_path: Path,
+    _validated_live_model: str,
 ) -> None:
     mixed_notes = _env_int("ANKIOPS_LIVE_LLM_MIXED_NOTES", 12)
     source_markdown = _build_mixed_deck_markdown(mixed_notes)
-    _bootstrap_collection(tmp_path, deck_markdown=source_markdown)
+    _bootstrap_collection(
+        tmp_path,
+        deck_markdown=source_markdown,
+        model_name=_validated_live_model,
+    )
 
     started = time.monotonic()
     result = _run_live_grammar_task(tmp_path)
@@ -494,10 +572,17 @@ def test_live_grammar_mixed_correctness_robustness_and_telemetry(
 
 @pytest.mark.live_llm
 @pytest.mark.usefixtures("require_live_llm")
-def test_live_grammar_pressure_robustness_and_speed(tmp_path: Path) -> None:
+def test_live_grammar_pressure_robustness_and_speed(
+    tmp_path: Path,
+    _validated_live_model: str,
+) -> None:
     pressure_notes = _env_int("ANKIOPS_LIVE_LLM_PRESSURE_NOTES", 18)
     source_markdown = _build_pressure_deck_markdown(pressure_notes)
-    _bootstrap_collection(tmp_path, deck_markdown=source_markdown)
+    _bootstrap_collection(
+        tmp_path,
+        deck_markdown=source_markdown,
+        model_name=_validated_live_model,
+    )
 
     started = time.monotonic()
     result = _run_live_grammar_task(tmp_path)
@@ -561,10 +646,17 @@ def test_live_grammar_pressure_robustness_and_speed(tmp_path: Path) -> None:
 
 @pytest.mark.live_llm
 @pytest.mark.usefixtures("require_live_llm", "require_live_llm_stress")
-def test_live_grammar_stress_large_batch_optional(tmp_path: Path) -> None:
+def test_live_grammar_stress_large_batch_optional(
+    tmp_path: Path,
+    _validated_live_model: str,
+) -> None:
     stress_notes = _env_int("ANKIOPS_LIVE_LLM_STRESS_NOTES", 48)
     source_markdown = _build_pressure_deck_markdown(stress_notes)
-    _bootstrap_collection(tmp_path, deck_markdown=source_markdown)
+    _bootstrap_collection(
+        tmp_path,
+        deck_markdown=source_markdown,
+        model_name=_validated_live_model,
+    )
 
     started = time.monotonic()
     result = _run_live_grammar_task(tmp_path)

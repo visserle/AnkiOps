@@ -4,16 +4,12 @@ import re
 import warnings
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-from html_to_markdown import ConversionOptions
-from html_to_markdown._html_to_markdown import (
-    HeadingStyle as _HTMHeadingStyle,
-)
-from html_to_markdown._html_to_markdown import (
-    HighlightStyle as _HTMHighlightStyle,
-)
-from html_to_markdown._html_to_markdown import (
-    convert as _htm_convert,
-)
+from html_to_markdown import ConversionOptions, convert
+
+try:
+    import html_to_markdown._html_to_markdown as _htm_native
+except Exception:  # pragma: no cover - optional module shape varies by install
+    _htm_native = None
 
 from ankiops.config import LOCAL_MEDIA_DIR
 
@@ -292,14 +288,42 @@ def _enforce_link_angle_brackets(md: str) -> str:
 class HTMLToMarkdown:
     """Convert HTML to clean Markdown."""
 
-    _OPTIONS = ConversionOptions(
-        heading_style=_HTMHeadingStyle.Atx,
-        bullets="-",
-        list_indent_width=3,
-        highlight_style=_HTMHighlightStyle.DoubleEqual,
-        autolinks=False,
-        extract_metadata=False,
-    )
+    @staticmethod
+    def _build_options() -> ConversionOptions:
+        defaults = ConversionOptions()
+
+        heading_default = getattr(defaults, "heading_style", "atx")
+        if isinstance(heading_default, str):
+            heading_style = "atx"
+        else:
+            heading_enum = type(heading_default)
+            heading_style = getattr(
+                heading_enum, "Atx", getattr(heading_enum, "ATX", heading_default)
+            )
+
+        highlight_default = getattr(defaults, "highlight_style", "double-equal")
+        if isinstance(highlight_default, str):
+            highlight_style = (
+                "double_equal" if "_" in highlight_default else "double-equal"
+            )
+        else:
+            highlight_enum = type(highlight_default)
+            highlight_style = getattr(
+                highlight_enum,
+                "DoubleEqual",
+                getattr(highlight_enum, "DOUBLE_EQUAL", highlight_default),
+            )
+
+        return ConversionOptions(
+            heading_style=heading_style,
+            bullets="-",
+            list_indent_width=3,
+            highlight_style=highlight_style,
+            autolinks=False,
+            extract_metadata=False,
+        )
+
+    _OPTIONS = _build_options.__func__()
 
     def convert(self, html: str) -> str:
         """Convert HTML to Markdown."""
@@ -321,10 +345,15 @@ class HTMLToMarkdown:
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
-            result = _htm_convert(html, self._OPTIONS, None)
+            if _htm_native is not None and hasattr(_htm_native, "convert"):
+                result = _htm_native.convert(html, self._OPTIONS, None)
+            else:
+                result = convert(html, self._OPTIONS)
             md = getattr(result, "content", None)
             if md is None and isinstance(result, dict):
                 md = result.get("content")
+            if md is None and isinstance(result, str):
+                md = result
             if md is None:
                 md = ""
             md = _restore_custom_tag_placeholders(md, replacements)

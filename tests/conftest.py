@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +11,18 @@ from ankiops.config import get_note_types_dir
 from ankiops.fs import FileSystemAdapter
 from tests.support.fake_anki import MockAnki
 from tests.support.sync_world import SyncWorld
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--live-llm-model",
+        action="store",
+        default=os.getenv("ANKIOPS_LIVE_LLM_MODEL", ""),
+        help=(
+            "Model name for live LLM integration tests. "
+            "Must exist in ankiops/llm/_models.yaml or collection/llm/_models.yaml."
+        ),
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

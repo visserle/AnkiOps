@@ -11,7 +11,6 @@ from ankiops.llm_v2.domain.contracts import build_note_update_contract
 from ankiops.llm_v2.domain.errors import CapabilityError
 from ankiops.llm_v2.domain.outcomes import ProviderOutcome, ProviderOutcomeKind
 from ankiops.llm_v2.domain.payloads import NotePayload as V2NotePayload
-from ankiops.llm_v2.providers import create_structured_adapter
 from ankiops.llm_v2.runtime import StructuredOutputEngine
 
 from .llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
@@ -27,6 +26,12 @@ from .task_types import (
 )
 
 
+def create_structured_adapter(*args, **kwargs):
+    from ankiops.llm_v2.providers import create_structured_adapter as _create_adapter
+
+    return _create_adapter(*args, **kwargs)
+
+
 class ProviderClient:
     """Adapter-backed provider client for structured note updates."""
 
@@ -40,12 +45,19 @@ class ProviderClient:
         except CapabilityError as error:
             raise LlmFatalError(str(error)) from error
 
-        self._adapter = create_structured_adapter(
-            model=task.model,
-            capabilities=self._capabilities,
-            api_key=api_key,
-            timeout_seconds=task.timeout_seconds,
-        )
+        try:
+            self._adapter = create_structured_adapter(
+                model=task.model,
+                capabilities=self._capabilities,
+                api_key=api_key,
+                timeout_seconds=task.timeout_seconds,
+            )
+        except ModuleNotFoundError as error:
+            if error.name == "openai":
+                raise LlmFatalError(
+                    "openai package is required for OpenAI-compatible LLM providers"
+                ) from error
+            raise
         self._engine = StructuredOutputEngine(self._adapter)
 
     async def close(self) -> None:
