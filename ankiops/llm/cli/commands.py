@@ -26,9 +26,9 @@ from rich.progress import (
 
 from ankiops.config import (
     LLM_DIR,
+    NOTE_TYPES_DIR,
     file_stem_to_deck_name,
-    get_note_types_dir,
-    require_initialized_collection_dir,
+    require_collection_dir,
 )
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.config_loader import load_llm_task_catalog
@@ -278,10 +278,7 @@ def configure_llm_parser(
 def run_llm(
     args: argparse.Namespace,
     *,
-    require_initialized_collection_dir_fn: Callable[[], Path] = (
-        require_initialized_collection_dir
-    ),
-    get_note_types_dir_fn: Callable[[], Path] = get_note_types_dir,
+    require_collection_dir_fn: Callable[[], Path] = require_collection_dir,
     load_note_type_configs_fn: Callable[[Path], list[Any]] | None = None,
     load_llm_task_catalog_fn: Callable[..., Any] = load_llm_task_catalog,
     plan_task_fn: Callable[..., Any] = plan_task,
@@ -293,7 +290,8 @@ def run_llm(
     if load_note_type_configs_fn is None:
         load_note_type_configs_fn = _load_note_type_configs
 
-    collection_dir = require_initialized_collection_dir_fn()
+    collection_dir = require_collection_dir_fn()
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
     task_name = getattr(args, "task_name", None)
     run_mode = bool(getattr(args, "run", False))
     job_id = getattr(args, "job_id", None)
@@ -408,7 +406,7 @@ def run_llm(
         if no_auto_commit:
             _usage_error("--no-auto-commit requires <task> --run.")
 
-        note_type_configs = load_note_type_configs_fn(get_note_types_dir_fn())
+        note_type_configs = load_note_type_configs_fn(note_types_dir)
         catalog = load_llm_task_catalog_fn(
             collection_dir,
             note_type_configs=note_type_configs,

@@ -10,8 +10,8 @@ from ankiops.anki import AnkiAdapter
 from ankiops.config import (
     ANKIOPS_DB,
     NOTE_SEPARATOR,
+    NOTE_TYPES_DIR,
     deck_name_to_file_stem,
-    get_note_types_dir,
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
@@ -28,9 +28,12 @@ class SyncWorld:
         self.root = root
         self.mock_anki = mock_anki
         self.anki = AnkiAdapter()
+        self.note_types_dir = self.root / NOTE_TYPES_DIR
 
         fs = FileSystemAdapter()
-        fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+        if not self.note_types_dir.exists():
+            fs.eject_builtin_note_types(self.note_types_dir)
+        fs.set_configs(fs.load_note_type_configs(self.note_types_dir))
         self.fs = fs
 
     def open_db(self) -> SQLiteDbAdapter:
@@ -79,7 +82,7 @@ class SyncWorld:
             fs_port=self.fs,
             db_port=db,
             collection_dir=self.root,
-            note_types_dir=get_note_types_dir(),
+            note_types_dir=self.note_types_dir,
         )
 
     def sync_export(self, db: SQLiteDbAdapter):
@@ -88,7 +91,7 @@ class SyncWorld:
             fs_port=self.fs,
             db_port=db,
             collection_dir=self.root,
-            note_types_dir=get_note_types_dir(),
+            note_types_dir=self.note_types_dir,
         )
 
     def deck_path(self, deck_name: str) -> Path:

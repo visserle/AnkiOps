@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem, get_note_types_dir
+from ankiops.config import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -62,22 +62,24 @@ def _assert_db_bijection(db_path: Path) -> None:
 
 
 def _sync_import(anki, fs, db, collection_dir: Path):
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
     return import_collection(
         anki_port=anki,
         fs_port=fs,
         db_port=db,
         collection_dir=collection_dir,
-        note_types_dir=get_note_types_dir(),
+        note_types_dir=note_types_dir,
     )
 
 
 def _sync_export(anki, fs, db, collection_dir: Path):
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
     return export_collection(
         anki_port=anki,
         fs_port=fs,
         db_port=db,
         collection_dir=collection_dir,
-        note_types_dir=get_note_types_dir(),
+        note_types_dir=note_types_dir,
     )
 
 
@@ -108,7 +110,10 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
         mock_anki = MockAnki()
         anki = AnkiAdapter()
         fs = FileSystemAdapter()
-        fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+        note_types_dir = collection_dir / NOTE_TYPES_DIR
+        if not note_types_dir.exists():
+            fs.eject_builtin_note_types(note_types_dir)
+        fs.set_configs(fs.load_note_type_configs(note_types_dir))
         db = SQLiteDbAdapter.open(collection_dir)
 
         question_idx = 0

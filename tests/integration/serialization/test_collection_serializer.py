@@ -23,14 +23,6 @@ def _set_collection_paths(monkeypatch, collection_dir):
     )
 
 
-def _set_note_type_paths(monkeypatch, note_types_dir):
-    monkeypatch.setattr("ankiops.config.get_note_types_dir", lambda: note_types_dir)
-    monkeypatch.setattr(
-        "ankiops.serializer.get_note_types_dir",
-        lambda: note_types_dir,
-    )
-
-
 @pytest.fixture
 def collection(tmp_path, fs, monkeypatch):
     """Create a minimal collection with DB, note types, and one deck file."""
@@ -44,7 +36,6 @@ def collection(tmp_path, fs, monkeypatch):
 
     note_types_dir = tmp_path / "note_types"
     fs.eject_builtin_note_types(note_types_dir)
-    _set_note_type_paths(monkeypatch, note_types_dir)
 
     (tmp_path / f"{deck_name_to_file_stem('TestDeck')}.md").write_text(
         (
@@ -138,7 +129,6 @@ def test_serialize_to_file_accepts_deck_scope(collection, tmp_path, monkeypatch)
 
 def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
-    _set_note_type_paths(monkeypatch, collection / "note_types")
 
     broken_name = f"{deck_name_to_file_stem('BrokenDeck')}.md"
     broken_file = collection / broken_name
@@ -167,7 +157,6 @@ def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatc
 def test_roundtrip(collection, tmp_path, monkeypatch):
     """Serialize then deserialize should preserve deck note content."""
     _set_collection_paths(monkeypatch, collection)
-    _set_note_type_paths(monkeypatch, collection / "note_types")
 
     json_file = tmp_path / "export.json"
     serialize_to_file(collection, json_file)
@@ -179,7 +168,6 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
     fs = FileSystemAdapter()
     note_types_dst = fresh_dir / "note_types"
     fs.eject_builtin_note_types(note_types_dst)
-    _set_note_type_paths(monkeypatch, note_types_dst)
 
     deserialize_from_file(json_file, overwrite=True)
 
@@ -192,7 +180,6 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
 
 def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
-    _set_note_type_paths(monkeypatch, collection / "note_types")
 
     serialized_data = serialize(collection)
 
@@ -203,7 +190,6 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     fs = FileSystemAdapter()
     note_types_dst = fresh_dir / "note_types"
     fs.eject_builtin_note_types(note_types_dst)
-    _set_note_type_paths(monkeypatch, note_types_dst)
 
     deserialize(
         serialized_data,
@@ -226,7 +212,6 @@ def test_deserialize_unknown_note_type_skips_note_without_orphan_key(
 
     note_types_dir = tmp_path / "note_types"
     fs.eject_builtin_note_types(note_types_dir)
-    _set_note_type_paths(monkeypatch, note_types_dir)
 
     json_file = tmp_path / "in.json"
     json_file.write_text(
@@ -266,7 +251,6 @@ def test_deserialize_unknown_note_type_falls_back_to_inference(
 
     note_types_dir = tmp_path / "note_types"
     fs.eject_builtin_note_types(note_types_dir)
-    _set_note_type_paths(monkeypatch, note_types_dir)
 
     json_file = tmp_path / "in.json"
     json_file.write_text(

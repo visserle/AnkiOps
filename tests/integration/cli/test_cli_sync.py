@@ -309,7 +309,7 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.get_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
@@ -332,7 +332,7 @@ def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
         no_subdecks=True,
     )
 
-    with patch("ankiops.cli.get_collection_dir", return_value=tmp_path):
+    with patch("ankiops.cli.require_collection_dir", return_value=tmp_path):
         with pytest.raises(SystemExit) as exc:
             run_serialize(args)
 

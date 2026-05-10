@@ -79,10 +79,6 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
         patch(
-            "ankiops.note_type_cli.get_note_types_dir",
-            return_value=tmp_path / "note_types",
-        ),
-        patch(
             "builtins.input",
             side_effect=["TM", "y", "D", "y", "DEF", "y", "X1", "y"],
         ),
@@ -131,10 +127,6 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
-        patch(
-            "ankiops.note_type_cli.get_note_types_dir",
-            return_value=tmp_path / "note_types",
-        ),
         patch("builtins.input", side_effect=["Q", "n", "Q", "y", "CTX", "y"]),
         caplog.at_level("INFO"),
     ):
@@ -158,10 +150,6 @@ def test_note_types_import_rejects_unknown_model(tmp_path):
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
-        patch(
-            "ankiops.note_type_cli.get_note_types_dir",
-            return_value=tmp_path / "note_types",
-        ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "DoesNotExist"]),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -180,10 +168,6 @@ def test_note_types_import_rejects_existing_target_folder(tmp_path):
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
         patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
-        patch(
-            "ankiops.note_type_cli.get_note_types_dir",
-            return_value=tmp_path / "note_types",
-        ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "MyType"]),
     ):
         with pytest.raises(SystemExit) as exc:

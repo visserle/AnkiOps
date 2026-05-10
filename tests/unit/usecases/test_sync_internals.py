@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ankiops.config import get_note_types_dir
+from ankiops.config import NOTE_TYPES_DIR, get_collection_dir
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import _order_resolved_notes, _sync_deck
 from ankiops.fs import FileSystemAdapter
@@ -74,7 +74,8 @@ def test_flush_writes_updates_existing_key_comment(tmp_path):
 
 def test_sync_deck_records_unknown_note_type_error(tmp_path):
     fs_port = FileSystemAdapter()
-    configs = fs_port.load_note_type_configs(get_note_types_dir())
+    note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
+    configs = fs_port.load_note_type_configs(note_types_dir)
     db = SQLiteDbAdapter.open(tmp_path)
     try:
         unknown = AnkiNote(

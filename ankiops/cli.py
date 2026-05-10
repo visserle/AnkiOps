@@ -5,13 +5,7 @@ from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
-from ankiops.config import (
-    ANKIOPS_DB,
-    get_collection_dir,
-    get_note_types_dir,
-    require_collection_dir,
-    require_initialized_collection_dir,
-)
+from ankiops.config import NOTE_TYPES_DIR, get_collection_dir, require_collection_dir
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -95,7 +89,7 @@ def run_am(args):
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     fs = FileSystemAdapter()
     db = SQLiteDbAdapter.open(collection_dir)
-    note_types_dir = get_note_types_dir()
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
 
     logger.debug("Starting note export (Anki -> Markdown)")
     export_summary: CollectionResult = export_collection(
@@ -158,7 +152,7 @@ def run_ma(args):
 
     fs = FileSystemAdapter()
     db = SQLiteDbAdapter.open(collection_dir)
-    note_types_dir = get_note_types_dir()
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
 
     try:
         logger.debug("Starting media push (local -> Anki)")
@@ -233,13 +227,7 @@ def run_serialize(args):
         logger.error("--no-subdecks requires --deck")
         raise SystemExit(2)
 
-    collection_dir = get_collection_dir()
-    db_path = collection_dir / ANKIOPS_DB
-    if not db_path.exists():
-        logger.error(
-            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
-        )
-        raise SystemExit(1)
+    collection_dir = require_collection_dir()
 
     if args.output:
         output_file = Path(args.output)
@@ -283,8 +271,7 @@ def run_llm(args):
     """Delegates LLM command handling to the LLM CLI module."""
     run_llm_impl(
         args,
-        require_initialized_collection_dir_fn=require_initialized_collection_dir,
-        get_note_types_dir_fn=get_note_types_dir,
+        require_collection_dir_fn=require_collection_dir,
         load_note_type_configs_fn=(
             lambda note_types_dir: FileSystemAdapter().load_note_type_configs(
                 note_types_dir

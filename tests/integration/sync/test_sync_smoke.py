@@ -6,7 +6,7 @@ import re
 from contextlib import contextmanager
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import deck_name_to_file_stem, get_note_types_dir
+from ankiops.config import NOTE_TYPES_DIR, deck_name_to_file_stem
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -20,34 +20,47 @@ _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 def _ports(collection_dir, *, preload_configs: bool):
     anki = AnkiAdapter()
     fs = FileSystemAdapter()
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
+    if not note_types_dir.exists():
+        fs.eject_builtin_note_types(note_types_dir)
     if preload_configs:
-        fs.set_configs(fs.load_note_type_configs(get_note_types_dir()))
+        fs.set_configs(fs.load_note_type_configs(note_types_dir))
     db = SQLiteDbAdapter.open(collection_dir)
     try:
-        yield anki, fs, db
+        yield anki, fs, db, note_types_dir
     finally:
         db.close()
 
 
 def _run_import(collection_dir, *, preload_configs: bool = True):
-    with _ports(collection_dir, preload_configs=preload_configs) as (anki, fs, db):
+    with _ports(collection_dir, preload_configs=preload_configs) as (
+        anki,
+        fs,
+        db,
+        note_types_dir,
+    ):
         return import_collection(
             anki_port=anki,
             fs_port=fs,
             db_port=db,
             collection_dir=collection_dir,
-            note_types_dir=get_note_types_dir(),
+            note_types_dir=note_types_dir,
         )
 
 
 def _run_export(collection_dir, *, preload_configs: bool = False):
-    with _ports(collection_dir, preload_configs=preload_configs) as (anki, fs, db):
+    with _ports(collection_dir, preload_configs=preload_configs) as (
+        anki,
+        fs,
+        db,
+        note_types_dir,
+    ):
         return export_collection(
             anki_port=anki,
             fs_port=fs,
             db_port=db,
             collection_dir=collection_dir,
-            note_types_dir=get_note_types_dir(),
+            note_types_dir=note_types_dir,
         )
 
 

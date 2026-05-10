@@ -8,10 +8,10 @@ from typing import Any
 
 from ankiops.config import (
     ANKIOPS_DB,
+    NOTE_TYPES_DIR,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
     get_collection_dir,
-    get_note_types_dir,
 )
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
@@ -32,7 +32,7 @@ def serialize(
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
 
     fs = FileSystemAdapter()
-    resolved_note_types_dir = note_types_dir or get_note_types_dir()
+    resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
     fs.load_note_type_configs(resolved_note_types_dir)
 
     serialized_data: dict[str, Any] = {
@@ -295,9 +295,10 @@ def deserialize_from_file(
         data = json.load(input_handle)
 
     logger.debug(f"Importing serialized data from: {json_file}")
+    collection_dir = get_collection_dir()
     deserialize(
         data,
-        collection_dir=get_collection_dir(),
-        note_types_dir=get_note_types_dir(),
+        collection_dir=collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
         overwrite=overwrite,
     )

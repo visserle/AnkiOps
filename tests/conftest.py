@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.config import get_note_types_dir
+from ankiops.config import NOTE_TYPES_DIR, get_collection_dir
 from ankiops.fs import FileSystemAdapter
 from tests.support.fake_anki import MockAnki
 from tests.support.sync_world import SyncWorld
@@ -28,7 +28,7 @@ def pytest_addoption(parser):
 @pytest.fixture(scope="session", autouse=True)
 def ensure_default_note_types_dir():
     """Bootstrap note type configs for tests in clean checkouts (e.g. CI)."""
-    note_types_dir = get_note_types_dir()
+    note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
     if not note_types_dir.exists():
         FileSystemAdapter().eject_builtin_note_types(note_types_dir)
 
@@ -37,7 +37,8 @@ def ensure_default_note_types_dir():
 def fs():
     """FileSystemAdapter pre-loaded with built-in note types (shared across tests)."""
     adapter = FileSystemAdapter()
-    adapter.set_configs(adapter.load_note_type_configs(get_note_types_dir()))
+    note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
+    adapter.set_configs(adapter.load_note_type_configs(note_types_dir))
     return adapter
 
 

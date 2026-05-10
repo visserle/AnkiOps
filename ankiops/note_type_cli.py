@@ -10,11 +10,7 @@ from rich import get_console as rich_get_console
 from rich.table import Table
 
 from ankiops.cli_anki import connect_or_exit
-from ankiops.config import (
-    get_note_types_dir,
-    require_collection_dir,
-    require_initialized_collection_dir,
-)
+from ankiops.config import NOTE_TYPES_DIR, require_collection_dir
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
 from ankiops.models import Field, NoteTypeConfig
@@ -258,11 +254,10 @@ def run(args) -> None:
         logger.error(f"Unknown note-types action: {action}")
         raise SystemExit(2)
 
-    note_types_dir = get_note_types_dir()
-    fs = FileSystemAdapter()
-
     if action == "list":
-        require_initialized_collection_dir()
+        collection_dir = require_collection_dir()
+        note_types_dir = collection_dir / NOTE_TYPES_DIR
+        fs = FileSystemAdapter()
         try:
             note_type_configs = fs.load_note_type_configs(note_types_dir)
         except ValueError as error:
@@ -280,6 +275,8 @@ def run(args) -> None:
     active_profile = anki.get_active_profile()
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+    note_types_dir = collection_dir / NOTE_TYPES_DIR
+    fs = FileSystemAdapter()
 
     destination_dir = note_types_dir / note_type_name
     if destination_dir.exists():

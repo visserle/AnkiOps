@@ -67,45 +67,29 @@ def file_stem_to_deck_name(file_stem: str) -> str:
     return unquote(file_stem.replace("__", "::"))
 
 
-def _is_development_mode() -> bool:
-    """Check if running from the AnkiOps source tree."""
-    pyproject = Path.cwd() / "pyproject.toml"
-    if not pyproject.exists():
-        return False
-    try:
-        return 'name = "ankiops"' in pyproject.read_text()
-    except OSError:
-        return False
-
-
 def get_collection_dir() -> Path:
     """Get the collection directory path.
 
     Development mode (pyproject.toml in cwd): ./collection
     Otherwise: current working directory
     """
-    if _is_development_mode():
-        return Path.cwd() / "collection"
+    pyproject = Path.cwd() / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            if 'name = "ankiops"' in pyproject.read_text():
+                return Path.cwd() / "collection"
+        except OSError:
+            pass
     return Path.cwd()
 
 
-def get_note_types_dir() -> Path:
-    """Get the standard note types directory path."""
-    return get_collection_dir() / NOTE_TYPES_DIR
+def require_collection_dir(active_profile: str | None = None) -> Path:
+    """Return the collection directory, or exit if not initialized.
 
+    Also exits if the active profile doesn't match (when provided).
+    """
+    from ankiops.db import SQLiteDbAdapter
 
-def get_llm_dir() -> Path:
-    """Get the LLM config root directory path."""
-    return get_collection_dir() / LLM_DIR
-
-
-def get_llm_db_path() -> Path:
-    """Get the LLM job-history database path."""
-    return get_llm_dir() / LLM_DB_FILENAME
-
-
-def require_initialized_collection_dir() -> Path:
-    """Return the collection directory, or exit if not initialized."""
     collection_dir = get_collection_dir()
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
@@ -113,17 +97,9 @@ def require_initialized_collection_dir() -> Path:
             f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
         )
         raise SystemExit(1)
-    return collection_dir
 
-
-def require_collection_dir(active_profile: str) -> Path:
-    """Return the collection directory, or exit if not initialized.
-
-    Also exits if the active profile doesn't match.
-    """
-    from ankiops.db import SQLiteDbAdapter
-
-    collection_dir = require_initialized_collection_dir()
+    if active_profile is None:
+        return collection_dir
 
     db = SQLiteDbAdapter.open(collection_dir)
     try:
