@@ -310,7 +310,7 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
 
     with (
         patch("ankiops.cli.get_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.serialize_collection_to_json") as serialize_mock,
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
 

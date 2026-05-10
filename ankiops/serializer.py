@@ -1,4 +1,4 @@
-"""Serialize and deserialize AnkiOps collections to/from JSON format."""
+"""Serialize and deserialize AnkiOps decks to/from JSON format."""
 
 import json
 import logging
@@ -19,14 +19,14 @@ from ankiops.log import clickable_path
 logger = logging.getLogger(__name__)
 
 
-def serialize_collection(
+def serialize(
     collection_dir: Path,
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
     note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Serialize the collection into an in-memory JSON-compatible mapping."""
+    """Serialize markdown decks into an in-memory JSON-compatible mapping."""
     db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
@@ -92,12 +92,14 @@ def serialize_collection(
         if isinstance(deck, dict)
     )
     total_decks = len(serialized_data["decks"])
-    logger.debug(f"Serialized {total_decks} deck(s), {total_notes} note(s) in memory")
+    logger.debug(
+        f"Serialized {total_decks} deck(s), {total_notes} note(s) to in-memory mapping"
+    )
 
     return serialized_data
 
 
-def serialize_collection_to_json(
+def serialize_to_file(
     collection_dir: Path,
     output_file: Path,
     *,
@@ -105,10 +107,10 @@ def serialize_collection_to_json(
     no_subdecks: bool = False,
     note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Serialize entire collection to JSON format.
+    """Serialize markdown decks to a JSON file.
 
     Args:
-        collection_dir: Path to the collection directory
+        collection_dir: Path to the markdown decks directory
         output_file: Path where JSON file will be written
         deck: Optional deck name scope for serialization
         no_subdecks: If True with deck set, include only exact deck
@@ -116,7 +118,7 @@ def serialize_collection_to_json(
     Returns:
         Dictionary containing the serialized data
     """
-    serialized_data = serialize_collection(
+    serialized_data = serialize(
         collection_dir,
         deck=deck,
         no_subdecks=no_subdecks,
@@ -139,11 +141,11 @@ def serialize_collection_to_json(
     return serialized_data
 
 
-def deserialize_collection_from_json(
+def deserialize_from_file(
     json_file: Path,
     overwrite: bool = False,
 ) -> None:
-    """Deserialize collection from JSON format.
+    """Deserialize markdown decks from a JSON file.
 
     In development mode (pyproject.toml with name="ankiops" in cwd),
     unpacks to ./collection. Otherwise, unpacks to the current working directory.
@@ -155,25 +157,25 @@ def deserialize_collection_from_json(
     with json_file.open("r", encoding="utf-8") as input_handle:
         data = json.load(input_handle)
 
-    logger.debug(f"Importing serialized collection from: {json_file}")
-    deserialize_collection(
+    logger.debug(f"Importing serialized data from: {json_file}")
+    deserialize(
         data,
-        root_dir=get_collection_dir(),
+        collection_dir=get_collection_dir(),
         note_types_dir=get_note_types_dir(),
         overwrite=overwrite,
     )
 
 
-def deserialize_collection(
+def deserialize(
     data: dict[str, Any],
     *,
-    root_dir: Path,
+    collection_dir: Path,
     note_types_dir: Path,
     overwrite: bool = False,
     quiet: bool = False,
 ) -> None:
-    """Deserialize collection from an in-memory JSON-compatible mapping."""
-    logger.debug(f"Target directory: {root_dir}")
+    """Deserialize markdown decks from an in-memory JSON-compatible mapping."""
+    logger.debug(f"Target directory: {collection_dir}")
 
     if not isinstance(data, dict):
         raise ValueError("Serialized data must be a JSON object mapping")
@@ -183,11 +185,11 @@ def deserialize_collection(
         raise ValueError("Serialized data must contain a top-level 'decks' list")
 
     if not overwrite:
-        existing_md_files = list(root_dir.glob("*.md"))
+        existing_md_files = list(collection_dir.glob("*.md"))
         if existing_md_files:
             logger.warning(
                 f"Found {len(existing_md_files)} existing markdown file(s) "
-                f"in {root_dir}. Use --overwrite to replace them."
+                f"in {collection_dir}. Use --overwrite to replace them."
             )
 
     fs = FileSystemAdapter()
@@ -207,7 +209,7 @@ def deserialize_collection(
             continue
 
         filename = deck_name_to_file_stem(deck_name) + ".md"
-        output_path = root_dir / filename
+        output_path = collection_dir / filename
 
         lines = []
         written_notes = 0
@@ -278,7 +280,7 @@ def deserialize_collection(
         total_notes += written_notes
 
     summary_message = (
-        f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {root_dir}"
+        f"Deserialized {total_decks} deck(s), {total_notes} note(s) to {collection_dir}"
     )
     if quiet:
         logger.debug(summary_message)
@@ -289,7 +291,7 @@ def deserialize_collection(
             f"Skipped {skipped_notes} note(s) due to missing/invalid note type metadata"
         )
 
-    db_path = root_dir / ANKIOPS_DB
+    db_path = collection_dir / ANKIOPS_DB
     if not db_path.exists():
         init_message = (
             "Run 'ankiops init' to set up this collection with your Anki profile."

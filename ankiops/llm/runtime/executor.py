@@ -10,10 +10,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from ankiops.collection_serializer import (
-    deserialize_collection,
-    serialize_collection,
-)
 from ankiops.config import NOTE_TYPES_DIR
 from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
@@ -40,6 +36,10 @@ from ankiops.llm.task_types import (
     TaskRunSummary,
 )
 from ankiops.models import Note, NoteTypeConfig
+from ankiops.serializer import (
+    deserialize,
+    serialize,
+)
 
 from ..domain.errors import RuntimeFatalError
 from ..domain.outcomes import ProviderOutcome, ProviderOutcomeKind
@@ -225,7 +225,7 @@ def _materialize_task_context(
     task = replace(task, model=model)
 
     deck, no_subdecks = resolve_serializer_scope(task)
-    serialized_data = serialize_collection(
+    serialized_data = serialize(
         collection_dir,
         deck=deck,
         no_subdecks=no_subdecks,
@@ -683,7 +683,7 @@ class LlmTaskExecutor:
         persisted = False
 
         if summary.updated > 0:
-            deserialize_collection(
+            deserialize(
                 data,
                 root_dir=self.collection_dir,
                 note_types_dir=self.collection_dir / NOTE_TYPES_DIR,

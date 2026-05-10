@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.collection_serializer import (
-    deserialize_collection,
-    deserialize_collection_from_json,
-    serialize_collection,
-    serialize_collection_to_json,
-)
 from ankiops.config import deck_name_to_file_stem
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
+from ankiops.serializer import (
+    deserialize,
+    deserialize_from_file,
+    serialize,
+    serialize_to_file,
+)
 
 
 def _set_collection_paths(monkeypatch, collection_dir):
     monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection_dir)
     monkeypatch.setattr(
-        "ankiops.collection_serializer.get_collection_dir",
+        "ankiops.serializer.get_collection_dir",
         lambda: collection_dir,
     )
 
@@ -26,7 +26,7 @@ def _set_collection_paths(monkeypatch, collection_dir):
 def _set_note_type_paths(monkeypatch, note_types_dir):
     monkeypatch.setattr("ankiops.config.get_note_types_dir", lambda: note_types_dir)
     monkeypatch.setattr(
-        "ankiops.collection_serializer.get_note_types_dir",
+        "ankiops.serializer.get_note_types_dir",
         lambda: note_types_dir,
     )
 
@@ -64,7 +64,7 @@ def collection(tmp_path, fs, monkeypatch):
 def test_basic_serialize(collection, tmp_path, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
     output = tmp_path / "out.json"
-    result = serialize_collection_to_json(collection, output)
+    result = serialize_to_file(collection, output)
 
     assert len(result["decks"]) == 1
     assert len(result["decks"][0]["notes"]) == 2
@@ -73,7 +73,7 @@ def test_basic_serialize(collection, tmp_path, monkeypatch):
 
 def test_in_memory_serialize(collection, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
-    result = serialize_collection(collection)
+    result = serialize(collection)
 
     assert len(result["decks"]) == 1
     assert len(result["decks"][0]["notes"]) == 2
@@ -92,7 +92,7 @@ def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypa
         encoding="utf-8",
     )
 
-    result = serialize_collection(collection, deck="TestDeck")
+    result = serialize(collection, deck="TestDeck")
 
     deck_names = {deck["name"] for deck in result["decks"]}
     assert deck_names == {"TestDeck", "TestDeck::Child"}
@@ -108,7 +108,7 @@ def test_serialize_single_deck_excludes_subdecks_with_no_subdecks(
         encoding="utf-8",
     )
 
-    result = serialize_collection(
+    result = serialize(
         collection,
         deck="TestDeck",
         no_subdecks=True,
@@ -117,9 +117,7 @@ def test_serialize_single_deck_excludes_subdecks_with_no_subdecks(
     assert [deck["name"] for deck in result["decks"]] == ["TestDeck"]
 
 
-def test_serialize_collection_to_json_accepts_deck_scope(
-    collection, tmp_path, monkeypatch
-):
+def test_serialize_to_file_accepts_deck_scope(collection, tmp_path, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
 
     (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
@@ -128,7 +126,7 @@ def test_serialize_collection_to_json_accepts_deck_scope(
     )
 
     output = tmp_path / "scoped.json"
-    result = serialize_collection_to_json(
+    result = serialize_to_file(
         collection,
         output,
         deck="TestDeck",
@@ -163,7 +161,7 @@ def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatc
         ValueError,
         match=f"Error parsing {broken_name}: synthetic parse failure",
     ):
-        serialize_collection(collection)
+        serialize(collection)
 
 
 def test_roundtrip(collection, tmp_path, monkeypatch):
@@ -172,7 +170,7 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
     _set_note_type_paths(monkeypatch, collection / "note_types")
 
     json_file = tmp_path / "export.json"
-    serialize_collection_to_json(collection, json_file)
+    serialize_to_file(collection, json_file)
 
     fresh_dir = tmp_path / "fresh"
     fresh_dir.mkdir()
@@ -183,7 +181,7 @@ def test_roundtrip(collection, tmp_path, monkeypatch):
     fs.eject_builtin_note_types(note_types_dst)
     _set_note_type_paths(monkeypatch, note_types_dst)
 
-    deserialize_collection_from_json(json_file, overwrite=True)
+    deserialize_from_file(json_file, overwrite=True)
 
     md_files = list(fresh_dir.glob("*.md"))
     assert len(md_files) == 1
@@ -196,7 +194,7 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
     _set_note_type_paths(monkeypatch, collection / "note_types")
 
-    serialized_data = serialize_collection(collection)
+    serialized_data = serialize(collection)
 
     fresh_dir = tmp_path / "fresh-in-memory"
     fresh_dir.mkdir()
@@ -207,7 +205,7 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     fs.eject_builtin_note_types(note_types_dst)
     _set_note_type_paths(monkeypatch, note_types_dst)
 
-    deserialize_collection(
+    deserialize(
         serialized_data,
         root_dir=fresh_dir,
         note_types_dir=note_types_dst,
@@ -252,7 +250,7 @@ def test_deserialize_unknown_note_type_skips_note_without_orphan_key(
         encoding="utf-8",
     )
 
-    deserialize_collection_from_json(json_file, overwrite=True)
+    deserialize_from_file(json_file, overwrite=True)
 
     content = (tmp_path / f"{deck_name_to_file_stem('UnknownDeck')}.md").read_text(
         encoding="utf-8"
@@ -292,7 +290,7 @@ def test_deserialize_unknown_note_type_falls_back_to_inference(
         encoding="utf-8",
     )
 
-    deserialize_collection_from_json(json_file, overwrite=True)
+    deserialize_from_file(json_file, overwrite=True)
 
     content = (tmp_path / f"{deck_name_to_file_stem('InferDeck')}.md").read_text(
         encoding="utf-8"

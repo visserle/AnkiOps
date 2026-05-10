@@ -5,10 +5,6 @@ from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
-from ankiops.collection_serializer import (
-    deserialize_collection_from_json,
-    serialize_collection_to_json,
-)
 from ankiops.config import (
     ANKIOPS_DB,
     get_collection_dir,
@@ -30,6 +26,10 @@ from ankiops.llm.runtime.executor import plan_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
+from ankiops.serializer import (
+    deserialize_from_file,
+    serialize_to_file,
+)
 from ankiops.sync_media import (
     format_media_status,
     sync_media_from_anki,
@@ -250,7 +250,7 @@ def run_serialize(args):
     logger.debug(f"Output file: {output_file}")
 
     try:
-        serialize_collection_to_json(
+        serialize_to_file(
             collection_dir,
             output_file,
             deck=args.deck,
@@ -273,7 +273,7 @@ def run_deserialize(args):
         logger.error(f"Serialized file not found: {serialized_file}")
         raise SystemExit(1)
 
-    deserialize_collection_from_json(
+    deserialize_from_file(
         serialized_file,
         overwrite=args.overwrite,
     )
