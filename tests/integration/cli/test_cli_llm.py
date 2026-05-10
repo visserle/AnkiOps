@@ -79,7 +79,7 @@ def test_cli_llm_dispatches_run():
         persisted=False,
     )
     with (
-           patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.run_task", return_value=success_result) as run_task,
         patch("sys.argv", ["ankiops", "llm", "grammar", "--run"]),
     ):
@@ -101,7 +101,7 @@ def test_cli_llm_dispatches_run_with_deck_override():
         persisted=False,
     )
     with (
-            patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.run_task", return_value=success_result) as run_task,
         patch("sys.argv", ["ankiops", "llm", "grammar", "--run", "--deck", "Target"]),
     ):
@@ -127,7 +127,7 @@ def test_cli_llm_dispatches_run_with_deck_alias(deck_arg: str, expected_deck: st
         persisted=False,
     )
     with (
-            patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.run_task", return_value=success_result) as run_task,
         patch("sys.argv", ["ankiops", "llm", "grammar", "--run", "--deck", deck_arg]),
     ):
@@ -139,7 +139,7 @@ def test_cli_llm_dispatches_run_with_deck_alias(deck_arg: str, expected_deck: st
 
 def test_cli_llm_dispatches_plan():
     with (
-            patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
         patch("sys.argv", ["ankiops", "llm", "grammar"]),
     ):
@@ -152,7 +152,7 @@ def test_cli_llm_dispatches_plan():
 
 def test_cli_llm_dispatches_plan_with_deck_override():
     with (
-            patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
         patch("sys.argv", ["ankiops", "llm", "grammar", "--deck", "Target"]),
     ):
@@ -171,7 +171,7 @@ def test_cli_llm_dispatches_plan_with_deck_override():
 )
 def test_cli_llm_dispatches_plan_with_deck_alias(deck_arg: str, expected_deck: str):
     with (
-            patch("ankiops.cli.require_collection_dir"),
+        patch("ankiops.cli.require_collection_dir"),
         patch("ankiops.cli.plan_task", return_value=_plan_result()) as plan_task,
         patch("sys.argv", ["ankiops", "llm", "grammar", "--deck", deck_arg]),
     ):
@@ -192,7 +192,7 @@ def test_run_llm_plan_logs_system_prompt_path_and_full_prompt(tmp_path, caplog):
     )
 
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.plan_task", return_value=_plan_result()),
         caplog.at_level(logging.INFO),
     ):
@@ -206,7 +206,7 @@ def test_run_llm_plan_logs_system_prompt_path_and_full_prompt(tmp_path, caplog):
 
 def test_cli_llm_status_exits_on_invalid_config(tmp_path):
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.FileSystemAdapter.load_note_type_configs", return_value=[]),
         patch(
             "ankiops.cli.load_llm_task_catalog",
@@ -245,7 +245,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
         {},
     )
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.FileSystemAdapter.load_note_type_configs", return_value=[]),
         patch("ankiops.cli.load_llm_task_catalog", return_value=catalog),
         patch("ankiops.cli.list_llm_jobs", return_value=jobs) as list_jobs,
@@ -258,7 +258,7 @@ def test_cli_llm_status_lists_tasks_and_recent_jobs(tmp_path):
 
 def test_cli_llm_show_parses_latest_alias(tmp_path):
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.show_job", return_value=None) as show_job,
         patch("sys.argv", ["ankiops", "llm", "--job", "latest"]),
     ):
@@ -280,7 +280,7 @@ def test_run_llm_run_exits_cleanly_on_fatal_provider_error(tmp_path, caplog):
     )
 
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch(
             "ankiops.cli.run_task",
             side_effect=ValueError("Provider authentication failed: bad key"),
@@ -303,7 +303,7 @@ def test_run_llm_show_exits_when_job_not_found(tmp_path):
         no_auto_commit=False,
     )
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.show_job", return_value=None),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -321,7 +321,7 @@ def test_run_llm_show_accepts_latest_alias(tmp_path):
         no_auto_commit=False,
     )
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.show_job", return_value=None) as show_job,
     ):
         with pytest.raises(SystemExit) as exc:
@@ -350,7 +350,7 @@ def test_run_llm_run_logs_compact_job_summary(tmp_path, caplog):
     )
 
     with (
-            patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.run_task", return_value=success_result),
         caplog.at_level(logging.INFO),
     ):

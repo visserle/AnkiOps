@@ -360,6 +360,9 @@ class HTMLToMarkdown:
         # Restore as escaped characters
         md = _restore_escaped_chars(md)
 
+        # Normalize NBSP to space.
+        md = md.replace("\u00a0", " ")
+
         # Arrow replacements (convert Unicode arrows back to ASCII)
         md = (
             md.replace("\u2192", "-->")
