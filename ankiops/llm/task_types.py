@@ -125,56 +125,6 @@ class NotePayload:
     read_only_fields: dict[str, str] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class NoteUpdate:
-    note_key: str
-    edits: dict[str, str]
-
-
-@dataclass(frozen=True)
-class PreparedAttemptRequest:
-    note_payload: NotePayload
-    system_prompt_text: str
-    user_message_text: str
-    request_params: dict[str, object]
-    contract_fingerprint: str
-    transport_mode: str
-    capability_snapshot: dict[str, object]
-
-
-@dataclass(frozen=True)
-class ProviderAttemptErrorContext:
-    outcome_kind: str | None
-    refusal_reason: str | None
-    provider_message_id: str | None
-    response_model_id: str | None
-    stop_reason: str | None
-    request_id: str | None
-    rate_limit_headers: dict[str, str]
-    input_tokens: int
-    output_tokens: int
-    latency_ms: int
-    retry_count: int
-    response_raw_text: str | None
-    response_full_json: str | None
-
-
-@dataclass(frozen=True)
-class ProviderAttemptOutcome:
-    update: NoteUpdate
-    provider_message_id: str | None
-    response_model_id: str | None
-    stop_reason: str | None
-    request_id: str | None
-    rate_limit_headers: dict[str, str]
-    input_tokens: int
-    output_tokens: int
-    latency_ms: int
-    retry_count: int
-    response_raw_text: str
-    response_full_json: str | None = None
-
-
 @dataclass
 class TaskRunSummary:
     task_name: str

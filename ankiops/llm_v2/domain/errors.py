@@ -13,3 +13,7 @@ class CapabilityError(LlmV2Error):
 
 class ContractValidationError(LlmV2Error, ValueError):
     """Raised when structured output contract validation fails."""
+
+
+class RuntimeFatalError(LlmV2Error):
+    """Raised when a runtime error should abort the whole LLM job."""

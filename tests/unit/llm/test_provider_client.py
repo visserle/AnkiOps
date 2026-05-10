@@ -6,21 +6,21 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
 from ankiops.llm.model_registry import ModelSpec
-from ankiops.llm.provider_client import ProviderClient
 from ankiops.llm.task_types import (
     NotePayload,
     TaskConfig,
     TaskRequestOptions,
 )
 from ankiops.llm_v2.domain.capabilities import ModelCapabilities, TransportMode
+from ankiops.llm_v2.domain.errors import RuntimeFatalError
 from ankiops.llm_v2.domain.outcomes import (
     ProviderOutcome,
     ProviderOutcomeKind,
     ProviderUsage,
 )
 from ankiops.llm_v2.domain.payloads import NoteUpdate
+from ankiops.llm_v2.runtime.provider import ProviderRuntime
 
 TEST_MODEL = ModelSpec(
     model="gpt-5.4",
@@ -57,8 +57,8 @@ def note_payload() -> NotePayload:
 def test_missing_api_key_raises_fatal(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(LlmFatalError, match="OPENAI_API_KEY"):
-        ProviderClient(
+    with pytest.raises(RuntimeFatalError, match="OPENAI_API_KEY"):
+        ProviderRuntime(
             TaskConfig(
                 name="grammar",
                 model=TEST_MODEL,
@@ -74,7 +74,7 @@ def test_prepare_attempt_request_uses_responses_json_schema(monkeypatch, note_pa
         provider="openai",
         model_id="gpt-5.4",
         transport_mode=TransportMode.OPENAI_RESPONSES_STRUCTURED,
-        supports_strict_json=True,
+        supports_strict_schema=True,
     )
     adapter = _FakeAdapter(
         ProviderOutcome(
@@ -86,15 +86,15 @@ def test_prepare_attempt_request_uses_responses_json_schema(monkeypatch, note_pa
 
     with (
         patch(
-            "ankiops.llm.provider_client.capabilities_from_model_spec",
+            "ankiops.llm_v2.runtime.provider.capabilities_from_model_spec",
             return_value=capabilities,
         ),
         patch(
-            "ankiops.llm.provider_client.create_structured_adapter",
+            "ankiops.llm_v2.runtime.provider.create_structured_adapter",
             return_value=adapter,
         ),
     ):
-        client = ProviderClient(
+        client = ProviderRuntime(
             TaskConfig(
                 name="grammar",
                 model=TEST_MODEL,
@@ -128,7 +128,7 @@ def test_prepare_attempt_request_uses_openai_compat_params_for_ollama(
         provider="ollama",
         model_id="gemma4:e2b",
         transport_mode=TransportMode.OPENAI_COMPAT_JSON_SCHEMA_STRICT,
-        supports_strict_json=True,
+        supports_strict_schema=True,
     )
     adapter = _FakeAdapter(
         ProviderOutcome(
@@ -140,15 +140,15 @@ def test_prepare_attempt_request_uses_openai_compat_params_for_ollama(
 
     with (
         patch(
-            "ankiops.llm.provider_client.capabilities_from_model_spec",
+            "ankiops.llm_v2.runtime.provider.capabilities_from_model_spec",
             return_value=capabilities,
         ),
         patch(
-            "ankiops.llm.provider_client.create_structured_adapter",
+            "ankiops.llm_v2.runtime.provider.create_structured_adapter",
             return_value=adapter,
         ),
     ):
-        client = ProviderClient(
+        client = ProviderRuntime(
             TaskConfig(
                 name="grammar",
                 model=ollama_model,
@@ -184,20 +184,20 @@ def test_generate_update_maps_success(monkeypatch, note_payload):
 
     with (
         patch(
-            "ankiops.llm.provider_client.capabilities_from_model_spec",
+            "ankiops.llm_v2.runtime.provider.capabilities_from_model_spec",
             return_value=ModelCapabilities(
                 provider="openai",
                 model_id="gpt-5.4",
                 transport_mode=TransportMode.OPENAI_RESPONSES_STRUCTURED,
-                supports_strict_json=True,
+                supports_strict_schema=True,
             ),
         ),
         patch(
-            "ankiops.llm.provider_client.create_structured_adapter",
+            "ankiops.llm_v2.runtime.provider.create_structured_adapter",
             return_value=adapter,
         ),
     ):
-        client = ProviderClient(
+        client = ProviderRuntime(
             TaskConfig(
                 name="grammar",
                 model=TEST_MODEL,
@@ -216,11 +216,11 @@ def test_generate_update_maps_success(monkeypatch, note_payload):
     assert outcome.update.note_key == "nk-1"
     assert outcome.update.edits == {"Question": "Fixed"}
     assert outcome.provider_message_id == "msg_123"
-    assert outcome.input_tokens == 11
-    assert outcome.output_tokens == 3
+    assert outcome.usage.input_tokens == 11
+    assert outcome.usage.output_tokens == 3
 
 
-def test_generate_update_maps_refusal_to_provider_note_error(monkeypatch, note_payload):
+def test_generate_update_returns_refusal_outcome(monkeypatch, note_payload):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     adapter = _FakeAdapter(
         ProviderOutcome(
@@ -232,20 +232,20 @@ def test_generate_update_maps_refusal_to_provider_note_error(monkeypatch, note_p
 
     with (
         patch(
-            "ankiops.llm.provider_client.capabilities_from_model_spec",
+            "ankiops.llm_v2.runtime.provider.capabilities_from_model_spec",
             return_value=ModelCapabilities(
                 provider="openai",
                 model_id="gpt-5.4",
                 transport_mode=TransportMode.OPENAI_RESPONSES_STRUCTURED,
-                supports_strict_json=True,
+                supports_strict_schema=True,
             ),
         ),
         patch(
-            "ankiops.llm.provider_client.create_structured_adapter",
+            "ankiops.llm_v2.runtime.provider.create_structured_adapter",
             return_value=adapter,
         ),
     ):
-        client = ProviderClient(
+        client = ProviderRuntime(
             TaskConfig(
                 name="grammar",
                 model=TEST_MODEL,
@@ -259,7 +259,7 @@ def test_generate_update_maps_refusal_to_provider_note_error(monkeypatch, note_p
             request_options=TaskRequestOptions(max_output_tokens=200),
             model_id="gpt-5.4",
         )
-        with pytest.raises(LlmNoteError) as raised:
-            asyncio.run(client.generate_update(prepared_request=prepared))
+        outcome = asyncio.run(client.generate_update(prepared_request=prepared))
 
-    assert raised.value.category is LlmNoteErrorCategory.PROVIDER
+    assert outcome.kind is ProviderOutcomeKind.REFUSAL
+    assert outcome.refusal_text == "I cannot assist with that."

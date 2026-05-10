@@ -1,4 +1,4 @@
-"""Execution of collection-local LLM tasks."""
+"""Execution of collection-local LLM tasks with runtime v2."""
 
 from __future__ import annotations
 
@@ -17,16 +17,10 @@ from ankiops.collection_serializer import (
 from ankiops.config import NOTE_TYPES_DIR
 from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
-from ankiops.models import Note, NoteTypeConfig
-
-from .config_loader import is_task_config_file, load_llm_task_catalog
-from .discovery import DiscoverySnapshot, discover_candidates
-from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
-from .llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
-from .provider_client import ProviderClient
-from .task_attempts import AttemptRecorder
-from .task_discovery import record_discovery_snapshot
-from .task_options import (
+from ankiops.llm.config_loader import is_task_config_file, load_llm_task_catalog
+from ankiops.llm.discovery import DiscoverySnapshot, discover_candidates
+from ankiops.llm.task_discovery import record_discovery_snapshot
+from ankiops.llm.task_options import (
     apply_deck_override,
     format_deck_scope,
     format_request_defaults,
@@ -34,9 +28,9 @@ from .task_options import (
     resolve_model,
     resolve_serializer_scope,
 )
-from .task_planner import build_task_plan_result
-from .task_runtime_types import EligibleCandidate, TaskExecutionProgress
-from .task_types import (
+from ankiops.llm.task_planner import build_task_plan_result
+from ankiops.llm.task_runtime_types import EligibleCandidate, TaskExecutionProgress
+from ankiops.llm.task_types import (
     LlmItemStatus,
     LlmJobResult,
     LlmJobStatus,
@@ -45,6 +39,13 @@ from .task_types import (
     TaskPlanResult,
     TaskRunSummary,
 )
+from ankiops.models import Note, NoteTypeConfig
+
+from ..domain.errors import RuntimeFatalError
+from ..domain.outcomes import ProviderOutcome, ProviderOutcomeKind
+from ..persistence.attempts import AttemptRecorder
+from ..persistence.db import LlmDb, LlmJobDetail, LlmJobListItem
+from .provider import ProviderRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -132,21 +133,21 @@ def _apply_note_update(
     note_type_config: NoteTypeConfig,
 ) -> list[str]:
     if payload.note_key != serialized_note.get("note_key"):
-        raise LlmNoteError("Update note_key did not match serialized note")
+        raise ValueError("Update note_key did not match serialized note")
 
     raw_fields = serialized_note.get("fields")
     if not isinstance(raw_fields, dict):
-        raise LlmNoteError("Serialized note fields must be a mapping")
+        raise ValueError("Serialized note fields must be a mapping")
 
     next_fields = dict(raw_fields)
     changed_fields: list[str] = []
     for field_name, value in edits.items():
         if field_name not in payload.editable_fields:
             if field_name in payload.read_only_fields:
-                raise LlmNoteError(
+                raise ValueError(
                     f"Model attempted to update read-only field '{field_name}'"
                 )
-            raise LlmNoteError(
+            raise ValueError(
                 f"Model attempted to update hidden or unknown field '{field_name}'"
             )
         if next_fields.get(field_name) != value:
@@ -163,7 +164,7 @@ def _apply_note_update(
     )
     errors = note.validate(note_type_config)
     if errors:
-        raise LlmNoteError("; ".join(errors))
+        raise ValueError("; ".join(errors))
 
     serialized_note["fields"] = next_fields
     return changed_fields
@@ -188,8 +189,9 @@ def _load_task(
             if _is_task_file_for_name(path, task_name)
         ]
         if task_errors:
-            joined_errors = "\n".join(task_errors)
-            raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
+            raise ValueError(
+                "Invalid LLM task configuration:\n" + "\n".join(task_errors)
+            )
 
         shared_errors = [
             message
@@ -197,8 +199,9 @@ def _load_task(
             if not _is_task_file(path)
         ]
         if shared_errors:
-            joined_errors = "\n".join(shared_errors)
-            raise ValueError(f"Invalid LLM task configuration:\n{joined_errors}")
+            raise ValueError(
+                "Invalid LLM task configuration:\n" + "\n".join(shared_errors)
+            )
 
         raise ValueError(f"Unknown task '{task_name}'")
 
@@ -251,13 +254,13 @@ def _is_task_file_for_name(path: str, task_name: str) -> bool:
     return _is_task_file(path) and path_obj.stem == task_name
 
 
-def _unexpected_online_execution_error(error: Exception) -> LlmFatalError:
+def _unexpected_online_execution_error(error: Exception) -> RuntimeFatalError:
     message = str(error).strip() or error.__class__.__name__
-    return LlmFatalError(f"Unexpected online execution error: {message}")
+    return RuntimeFatalError(f"Unexpected online execution error: {message}")
 
 
 class LlmTaskExecutor:
-    """Standalone async LLM runtime pipeline with DB-backed state."""
+    """Standalone async LLM runtime v2 pipeline with DB-backed state."""
 
     def __init__(
         self,
@@ -294,10 +297,7 @@ class LlmTaskExecutor:
                 format_deck_scope(task),
             )
             logger.debug("LLM request defaults: %s", format_request_defaults(task))
-            logger.debug(
-                "LLM serializer scope: %s",
-                format_serializer_scope(task),
-            )
+            logger.debug("LLM serializer scope: %s", format_serializer_scope(task))
 
             if not self.no_auto_commit:
                 logger.debug("Creating pre-LLM git snapshot")
@@ -306,11 +306,10 @@ class LlmTaskExecutor:
                 logger.debug("Auto-commit disabled (--no-auto-commit)")
 
             fatal_error: str | None = None
-            provider_client: ProviderClient | None = None
-            attempt_recorder = AttemptRecorder(db=db, provider=model.provider)
+            provider_runtime: ProviderRuntime | None = None
             progress_state: _ExecutionProgressState | None = None
             try:
-                provider_client = ProviderClient(task)
+                provider_runtime = ProviderRuntime(task)
                 candidates = record_discovery_snapshot(
                     db=db,
                     job_id=job_id,
@@ -327,20 +326,21 @@ class LlmTaskExecutor:
                     db=db,
                     task=task,
                     model_id=model.model_id,
-                    provider_client=provider_client,
+                    provider_runtime=provider_runtime,
                     candidates=candidates,
-                    attempt_recorder=attempt_recorder,
+                    attempt_recorder=AttemptRecorder(db=db, provider=model.provider),
                     progress_state=progress_state,
                 )
-            except LlmFatalError as error:
+            except RuntimeFatalError as error:
                 fatal_error = str(error)
                 logger.error(fatal_error)
             except Exception as error:
-                fatal_error = str(_unexpected_online_execution_error(error))
+                fatal = _unexpected_online_execution_error(error)
+                fatal_error = str(fatal)
                 logger.error(fatal_error)
             finally:
-                fatal_error = await self._close_provider_client(
-                    provider_client=provider_client,
+                fatal_error = await self._close_provider_runtime(
+                    provider_runtime=provider_runtime,
                     fatal_error=fatal_error,
                 )
 
@@ -395,16 +395,16 @@ class LlmTaskExecutor:
         logger.debug("Cost: %s", summary.format_cost())
 
     @staticmethod
-    async def _close_provider_client(
+    async def _close_provider_runtime(
         *,
-        provider_client: ProviderClient | None,
+        provider_runtime: ProviderRuntime | None,
         fatal_error: str | None,
     ) -> str | None:
-        if provider_client is None:
+        if provider_runtime is None:
             return fatal_error
 
         try:
-            await provider_client.close()
+            await provider_runtime.close()
         except Exception as error:
             close_error = str(_unexpected_online_execution_error(error))
             logger.error(close_error)
@@ -449,7 +449,7 @@ class LlmTaskExecutor:
         db: LlmDb,
         task: TaskConfig,
         model_id: str,
-        provider_client: ProviderClient,
+        provider_runtime: ProviderRuntime,
         candidates: list[EligibleCandidate],
         attempt_recorder: AttemptRecorder,
         progress_state: _ExecutionProgressState,
@@ -459,7 +459,7 @@ class LlmTaskExecutor:
 
         in_flight_limit = min(max(task.model.concurrency, 1), len(candidates))
         next_index = 0
-        first_fatal_error: LlmFatalError | None = None
+        first_fatal_error: RuntimeFatalError | None = None
 
         def _start_candidate(
             candidate: EligibleCandidate,
@@ -469,7 +469,7 @@ class LlmTaskExecutor:
                     db=db,
                     task=task,
                     model_id=model_id,
-                    provider_client=provider_client,
+                    provider_runtime=provider_runtime,
                     candidate=candidate,
                     attempt_recorder=attempt_recorder,
                 )
@@ -492,7 +492,7 @@ class LlmTaskExecutor:
                     item_status = await completed
                     progress_state.record_status(item_status)
                     self._emit_progress(progress_state, in_flight=len(in_flight))
-                except LlmFatalError as error:
+                except RuntimeFatalError as error:
                     progress_state.record_status(LlmItemStatus.FATAL_ERROR)
                     self._emit_progress(progress_state, in_flight=len(in_flight))
                     if first_fatal_error is None:
@@ -519,11 +519,11 @@ class LlmTaskExecutor:
         db: LlmDb,
         task: TaskConfig,
         model_id: str,
-        provider_client: ProviderClient,
+        provider_runtime: ProviderRuntime,
         candidate: EligibleCandidate,
         attempt_recorder: AttemptRecorder,
     ) -> LlmItemStatus:
-        prepared_request = provider_client.prepare_attempt_request(
+        prepared_request = provider_runtime.prepare_attempt_request(
             note_payload=candidate.payload,
             task_prompt=task.prompt,
             request_options=task.request,
@@ -532,52 +532,27 @@ class LlmTaskExecutor:
         outcome = None
 
         try:
-            outcome = await provider_client.generate_update(
+            outcome = await provider_runtime.generate_update(
                 prepared_request=prepared_request,
             )
-            update = outcome.update
-            if update.note_key != candidate.payload.note_key:
-                raise LlmNoteError("Model returned mismatched note_key")
-
-            changed_fields = _apply_note_update(
-                serialized_note=candidate.serialized_note,
-                payload=candidate.payload,
-                edits=update.edits,
-                note_type_config=candidate.note_type_config,
+            return self._handle_provider_outcome(
+                db=db,
+                candidate=candidate,
+                prepared_request=prepared_request,
+                attempt_recorder=attempt_recorder,
+                outcome=outcome,
             )
-        except LlmFatalError as error:
+        except RuntimeFatalError as error:
             with db.write_tx():
                 attempt_recorder.record_error(
                     candidate=candidate,
                     prepared_request=prepared_request,
                     outcome=outcome,
-                    error=error,
+                    error_message=str(error),
                     item_status=LlmItemStatus.FATAL_ERROR,
+                    outcome_kind=ProviderOutcomeKind.FATAL_ERROR,
                 )
             raise
-        except LlmNoteError as error:
-            provider_error = error.category is LlmNoteErrorCategory.PROVIDER
-            item_status = (
-                LlmItemStatus.PROVIDER_ERROR
-                if provider_error
-                else LlmItemStatus.NOTE_ERROR
-            )
-            with db.write_tx():
-                attempt_recorder.record_error(
-                    candidate=candidate,
-                    prepared_request=prepared_request,
-                    outcome=outcome,
-                    error=error,
-                    item_status=item_status,
-                )
-            logger.error(
-                "LLM note error for %s in '%s' (%s): %s",
-                candidate.payload.note_key,
-                candidate.deck_name,
-                candidate.payload.note_type,
-                error,
-            )
-            return item_status
         except Exception as error:
             logger.exception(
                 "Unexpected online execution error for %s in '%s' (%s)",
@@ -591,12 +566,48 @@ class LlmTaskExecutor:
                     candidate=candidate,
                     prepared_request=prepared_request,
                     outcome=outcome,
-                    error=fatal_error,
+                    error_message=str(fatal_error),
                     item_status=LlmItemStatus.FATAL_ERROR,
+                    outcome_kind=ProviderOutcomeKind.FATAL_ERROR,
                 )
             raise fatal_error from error
 
-        if changed_fields:
+    def _handle_provider_outcome(
+        self,
+        *,
+        db: LlmDb,
+        candidate: EligibleCandidate,
+        prepared_request: Any,
+        attempt_recorder: AttemptRecorder,
+        outcome: ProviderOutcome,
+    ) -> LlmItemStatus:
+        if outcome.kind is ProviderOutcomeKind.SUCCESS and outcome.update is not None:
+            try:
+                changed_fields = _apply_note_update(
+                    serialized_note=candidate.serialized_note,
+                    payload=candidate.payload,
+                    edits=outcome.update.edits,
+                    note_type_config=candidate.note_type_config,
+                )
+            except ValueError as error:
+                message = str(error)
+                with db.write_tx():
+                    attempt_recorder.record_error(
+                        candidate=candidate,
+                        prepared_request=prepared_request,
+                        outcome=outcome,
+                        error_message=message,
+                        item_status=LlmItemStatus.NOTE_ERROR,
+                        outcome_kind=ProviderOutcomeKind.VALIDATION_ERROR,
+                    )
+                self._log_note_error(candidate, message)
+                return LlmItemStatus.NOTE_ERROR
+
+            item_status = (
+                LlmItemStatus.SUCCEEDED_UPDATED
+                if changed_fields
+                else LlmItemStatus.SUCCEEDED_UNCHANGED
+            )
             with db.write_tx():
                 attempt_recorder.record_success(
                     candidate=candidate,
@@ -605,36 +616,60 @@ class LlmTaskExecutor:
                 )
                 db.update_job_item_status(
                     item_id=candidate.item_id,
-                    item_status=LlmItemStatus.SUCCEEDED_UPDATED,
+                    item_status=item_status,
                     changed_fields=changed_fields,
                 )
-            logger.debug(
-                "  Updated %s in '%s' (%s): fields=%s",
-                candidate.payload.note_key,
-                candidate.deck_name,
-                candidate.payload.note_type,
-                ",".join(changed_fields),
-            )
-            return LlmItemStatus.SUCCEEDED_UPDATED
+            if changed_fields:
+                logger.debug(
+                    "  Updated %s in '%s' (%s): fields=%s",
+                    candidate.payload.note_key,
+                    candidate.deck_name,
+                    candidate.payload.note_type,
+                    ",".join(changed_fields),
+                )
+            else:
+                logger.debug(
+                    "  Unchanged %s in '%s' (%s)",
+                    candidate.payload.note_key,
+                    candidate.deck_name,
+                    candidate.payload.note_type,
+                )
+            return item_status
 
+        if outcome.kind is ProviderOutcomeKind.FATAL_ERROR:
+            message = outcome.error_message or "Unexpected provider failure"
+            with db.write_tx():
+                attempt_recorder.record_error(
+                    candidate=candidate,
+                    prepared_request=prepared_request,
+                    outcome=outcome,
+                    error_message=message,
+                    item_status=LlmItemStatus.FATAL_ERROR,
+                )
+            raise RuntimeFatalError(message)
+
+        item_status = _nonfatal_item_status(outcome.kind)
+        message = _nonfatal_error_message(outcome)
         with db.write_tx():
-            attempt_recorder.record_success(
+            attempt_recorder.record_error(
                 candidate=candidate,
                 prepared_request=prepared_request,
                 outcome=outcome,
+                error_message=message,
+                item_status=item_status,
             )
-            db.update_job_item_status(
-                item_id=candidate.item_id,
-                item_status=LlmItemStatus.SUCCEEDED_UNCHANGED,
-                changed_fields=[],
-            )
-        logger.debug(
-            "  Unchanged %s in '%s' (%s)",
+        self._log_note_error(candidate, message)
+        return item_status
+
+    @staticmethod
+    def _log_note_error(candidate: EligibleCandidate, message: str) -> None:
+        logger.error(
+            "LLM note error for %s in '%s' (%s): %s",
             candidate.payload.note_key,
             candidate.deck_name,
             candidate.payload.note_type,
+            message,
         )
-        return LlmItemStatus.SUCCEEDED_UNCHANGED
 
     def _apply_updates(
         self,
@@ -657,34 +692,39 @@ class LlmTaskExecutor:
             )
             persisted = True
             db.set_applied_for_updated_items(job_id=job_id)
+            deck_count = len(
+                [deck for deck in data.get("decks", []) if isinstance(deck, dict)]
+            )
             if summary.errors:
                 logger.warning(
                     "Persisted %d updated note(s) across %d deck file(s) "
                     "despite %d error(s)",
                     summary.updated,
-                    len(
-                        [
-                            deck
-                            for deck in data.get("decks", [])
-                            if isinstance(deck, dict)
-                        ]
-                    ),
+                    deck_count,
                     summary.errors,
                 )
             else:
                 logger.info(
                     "Persisted %d updated note(s) across %d deck file(s)",
                     summary.updated,
-                    len(
-                        [
-                            deck
-                            for deck in data.get("decks", [])
-                            if isinstance(deck, dict)
-                        ]
-                    ),
+                    deck_count,
                 )
 
         return persisted
+
+
+def _nonfatal_item_status(outcome_kind: ProviderOutcomeKind) -> LlmItemStatus:
+    if outcome_kind is ProviderOutcomeKind.VALIDATION_ERROR:
+        return LlmItemStatus.NOTE_ERROR
+    return LlmItemStatus.PROVIDER_ERROR
+
+
+def _nonfatal_error_message(outcome: ProviderOutcome) -> str:
+    if outcome.kind is ProviderOutcomeKind.REFUSAL:
+        return outcome.refusal_text or "Provider refused request"
+    if outcome.kind is ProviderOutcomeKind.VALIDATION_ERROR:
+        return outcome.error_message or "Structured output validation failed"
+    return outcome.error_message or "Provider request failed"
 
 
 def plan_task(

@@ -12,18 +12,22 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.init import initialize_collection
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.llm_errors import LlmFatalError
-from ankiops.llm.runner import run_task
 from ankiops.llm.task_types import (
     FieldAccess,
     LlmItemStatus,
     LlmJobStatus,
-    NoteUpdate,
-    PreparedAttemptRequest,
-    ProviderAttemptOutcome,
     TaskRequestOptions,
 )
+from ankiops.llm_v2.domain.errors import RuntimeFatalError
+from ankiops.llm_v2.domain.outcomes import (
+    ProviderOutcome,
+    ProviderOutcomeKind,
+    ProviderUsage,
+)
+from ankiops.llm_v2.domain.payloads import NoteUpdate
+from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm_v2.runtime.executor import run_task
+from ankiops.llm_v2.runtime.provider import PreparedProviderRequest
 
 TASK_FILE = Path("llm/grammar.yaml")
 PROMPT_FILE = Path("llm/grammar.md")
@@ -164,7 +168,7 @@ def _prepare_runner_collection(
 
 
 class _StubClient:
-    def __init__(self, results: list[ProviderAttemptOutcome]) -> None:
+    def __init__(self, results: list[ProviderOutcome]) -> None:
         self._results = results
 
     def prepare_attempt_request(
@@ -174,32 +178,15 @@ class _StubClient:
         task_prompt,
         request_options,
         model_id,
-    ) -> PreparedAttemptRequest:
+    ) -> PreparedProviderRequest:
         del task_prompt
-        max_tokens = request_options.max_output_tokens
-        request_params: dict[str, object] = {
-            "model": model_id,
-            "max_tokens": max_tokens,
-            "output_config": {"format": {"type": "json_schema", "schema": {}}},
-        }
-        if request_options.temperature is not None:
-            request_params["temperature"] = request_options.temperature
-        return PreparedAttemptRequest(
+        return _prepared_provider_request(
             note_payload=note_payload,
-            system_prompt_text="system",
-            user_message_text="user",
-            request_params=request_params,
-            contract_fingerprint="contract-fingerprint",
-            transport_mode="openai_compat_json_schema_strict",
-            capability_snapshot={
-                "provider": "anthropic",
-                "model_id": model_id,
-                "transport_mode": "openai_compat_json_schema_strict",
-                "supports_strict_json": True,
-            },
+            request_options=request_options,
+            model_id=model_id,
         )
 
-    async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
+    async def generate_update(self, **_kwargs) -> ProviderOutcome:
         return self._results.pop(0)
 
     async def close(self) -> None:
@@ -217,35 +204,18 @@ class _OnlineFailFastClient:
         task_prompt,
         request_options,
         model_id,
-    ) -> PreparedAttemptRequest:
+    ) -> PreparedProviderRequest:
         del task_prompt
-        max_tokens = request_options.max_output_tokens
-        request_params: dict[str, object] = {
-            "model": model_id,
-            "max_tokens": max_tokens,
-            "output_config": {"format": {"type": "json_schema", "schema": {}}},
-        }
-        if request_options.temperature is not None:
-            request_params["temperature"] = request_options.temperature
-        return PreparedAttemptRequest(
+        return _prepared_provider_request(
             note_payload=note_payload,
-            system_prompt_text="system",
-            user_message_text="user",
-            request_params=request_params,
-            contract_fingerprint="contract-fingerprint",
-            transport_mode="openai_compat_json_schema_strict",
-            capability_snapshot={
-                "provider": "anthropic",
-                "model_id": model_id,
-                "transport_mode": "openai_compat_json_schema_strict",
-                "supports_strict_json": True,
-            },
+            request_options=request_options,
+            model_id=model_id,
         )
 
-    async def generate_update(self, **_kwargs) -> ProviderAttemptOutcome:
+    async def generate_update(self, **_kwargs) -> ProviderOutcome:
         self._calls += 1
         if self._calls == 1:
-            raise LlmFatalError("Provider connection error: boom")
+            raise RuntimeFatalError("Provider connection error: boom")
         await asyncio.sleep(60)
         return _result("nk-2", {})
 
@@ -261,16 +231,46 @@ class _OnlineUnexpectedErrorClient(_OnlineFailFastClient):
     async def generate_update(
         self,
         *,
-        prepared_request: PreparedAttemptRequest,
+        prepared_request: PreparedProviderRequest,
         **_kwargs,
-    ) -> ProviderAttemptOutcome:
+    ) -> ProviderOutcome:
         self._calls += 1
         if self._calls == 1:
             raise RuntimeError("boom runtime")
         if self._second_delay_seconds > 0:
             await asyncio.sleep(self._second_delay_seconds)
-        note_key = prepared_request.note_payload.note_key
-        return _result(note_key, {})
+        return _result("nk-2", {})
+
+
+def _prepared_provider_request(
+    *,
+    note_payload,
+    request_options,
+    model_id: str,
+) -> PreparedProviderRequest:
+    max_tokens = request_options.max_output_tokens
+    request_params: dict[str, object] = {
+        "model": model_id,
+        "max_tokens": max_tokens,
+        "output_config": {"format": {"type": "json_schema", "schema": {}}},
+    }
+    if request_options.temperature is not None:
+        request_params["temperature"] = request_options.temperature
+    return PreparedProviderRequest(
+        adapter_request=None,
+        system_prompt_text="system",
+        user_message_text="user",
+        request_params=request_params,
+        contract_fingerprint="contract-fingerprint",
+        transport_mode="openai_compat",
+        capability_snapshot={
+            "provider": "anthropic",
+            "model_id": model_id,
+            "transport_mode": "openai_compat",
+            "supports_strict_schema": True,
+            "note_key": note_payload.note_key,
+        },
+    )
 
 
 def _result(
@@ -284,19 +284,22 @@ def _result(
     output_tokens: int = 7,
     latency_ms: int = 900,
     retry_count: int = 0,
-) -> ProviderAttemptOutcome:
-    return ProviderAttemptOutcome(
+) -> ProviderOutcome:
+    return ProviderOutcome(
+        kind=ProviderOutcomeKind.SUCCESS,
         update=NoteUpdate(note_key=note_key, edits=edits),
         provider_message_id=message_id,
         response_model_id=model,
         stop_reason=stop_reason,
         request_id=None,
         rate_limit_headers={},
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+        usage=ProviderUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ),
         latency_ms=latency_ms,
         retry_count=retry_count,
-        response_raw_text='{"note_key":"%s","edits":{}}' % note_key,
+        raw_text='{"note_key":"%s","edits":{}}' % note_key,
     )
 
 
@@ -839,10 +842,10 @@ def test_load_llm_task_catalog_ignores_non_task_dirs(
 def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result(
@@ -891,10 +894,10 @@ def test_run_task_updates_only_editable_fields(tmp_path, monkeypatch):
 def test_run_task_emits_progress_snapshots(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "This is a fixed question."}),
@@ -926,10 +929,10 @@ def test_run_task_emits_progress_snapshots(tmp_path, monkeypatch):
 def test_run_task_progress_includes_canceled_items_on_fail_fast(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _OnlineFailFastClient(),
     )
 
@@ -956,10 +959,10 @@ def test_run_task_logs_llm_persistence_summary_without_deserialize_noise(
 ):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result(
@@ -996,10 +999,10 @@ def test_run_task_logs_llm_persistence_summary_without_deserialize_noise(
 def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result(
@@ -1067,16 +1070,19 @@ def test_run_task_persists_job_history_in_llm_db(tmp_path, monkeypatch):
 def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
 
     class _FailingClient:
         def __init__(self, _task) -> None:
-            raise LlmFatalError(
+            raise RuntimeFatalError(
                 "Required environment variable 'ANTHROPIC_API_KEY' is not set"
             )
 
-    monkeypatch.setattr("ankiops.llm.runner.ProviderClient", _FailingClient)
+    monkeypatch.setattr(
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
+        _FailingClient,
+    )
 
     result = run_task(
         collection_dir=collection,
@@ -1105,10 +1111,10 @@ def test_run_task_records_startup_fatal_failure_in_job_history(tmp_path, monkeyp
 def test_run_task_keeps_online_fail_fast_pending_items_canceled(tmp_path, monkeypatch):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _OnlineFailFastClient(),
     )
 
@@ -1141,10 +1147,10 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
 ):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _OnlineUnexpectedErrorClient(second_delay_seconds=60),
     )
 
@@ -1174,10 +1180,10 @@ def test_run_task_online_fail_fast_wraps_unexpected_worker_exception_as_fatal(
 def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result(
@@ -1236,10 +1242,10 @@ def test_run_task_logs_debug_lifecycle(tmp_path, monkeypatch, caplog):
 def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {}),
@@ -1275,7 +1281,7 @@ def test_run_task_rejects_read_only_updates(tmp_path, monkeypatch, caplog):
 def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
 
     def _fake_serialize(*_args, **_kwargs):
@@ -1298,9 +1304,12 @@ def test_run_task_logs_no_editable_field_skips(tmp_path, monkeypatch, caplog):
             ],
         }
 
-    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.serialize_collection",
+        _fake_serialize,
+    )
+    monkeypatch.setattr(
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient([]),
     )
 
@@ -1363,9 +1372,12 @@ def test_run_task_uses_expected_serialize_scope(
             "decks": [],
         }
 
-    monkeypatch.setattr("ankiops.llm.runner.serialize_collection", _fake_serialize)
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.serialize_collection",
+        _fake_serialize,
+    )
+    monkeypatch.setattr(
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient([]),
     )
 
@@ -1406,10 +1418,10 @@ def test_run_task_persists_updates_when_any_note_fails(
     collection = _prepare_runner_collection(tmp_path, monkeypatch)
     original_content = (collection / f"{TEST_DECK}.md").read_text(encoding="utf-8")
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "This should not persist."}),
@@ -1451,10 +1463,10 @@ def test_run_task_writes_to_explicit_collection_dir(tmp_path: Path, monkeypatch)
         lambda: other_root / "note_types",
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.git_snapshot", lambda *_args, **_kwargs: False
+        "ankiops.llm_v2.runtime.executor.git_snapshot", lambda *_args, **_kwargs: False
     )
     monkeypatch.setattr(
-        "ankiops.llm.runner.ProviderClient",
+        "ankiops.llm_v2.runtime.executor.ProviderRuntime",
         lambda _task: _StubClient(
             [
                 _result("nk-1", {"Question": "Path-correct update."}),

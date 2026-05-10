@@ -23,10 +23,10 @@ from ankiops.git import git_snapshot
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.llm_cli import configure_llm_parser
-from ankiops.llm.llm_cli import run_llm as run_llm_impl
-from ankiops.llm.runner import list_jobs as list_llm_jobs
-from ankiops.llm.runner import plan_task, run_task, show_job
+from ankiops.llm_v2.cli.commands import configure_llm_parser
+from ankiops.llm_v2.cli.commands import run_llm as run_llm_impl
+from ankiops.llm_v2.runtime.executor import list_jobs as list_llm_jobs
+from ankiops.llm_v2.runtime.executor import plan_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type

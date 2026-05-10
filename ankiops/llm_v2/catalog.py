@@ -9,10 +9,7 @@ from .domain.errors import CapabilityError
 
 
 def capabilities_from_model_spec(model: ModelSpec) -> ModelCapabilities:
-    """Resolve runtime v2 capabilities from a legacy model spec.
-
-    This bridge allows phased adoption while v2 model-catalog schema is finalized.
-    """
+    """Resolve runtime v2 capabilities from a collection model spec."""
 
     return resolve_model_capabilities(
         provider=model.provider,

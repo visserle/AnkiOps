@@ -5,9 +5,9 @@ from importlib import resources
 
 import pytest
 
-from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.task_types import LlmItemStatus, LlmJobStatus
 from ankiops.llm_v2.domain.outcomes import ProviderOutcomeKind
+from ankiops.llm_v2.persistence.db import LlmDb
 
 
 def _table_names(conn: sqlite3.Connection) -> set[str]:
@@ -46,12 +46,12 @@ def _insert_attempt(
         item_id=item_id,
         provider="anthropic",
         outcome_kind=ProviderOutcomeKind.SUCCESS.value,
-        transport_mode="anthropic_tool_use_strict",
+        transport_mode="anthropic_native",
         capability_snapshot_json={
             "provider": "anthropic",
             "model_id": "claude-sonnet-4-6",
-            "transport_mode": "anthropic_tool_use_strict",
-            "supports_strict_json": True,
+            "transport_mode": "anthropic_native",
+            "supports_strict_schema": True,
         },
         contract_fingerprint="contract-fingerprint",
         refusal_reason=None,

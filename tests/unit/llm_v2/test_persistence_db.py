@@ -25,12 +25,12 @@ def _insert_attempt_with_payload(
         item_id=item_id,
         provider="openai",
         outcome_kind=ProviderOutcomeKind.SUCCESS.value,
-        transport_mode="openai_responses_structured",
+        transport_mode="openai_responses",
         capability_snapshot_json={
             "provider": "openai",
             "model_id": "gpt-5.4",
-            "transport_mode": "openai_responses_structured",
-            "supports_strict_json": True,
+            "transport_mode": "openai_responses",
+            "supports_strict_schema": True,
         },
         contract_fingerprint="contract-fingerprint",
         refusal_reason=None,
@@ -202,10 +202,10 @@ def test_attempt_metadata_persists_outcome_and_contract_fields(tmp_path):
             item_id=item_id,
             provider="openai",
             outcome_kind=ProviderOutcomeKind.REFUSAL.value,
-            transport_mode="openai_responses_structured",
+            transport_mode="openai_responses",
             capability_snapshot_json={
                 "provider": "openai",
-                "supports_strict_json": True,
+                "supports_strict_schema": True,
             },
             contract_fingerprint="fingerprint-v1",
             refusal_reason="Safety refusal",
@@ -242,7 +242,7 @@ def test_attempt_metadata_persists_outcome_and_contract_fields(tmp_path):
         ).fetchone()
         assert row is not None
         assert row["outcome_kind"] == ProviderOutcomeKind.REFUSAL.value
-        assert row["transport_mode"] == "openai_responses_structured"
+        assert row["transport_mode"] == "openai_responses"
         assert '"provider":"openai"' in row["capability_snapshot_json"]
         assert row["contract_fingerprint"] == "fingerprint-v1"
         assert row["refusal_reason"] == "Safety refusal"

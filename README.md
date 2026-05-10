@@ -57,13 +57,13 @@ ankiops am # alias for anki-to-markdown (export)
 
 ## FAQ
 
-### How is this different from other Markdown or Obsidian tools?
+### How is this different from other Markdown tools?
 
-Most available tools are one-way importers: you write in Markdown or Obsidian and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
+Most available tools are one-way importers: you write in Markdown and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
 
 ### Is it safe to use?
 
-Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected and you can safely mix managed and unmanaged notes within one deck. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning your Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
+Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected and you can safely mix managed and unmanaged notes within one deck. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning the Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
 
 ### How do I create new notes?
 

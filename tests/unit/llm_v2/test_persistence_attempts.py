@@ -2,19 +2,20 @@ from __future__ import annotations
 
 import json
 
-from ankiops.llm.llm_errors import LlmFatalError, LlmNoteError, LlmNoteErrorCategory
 from ankiops.llm.task_runtime_types import EligibleCandidate
 from ankiops.llm.task_types import (
     LlmItemStatus,
     NotePayload,
-    NoteUpdate,
-    PreparedAttemptRequest,
-    ProviderAttemptErrorContext,
-    ProviderAttemptOutcome,
 )
-from ankiops.llm_v2.domain.outcomes import ProviderOutcomeKind
+from ankiops.llm_v2.domain.outcomes import (
+    ProviderOutcome,
+    ProviderOutcomeKind,
+    ProviderUsage,
+)
+from ankiops.llm_v2.domain.payloads import NoteUpdate
 from ankiops.llm_v2.persistence.attempts import AttemptRecorder
 from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm_v2.runtime.provider import PreparedProviderRequest
 from ankiops.models import NoteTypeConfig
 
 
@@ -43,42 +44,37 @@ def _setup_candidate(db: LlmDb) -> EligibleCandidate:
     )
 
 
-def _prepared_request() -> PreparedAttemptRequest:
-    return PreparedAttemptRequest(
-        note_payload=NotePayload(
-            note_key="nk-1",
-            note_type="AnkiOpsQA",
-            editable_fields={"Question": "Broken"},
-            read_only_fields={"Source": "Book"},
-        ),
+def _prepared_request() -> PreparedProviderRequest:
+    return PreparedProviderRequest(
+        adapter_request=None,
         system_prompt_text="system",
         user_message_text="user",
         request_params={"model": "gpt-5.4"},
         contract_fingerprint="fingerprint-v1",
-        transport_mode="openai_responses_structured",
+        transport_mode="openai_responses",
         capability_snapshot={
             "provider": "openai",
             "model_id": "gpt-5.4",
-            "transport_mode": "openai_responses_structured",
-            "supports_strict_json": True,
+            "transport_mode": "openai_responses",
+            "supports_strict_schema": True,
         },
     )
 
 
-def _success_outcome() -> ProviderAttemptOutcome:
-    return ProviderAttemptOutcome(
+def _success_outcome() -> ProviderOutcome:
+    return ProviderOutcome(
+        kind=ProviderOutcomeKind.SUCCESS,
         update=NoteUpdate(note_key="nk-1", edits={"Question": "Fixed"}),
         provider_message_id="msg_1",
         response_model_id="gpt-5.4",
         stop_reason=None,
         request_id="req_1",
         rate_limit_headers={},
-        input_tokens=7,
-        output_tokens=4,
+        usage=ProviderUsage(input_tokens=7, output_tokens=4),
         latency_ms=20,
         retry_count=0,
-        response_raw_text='{"note_key":"nk-1"}',
-        response_full_json='{"id":"msg_1"}',
+        raw_text='{"note_key":"nk-1"}',
+        raw_json='{"id":"msg_1"}',
     )
 
 
@@ -114,32 +110,23 @@ def test_record_error_persists_refusal_outcome_kind(tmp_path):
     try:
         candidate = _setup_candidate(db)
         recorder = AttemptRecorder(db=db, provider="openai")
-        refusal_error = LlmNoteError(
-            "Provider refused request",
-            category=LlmNoteErrorCategory.PROVIDER,
-            attempt_context=ProviderAttemptErrorContext(
-                outcome_kind=ProviderOutcomeKind.REFUSAL.value,
-                refusal_reason="Safety refusal",
-                provider_message_id="msg_1",
-                response_model_id="gpt-5.4",
-                stop_reason=None,
-                request_id="req_1",
-                rate_limit_headers={},
-                input_tokens=3,
-                output_tokens=1,
-                latency_ms=10,
-                retry_count=0,
-                response_raw_text=None,
-                response_full_json='{"id":"msg_1"}',
-            ),
+        refusal = ProviderOutcome(
+            kind=ProviderOutcomeKind.REFUSAL,
+            refusal_text="Safety refusal",
+            provider_message_id="msg_1",
+            response_model_id="gpt-5.4",
+            request_id="req_1",
+            usage=ProviderUsage(input_tokens=3, output_tokens=1),
+            latency_ms=10,
+            raw_json='{"id":"msg_1"}',
         )
 
         with db.write_tx():
             recorder.record_error(
                 candidate=candidate,
                 prepared_request=_prepared_request(),
-                outcome=None,
-                error=refusal_error,
+                outcome=refusal,
+                error_message="Provider refused request",
                 item_status=LlmItemStatus.PROVIDER_ERROR,
             )
 
@@ -163,8 +150,9 @@ def test_record_error_maps_post_parse_note_error_to_validation_outcome_kind(tmp_
                 candidate=candidate,
                 prepared_request=_prepared_request(),
                 outcome=_success_outcome(),
-                error=LlmNoteError("Model attempted read-only edit"),
+                error_message="Model attempted read-only edit",
                 item_status=LlmItemStatus.NOTE_ERROR,
+                outcome_kind=ProviderOutcomeKind.VALIDATION_ERROR,
             )
 
         row = db._conn.execute(
@@ -182,32 +170,14 @@ def test_record_error_persists_fatal_outcome_kind_from_context(tmp_path):
     try:
         candidate = _setup_candidate(db)
         recorder = AttemptRecorder(db=db, provider="openai")
-        fatal_error = LlmFatalError(
-            "Provider authentication failed",
-            attempt_context=ProviderAttemptErrorContext(
-                outcome_kind=ProviderOutcomeKind.FATAL_ERROR.value,
-                refusal_reason=None,
-                provider_message_id=None,
-                response_model_id=None,
-                stop_reason=None,
-                request_id=None,
-                rate_limit_headers={},
-                input_tokens=0,
-                output_tokens=0,
-                latency_ms=0,
-                retry_count=0,
-                response_raw_text=None,
-                response_full_json=None,
-            ),
-        )
-
         with db.write_tx():
             recorder.record_error(
                 candidate=candidate,
                 prepared_request=_prepared_request(),
                 outcome=None,
-                error=fatal_error,
+                error_message="Provider authentication failed",
                 item_status=LlmItemStatus.FATAL_ERROR,
+                outcome_kind=ProviderOutcomeKind.FATAL_ERROR,
             )
 
         row = db._conn.execute(

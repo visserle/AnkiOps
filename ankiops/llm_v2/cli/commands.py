@@ -1,4 +1,4 @@
-"""LLM command-line entrypoints and parser wiring."""
+"""LLM runtime v2 command-line entrypoints and parser wiring."""
 
 from __future__ import annotations
 
@@ -31,12 +31,11 @@ from ankiops.config import (
     require_initialized_collection_dir,
 )
 from ankiops.fs import FileSystemAdapter
-
-from .config_loader import load_llm_task_catalog
-from .model_registry import MODEL_REGISTRY_FILE_NAME
-from .runner import list_jobs as list_llm_jobs
-from .runner import plan_task, run_task, show_job
-from .task_runtime_types import TaskExecutionProgress
+from ankiops.llm.config_loader import load_llm_task_catalog
+from ankiops.llm.model_registry import MODEL_REGISTRY_FILE_NAME
+from ankiops.llm.task_runtime_types import TaskExecutionProgress
+from ankiops.llm_v2.runtime.executor import list_jobs as list_llm_jobs
+from ankiops.llm_v2.runtime.executor import plan_task, run_task, show_job
 
 logger = logging.getLogger(__name__)
 

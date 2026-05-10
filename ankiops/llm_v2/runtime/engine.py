@@ -15,6 +15,10 @@ class StructuredOutputEngine:
     async def close(self) -> None:
         await self._adapter.close()
 
+    async def generate(self, request: AdapterRequest) -> ProviderOutcome:
+        outcome = await self._adapter.generate(request)
+        return _validate_note_key(outcome, request.note_payload.note_key)
+
     async def generate_note_update(
         self,
         *,
@@ -37,21 +41,27 @@ class StructuredOutputEngine:
             temperature=temperature,
             user_message_text=user_message_text,
         )
-        outcome = await self._adapter.generate(request)
-        if (
-            outcome.kind is ProviderOutcomeKind.SUCCESS
-            and outcome.update is not None
-            and outcome.update.note_key != note_payload.note_key
-        ):
-            return ProviderOutcome(
-                kind=ProviderOutcomeKind.VALIDATION_ERROR,
-                error_message="Model returned mismatched note_key",
-                provider_message_id=outcome.provider_message_id,
-                response_model_id=outcome.response_model_id,
-                request_id=outcome.request_id,
-                usage=outcome.usage,
-                latency_ms=outcome.latency_ms,
-                raw_text=outcome.raw_text,
-                raw_json=outcome.raw_json,
-            )
-        return outcome
+        return await self.generate(request)
+
+
+def _validate_note_key(outcome: ProviderOutcome, note_key: str) -> ProviderOutcome:
+    if (
+        outcome.kind is ProviderOutcomeKind.SUCCESS
+        and outcome.update is not None
+        and outcome.update.note_key != note_key
+    ):
+        return ProviderOutcome(
+            kind=ProviderOutcomeKind.VALIDATION_ERROR,
+            error_message="Model returned mismatched note_key",
+            provider_message_id=outcome.provider_message_id,
+            response_model_id=outcome.response_model_id,
+            request_id=outcome.request_id,
+            stop_reason=outcome.stop_reason,
+            rate_limit_headers=outcome.rate_limit_headers,
+            usage=outcome.usage,
+            latency_ms=outcome.latency_ms,
+            retry_count=outcome.retry_count,
+            raw_text=outcome.raw_text,
+            raw_json=outcome.raw_json,
+        )
+    return outcome

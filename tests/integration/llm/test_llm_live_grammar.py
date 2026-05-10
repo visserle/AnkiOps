@@ -13,10 +13,13 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.model_registry import load_model_registry
-from ankiops.llm.runner import LlmTaskExecutor, _materialize_task_context
 from ankiops.llm.task_types import LlmItemStatus
+from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm_v2.runtime.executor import (
+    LlmTaskExecutor,
+    _materialize_task_context,
+)
 
 LIVE_DECK_NAME = "LiveGrammarDeck"
 STANDARD_TASK_NAME = "grammar"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ankiops.llm_v2.domain.capabilities import (
+    SchemaLimitsProfile,
     TransportMode,
     resolve_model_capabilities,
 )
@@ -17,7 +18,9 @@ def test_resolve_openai_capabilities_defaults_to_responses_structured() -> None:
 
     assert capabilities.provider == "openai"
     assert capabilities.transport_mode is TransportMode.OPENAI_RESPONSES_STRUCTURED
-    assert capabilities.supports_strict_json is True
+    assert capabilities.supports_strict_schema is True
+    assert capabilities.supports_streaming_structured is False
+    assert capabilities.schema_limits_profile is SchemaLimitsProfile.OPENAI_SUBSET
 
 
 def test_resolve_anthropic_capabilities_defaults_to_tool_use() -> None:
@@ -27,7 +30,8 @@ def test_resolve_anthropic_capabilities_defaults_to_tool_use() -> None:
     )
 
     assert capabilities.transport_mode is TransportMode.ANTHROPIC_TOOL_USE_STRICT
-    assert capabilities.supports_strict_json is True
+    assert capabilities.supports_strict_schema is True
+    assert capabilities.schema_limits_profile is SchemaLimitsProfile.ANTHROPIC_SUBSET
 
 
 def test_resolve_gemini_capabilities_defaults_to_native_structured() -> None:
@@ -37,7 +41,8 @@ def test_resolve_gemini_capabilities_defaults_to_native_structured() -> None:
     )
 
     assert capabilities.transport_mode is TransportMode.GEMINI_NATIVE_STRUCTURED
-    assert capabilities.supports_strict_json is True
+    assert capabilities.supports_strict_schema is True
+    assert capabilities.schema_limits_profile is SchemaLimitsProfile.GEMINI_SUBSET
 
 
 def test_resolve_unknown_provider_requires_explicit_strict_json_support() -> None:
@@ -53,5 +58,5 @@ def test_explicit_non_strict_model_is_rejected() -> None:
         resolve_model_capabilities(
             provider="openai",
             model_id="gpt-5.4",
-            supports_strict_json=False,
+            supports_strict_schema=False,
         )

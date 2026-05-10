@@ -8,8 +8,8 @@ import pytest
 
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.runner import plan_task
+from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm_v2.runtime.executor import plan_task
 
 TASK_FILE = Path("llm/grammar.yaml")
 TEST_DECK = "TestDeck"
