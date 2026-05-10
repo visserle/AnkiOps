@@ -88,6 +88,21 @@ def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):
     )
 
 
+def test_exp_fresh_create_003_exports_html_fields_to_markdown(world):
+    """EXP-FRESH-CREATE-003."""
+    world.add_qa_note(
+        deck_name="HtmlExportDeck",
+        question="<b>Q1</b>",
+        answer="<b>A1</b>",
+    )
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
+    _assert_deck_contains(world, "HtmlExportDeck", "Q: **Q1**", "A: **A1**")
+
+
 def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world):
     """EXP-RUN-DELETE-001."""
     keep_key = "exp-run-delete-keep"

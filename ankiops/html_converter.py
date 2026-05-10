@@ -3,13 +3,12 @@
 import re
 import warnings
 
+import html_to_markdown._html_to_markdown as _htm_native
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-from html_to_markdown import ConversionOptions, convert
 
-try:
-    import html_to_markdown._html_to_markdown as _htm_native
-except Exception:  # pragma: no cover - optional module shape varies by install
-    _htm_native = None
+# Use native options to match the native converter's enum types.
+# TODO: Bug in html-to-markdown 3.3.2 - update and use public API when fixed.
+ConversionOptions = _htm_native.ConversionOptions
 
 from ankiops.config import LOCAL_MEDIA_DIR
 
@@ -345,10 +344,7 @@ class HTMLToMarkdown:
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
-            if _htm_native is not None and hasattr(_htm_native, "convert"):
-                result = _htm_native.convert(html, self._OPTIONS, None)
-            else:
-                result = convert(html, self._OPTIONS)
+            result = _htm_native.convert(html, self._OPTIONS, None)
             md = getattr(result, "content", None)
             if md is None and isinstance(result, dict):
                 md = result.get("content")
