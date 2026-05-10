@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps is a bi-directional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
+AnkiOps is a bidirectional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
 
 ## Features
 
@@ -59,7 +59,7 @@ ankiops am # alias for anki-to-markdown (export)
 
 ### How is this different from other Markdown tools?
 
-Most available tools are one-way importers: you write in Markdown and push to Anki, but edits in Anki don't sync back. AnkiOps is bi-directional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
+Most available tools are one-way importers: you write in Markdown and push to Anki, but edits in Anki don't sync back. AnkiOps is bidirectional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
 
 ### Is it safe to use?
 
