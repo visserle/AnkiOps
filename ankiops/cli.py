@@ -30,7 +30,11 @@ from ankiops.llm.runtime.executor import plan_task, run_task, show_job
 from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
-from ankiops.sync_media import sync_media_from_anki, sync_media_to_anki
+from ankiops.sync_media import (
+    format_media_status,
+    sync_media_from_anki,
+    sync_media_to_anki,
+)
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
@@ -41,27 +45,6 @@ def _get_cli_version() -> str:
         return version("ankiops")
     except PackageNotFoundError:
         return "unknown"
-
-
-def _format_media_status(media_result, *, from_anki: bool) -> str:
-    checked = media_result.checked
-    summary = media_result.summary
-
-    if checked == 0:
-        return "Media: no referenced files"
-
-    if media_result.missing:
-        if from_anki:
-            return (
-                f"Media: {checked} files checked — "
-                f"{summary.synced} pulled, {media_result.missing} missing in Anki"
-            )
-        return (
-            f"Media: {checked} files checked — "
-            f"{summary.format()}, {media_result.missing} missing locally"
-        )
-
-    return f"Media: {checked} files checked — {summary.format()}"
 
 
 def _log_import_errors(import_summary: CollectionResult) -> None:
@@ -154,7 +137,7 @@ def run_am(args):
     try:
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, fs, collection_dir, db)
-        logger.info(_format_media_status(media_result, from_anki=True))
+        logger.info(format_media_status(media_result, from_anki=True))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -180,7 +163,7 @@ def run_ma(args):
     try:
         logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, fs, collection_dir, db)
-        logger.info(_format_media_status(media_result, from_anki=False))
+        logger.info(format_media_status(media_result, from_anki=False))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 

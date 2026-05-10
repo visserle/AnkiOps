@@ -340,133 +340,6 @@ _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
 
 
 @dataclass
-class SyncSummary:
-    total: int = 0
-    created: int = 0
-    updated: int = 0
-    deleted: int = 0
-    moved: int = 0
-    skipped: int = 0
-    errors: int = 0
-    hashed: int = 0
-    synced: int = 0
-    _FORMAT_ORDER = (
-        "created",
-        "updated",
-        "deleted",
-        "moved",
-        "errors",
-        "hashed",
-        "synced",
-    )
-
-    def __add__(self, other: "SyncSummary") -> "SyncSummary":
-        if not isinstance(other, SyncSummary):
-            return NotImplemented
-        return SyncSummary(
-            **{
-                field_name: getattr(self, field_name) + getattr(other, field_name)
-                for field_name in self.__annotations__
-            }
-        )
-
-    @classmethod
-    def from_changes(
-        cls,
-        changes: list["Change"],
-        errors: list[str],
-        *,
-        reported_change_types: frozenset[ChangeType],
-    ) -> "SyncSummary":
-        summary = cls(errors=len(errors))
-        summary.add_changes(changes, reported_change_types=reported_change_types)
-        return summary
-
-    def add_changes(
-        self,
-        changes: list["Change"],
-        *,
-        reported_change_types: frozenset[ChangeType],
-        dedupe_by_entity: bool = True,
-        include_total: bool = True,
-    ) -> None:
-        change_types: list[ChangeType]
-        if dedupe_by_entity:
-            change_types = _effective_change_types(changes)
-        else:
-            change_types = [change.change_type for change in changes]
-
-        for change_type in change_types:
-            self.add_change_type(
-                change_type,
-                reported_change_types=reported_change_types,
-                include_total=include_total,
-            )
-
-    def add_change_type(
-        self,
-        change_type: ChangeType,
-        *,
-        reported_change_types: frozenset[ChangeType],
-        include_total: bool = True,
-    ) -> None:
-        if change_type in reported_change_types:
-            field_name = _SUMMARY_FIELD_BY_CHANGE.get(change_type)
-            if field_name:
-                setattr(self, field_name, getattr(self, field_name) + 1)
-
-        if include_total and change_type not in _TOTAL_EXCLUDED_CHANGE_TYPES:
-            self.total += 1
-
-    def to_dict(self) -> dict[str, int]:
-        return {
-            field_name: getattr(self, field_name) for field_name in self.__annotations__
-        }
-
-    def format(self) -> str:
-        parts = []
-        for key in self._FORMAT_ORDER:
-            val = getattr(self, key)
-            if val > 0:
-                parts.append(f"{val} {key}")
-        if not parts:
-            return "no changes"
-        return ", ".join(parts)
-
-
-# Priority order for deduplicating overlapping changes on the same entity.
-_CHANGE_PRIORITY = {
-    change_type: priority
-    for priority, change_type in enumerate(
-        [
-            ChangeType.SKIP,
-            ChangeType.HASH,
-            ChangeType.SYNC,
-            ChangeType.UPDATE,
-            ChangeType.CREATE,
-            ChangeType.MOVE,
-            ChangeType.DELETE,
-            ChangeType.CONFLICT,
-        ]
-    )
-}
-
-
-def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
-    """Return the highest-priority change per entity."""
-    effective: dict[int | str, ChangeType] = {}
-    for change in changes:
-        entity_id = change.entity_id or change.entity_repr
-        previous = effective.get(entity_id)
-        if (
-            previous is None
-            or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[previous]
-        ):
-            effective[entity_id] = change.change_type
-    return list(effective.values())
-
-
-@dataclass
 class ChangeBuckets:
     creates: list[Change] = field(default_factory=list)
     updates: list[Change] = field(default_factory=list)
@@ -570,6 +443,133 @@ class SyncResult:
             self.errors,
             reported_change_types=self.reported_change_types,
         )
+
+
+# Priority order for deduplicating overlapping changes on the same entity.
+_CHANGE_PRIORITY = {
+    change_type: priority
+    for priority, change_type in enumerate(
+        [
+            ChangeType.SKIP,
+            ChangeType.HASH,
+            ChangeType.SYNC,
+            ChangeType.UPDATE,
+            ChangeType.CREATE,
+            ChangeType.MOVE,
+            ChangeType.DELETE,
+            ChangeType.CONFLICT,
+        ]
+    )
+}
+
+
+def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
+    """Return the highest-priority change per entity."""
+    effective: dict[int | str, ChangeType] = {}
+    for change in changes:
+        entity_id = change.entity_id or change.entity_repr
+        previous = effective.get(entity_id)
+        if (
+            previous is None
+            or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[previous]
+        ):
+            effective[entity_id] = change.change_type
+    return list(effective.values())
+
+
+@dataclass
+class SyncSummary:
+    total: int = 0
+    created: int = 0
+    updated: int = 0
+    deleted: int = 0
+    moved: int = 0
+    skipped: int = 0
+    errors: int = 0
+    hashed: int = 0
+    synced: int = 0
+    _FORMAT_ORDER = (
+        "created",
+        "updated",
+        "deleted",
+        "moved",
+        "errors",
+        "hashed",
+        "synced",
+    )
+
+    def __add__(self, other: "SyncSummary") -> "SyncSummary":
+        if not isinstance(other, SyncSummary):
+            return NotImplemented
+        return SyncSummary(
+            **{
+                field_name: getattr(self, field_name) + getattr(other, field_name)
+                for field_name in self.__annotations__
+            }
+        )
+
+    @classmethod
+    def from_changes(
+        cls,
+        changes: list["Change"],
+        errors: list[str],
+        *,
+        reported_change_types: frozenset[ChangeType],
+    ) -> "SyncSummary":
+        summary = cls(errors=len(errors))
+        summary.add_changes(changes, reported_change_types=reported_change_types)
+        return summary
+
+    def add_changes(
+        self,
+        changes: list["Change"],
+        *,
+        reported_change_types: frozenset[ChangeType],
+        dedupe_by_entity: bool = True,
+        include_total: bool = True,
+    ) -> None:
+        change_types: list[ChangeType]
+        if dedupe_by_entity:
+            change_types = _effective_change_types(changes)
+        else:
+            change_types = [change.change_type for change in changes]
+
+        for change_type in change_types:
+            self.add_change_type(
+                change_type,
+                reported_change_types=reported_change_types,
+                include_total=include_total,
+            )
+
+    def add_change_type(
+        self,
+        change_type: ChangeType,
+        *,
+        reported_change_types: frozenset[ChangeType],
+        include_total: bool = True,
+    ) -> None:
+        if change_type in reported_change_types:
+            field_name = _SUMMARY_FIELD_BY_CHANGE.get(change_type)
+            if field_name:
+                setattr(self, field_name, getattr(self, field_name) + 1)
+
+        if include_total and change_type not in _TOTAL_EXCLUDED_CHANGE_TYPES:
+            self.total += 1
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            field_name: getattr(self, field_name) for field_name in self.__annotations__
+        }
+
+    def format(self) -> str:
+        parts = []
+        for key in self._FORMAT_ORDER:
+            val = getattr(self, key)
+            if val > 0:
+                parts.append(f"{val} {key}")
+        if not parts:
+            return "no changes"
+        return ", ".join(parts)
 
 
 @dataclass

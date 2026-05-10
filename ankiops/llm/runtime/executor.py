@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ankiops.collection_serializer import (
-    deserialize_collection_data,
+    deserialize_collection,
     serialize_collection,
 )
 from ankiops.config import NOTE_TYPES_DIR
@@ -683,7 +683,7 @@ class LlmTaskExecutor:
         persisted = False
 
         if summary.updated > 0:
-            deserialize_collection_data(
+            deserialize_collection(
                 data,
                 root_dir=self.collection_dir,
                 note_types_dir=self.collection_dir / NOTE_TYPES_DIR,

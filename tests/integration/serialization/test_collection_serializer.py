@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ankiops.collection_serializer import (
-    deserialize_collection_data,
+    deserialize_collection,
     deserialize_collection_from_json,
     serialize_collection,
     serialize_collection_to_json,
@@ -207,7 +207,7 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     fs.eject_builtin_note_types(note_types_dst)
     _set_note_type_paths(monkeypatch, note_types_dst)
 
-    deserialize_collection_data(
+    deserialize_collection(
         serialized_data,
         root_dir=fresh_dir,
         note_types_dir=note_types_dst,

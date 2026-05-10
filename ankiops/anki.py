@@ -93,6 +93,7 @@ class AnkiAdapter:
             )
         return notes_by_id
 
+    # Models are Anki's note types
     def fetch_model_names(self) -> list[str]:
         return invoke("modelNames")
 

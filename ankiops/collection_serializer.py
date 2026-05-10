@@ -156,7 +156,7 @@ def deserialize_collection_from_json(
         data = json.load(input_handle)
 
     logger.debug(f"Importing serialized collection from: {json_file}")
-    deserialize_collection_data(
+    deserialize_collection(
         data,
         root_dir=get_collection_dir(),
         note_types_dir=get_note_types_dir(),
@@ -164,7 +164,7 @@ def deserialize_collection_from_json(
     )
 
 
-def deserialize_collection_data(
+def deserialize_collection(
     data: dict[str, Any],
     *,
     root_dir: Path,
