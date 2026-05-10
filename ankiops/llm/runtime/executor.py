@@ -685,7 +685,7 @@ class LlmTaskExecutor:
         if summary.updated > 0:
             deserialize(
                 data,
-                root_dir=self.collection_dir,
+                collection_dir=self.collection_dir,
                 note_types_dir=self.collection_dir / NOTE_TYPES_DIR,
                 overwrite=True,
                 quiet=True,

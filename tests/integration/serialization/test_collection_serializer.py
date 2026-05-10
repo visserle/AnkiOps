@@ -207,7 +207,7 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
 
     deserialize(
         serialized_data,
-        root_dir=fresh_dir,
+        collection_dir=fresh_dir,
         note_types_dir=note_types_dst,
         overwrite=True,
     )

@@ -112,7 +112,8 @@ def serialize_to_file(
     Args:
         collection_dir: Path to the markdown decks directory
         output_file: Path where JSON file will be written
-        deck: Optional deck name scope for serialization
+        deck: Optional deck name scope for serialization, otherswise serializes the
+              entire collection
         no_subdecks: If True with deck set, include only exact deck
 
     Returns:
@@ -139,31 +140,6 @@ def serialize_to_file(
     )
 
     return serialized_data
-
-
-def deserialize_from_file(
-    json_file: Path,
-    overwrite: bool = False,
-) -> None:
-    """Deserialize markdown decks from a JSON file.
-
-    In development mode (pyproject.toml with name="ankiops" in cwd),
-    unpacks to ./collection. Otherwise, unpacks to the current working directory.
-
-    Args:
-        json_file: Path to JSON file to deserialize
-        overwrite: If True, overwrite existing markdown files; if False, skip
-    """
-    with json_file.open("r", encoding="utf-8") as input_handle:
-        data = json.load(input_handle)
-
-    logger.debug(f"Importing serialized data from: {json_file}")
-    deserialize(
-        data,
-        collection_dir=get_collection_dir(),
-        note_types_dir=get_note_types_dir(),
-        overwrite=overwrite,
-    )
 
 
 def deserialize(
@@ -300,3 +276,28 @@ def deserialize(
             logger.debug(init_message)
         else:
             logger.info(init_message)
+
+
+def deserialize_from_file(
+    json_file: Path,
+    overwrite: bool = False,
+) -> None:
+    """Deserialize markdown decks from a JSON file.
+
+    In development mode (pyproject.toml with name="ankiops" in cwd),
+    unpacks to ./collection. Otherwise, unpacks to the current working directory.
+
+    Args:
+        json_file: Path to JSON file to deserialize
+        overwrite: If True, overwrite existing markdown files; if False, skip
+    """
+    with json_file.open("r", encoding="utf-8") as input_handle:
+        data = json.load(input_handle)
+
+    logger.debug(f"Importing serialized data from: {json_file}")
+    deserialize(
+        data,
+        collection_dir=get_collection_dir(),
+        note_types_dir=get_note_types_dir(),
+        overwrite=overwrite,
+    )

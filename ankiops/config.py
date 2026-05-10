@@ -123,13 +123,7 @@ def require_collection_dir(active_profile: str) -> Path:
     """
     from ankiops.db import SQLiteDbAdapter
 
-    collection_dir = get_collection_dir()
-    db_path = collection_dir / ANKIOPS_DB
-    if not db_path.exists():
-        logger.error(
-            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
-        )
-        raise SystemExit(1)
+    collection_dir = require_initialized_collection_dir()
 
     db = SQLiteDbAdapter.open(collection_dir)
     try:
