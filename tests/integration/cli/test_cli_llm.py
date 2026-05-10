@@ -8,6 +8,7 @@ import pytest
 
 from ankiops.cli import main, run_llm
 from ankiops.llm.model_registry import ModelSpec
+from ankiops.llm.persistence.db import LlmJobListItem
 from ankiops.llm.task_types import (
     LlmJobResult,
     LlmJobStatus,
@@ -17,7 +18,6 @@ from ankiops.llm.task_types import (
     TaskPlanResult,
     TaskRunSummary,
 )
-from ankiops.llm_v2.persistence.db import LlmJobListItem
 
 TEST_MODEL = ModelSpec(
     model="claude-sonnet-4-6",

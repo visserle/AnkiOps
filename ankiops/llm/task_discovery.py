@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm.persistence.db import LlmDb
 
 from .discovery import DiscoveryItem, DiscoverySnapshot
 from .task_runtime_types import EligibleCandidate

@@ -10,7 +10,7 @@ import yaml
 from yaml.nodes import ScalarNode
 
 from ankiops.config import LLM_DIR
-from ankiops.llm_v2.catalog import ensure_model_supported
+from ankiops.llm.catalog import ensure_model_supported
 from ankiops.models import NoteTypeConfig
 
 from .model_registry import (

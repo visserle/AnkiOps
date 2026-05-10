@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from ankiops.llm_v2.catalog import ensure_model_supported
+from ankiops.llm.catalog import ensure_model_supported
 
 from .model_registry import ModelSpec, load_model_registry
 from .task_types import DeckScope, TaskConfig

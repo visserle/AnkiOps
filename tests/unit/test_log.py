@@ -50,7 +50,7 @@ def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
     try:
         configure_logging(stream_level=logging.DEBUG)
 
-        logging.getLogger("ankiops.llm_v2.runtime.executor").debug("runner debug")
+        logging.getLogger("ankiops.llm.runtime.executor").debug("runner debug")
         logging.getLogger("openai._base_client").debug("sdk debug")
 
         rendered = stream.getvalue()

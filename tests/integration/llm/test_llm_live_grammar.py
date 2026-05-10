@@ -14,12 +14,12 @@ import pytest
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.model_registry import load_model_registry
-from ankiops.llm.task_types import LlmItemStatus
-from ankiops.llm_v2.persistence.db import LlmDb
-from ankiops.llm_v2.runtime.executor import (
+from ankiops.llm.persistence.db import LlmDb
+from ankiops.llm.runtime.executor import (
     LlmTaskExecutor,
     _materialize_task_context,
 )
+from ankiops.llm.task_types import LlmItemStatus
 
 LIVE_DECK_NAME = "LiveGrammarDeck"
 STANDARD_TASK_NAME = "grammar"
@@ -283,9 +283,9 @@ def _collect_attempt_metrics(db: LlmDb, *, job_id: int) -> dict[str, int]:
                 ),
                 0
             ) AS attempts_with_raw_text
-        FROM llm_job_item_v2 i
-        LEFT JOIN llm_attempt_v2 a ON a.job_item_id = i.id
-        LEFT JOIN llm_attempt_payload_v2 p ON p.attempt_id = a.id
+        FROM llm_job_item i
+        LEFT JOIN llm_attempt a ON a.job_item_id = i.id
+        LEFT JOIN llm_attempt_payload p ON p.attempt_id = a.id
         WHERE i.job_id = ?
         """,
         (job_id,),
@@ -450,8 +450,8 @@ def test_live_grammar_single_note_smoke(
         attempts_count = db._conn.execute(
             """
             SELECT COUNT(*) AS total
-            FROM llm_attempt_v2 a
-            JOIN llm_job_item_v2 i ON i.id = a.job_item_id
+            FROM llm_attempt a
+            JOIN llm_job_item i ON i.id = a.job_item_id
             WHERE i.job_id = ?
             """,
             (job_id,),
@@ -459,9 +459,9 @@ def test_live_grammar_single_note_smoke(
         payload_rows = db._conn.execute(
             """
             SELECT p.response_raw_text
-            FROM llm_attempt_payload_v2 p
-            JOIN llm_attempt_v2 a ON a.id = p.attempt_id
-            JOIN llm_job_item_v2 i ON i.id = a.job_item_id
+            FROM llm_attempt_payload p
+            JOIN llm_attempt a ON a.id = p.attempt_id
+            JOIN llm_job_item i ON i.id = a.job_item_id
             WHERE i.job_id = ?
             ORDER BY a.id ASC
             """,
@@ -540,9 +540,9 @@ def test_live_grammar_mixed_correctness_robustness_and_telemetry(
             SELECT
                 COUNT(a.id) AS attempts_count,
                 COUNT(p.attempt_id) AS payload_count
-            FROM llm_job_item_v2 i
-            LEFT JOIN llm_attempt_v2 a ON a.job_item_id = i.id
-            LEFT JOIN llm_attempt_payload_v2 p ON p.attempt_id = a.id
+            FROM llm_job_item i
+            LEFT JOIN llm_attempt a ON a.job_item_id = i.id
+            LEFT JOIN llm_attempt_payload p ON p.attempt_id = a.id
             WHERE i.job_id = ?
             """,
             (job_id,),

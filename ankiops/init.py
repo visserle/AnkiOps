@@ -20,7 +20,7 @@ from ankiops.llm.model_registry import (
     MODEL_REGISTRY_FILE_NAME,
     SYSTEM_PROMPT_FILE_NAME,
 )
-from ankiops.llm_v2.persistence.db import LlmDb
+from ankiops.llm.persistence.db import LlmDb
 from ankiops.log import clickable_path
 
 logger = logging.getLogger(__name__)
