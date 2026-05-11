@@ -21,30 +21,6 @@ DEFAULT_QUIET_LOGGERS = (
 DEFAULT_TRACEBACK_SUPPRESS: tuple[str | ModuleType, ...] = (argparse,)
 
 
-def format_changes(**counts: int) -> str:
-    """Format non-zero change counts into a compact string.
-
-    >>> format_changes(updated=3, created=1, deleted=0, skipped=96)
-    '3 updated, 1 created'
-    >>> format_changes(skipped=10)
-    'no changes'
-    """
-    parts = []
-    # 'total' is usually displayed separately (e.g. "X files - Y synced")
-    # so we skip it in the compact change summary.
-    for label_key, count_value in counts.items():
-        if not count_value or label_key == "total":
-            continue
-        # Singularize nouns (e.g. "1 errors" → "1 error")
-        label = (
-            label_key[:-1]
-            if count_value == 1 and label_key.endswith("s")
-            else label_key
-        )
-        parts.append(f"{count_value} {label}")
-    return ", ".join(parts) if parts else "no changes"
-
-
 def clickable_path(file_path: Path | str, display_name: str | None = None) -> str:
     """Create a clickable terminal hyperlink for a file path.
 

@@ -7,7 +7,7 @@ from enum import Enum
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from ankiops.log import format_changes
+from ankiops.models import SyncSummary
 
 from .model_registry import ModelSpec
 
@@ -149,7 +149,7 @@ class TaskRunSummary:
         return self.skipped_no_editable_fields
 
     def format(self) -> str:
-        changes = format_changes(
+        changes = SyncSummary.format_change_counts(
             updated=self.updated,
             unchanged=self.unchanged,
             skipped=self.skipped,

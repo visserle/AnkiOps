@@ -310,7 +310,6 @@ _SUMMARY_FIELD_BY_CHANGE: dict[ChangeType, str] = {
     ChangeType.HASH: "hashed",
     ChangeType.SYNC: "synced",
 }
-
 _NOTE_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
     {
         ChangeType.CREATE,
@@ -320,16 +319,6 @@ _NOTE_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
         ChangeType.SKIP,
     }
 )
-
-_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES | {
-    ChangeType.HASH,
-    ChangeType.SYNC,
-}
-
-_TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
-    {ChangeType.DELETE, ChangeType.CONFLICT}
-)
-
 _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
     ChangeType.CREATE,
     ChangeType.UPDATE,
@@ -337,6 +326,14 @@ _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
     ChangeType.SKIP,
     ChangeType.MOVE,
 )
+_TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
+    {ChangeType.DELETE, ChangeType.CONFLICT}
+)
+
+_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES | {
+    ChangeType.HASH,
+    ChangeType.SYNC,
+}
 
 
 @dataclass
@@ -561,15 +558,24 @@ class SyncSummary:
             field_name: getattr(self, field_name) for field_name in self.__annotations__
         }
 
-    def format(self) -> str:
+    @staticmethod
+    def format_change_counts(**counts: int) -> str:
+        """Format non-zero change counts into a compact string."""
         parts = []
-        for key in self._FORMAT_ORDER:
-            val = getattr(self, key)
-            if val > 0:
-                parts.append(f"{val} {key}")
-        if not parts:
-            return "no changes"
-        return ", ".join(parts)
+        for label_key, count_value in counts.items():
+            if count_value <= 0 or label_key == "total":
+                continue
+            label = (
+                label_key[:-1]
+                if count_value == 1 and label_key.endswith("s")
+                else label_key
+            )
+            parts.append(f"{count_value} {label}")
+        return ", ".join(parts) if parts else "no changes"
+
+    def format(self) -> str:
+        ordered_counts = {key: getattr(self, key) for key in self._FORMAT_ORDER}
+        return self.format_change_counts(**ordered_counts)
 
 
 @dataclass
