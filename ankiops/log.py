@@ -3,7 +3,6 @@
 import argparse
 import logging
 import logging.config
-import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -62,10 +61,6 @@ def clickable_path(file_path: Path | str, display_name: str | None = None) -> st
     path = Path(file_path).expanduser()
     absolute_path = path.resolve(strict=False)
     text = display_name if display_name is not None else f"FILE {absolute_path}"
-
-    # Respect NO_COLOR environment variable
-    if os.environ.get("NO_COLOR"):
-        return text
 
     # Build an RFC-compliant file URI so spaces/special chars are encoded
     # (e.g. " " -> %20, "#" -> %23).
@@ -141,7 +136,7 @@ def configure_logging(
             "enable_link_path": False,
             "rich_tracebacks": verbose,
             "tracebacks_suppress": suppress_targets,
-            "markup": False,
+            "markup": True,
             "highlighter": NullHighlighter(),
             "log_time_format": "%H:%M:%S",
             "formatter": "stream_verbose" if verbose else "stream_compact",
