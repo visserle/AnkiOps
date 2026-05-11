@@ -156,7 +156,7 @@ class MarkdownToHTML:
         if not markdown or not markdown.strip():
             return ""
 
-        # Normalize NBSP to space.
+        # Normalize NBSP to space
         markdown = markdown.replace("\u00a0", " ")
 
         # Arrow replacements: Replace before parsing to avoid conflicts

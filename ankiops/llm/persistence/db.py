@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
 from ankiops.config import LLM_DB_FILENAME, LLM_DIR
+from ankiops.llm.domain.outcomes import ProviderOutcomeKind
 from ankiops.llm.model_registry import parse_model
 from ankiops.llm.task_types import LlmItemStatus, LlmJobStatus, TaskRunSummary
-from ankiops.llm.domain.outcomes import ProviderOutcomeKind
 
 _DEFAULT_JOB_LIST_LIMIT = 20
 _RAW_PAYLOAD_ENV_VAR = "ANKIOPS_LLM_PERSIST_RAW_PAYLOADS"

@@ -6,8 +6,8 @@ import warnings
 import html_to_markdown._html_to_markdown as _htm_native
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 
-# Use native options to match the native converter's enum types.
 # TODO: Bug in html-to-markdown 3.3.2 - update and use public API when fixed.
+# Use native options to match the native converter's enum types.
 ConversionOptions = _htm_native.ConversionOptions
 
 from ankiops.config import LOCAL_MEDIA_DIR
@@ -360,7 +360,7 @@ class HTMLToMarkdown:
         # Restore as escaped characters
         md = _restore_escaped_chars(md)
 
-        # Normalize NBSP to space.
+        # Normalize NBSP to space
         md = md.replace("\u00a0", " ")
 
         # Arrow replacements (convert Unicode arrows back to ASCII)

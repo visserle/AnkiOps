@@ -182,20 +182,6 @@ def configure_logging(
     logging.config.dictConfig(logging_config)
 
 
-def close_root_logging() -> None:
-    """
-    Safely closes and removes all handlers associated with the root logger.
-
-    Note that handlers typically do not require manual closing and removal,
-    as Python's logging module automatically manages this process when the program
-    terminates.
-    """
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        handler.close()
-        root_logger.removeHandler(handler)
-
-
 def main():
     """Example usage of the configure_logging function."""
     configure_logging(
