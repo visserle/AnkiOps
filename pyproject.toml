@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.5.8"
+version = "0.5.9"
 description = "Anki ↔ Markdown, with bidirectional sync, custom note types, and LLM integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,12 +19,12 @@ classifiers = [
     "Topic :: Education",
 ]
 dependencies = [
-    "openai>=2.32.0",
     "beautifulsoup4>=4.14.3",
     "blake3>=1.0.8",
-    "colorama>=0.4.6",
     "html-to-markdown>=3.3.2,<3.4.0",
     "mistune>=3.2.0",
+    "openai>=2.36.0",
+    "pydantic>=2.13.4",
     "pygments>=2.20.0",
     "PyYAML>=6.0.3",
     "requests>=2.33.1",
@@ -73,7 +73,7 @@ docstring-code-format = true
 [tool.ruff.lint]
 select = ["E", "F"]
 extend-select = ["I"]
-unfixable = ["F401"] # do not auto-remove unused imports
+unfixable = ["F401"]  # do not auto-remove unused imports
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
