@@ -95,7 +95,7 @@ def _eject_llm_configs(collection_dir: Path) -> None:
 
     llm_dir = collection_dir / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
-    llm_resources = resources.files("ankiops.llm")
+    llm_resources = resources.files("ankiops.llm.resources")
 
     for resource_name in (MODEL_REGISTRY_FILE_NAME, SYSTEM_PROMPT_FILE_NAME):
         destination = llm_dir / resource_name

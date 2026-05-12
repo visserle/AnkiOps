@@ -16,7 +16,7 @@ MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "model",
     "model_id",
-    "base_url",
+    "api_url",
     "api_key",
     "concurrency",
     "input_usd_per_mtok",
@@ -49,7 +49,7 @@ class ModelSpec:
 
     model: str
     model_id: str
-    base_url: str
+    api_url: str
     api_key: str
     concurrency: int = 8
     input_usd_per_mtok: Decimal | None = None
@@ -164,9 +164,9 @@ def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
             key="model_id",
             item_label=item_label,
         ),
-        base_url=_require_string(
-            entry.get("base_url"),
-            key="base_url",
+        api_url=_require_string(
+            entry.get("api_url"),
+            key="api_url",
             item_label=item_label,
         ),
         api_key=_require_string(

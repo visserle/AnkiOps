@@ -580,7 +580,7 @@ def _resolve_model_for_summary(row: sqlite3.Row, *, collection_dir: Path) -> Mod
     return ModelSpec(
         model=str(row["model"]),
         model_id=str(row["model_id"]),
-        base_url="",
+        api_url="",
         api_key="",
     )
 
