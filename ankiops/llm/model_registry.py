@@ -1,4 +1,4 @@
-"""Collection-local model registry with provider routing and optional pricing."""
+"""Collection-local OpenAI model registry."""
 
 from __future__ import annotations
 
@@ -16,13 +16,9 @@ MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "model",
     "model_id",
-    "provider",
     "base_url",
     "api_key",
     "concurrency",
-    "retries",
-    "retry_backoff_seconds",
-    "retry_backoff_jitter",
     "input_usd_per_mtok",
     "output_usd_per_mtok",
 }
@@ -31,7 +27,7 @@ _USD_CENTS_QUANTUM = Decimal("0.01")
 
 
 class ModelRegistryError(ValueError):
-    """Raised when a collection model registry file is invalid."""
+    """Raised when ``llm/_models.yaml`` is invalid."""
 
 
 @dataclass(frozen=True)
@@ -49,15 +45,13 @@ class CostEstimate:
 
 @dataclass(frozen=True)
 class ModelSpec:
+    """A single OpenAI Responses API model alias."""
+
     model: str
     model_id: str
-    provider: str
     base_url: str
     api_key: str
     concurrency: int = 8
-    retries: int = 2
-    retry_backoff_seconds: float = 0.5
-    retry_backoff_jitter: bool = True
     input_usd_per_mtok: Decimal | None = None
     output_usd_per_mtok: Decimal | None = None
 
@@ -88,16 +82,14 @@ class ModelRegistry:
     _models_by_model: dict[str, ModelSpec] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        by_model: dict[str, ModelSpec] = {}
+        models_by_model: dict[str, ModelSpec] = {}
         for model in self.models:
-            if model.model in by_model:
-                raise ModelRegistryError(f"duplicate model '{model.model}' in registry")
-            by_model[model.model] = model
-
-        if not by_model:
+            if model.model in models_by_model:
+                raise ModelRegistryError(f"duplicate model '{model.model}'")
+            models_by_model[model.model] = model
+        if not models_by_model:
             raise ModelRegistryError("model registry must contain at least one model")
-
-        object.__setattr__(self, "_models_by_model", by_model)
+        object.__setattr__(self, "_models_by_model", models_by_model)
 
     def parse(self, value: str) -> ModelSpec | None:
         return self._models_by_model.get(value.strip())
@@ -110,14 +102,95 @@ def model_registry_path(*, collection_dir: Path) -> Path:
     return collection_dir / LLM_DIR / MODEL_REGISTRY_FILE_NAME
 
 
-def _read_yaml_list(path: Path) -> list[Any]:
+def load_model_registry(*, collection_dir: Path) -> ModelRegistry:
+    path = model_registry_path(collection_dir=collection_dir)
+    if not path.exists():
+        raise ModelRegistryError(
+            f"{path}: model registry file not found. "
+            f"Run 'ankiops init' to eject {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME}."
+        )
+    if not path.is_file():
+        raise ModelRegistryError(f"{path}: model registry must be a file")
+    try:
+        return _parse_registry(path)
+    except ModelRegistryError as error:
+        raise ModelRegistryError(f"{path}: {error}") from error
+
+
+def parse_model(
+    value: str,
+    *,
+    collection_dir: Path,
+) -> ModelSpec | None:
+    return load_model_registry(collection_dir=collection_dir).parse(value)
+
+
+def format_supported_models(*, collection_dir: Path) -> str:
+    return load_model_registry(collection_dir=collection_dir).format_models()
+
+
+def format_usd_cents(amount: Decimal) -> str:
+    quantized = amount.quantize(_USD_CENTS_QUANTUM, rounding=ROUND_HALF_UP)
+    return f"${quantized:.2f}"
+
+
+def _parse_registry(path: Path) -> ModelRegistry:
     with path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle)
     if raw is None:
-        return []
+        raw = []
     if not isinstance(raw, list):
         raise ModelRegistryError("model registry must be a YAML list")
-    return raw
+    return ModelRegistry(
+        models=tuple(
+            _parse_model_entry(entry, index=index) for index, entry in enumerate(raw)
+        )
+    )
+
+
+def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
+    item_label = f"models[{index}]"
+    if not isinstance(entry, dict):
+        raise ModelRegistryError(f"{item_label}: model entry must be a mapping")
+
+    unknown = sorted(set(entry.keys()) - _SUPPORTED_MODEL_KEYS)
+    if unknown:
+        raise ModelRegistryError(f"{item_label}: unknown key(s): {', '.join(unknown)}")
+
+    return ModelSpec(
+        model=_require_string(entry.get("model"), key="model", item_label=item_label),
+        model_id=_require_string(
+            entry.get("model_id"),
+            key="model_id",
+            item_label=item_label,
+        ),
+        base_url=_require_string(
+            entry.get("base_url"),
+            key="base_url",
+            item_label=item_label,
+        ),
+        api_key=_require_string(
+            entry.get("api_key"),
+            key="api_key",
+            item_label=item_label,
+        ),
+        concurrency=_parse_positive_int(
+            entry.get("concurrency"),
+            key="concurrency",
+            item_label=item_label,
+            default=8,
+        ),
+        input_usd_per_mtok=_parse_decimal(
+            entry.get("input_usd_per_mtok"),
+            key="input_usd_per_mtok",
+            item_label=item_label,
+        ),
+        output_usd_per_mtok=_parse_decimal(
+            entry.get("output_usd_per_mtok"),
+            key="output_usd_per_mtok",
+            item_label=item_label,
+        ),
+    )
 
 
 def _require_string(
@@ -161,165 +234,3 @@ def _parse_positive_int(
     if value < 1:
         raise ModelRegistryError(f"{item_label}: '{key}' must be >= 1")
     return value
-
-
-def _parse_non_negative_int(
-    value: Any,
-    *,
-    key: str,
-    item_label: str,
-    default: int,
-) -> int:
-    if value is None:
-        return default
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ModelRegistryError(f"{item_label}: '{key}' must be an integer")
-    if value < 0:
-        raise ModelRegistryError(f"{item_label}: '{key}' must be >= 0")
-    return value
-
-
-def _parse_non_negative_float(
-    value: Any,
-    *,
-    key: str,
-    item_label: str,
-    default: float,
-) -> float:
-    if value is None:
-        return default
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ModelRegistryError(f"{item_label}: '{key}' must be numeric")
-    parsed = float(value)
-    if parsed < 0:
-        raise ModelRegistryError(f"{item_label}: '{key}' must be >= 0")
-    return parsed
-
-
-def _parse_bool(
-    value: Any,
-    *,
-    key: str,
-    item_label: str,
-    default: bool,
-) -> bool:
-    if value is None:
-        return default
-    if not isinstance(value, bool):
-        raise ModelRegistryError(f"{item_label}: '{key}' must be a boolean")
-    return value
-
-
-def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
-    item_label = f"models[{index}]"
-    if not isinstance(entry, dict):
-        raise ModelRegistryError(f"{item_label}: model entry must be a mapping")
-
-    unknown = sorted(set(entry.keys()) - _SUPPORTED_MODEL_KEYS)
-    if unknown:
-        raise ModelRegistryError(f"{item_label}: unknown key(s): {', '.join(unknown)}")
-
-    return ModelSpec(
-        model=_require_string(
-            entry.get("model"),
-            key="model",
-            item_label=item_label,
-        ),
-        model_id=_require_string(
-            entry.get("model_id"),
-            key="model_id",
-            item_label=item_label,
-        ),
-        provider=_require_string(
-            entry.get("provider"),
-            key="provider",
-            item_label=item_label,
-        ),
-        base_url=_require_string(
-            entry.get("base_url"),
-            key="base_url",
-            item_label=item_label,
-        ),
-        api_key=_require_string(
-            entry.get("api_key"),
-            key="api_key",
-            item_label=item_label,
-        ),
-        concurrency=_parse_positive_int(
-            entry.get("concurrency"),
-            key="concurrency",
-            item_label=item_label,
-            default=8,
-        ),
-        retries=_parse_non_negative_int(
-            entry.get("retries"),
-            key="retries",
-            item_label=item_label,
-            default=2,
-        ),
-        retry_backoff_seconds=_parse_non_negative_float(
-            entry.get("retry_backoff_seconds"),
-            key="retry_backoff_seconds",
-            item_label=item_label,
-            default=0.5,
-        ),
-        retry_backoff_jitter=_parse_bool(
-            entry.get("retry_backoff_jitter"),
-            key="retry_backoff_jitter",
-            item_label=item_label,
-            default=True,
-        ),
-        input_usd_per_mtok=_parse_decimal(
-            entry.get("input_usd_per_mtok"),
-            key="input_usd_per_mtok",
-            item_label=item_label,
-        ),
-        output_usd_per_mtok=_parse_decimal(
-            entry.get("output_usd_per_mtok"),
-            key="output_usd_per_mtok",
-            item_label=item_label,
-        ),
-    )
-
-
-def _parse_registry(path: Path) -> ModelRegistry:
-    models = _read_yaml_list(path)
-    if not models:
-        raise ModelRegistryError("model registry must be a non-empty list")
-
-    parsed = tuple(
-        _parse_model_entry(entry, index=index) for index, entry in enumerate(models)
-    )
-    return ModelRegistry(models=parsed)
-
-
-def load_model_registry(*, collection_dir: Path) -> ModelRegistry:
-    path = model_registry_path(collection_dir=collection_dir)
-    if not path.exists():
-        raise ModelRegistryError(
-            f"{path}: model registry file not found. "
-            f"Run 'ankiops init' to eject {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME}."
-        )
-    if not path.is_file():
-        raise ModelRegistryError(f"{path}: model registry must be a file")
-    try:
-        return _parse_registry(path)
-    except ModelRegistryError as error:
-        raise ModelRegistryError(f"{path}: {error}") from error
-
-
-def parse_model(
-    value: str,
-    *,
-    collection_dir: Path,
-) -> ModelSpec | None:
-    return load_model_registry(collection_dir=collection_dir).parse(value)
-
-
-def format_supported_models(*, collection_dir: Path) -> str:
-    return load_model_registry(collection_dir=collection_dir).format_models()
-
-
-def format_usd_cents(amount: Decimal) -> str:
-    quantized = amount.quantize(_USD_CENTS_QUANTUM, rounding=ROUND_HALF_UP)
-    return f"${quantized:.2f}"

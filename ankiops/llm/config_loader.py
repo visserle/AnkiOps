@@ -1,4 +1,4 @@
-"""YAML config loading for task specs."""
+"""Load OpenAI LLM task YAML files."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import yaml
 from yaml.nodes import ScalarNode
 
 from ankiops.config import LLM_DIR
-from ankiops.llm.catalog import ensure_model_supported
 from ankiops.models import NoteTypeConfig
 
 from .model_registry import (
@@ -20,7 +19,7 @@ from .model_registry import (
     load_model_registry,
     model_registry_path,
 )
-from .task_types import (
+from .types import (
     FieldAccess,
     FieldAccessRule,
     TaskCatalog,
@@ -30,13 +29,13 @@ from .task_types import (
 
 
 class LlmConfigError(ValueError):
-    """Raised when an LLM task config is invalid."""
+    """Raised when a task config is invalid."""
 
 
 _SUPPORTED_TASK_KEYS_ORDERED = (
     "model",
     "system_prompt",
-    "task_prompt",
+    "user_prompt",
     "request",
     "fields",
 )
@@ -79,21 +78,111 @@ def _construct_file_source(
         raw_reference,
         llm_dir=loader.llm_dir,
     )
-    content = _read_text_file(resolved_path)
-    return _FileSource(text=content, path=resolved_path)
+    return _FileSource(text=_read_text_file(resolved_path), path=resolved_path)
 
 
 _TaskConfigLoader.add_constructor("!file", _construct_file_source)
 
 
-def _iter_yaml_files(directory: Path) -> list[Path]:
-    files = sorted(directory.glob("*.yaml"))
-    files.extend(sorted(directory.glob("*.yml")))
-    return files
-
-
 def is_task_config_file(path: Path) -> bool:
     return path.suffix in {".yaml", ".yml"} and path.name != MODEL_REGISTRY_FILE_NAME
+
+
+def load_llm_task_catalog(
+    collection_dir: Path,
+    *,
+    note_type_configs: list[NoteTypeConfig],
+) -> TaskCatalog:
+    llm_dir = collection_dir / LLM_DIR
+    tasks_by_name: dict[str, TaskConfig] = {}
+    errors: dict[str, str] = {}
+
+    if not llm_dir.exists() or not llm_dir.is_dir():
+        errors[str(llm_dir)] = (
+            f"{llm_dir}: LLM config directory not found. "
+            "Run 'ankiops init' to create LLM configs."
+        )
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    task_files = [
+        path for path in _iter_yaml_files(llm_dir) if is_task_config_file(path)
+    ]
+    if not task_files:
+        errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    try:
+        model_registry = load_model_registry(collection_dir=collection_dir)
+    except ModelRegistryError as error:
+        errors[str(model_registry_path(collection_dir=collection_dir))] = str(error)
+        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+    for path in task_files:
+        try:
+            task = _parse_task(
+                path,
+                note_type_configs=note_type_configs,
+                llm_dir=llm_dir,
+                model_registry=model_registry,
+            )
+            if task.name in tasks_by_name:
+                raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
+            tasks_by_name[task.name] = task
+        except LlmConfigError as error:
+            errors[str(path)] = str(error)
+
+    return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+
+
+def _parse_task(
+    path: Path,
+    *,
+    note_type_configs: list[NoteTypeConfig],
+    llm_dir: Path,
+    model_registry: ModelRegistry,
+) -> TaskConfig:
+    mapping = _read_yaml_mapping(path, llm_dir=llm_dir)
+    _validate_task_keys(mapping, path)
+
+    model_name = _require_str(mapping, "model", path)
+    model = model_registry.parse(model_name)
+    if model is None:
+        raise LlmConfigError(
+            f"{path}: 'model' must be one of: {model_registry.format_models()}"
+        )
+
+    system_prompt, system_prompt_path = _parse_text_source(
+        mapping,
+        key="system_prompt",
+        path=path,
+    )
+    user_prompt, user_prompt_path = _parse_text_source(
+        mapping,
+        key="user_prompt",
+        path=path,
+    )
+    default_field_access, field_rules = _parse_field_rules(
+        mapping.get("fields"),
+        note_type_configs=note_type_configs,
+        path=path,
+    )
+    request = _parse_request_options(mapping.get("request"), path=path)
+
+    return TaskConfig(
+        name=path.stem,
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        system_prompt_path=system_prompt_path,
+        user_prompt_path=user_prompt_path,
+        default_field_access=default_field_access,
+        field_rules=field_rules,
+        request=request,
+    )
+
+
+def _iter_yaml_files(directory: Path) -> list[Path]:
+    return sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")])
 
 
 def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
@@ -112,11 +201,35 @@ def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
     return raw
 
 
+def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
+    unknown = sorted(set(mapping.keys()) - _SUPPORTED_TASK_KEYS)
+    if not unknown:
+        return
+    allowed = ", ".join(_SUPPORTED_TASK_KEYS_ORDERED)
+    raise LlmConfigError(
+        f"{path}: unknown task key(s): {', '.join(unknown)}. Allowed keys: {allowed}"
+    )
+
+
 def _require_str(mapping: dict[str, Any], key: str, path: Path) -> str:
     value = mapping.get(key)
     if not isinstance(value, str) or not value.strip():
         raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
     return value.strip()
+
+
+def _parse_text_source(
+    mapping: dict[str, Any],
+    *,
+    key: str,
+    path: Path,
+) -> tuple[str, Path | None]:
+    raw_value = mapping.get(key)
+    if isinstance(raw_value, _FileSource):
+        return raw_value.text, raw_value.path
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip(), None
+    raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
 
 
 def _read_text_file(path: Path) -> str:
@@ -144,75 +257,62 @@ def _resolve_relative_file(
     return candidate
 
 
-def _parse_str_list(
+def _parse_field_rules(
     value: Any,
-    key: str,
-    path: Path,
     *,
-    required: bool,
-) -> list[str]:
+    note_type_configs: list[NoteTypeConfig],
+    path: Path,
+) -> tuple[FieldAccess, list[FieldAccessRule]]:
     if value is None:
-        if required:
-            raise LlmConfigError(f"{path}: '{key}' must be a non-empty list of strings")
-        return []
-    if not isinstance(value, list) or (required and not value):
-        expected = "non-empty list of strings" if required else "list of strings"
-        raise LlmConfigError(f"{path}: '{key}' must be a {expected}")
-    items: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item.strip():
-            raise LlmConfigError(f"{path}: '{key}' must contain only strings")
-        items.append(item.strip())
-    return items
+        return FieldAccess.EDITABLE, []
+    if not isinstance(value, dict):
+        raise LlmConfigError(f"{path}: 'fields' must be a mapping")
+
+    unknown_fields = sorted(
+        set(value.keys()) - {"default_access", "editable", "read_only", "hidden"}
+    )
+    if unknown_fields:
+        raise LlmConfigError(
+            f"{path}: unknown fields config key(s): {', '.join(unknown_fields)}"
+        )
+
+    default_access = _parse_field_access_value(value.get("default_access"), path=path)
+    note_type_names = [config.name for config in note_type_configs]
+    field_names = {
+        config.name: {field.name for field in config.fields}
+        for config in note_type_configs
+    }
+
+    rules: list[FieldAccessRule] = []
+    for key in ("editable", "read_only", "hidden"):
+        rules.extend(
+            _parse_access_rules_by_note_type(
+                value.get(key),
+                key=key,
+                note_type_names=note_type_names,
+                field_names=field_names,
+                path=path,
+            )
+        )
+
+    return default_access, rules
 
 
 def _parse_field_access_value(value: Any, *, path: Path) -> FieldAccess:
     if value is None:
         return FieldAccess.EDITABLE
     if not isinstance(value, str):
-        supported = ", ".join(access.value for access in FieldAccess)
-        raise LlmConfigError(
-            f"{path}: 'fields.default_access' must be one of: {supported}"
-        )
+        return _raise_invalid_field_access(path)
     normalized = value.strip()
     for access in FieldAccess:
         if normalized == access.value:
             return access
+    return _raise_invalid_field_access(path)
+
+
+def _raise_invalid_field_access(path: Path) -> FieldAccess:
     supported = ", ".join(access.value for access in FieldAccess)
     raise LlmConfigError(f"{path}: 'fields.default_access' must be one of: {supported}")
-
-
-def _validate_field_patterns(
-    patterns: list[str],
-    *,
-    available_fields: set[str],
-    entry_path: Path,
-) -> None:
-    for pattern in patterns:
-        if not any(fnmatchcase(field_name, pattern) for field_name in available_fields):
-            raise LlmConfigError(
-                f"{entry_path}: field pattern '{pattern}' does not exist on any "
-                "matched note type"
-            )
-
-
-def _match_note_types(
-    note_types: list[str],
-    *,
-    note_type_names: list[str],
-    entry_path: Path,
-) -> set[str]:
-    matched_types = {
-        note_type_name
-        for note_type_name in note_type_names
-        if any(fnmatchcase(note_type_name, pattern) for pattern in note_types)
-    }
-    if not matched_types:
-        patterns = ", ".join(note_types)
-        raise LlmConfigError(
-            f"{entry_path}: note type pattern(s) match no note types: {patterns}"
-        )
-    return matched_types
 
 
 def _parse_access_rules_by_note_type(
@@ -231,7 +331,7 @@ def _parse_access_rules_by_note_type(
             "non-empty field pattern lists"
         )
 
-    parsed: list[FieldAccessRule] = []
+    rules: list[FieldAccessRule] = []
     for raw_note_type_pattern, raw_field_patterns in value.items():
         if (
             not isinstance(raw_note_type_pattern, str)
@@ -260,8 +360,7 @@ def _parse_access_rules_by_note_type(
             available_fields=available_fields,
             entry_path=entry_path,
         )
-
-        parsed.append(
+        rules.append(
             FieldAccessRule(
                 note_types=[note_type_pattern],
                 editable=field_patterns if key == "editable" else [],
@@ -269,70 +368,7 @@ def _parse_access_rules_by_note_type(
                 hidden=field_patterns if key == "hidden" else [],
             )
         )
-
-    return parsed
-
-
-def _parse_field_rules(
-    value: Any,
-    *,
-    note_type_configs: list[NoteTypeConfig],
-    path: Path,
-) -> tuple[FieldAccess, list[FieldAccessRule]]:
-    if value is None:
-        return FieldAccess.EDITABLE, []
-    if not isinstance(value, dict):
-        raise LlmConfigError(f"{path}: 'fields' must be a mapping")
-
-    unknown_fields = sorted(
-        set(value.keys()) - {"default_access", "editable", "read_only", "hidden"}
-    )
-    if unknown_fields:
-        raise LlmConfigError(
-            f"{path}: unknown fields config key(s): {', '.join(unknown_fields)}"
-        )
-
-    default_access = _parse_field_access_value(
-        value.get("default_access"),
-        path=path,
-    )
-
-    note_type_names = [config.name for config in note_type_configs]
-    field_names = {
-        config.name: {field.name for field in config.fields}
-        for config in note_type_configs
-    }
-    parsed: list[FieldAccessRule] = []
-
-    parsed.extend(
-        _parse_access_rules_by_note_type(
-            value.get("editable"),
-            key="editable",
-            note_type_names=note_type_names,
-            field_names=field_names,
-            path=path,
-        )
-    )
-    parsed.extend(
-        _parse_access_rules_by_note_type(
-            value.get("read_only"),
-            key="read_only",
-            note_type_names=note_type_names,
-            field_names=field_names,
-            path=path,
-        )
-    )
-    parsed.extend(
-        _parse_access_rules_by_note_type(
-            value.get("hidden"),
-            key="hidden",
-            note_type_names=note_type_names,
-            field_names=field_names,
-            path=path,
-        )
-    )
-
-    return default_access, parsed
+    return rules
 
 
 def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
@@ -383,126 +419,57 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
     )
 
 
-def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
-    unknown = sorted(set(mapping.keys()) - _SUPPORTED_TASK_KEYS)
-    if unknown:
-        allowed = ", ".join(_SUPPORTED_TASK_KEYS_ORDERED)
-        raise LlmConfigError(
-            f"{path}: unknown task key(s): {', '.join(unknown)}. "
-            f"Allowed keys: {allowed}"
-        )
-
-
-def _parse_text_source(
-    mapping: dict[str, Any],
-    *,
+def _parse_str_list(
+    value: Any,
     key: str,
     path: Path,
-) -> tuple[str, Path | None]:
-    raw_value = mapping.get(key)
-    if isinstance(raw_value, _FileSource):
-        return raw_value.text, raw_value.path
-
-    if isinstance(raw_value, str) and raw_value.strip():
-        return raw_value.strip(), None
-
-    raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
-
-
-def _parse_task(
-    path: Path,
     *,
-    note_type_configs: list[NoteTypeConfig],
-    llm_dir: Path,
-    model_registry: ModelRegistry,
-) -> TaskConfig:
-    mapping = _read_yaml_mapping(path, llm_dir=llm_dir)
-    _validate_task_keys(mapping, path)
-    name = path.stem
-    model_value = _require_str(mapping, "model", path)
-    model = model_registry.parse(model_value)
-    if model is None:
-        supported = model_registry.format_models()
-        raise LlmConfigError(f"{path}: 'model' must be one of: {supported}")
-    try:
-        ensure_model_supported(model)
-    except ValueError as error:
-        raise LlmConfigError(f"{path}: {error}") from error
+    required: bool,
+) -> list[str]:
+    if value is None:
+        if required:
+            raise LlmConfigError(f"{path}: '{key}' must be a non-empty list")
+        return []
+    if not isinstance(value, list) or (required and not value):
+        expected = "non-empty list" if required else "list"
+        raise LlmConfigError(f"{path}: '{key}' must be a {expected}")
 
-    system_prompt, system_prompt_path = _parse_text_source(
-        mapping,
-        key="system_prompt",
-        path=path,
-    )
-    task_prompt, task_prompt_path = _parse_text_source(
-        mapping,
-        key="task_prompt",
-        path=path,
-    )
-    default_field_access, field_rules = _parse_field_rules(
-        mapping.get("fields"),
-        note_type_configs=note_type_configs,
-        path=path,
-    )
-    request = _parse_request_options(mapping.get("request"), path=path)
-
-    return TaskConfig(
-        name=name,
-        model=model,
-        system_prompt=system_prompt,
-        prompt=task_prompt,
-        system_prompt_path=system_prompt_path,
-        prompt_path=task_prompt_path,
-        default_field_access=default_field_access,
-        field_rules=field_rules,
-        request=request,
-    )
+    parsed: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise LlmConfigError(f"{path}: '{key}' must contain only strings")
+        parsed.append(item.strip())
+    return parsed
 
 
-def load_llm_task_catalog(
-    collection_dir: Path,
+def _match_note_types(
+    note_types: list[str],
     *,
-    note_type_configs: list[NoteTypeConfig],
-) -> TaskCatalog:
-    llm_dir = collection_dir / LLM_DIR
-    tasks_by_name: dict[str, TaskConfig] = {}
-    errors: dict[str, str] = {}
-
-    if not llm_dir.exists() or not llm_dir.is_dir():
-        errors[str(llm_dir)] = (
-            f"{llm_dir}: LLM config directory not found. "
-            "Run 'ankiops init' to create IaC LLM configs."
+    note_type_names: list[str],
+    entry_path: Path,
+) -> set[str]:
+    matched = {
+        name
+        for name in note_type_names
+        if any(fnmatchcase(name, pattern) for pattern in note_types)
+    }
+    if not matched:
+        raise LlmConfigError(
+            f"{entry_path}: note type pattern(s) match no note types: "
+            f"{', '.join(note_types)}"
         )
-        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
+    return matched
 
-    task_files = [
-        path for path in _iter_yaml_files(llm_dir) if is_task_config_file(path)
-    ]
-    if not task_files:
-        errors[str(llm_dir)] = f"{llm_dir}: no task YAML files found in llm/"
-        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
-    try:
-        model_registry = load_model_registry(collection_dir=collection_dir)
-    except ModelRegistryError as error:
-        errors[str(model_registry_path(collection_dir=collection_dir))] = str(error)
-        return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
-
-    for path in task_files:
-        try:
-            task = _parse_task(
-                path,
-                note_type_configs=note_type_configs,
-                llm_dir=llm_dir,
-                model_registry=model_registry,
+def _validate_field_patterns(
+    patterns: list[str],
+    *,
+    available_fields: set[str],
+    entry_path: Path,
+) -> None:
+    for pattern in patterns:
+        if not any(fnmatchcase(field_name, pattern) for field_name in available_fields):
+            raise LlmConfigError(
+                f"{entry_path}: field pattern '{pattern}' does not exist on any "
+                "matched note type"
             )
-            if task.name in tasks_by_name:
-                raise LlmConfigError(f"{path}: duplicate task name '{task.name}'")
-            tasks_by_name[task.name] = task
-        except LlmConfigError as error:
-            errors[str(path)] = str(error)
-
-    return TaskCatalog(
-        tasks_by_name=tasks_by_name,
-        errors=errors,
-    )

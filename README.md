@@ -196,7 +196,6 @@ Set the key required by the model entry you use (from `llm/_models.yaml`):
 
 ```bash
 export OPENAI_API_KEY="your-openai-key"
-export ANTHROPIC_API_KEY="your-anthropic-key"
 ```
 
 Plan, run, and inspect jobs:
@@ -206,15 +205,15 @@ ankiops llm                         # status dashboard (tasks + recent jobs)
 ankiops llm grammar                 # dry-run plan
 ankiops llm grammar --run           # run task job
 ankiops llm grammar --deck Biology  # one exact deck (subdecks excluded)
-ankiops llm grammar --run --model haiku
+ankiops llm grammar --run --model gpt-5.4-mini
 ankiops llm --job latest
 ```
 ### Task File Format (`llm/<task-name>.yaml`)
 
 ```yaml
-model: sonnet
+model: gpt-5.4-mini
 system_prompt: !file _system_prompt.md
-task_prompt: |
+user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
   Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
   Do not add facts or change correctness.
@@ -227,13 +226,12 @@ fields:
     "AnkiOpsChoice": ["Answer"]
 ```
 
-- Required keys: `model`, `system_prompt`, `task_prompt`
+- Required keys: `model`, `system_prompt`, `user_prompt`
 - `model` must reference a model name from `llm/_models.yaml`
-- `system_prompt` and `task_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
+- `system_prompt` and `user_prompt` each accept either inline text or a YAML file tag (`!file <relative-path>`) resolved relative to the task file
 - Default templates use `system_prompt: !file _system_prompt.md`
-- `request` is optional and controls provider request defaults for this task
+- `request` is optional and controls OpenAI request defaults for this task
   (`temperature`, `max_output_tokens`)
-- Retry and backoff policy is model-level (`llm/_models.yaml`) so provider/infra defaults stay centralized
 - `fields` is optional
 - `fields.default_access` sets the baseline access for all note fields (`editable`, `read_only`, `hidden`)
 - `fields.editable`, `fields.read_only`, and `fields.hidden` map note-type patterns to field pattern lists
@@ -244,9 +242,9 @@ fields:
 Optional request tuning example:
 
 ```yaml
-model: sonnet
+model: gpt-5.4-mini
 system_prompt: !file _system_prompt.md
-task_prompt: |
+user_prompt: |
   Fix grammar while preserving meaning.
 request:
   max_output_tokens: 1024
@@ -255,31 +253,25 @@ request:
 Optional file-linked prompt example:
 
 ```yaml
-model: sonnet
+model: gpt-5.4-mini
 system_prompt: !file _system_prompt.md
-task_prompt: !file grammar.md
+user_prompt: !file grammar.md
 ```
 
 ### Model Registry (`llm/_models.yaml`)
 
-`llm/_models.yaml` is ejected during `ankiops init` and is the source of truth for available models. You can add any OpenAI-compatible provider/model by defining an entry with a `base_url`, `api_key`, and `model_id`.
+`llm/_models.yaml` is ejected during `ankiops init` and is the source of truth for OpenAI Responses API models. You can point an entry at another `base_url`, but it must support OpenAI's Responses API structured-output parsing.
 
 ```yaml
-- model: qwen3-32b
-  model_id: qwen3-32b
-  provider: my-openai-compatible
-  base_url: https://api.example.com/v1
-  api_key: $EXAMPLE_API_KEY
+- model: gpt-5.4-mini
+  model_id: gpt-5.4-mini
+  base_url: https://api.openai.com/v1
+  api_key: $OPENAI_API_KEY
   concurrency: 8
-  retries: 2
-  retry_backoff_seconds: 0.5
-  retry_backoff_jitter: true
 ```
 
-`api_key` accepts either an env-var reference (`$EXAMPLE_API_KEY`) or a literal API key string.
+`api_key` accepts either an env-var reference (`$OPENAI_API_KEY`) or a literal API key string.
 `concurrency` is optional and defaults to `8` when omitted.
-`retries`, `retry_backoff_seconds`, and `retry_backoff_jitter` are optional and default to
-`2`, `0.5`, and `true`.
 
 Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and only used for cost estimates.
 
@@ -287,8 +279,8 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 
 - `ankiops llm` validates all task configs and exits non-zero on errors
 - AnkiOps creates a pre-LLM git snapshot unless `--no-auto-commit` is passed
-- `ankiops llm <task>` prints the full prompt (`<system> ... </system>` + `<task> ... </task>`) used for planning; file paths are shown only when `system_prompt` or `task_prompt` use `!file`
-- Only notes in scope with at least one editable, non-empty field are sent to the model
+- `ankiops llm <task>` prints the full prompt (`<system> ... </system>` + `<user> ... </user>`) used for planning; file paths are shown only when `system_prompt` or `user_prompt` use `!file`
+- Only notes in scope with at least one editable field are sent to the model
 - If any note errors, staged note edits are not persisted
 - Every job is recorded in `llm/.llm.db` with per-note status, token usage, latency, and errors
 - Use `ankiops llm --job <job_id|latest>` for one job's history and diagnostics
@@ -296,7 +288,7 @@ Pricing fields are optional (`input_usd_per_mtok`, `output_usd_per_mtok`) and on
 ### Live LLM Scenarios
 
 AnkiOps includes opt-in live integration tests for end-to-end LLM execution.
-These tests exercise correctness, robustness, retry/telemetry persistence, and
+These tests exercise correctness, robustness, telemetry persistence, and
 throughput under larger note batches.
 
 Required environment variables:

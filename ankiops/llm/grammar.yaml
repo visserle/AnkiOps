@@ -1,6 +1,6 @@
-model: haiku
+model: gpt-5.4-mini
 system_prompt: !file _system_prompt.md
-task_prompt: |
+user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
   Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
   Do not add facts or change correctness.

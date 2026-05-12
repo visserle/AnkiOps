@@ -1,0 +1,1306 @@
+"""OpenAI-only LLM task planning and execution."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import time
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, Protocol
+
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
+
+from ankiops.config import NOTE_TYPES_DIR
+from ankiops.fs import FileSystemAdapter
+from ankiops.git import git_snapshot
+from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
+from ankiops.serializer import deserialize, serialize
+
+from .config_loader import is_task_config_file, load_llm_task_catalog
+from .db import LlmDb, LlmJobDetail, LlmJobListItem
+from .model_registry import parse_model
+from .schemas import build_response_model, parsed_response_json, parsed_updates
+from .types import (
+    DeckScope,
+    DiscoveryCounts,
+    DiscoveryItem,
+    DiscoverySnapshot,
+    EligibleCandidate,
+    FieldAccess,
+    LlmItemStatus,
+    LlmJobResult,
+    LlmJobStatus,
+    NotePayload,
+    PlanFieldSurface,
+    TaskConfig,
+    TaskExecutionProgress,
+    TaskPlanResult,
+    TaskRequestOptions,
+    TaskRunSummary,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ProgressReporter(Protocol):
+    def __call__(self, progress: TaskExecutionProgress) -> object: ...
+
+
+@dataclass(frozen=True)
+class MaterializedTaskContext:
+    task: TaskConfig
+    note_type_configs: dict[str, NoteTypeConfig]
+    serialized_data: dict[str, Any]
+    discovery_snapshot: DiscoverySnapshot
+
+
+@dataclass(frozen=True)
+class OpenAIResult:
+    parsed_response: object | None
+    request_json: dict[str, Any]
+    parsed_response_json: dict[str, Any] | None
+    response_json: str | None
+    error_message: str | None
+    outcome: str
+    latency_ms: int
+    input_tokens: int
+    output_tokens: int
+    fatal: bool = False
+
+
+@dataclass
+class _ExecutionProgressState:
+    job_id: int
+    task_name: str
+    total: int
+    completed: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped: int = 0
+    errors: int = 0
+    canceled: int = 0
+
+    def record_status(self, status: LlmItemStatus, *, count: int = 1) -> None:
+        if count <= 0:
+            return
+        if status is LlmItemStatus.SUCCEEDED_UPDATED:
+            self.updated += count
+        elif status is LlmItemStatus.SUCCEEDED_UNCHANGED:
+            self.unchanged += count
+        elif status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS:
+            self.skipped += count
+        elif status is LlmItemStatus.CANCELED:
+            self.canceled += count
+        elif status in {
+            LlmItemStatus.INVALID_NOTE,
+            LlmItemStatus.NOTE_ERROR,
+            LlmItemStatus.PROVIDER_ERROR,
+            LlmItemStatus.FATAL_ERROR,
+        }:
+            self.errors += count
+        else:
+            return
+        self.completed += count
+
+    def snapshot(self, *, in_flight: int) -> TaskExecutionProgress:
+        queued = max(self.total - self.completed - in_flight, 0)
+        return TaskExecutionProgress(
+            job_id=self.job_id,
+            task_name=self.task_name,
+            total=self.total,
+            completed=self.completed,
+            in_flight=in_flight,
+            queued=queued,
+            updated=self.updated,
+            unchanged=self.unchanged,
+            skipped=self.skipped,
+            errors=self.errors,
+            canceled=self.canceled,
+        )
+
+
+class LlmTaskExecutor:
+    """Run one configured LLM task against serialized notes."""
+
+    def __init__(
+        self,
+        *,
+        collection_dir: Path,
+        materialized_context: MaterializedTaskContext,
+        no_auto_commit: bool,
+        progress_callback: ProgressReporter | None = None,
+    ) -> None:
+        self.collection_dir = collection_dir
+        self.materialized_context = materialized_context
+        self.no_auto_commit = no_auto_commit
+        self.progress_callback = progress_callback
+
+    async def execute(self) -> LlmJobResult:
+        task_context = self.materialized_context
+        task = task_context.task
+        db = LlmDb.open(self.collection_dir)
+        try:
+            job_id = db.start_job(
+                task_name=task.name,
+                model=task.model.model,
+                model_id=task.model.model_id,
+            )
+            logger.debug(
+                "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
+                task.name,
+                task.model,
+                self.collection_dir,
+                _format_deck_scope(task),
+            )
+            if not self.no_auto_commit:
+                logger.debug("Creating pre-LLM git snapshot")
+                git_snapshot(self.collection_dir, f"llm:{task.name}")
+            else:
+                logger.debug("Auto-commit disabled (--no-auto-commit)")
+
+            progress_state = _build_progress_state(
+                job_id=job_id,
+                task_name=task.name,
+                snapshot=task_context.discovery_snapshot,
+            )
+            candidates = _record_discovery_snapshot(
+                db=db,
+                job_id=job_id,
+                snapshot=task_context.discovery_snapshot,
+            )
+            self._emit_progress(progress_state, in_flight=0)
+
+            fatal_error: str | None = None
+            if candidates:
+                try:
+                    await self._execute_candidates(
+                        db=db,
+                        task=task,
+                        candidates=candidates,
+                        progress_state=progress_state,
+                    )
+                except RuntimeError as error:
+                    fatal_error = str(error)
+                    logger.error(fatal_error)
+
+            if fatal_error is not None:
+                canceled = db.mark_unfinished_items_canceled(job_id=job_id)
+                progress_state.record_status(LlmItemStatus.CANCELED, count=canceled)
+
+            self._emit_progress(progress_state, in_flight=0)
+            aggregate = db.aggregate_job(job_id)
+            failed = fatal_error is not None or aggregate.summary.errors > 0
+            persisted = False
+            if not failed:
+                persisted = _persist_updates(
+                    db=db,
+                    job_id=job_id,
+                    data=task_context.serialized_data,
+                    collection_dir=self.collection_dir,
+                )
+
+            db.finalize_job(
+                job_id=job_id,
+                status=LlmJobStatus.FAILED if failed else LlmJobStatus.COMPLETED,
+                persisted=persisted,
+                fatal_error=fatal_error if failed else None,
+            )
+            aggregate = db.aggregate_job(job_id)
+            logger.info(aggregate.summary.format())
+            logger.debug("Usage: %s", aggregate.summary.format_usage())
+            logger.debug("Cost: %s", aggregate.summary.format_cost())
+            return LlmJobResult(
+                job_id=job_id,
+                status=aggregate.status.value,
+                summary=aggregate.summary,
+                failed=aggregate.failed,
+                persisted=aggregate.persisted,
+            )
+        finally:
+            db.close()
+
+    async def _execute_candidates(
+        self,
+        *,
+        db: LlmDb,
+        task: TaskConfig,
+        candidates: list[EligibleCandidate],
+        progress_state: _ExecutionProgressState,
+    ) -> None:
+        api_key = _resolve_api_key(task.model.api_key)
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=task.model.base_url,
+            timeout=60.0,
+            max_retries=0,
+        )
+        try:
+            in_flight_limit = min(max(task.model.concurrency, 1), len(candidates))
+            next_index = 0
+            in_flight: set[asyncio.Task[LlmItemStatus]] = set()
+
+            def start(candidate: EligibleCandidate) -> asyncio.Task[LlmItemStatus]:
+                return asyncio.create_task(
+                    self._process_candidate(
+                        db=db,
+                        task=task,
+                        client=client,
+                        candidate=candidate,
+                    )
+                )
+
+            while next_index < in_flight_limit:
+                in_flight.add(start(candidates[next_index]))
+                next_index += 1
+
+            first_fatal: RuntimeError | None = None
+            while in_flight:
+                done, pending = await asyncio.wait(
+                    in_flight,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                in_flight = set(pending)
+                for completed in done:
+                    try:
+                        status = await completed
+                        progress_state.record_status(status)
+                    except RuntimeError as error:
+                        progress_state.record_status(LlmItemStatus.FATAL_ERROR)
+                        if first_fatal is None:
+                            first_fatal = error
+                    self._emit_progress(progress_state, in_flight=len(in_flight))
+
+                if first_fatal is not None:
+                    for pending_task in in_flight:
+                        pending_task.cancel()
+                    await asyncio.gather(*in_flight, return_exceptions=True)
+                    raise first_fatal
+
+                while next_index < len(candidates) and len(in_flight) < in_flight_limit:
+                    in_flight.add(start(candidates[next_index]))
+                    next_index += 1
+        finally:
+            await client.close()
+
+    async def _process_candidate(
+        self,
+        *,
+        db: LlmDb,
+        task: TaskConfig,
+        client: AsyncOpenAI,
+        candidate: EligibleCandidate,
+    ) -> LlmItemStatus:
+        result = await _call_openai(
+            client=client,
+            task=task,
+            candidate=candidate,
+        )
+        if result.parsed_response is None:
+            status = (
+                LlmItemStatus.FATAL_ERROR
+                if result.fatal
+                else LlmItemStatus.PROVIDER_ERROR
+            )
+            with db.write_tx():
+                db.insert_attempt(
+                    item_id=candidate.item_id,
+                    outcome=result.outcome,
+                    request_json=result.request_json,
+                    parsed_response_json=result.parsed_response_json,
+                    response_json=result.response_json,
+                    error_message=result.error_message,
+                    latency_ms=result.latency_ms,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+                db.update_job_item_status(
+                    item_id=candidate.item_id,
+                    item_status=status,
+                    error_message=result.error_message,
+                )
+            if result.fatal:
+                raise RuntimeError(result.error_message or "Fatal OpenAI error")
+            _log_note_error(candidate, result.error_message or "OpenAI request failed")
+            return status
+
+        try:
+            changed_fields = _apply_parsed_response(
+                parsed_response=result.parsed_response,
+                candidate=candidate,
+            )
+        except ValueError as error:
+            message = str(error)
+            with db.write_tx():
+                db.insert_attempt(
+                    item_id=candidate.item_id,
+                    outcome="validation_error",
+                    request_json=result.request_json,
+                    parsed_response_json=result.parsed_response_json,
+                    response_json=result.response_json,
+                    error_message=message,
+                    latency_ms=result.latency_ms,
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                )
+                db.update_job_item_status(
+                    item_id=candidate.item_id,
+                    item_status=LlmItemStatus.NOTE_ERROR,
+                    error_message=message,
+                )
+            _log_note_error(candidate, message)
+            return LlmItemStatus.NOTE_ERROR
+
+        status = (
+            LlmItemStatus.SUCCEEDED_UPDATED
+            if changed_fields
+            else LlmItemStatus.SUCCEEDED_UNCHANGED
+        )
+        with db.write_tx():
+            db.insert_attempt(
+                item_id=candidate.item_id,
+                outcome="success",
+                request_json=result.request_json,
+                parsed_response_json=result.parsed_response_json,
+                response_json=result.response_json,
+                error_message=None,
+                latency_ms=result.latency_ms,
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+            )
+            db.update_job_item_status(
+                item_id=candidate.item_id,
+                item_status=status,
+                changed_fields=changed_fields,
+            )
+        if changed_fields:
+            logger.debug(
+                "  Updated %s in '%s' (%s): fields=%s",
+                candidate.payload.note_key,
+                candidate.deck_name,
+                candidate.payload.note_type,
+                ",".join(changed_fields),
+            )
+        return status
+
+    def _emit_progress(
+        self,
+        progress_state: _ExecutionProgressState,
+        *,
+        in_flight: int,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        try:
+            self.progress_callback(progress_state.snapshot(in_flight=in_flight))
+        except Exception:
+            logger.debug("Progress callback raised an exception", exc_info=True)
+
+
+def plan_task(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None = None,
+    deck_override: str | None = None,
+) -> TaskPlanResult:
+    context = _materialize_task_context(
+        collection_dir=collection_dir,
+        task_name=task_name,
+        model_override=model_override,
+        deck_override=deck_override,
+    )
+    return _build_task_plan_result(
+        task=context.task,
+        note_type_configs=context.note_type_configs,
+        snapshot=context.discovery_snapshot,
+    )
+
+
+async def run_task_async(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None = None,
+    deck_override: str | None = None,
+    no_auto_commit: bool = False,
+    progress_callback: ProgressReporter | None = None,
+) -> LlmJobResult:
+    context = _materialize_task_context(
+        collection_dir=collection_dir,
+        task_name=task_name,
+        model_override=model_override,
+        deck_override=deck_override,
+    )
+    return await LlmTaskExecutor(
+        collection_dir=collection_dir,
+        materialized_context=context,
+        no_auto_commit=no_auto_commit,
+        progress_callback=progress_callback,
+    ).execute()
+
+
+def run_task(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None = None,
+    deck_override: str | None = None,
+    no_auto_commit: bool = False,
+    progress_callback: ProgressReporter | None = None,
+) -> LlmJobResult:
+    return asyncio.run(
+        run_task_async(
+            collection_dir=collection_dir,
+            task_name=task_name,
+            model_override=model_override,
+            deck_override=deck_override,
+            no_auto_commit=no_auto_commit,
+            progress_callback=progress_callback,
+        )
+    )
+
+
+def list_jobs(*, collection_dir: Path) -> list[LlmJobListItem]:
+    db = LlmDb.open(collection_dir)
+    try:
+        return db.list_jobs()
+    finally:
+        db.close()
+
+
+def show_job(*, collection_dir: Path, job_id: str | int) -> LlmJobDetail | None:
+    db = LlmDb.open(collection_dir)
+    try:
+        resolved_job_id = (
+            db.resolve_job_id(job_id) if isinstance(job_id, str) else int(job_id)
+        )
+        if resolved_job_id is None:
+            return None
+        return db.get_job_detail(resolved_job_id)
+    finally:
+        db.close()
+
+
+def _materialize_task_context(
+    *,
+    collection_dir: Path,
+    task_name: str,
+    model_override: str | None,
+    deck_override: str | None,
+) -> MaterializedTaskContext:
+    task, note_type_configs = _load_task(
+        collection_dir=collection_dir,
+        task_name=task_name,
+    )
+    if deck_override is not None:
+        task = replace(task, decks=DeckScope(deck_root=deck_override))
+    if model_override is not None:
+        model = parse_model(model_override, collection_dir=collection_dir)
+        if model is None:
+            raise ValueError(f"Unknown model '{model_override}'")
+        task = replace(task, model=model)
+
+    deck, no_subdecks = _resolve_serializer_scope(task)
+    serialized_data = serialize(
+        collection_dir,
+        deck=deck,
+        no_subdecks=no_subdecks,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    discovery_snapshot = _discover_candidates(
+        data=serialized_data,
+        task=task,
+        note_type_configs=note_type_configs,
+    )
+    return MaterializedTaskContext(
+        task=task,
+        note_type_configs=note_type_configs,
+        serialized_data=serialized_data,
+        discovery_snapshot=discovery_snapshot,
+    )
+
+
+def _load_task(
+    *,
+    collection_dir: Path,
+    task_name: str,
+) -> tuple[TaskConfig, dict[str, NoteTypeConfig]]:
+    fs = FileSystemAdapter()
+    note_type_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
+    catalog = load_llm_task_catalog(
+        collection_dir,
+        note_type_configs=note_type_configs,
+    )
+    task = catalog.tasks_by_name.get(task_name)
+    if task is None:
+        task_errors = [
+            message
+            for path, message in catalog.errors.items()
+            if _is_task_file_for_name(path, task_name)
+        ]
+        if task_errors:
+            raise ValueError(
+                "Invalid LLM task configuration:\n" + "\n".join(task_errors)
+            )
+        shared_errors = [
+            message
+            for path, message in catalog.errors.items()
+            if not _is_task_file(path)
+        ]
+        if shared_errors:
+            raise ValueError(
+                "Invalid LLM task configuration:\n" + "\n".join(shared_errors)
+            )
+        raise ValueError(f"Unknown task '{task_name}'")
+    return task, {config.name: config for config in note_type_configs}
+
+
+def _discover_candidates(
+    *,
+    data: dict[str, Any],
+    task: TaskConfig,
+    note_type_configs: dict[str, NoteTypeConfig],
+) -> DiscoverySnapshot:
+    decks = data.get("decks")
+    if not isinstance(decks, list):
+        raise ValueError("Serialized collection is missing a decks list")
+
+    items: list[DiscoveryItem] = []
+    decks_seen = 0
+    decks_matched = 0
+    notes_seen = 0
+    ordinal = 0
+
+    for deck in decks:
+        if not isinstance(deck, dict):
+            continue
+        deck_name = deck.get("name")
+        notes = deck.get("notes")
+        if not isinstance(deck_name, str) or not isinstance(notes, list):
+            continue
+        decks_seen += 1
+        notes_seen += len(notes)
+        if not task.decks.matches(deck_name):
+            continue
+        decks_matched += 1
+
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            ordinal += 1
+            items.append(
+                _discover_note(
+                    task=task,
+                    deck_name=deck_name,
+                    ordinal=ordinal,
+                    note=note,
+                    note_type_configs=note_type_configs,
+                )
+            )
+
+    return DiscoverySnapshot(
+        counts=DiscoveryCounts(
+            decks_seen=decks_seen,
+            decks_matched=decks_matched,
+            notes_seen=notes_seen,
+        ),
+        items=items,
+    )
+
+
+def _discover_note(
+    *,
+    task: TaskConfig,
+    deck_name: str,
+    ordinal: int,
+    note: dict[str, Any],
+    note_type_configs: dict[str, NoteTypeConfig],
+) -> DiscoveryItem:
+    note_key = note.get("note_key")
+    note_type_name = note.get("note_type")
+    fields = note.get("fields")
+    note_key_value = note_key if isinstance(note_key, str) else None
+    note_type_value = note_type_name if isinstance(note_type_name, str) else None
+
+    if not isinstance(note_key, str) or not isinstance(note_type_name, str):
+        return _invalid_discovery_item(
+            deck_name=deck_name,
+            ordinal=ordinal,
+            note_key=note_key_value,
+            note_type=note_type_value,
+            error_message="Serialized note is missing note_key or note_type",
+            serialized_note=note,
+        )
+    if not isinstance(fields, dict):
+        return _invalid_discovery_item(
+            deck_name=deck_name,
+            ordinal=ordinal,
+            note_key=note_key,
+            note_type=note_type_name,
+            error_message="Serialized note fields must be a mapping",
+            serialized_note=note,
+        )
+
+    note_type_config = note_type_configs.get(note_type_name)
+    if note_type_config is None:
+        return _invalid_discovery_item(
+            deck_name=deck_name,
+            ordinal=ordinal,
+            note_key=note_key,
+            note_type=note_type_name,
+            error_message=f"Unknown note type '{note_type_name}' in serialized note",
+            serialized_note=note,
+        )
+
+    editable_fields: dict[str, str] = {}
+    read_only_fields: dict[str, str] = {}
+    for field in note_type_config.fields:
+        if field.name == ANKIOPS_KEY_FIELD.name:
+            continue
+        access = task.field_access(note_type_name, field.name)
+        if access is FieldAccess.HIDDEN:
+            continue
+        raw_value = fields.get(field.name, "")
+        if raw_value is None:
+            raw_value = ""
+        if not isinstance(raw_value, str):
+            return _invalid_discovery_item(
+                deck_name=deck_name,
+                ordinal=ordinal,
+                note_key=note_key,
+                note_type=note_type_name,
+                error_message=f"Serialized field '{field.name}' must be a string",
+                serialized_note=note,
+            )
+        if access is FieldAccess.READ_ONLY:
+            read_only_fields[field.name] = raw_value
+        else:
+            editable_fields[field.name] = raw_value
+
+    if not editable_fields:
+        return DiscoveryItem(
+            ordinal=ordinal,
+            deck_name=deck_name,
+            note_key=note_key,
+            note_type=note_type_name,
+            item_status=LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS,
+            skip_reason="no editable fields",
+            error_message=None,
+            payload=None,
+            note_type_config=note_type_config,
+            serialized_note=note,
+        )
+
+    return DiscoveryItem(
+        ordinal=ordinal,
+        deck_name=deck_name,
+        note_key=note_key,
+        note_type=note_type_name,
+        item_status=LlmItemStatus.QUEUED,
+        skip_reason=None,
+        error_message=None,
+        payload=NotePayload(
+            note_key=note_key,
+            note_type=note_type_name,
+            editable_fields=editable_fields,
+            read_only_fields=read_only_fields,
+        ),
+        note_type_config=note_type_config,
+        serialized_note=note,
+    )
+
+
+def _invalid_discovery_item(
+    *,
+    deck_name: str,
+    ordinal: int,
+    note_key: str | None,
+    note_type: str | None,
+    error_message: str,
+    serialized_note: dict[str, Any] | None,
+) -> DiscoveryItem:
+    return DiscoveryItem(
+        ordinal=ordinal,
+        deck_name=deck_name,
+        note_key=note_key,
+        note_type=note_type,
+        item_status=LlmItemStatus.INVALID_NOTE,
+        skip_reason=None,
+        error_message=error_message,
+        payload=None,
+        note_type_config=None,
+        serialized_note=serialized_note,
+    )
+
+
+def _record_discovery_snapshot(
+    *,
+    db: LlmDb,
+    job_id: int,
+    snapshot: DiscoverySnapshot,
+) -> list[EligibleCandidate]:
+    candidates: list[EligibleCandidate] = []
+    for item in snapshot.items:
+        candidate = _record_discovery_item(db=db, job_id=job_id, item=item)
+        if candidate is not None:
+            candidates.append(candidate)
+
+    db.set_discovery_counts(
+        job_id=job_id,
+        decks_seen=snapshot.counts.decks_seen,
+        decks_matched=snapshot.counts.decks_matched,
+        notes_seen=snapshot.counts.notes_seen,
+    )
+    return candidates
+
+
+def _record_discovery_item(
+    *,
+    db: LlmDb,
+    job_id: int,
+    item: DiscoveryItem,
+) -> EligibleCandidate | None:
+    if item.item_status is LlmItemStatus.INVALID_NOTE:
+        db.insert_job_item(
+            job_id=job_id,
+            ordinal=item.ordinal,
+            deck_name=item.deck_name,
+            note_key=item.note_key,
+            note_type=item.note_type,
+            item_status=item.item_status,
+            skip_reason=None,
+            error_message=item.error_message or "Invalid note",
+        )
+        logger.error(
+            "LLM note error for %s in '%s' (%s): %s",
+            item.note_key or "unknown",
+            item.deck_name,
+            item.note_type or "unknown",
+            item.error_message or "Invalid note",
+        )
+        return None
+
+    if item.item_status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS:
+        db.insert_job_item(
+            job_id=job_id,
+            ordinal=item.ordinal,
+            deck_name=item.deck_name,
+            note_key=item.note_key,
+            note_type=item.note_type,
+            item_status=item.item_status,
+            skip_reason=item.skip_reason,
+        )
+        return None
+
+    if (
+        item.payload is None
+        or item.note_type_config is None
+        or item.serialized_note is None
+    ):
+        return None
+
+    item_id = db.insert_job_item(
+        job_id=job_id,
+        ordinal=item.ordinal,
+        deck_name=item.deck_name,
+        note_key=item.payload.note_key,
+        note_type=item.payload.note_type,
+        item_status=LlmItemStatus.QUEUED,
+        skip_reason=None,
+    )
+    return EligibleCandidate(
+        item_id=item_id,
+        deck_name=item.deck_name,
+        payload=item.payload,
+        note_type_config=item.note_type_config,
+        serialized_note=item.serialized_note,
+    )
+
+
+async def _call_openai(
+    *,
+    client: AsyncOpenAI,
+    task: TaskConfig,
+    candidate: EligibleCandidate,
+) -> OpenAIResult:
+    response_model = build_response_model(
+        note_type=candidate.payload.note_type,
+        payloads=[candidate.payload],
+    )
+    input_messages = _build_input_messages(task=task, candidate=candidate)
+    request_json = {
+        "model": task.model.model_id,
+        "input": input_messages,
+        "max_output_tokens": task.request.max_output_tokens,
+        "text_format": response_model.__name__,
+    }
+    request_kwargs: dict[str, Any] = {
+        "model": task.model.model_id,
+        "input": input_messages,
+        "max_output_tokens": task.request.max_output_tokens,
+        "text_format": response_model,
+    }
+    if task.request.temperature is not None:
+        request_kwargs["temperature"] = task.request.temperature
+        request_json["temperature"] = task.request.temperature
+
+    started_at = time.monotonic()
+    try:
+        response = await client.responses.parse(**request_kwargs)
+    except AuthenticationError as error:
+        return _openai_error_result(
+            request_json=request_json,
+            error_message=f"OpenAI authentication failed: {error}",
+            outcome="fatal_error",
+            started_at=started_at,
+            fatal=True,
+        )
+    except APIConnectionError as error:
+        return _openai_error_result(
+            request_json=request_json,
+            error_message=f"OpenAI connection error: {error}",
+            outcome="provider_error",
+            started_at=started_at,
+        )
+    except APIStatusError as error:
+        status_code = getattr(error, "status_code", "unknown")
+        return _openai_error_result(
+            request_json=request_json,
+            error_message=f"OpenAI returned HTTP {status_code}: {error}",
+            outcome="provider_error",
+            started_at=started_at,
+        )
+    except Exception as error:
+        return _openai_error_result(
+            request_json=request_json,
+            error_message=f"Unexpected OpenAI error: {error}",
+            outcome="fatal_error",
+            started_at=started_at,
+            fatal=True,
+        )
+
+    latency_ms = round((time.monotonic() - started_at) * 1000)
+    refusal = _extract_refusal_text(response)
+    response_json = _response_to_json(response)
+    if refusal is not None:
+        return OpenAIResult(
+            parsed_response=None,
+            request_json=request_json,
+            parsed_response_json=None,
+            response_json=response_json,
+            error_message=refusal,
+            outcome="refusal",
+            latency_ms=latency_ms,
+            input_tokens=_usage_value(response, "input_tokens"),
+            output_tokens=_usage_value(response, "output_tokens"),
+        )
+
+    parsed = getattr(response, "output_parsed", None)
+    if parsed is None:
+        return OpenAIResult(
+            parsed_response=None,
+            request_json=request_json,
+            parsed_response_json=None,
+            response_json=response_json,
+            error_message="OpenAI response did not include parsed structured output",
+            outcome="provider_error",
+            latency_ms=latency_ms,
+            input_tokens=_usage_value(response, "input_tokens"),
+            output_tokens=_usage_value(response, "output_tokens"),
+        )
+
+    return OpenAIResult(
+        parsed_response=parsed,
+        request_json=request_json,
+        parsed_response_json=parsed_response_json(parsed),
+        response_json=response_json,
+        error_message=None,
+        outcome="success",
+        latency_ms=latency_ms,
+        input_tokens=_usage_value(response, "input_tokens"),
+        output_tokens=_usage_value(response, "output_tokens"),
+    )
+
+
+def _build_input_messages(
+    *,
+    task: TaskConfig,
+    candidate: EligibleCandidate,
+) -> list[dict[str, str]]:
+    payload = {
+        "user_prompt": task.user_prompt,
+        "note_key": candidate.payload.note_key,
+        "note_type": candidate.payload.note_type,
+        "editable_fields": candidate.payload.editable_fields,
+        "read_only_fields": candidate.payload.read_only_fields,
+    }
+    return [
+        {"role": "system", "content": task.system_prompt.strip()},
+        {
+            "role": "user",
+            "content": json.dumps(payload, ensure_ascii=False, indent=2),
+        },
+    ]
+
+
+def _openai_error_result(
+    *,
+    request_json: dict[str, Any],
+    error_message: str,
+    outcome: str,
+    started_at: float,
+    fatal: bool = False,
+) -> OpenAIResult:
+    return OpenAIResult(
+        parsed_response=None,
+        request_json=request_json,
+        parsed_response_json=None,
+        response_json=None,
+        error_message=error_message,
+        outcome=outcome,
+        latency_ms=round((time.monotonic() - started_at) * 1000),
+        input_tokens=0,
+        output_tokens=0,
+        fatal=fatal,
+    )
+
+
+def _apply_parsed_response(
+    *,
+    parsed_response: object,
+    candidate: EligibleCandidate,
+) -> list[str]:
+    updates = parsed_updates(parsed_response)
+    seen_fields: set[str] = set()
+    edits: dict[str, str] = {}
+    for note_key, field_name, value in updates:
+        if note_key != candidate.payload.note_key:
+            raise ValueError(
+                f"Model returned update for unexpected note_key '{note_key}'"
+            )
+        if field_name in seen_fields:
+            raise ValueError(f"Model returned duplicate update for '{field_name}'")
+        seen_fields.add(field_name)
+        if field_name not in candidate.payload.editable_fields:
+            if field_name in candidate.payload.read_only_fields:
+                raise ValueError(
+                    f"Model attempted to update read-only field '{field_name}'"
+                )
+            raise ValueError(
+                f"Model attempted to update hidden or unknown field '{field_name}'"
+            )
+        edits[field_name] = value
+
+    raw_fields = candidate.serialized_note.get("fields")
+    if not isinstance(raw_fields, dict):
+        raise ValueError("Serialized note fields must be a mapping")
+
+    next_fields = dict(raw_fields)
+    changed_fields: list[str] = []
+    for field_name, value in edits.items():
+        if next_fields.get(field_name, "") != value:
+            next_fields[field_name] = value
+            changed_fields.append(field_name)
+
+    if not changed_fields:
+        return []
+
+    note = Note(
+        note_key=candidate.payload.note_key,
+        note_type=candidate.payload.note_type,
+        fields=next_fields,
+    )
+    errors = [*_validate_cloze_text_fields(note, candidate.note_type_config)]
+    errors.extend(note.validate(candidate.note_type_config))
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    candidate.serialized_note["fields"] = next_fields
+    return changed_fields
+
+
+def _validate_cloze_text_fields(
+    note: Note,
+    config: NoteTypeConfig,
+) -> list[str]:
+    if not config.is_cloze:
+        return []
+    errors: list[str] = []
+    for field in config.fields:
+        if field.label not in {"T:", "TH:"}:
+            continue
+        value = note.fields.get(field.name, "")
+        if "{{c" not in value:
+            errors.append(
+                f"{note.note_type} field '{field.name}' must contain cloze syntax "
+                "(e.g. {{c1::answer}})"
+            )
+    return errors
+
+
+def _persist_updates(
+    *,
+    db: LlmDb,
+    job_id: int,
+    data: dict[str, Any],
+    collection_dir: Path,
+) -> bool:
+    aggregate = db.aggregate_job(job_id)
+    if aggregate.summary.updated <= 0:
+        return False
+
+    deserialize(
+        data,
+        collection_dir=collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+        overwrite=True,
+        quiet=True,
+    )
+    db.set_applied_for_updated_items(job_id=job_id)
+    deck_count = len([deck for deck in data.get("decks", []) if isinstance(deck, dict)])
+    logger.info(
+        "Persisted %d updated note(s) across %d deck file(s)",
+        aggregate.summary.updated,
+        deck_count,
+    )
+    return True
+
+
+def _build_progress_state(
+    *,
+    job_id: int,
+    task_name: str,
+    snapshot: DiscoverySnapshot,
+) -> _ExecutionProgressState:
+    state = _ExecutionProgressState(
+        job_id=job_id,
+        task_name=task_name,
+        total=len(snapshot.items),
+    )
+    for item in snapshot.items:
+        state.record_status(item.item_status)
+    return state
+
+
+def _build_task_plan_result(
+    *,
+    task: TaskConfig,
+    note_type_configs: dict[str, NoteTypeConfig],
+    snapshot: DiscoverySnapshot,
+) -> TaskPlanResult:
+    eligible_items = [
+        item
+        for item in snapshot.items
+        if item.item_status is LlmItemStatus.QUEUED and item.payload is not None
+    ]
+    eligible_payloads = [
+        item.payload for item in eligible_items if item.payload is not None
+    ]
+    skipped = sum(
+        1
+        for item in snapshot.items
+        if item.item_status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS
+    )
+    errors = sum(
+        1 for item in snapshot.items if item.item_status is LlmItemStatus.INVALID_NOTE
+    )
+    input_tokens_estimate = sum(
+        _estimate_note_input_tokens(task, payload) for payload in eligible_payloads
+    )
+    summary = TaskRunSummary(
+        task_name=task.name,
+        model=task.model,
+        decks_seen=snapshot.counts.decks_seen,
+        decks_matched=snapshot.counts.decks_matched,
+        notes_seen=snapshot.counts.notes_seen,
+        eligible=len(eligible_items),
+        skipped_no_editable_fields=skipped,
+        errors=errors,
+        requests=len(eligible_items),
+    )
+    return TaskPlanResult(
+        task_name=task.name,
+        model=task.model,
+        deck_scope=_format_deck_scope(task),
+        serializer_scope=_format_serializer_scope(task),
+        system_prompt_path=(
+            str(task.system_prompt_path)
+            if task.system_prompt_path is not None
+            else None
+        ),
+        user_prompt_path=(
+            str(task.user_prompt_path) if task.user_prompt_path is not None else None
+        ),
+        system_prompt=task.system_prompt,
+        user_prompt=task.user_prompt,
+        request_defaults=_format_request_defaults(task.request),
+        summary=summary,
+        field_surface=_build_plan_field_surface(
+            task=task,
+            note_type_configs=note_type_configs,
+            snapshot_items=snapshot.items,
+        ),
+        requests_estimate=len(eligible_items),
+        input_tokens_estimate=input_tokens_estimate,
+        output_tokens_cap=len(eligible_items) * task.request.max_output_tokens,
+    )
+
+
+def _build_plan_field_surface(
+    *,
+    task: TaskConfig,
+    note_type_configs: dict[str, NoteTypeConfig],
+    snapshot_items: list[DiscoveryItem],
+) -> list[PlanFieldSurface]:
+    observed_note_types = {
+        item.note_type
+        for item in snapshot_items
+        if item.note_type is not None and item.note_type_config is not None
+    }
+    surface: list[PlanFieldSurface] = []
+    for note_type in sorted(observed_note_types):
+        config = note_type_configs.get(note_type)
+        if config is None:
+            continue
+        editable_fields: list[str] = []
+        read_only_fields: list[str] = []
+        hidden_fields: list[str] = []
+        for field in config.fields:
+            if field.name == ANKIOPS_KEY_FIELD.name:
+                continue
+            access = task.field_access(note_type, field.name)
+            if access is FieldAccess.EDITABLE:
+                editable_fields.append(field.name)
+            elif access is FieldAccess.READ_ONLY:
+                read_only_fields.append(field.name)
+            else:
+                hidden_fields.append(field.name)
+        candidate_notes = sum(
+            1
+            for item in snapshot_items
+            if item.item_status is LlmItemStatus.QUEUED and item.note_type == note_type
+        )
+        surface.append(
+            PlanFieldSurface(
+                note_type=note_type,
+                candidate_notes=candidate_notes,
+                editable_fields=editable_fields,
+                read_only_fields=read_only_fields,
+                hidden_fields=hidden_fields,
+            )
+        )
+    return surface
+
+
+def _estimate_note_input_tokens(task: TaskConfig, payload: NotePayload) -> int:
+    parts = [
+        task.system_prompt,
+        task.user_prompt,
+        payload.note_key,
+        payload.note_type,
+    ]
+    for name, value in sorted(payload.editable_fields.items()):
+        parts.extend([name, value])
+    for name, value in sorted(payload.read_only_fields.items()):
+        parts.extend([name, value])
+    return _estimate_tokens("\n".join(parts))
+
+
+def _estimate_tokens(text: str) -> int:
+    value = text.strip()
+    if not value:
+        return 0
+    return max(1, (len(value) + 3) // 4)
+
+
+def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
+    return task.decks.deck_root, False
+
+
+def _format_deck_scope(task: TaskConfig) -> str:
+    return task.decks.deck_root or "all decks"
+
+
+def _format_serializer_scope(task: TaskConfig) -> str:
+    deck, no_subdecks = _resolve_serializer_scope(task)
+    if deck is None:
+        return "all markdown decks"
+    suffix = "exact deck only" if no_subdecks else "including subdecks"
+    return f"{deck} ({suffix})"
+
+
+def _format_request_defaults(request: TaskRequestOptions) -> str:
+    parts = [f"max_output_tokens={request.max_output_tokens}"]
+    if request.temperature is not None:
+        parts.append(f"temperature={request.temperature:g}")
+    return ", ".join(parts)
+
+
+def _is_task_file(path: str) -> bool:
+    path_obj = Path(path)
+    return path_obj.parent.name == "llm" and is_task_config_file(path_obj)
+
+
+def _is_task_file_for_name(path: str, task_name: str) -> bool:
+    path_obj = Path(path)
+    return _is_task_file(path) and path_obj.stem == task_name
+
+
+def _resolve_api_key(configured_value: str) -> str:
+    if not configured_value.startswith("$"):
+        return configured_value
+    env_name = configured_value[1:].strip()
+    if not env_name:
+        raise RuntimeError("Model api_key env reference must include a variable")
+    resolved = os.environ.get(env_name)
+    if not resolved:
+        raise RuntimeError(f"Required environment variable '{env_name}' is not set")
+    return resolved
+
+
+def _usage_value(response: object, name: str) -> int:
+    usage = getattr(response, "usage", None)
+    value = getattr(usage, name, 0)
+    return value if isinstance(value, int) else 0
+
+
+def _response_to_json(response: object) -> str | None:
+    model_dump_json = getattr(response, "model_dump_json", None)
+    if callable(model_dump_json):
+        try:
+            value = model_dump_json()
+            return value if isinstance(value, str) else None
+        except Exception:
+            return None
+    return None
+
+
+def _extract_refusal_text(response: object) -> str | None:
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return None
+    refusal_parts: list[str] = []
+    for item in output:
+        content = getattr(item, "content", None)
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if getattr(part, "type", None) != "refusal":
+                continue
+            refusal = getattr(part, "refusal", None)
+            if isinstance(refusal, str) and refusal:
+                refusal_parts.append(refusal)
+    return "\n".join(refusal_parts) if refusal_parts else None
+
+
+def _log_note_error(candidate: EligibleCandidate, message: str) -> None:
+    logger.error(
+        "LLM note error for %s in '%s' (%s): %s",
+        candidate.payload.note_key,
+        candidate.deck_name,
+        candidate.payload.note_type,
+        message,
+    )
