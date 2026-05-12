@@ -14,8 +14,11 @@ How Anki renders {{cloze:Field}}:
 """
 
 import re
+from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
+from bs4.element import NavigableString, Tag
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +59,29 @@ def anki_render_cloze(raw: str, active_idx: int, side: str) -> str:
     return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_cloze, raw)
 
 
+def anki_render_cloze_with_ordinals(raw: str, active_idx: int, side: str) -> str:
+    """Mimic newer desktop Anki output with cloze ordinal metadata."""
+
+    def replace_cloze(match: re.Match) -> str:
+        idx = int(match.group(1))
+        inner = match.group(2)
+        parts = inner.split("::", 1)
+        content = parts[0]
+        hint = parts[1] if len(parts) > 1 else ""
+
+        if idx == active_idx:
+            if side == "front":
+                display = f"[{hint}]" if hint else "[...]"
+                return (
+                    f'<span class="cloze" data-cloze="{content}" '
+                    f'data-ordinal="{idx}">{display}</span>'
+                )
+            return f'<span class="cloze" data-ordinal="{idx}">{content}</span>'
+        return f'<span class="cloze-inactive" data-ordinal="{idx}">{content}</span>'
+
+    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_cloze, raw)
+
+
 # ---------------------------------------------------------------------------
 # Detection algorithms (Python ports of the JS in the templates)
 # ---------------------------------------------------------------------------
@@ -67,15 +93,35 @@ def _normalize_signature(html: str) -> str:
     def text_part(text: str) -> str:
         return re.sub(r"\s+", " ", text)
 
-    # Normalize line breaks and represent cloze boundaries explicitly.
-    normalized = re.sub(r"(?i)<br\s*/?>", "\n", html)
-    normalized = re.sub(
-        r'(?is)<span[^>]*class=["\'][^"\']*\bcloze\b[^"\']*["\'][^>]*>(.*?)</span>',
-        r"[[CLOZE]]\1[[/CLOZE]]",
-        normalized,
-    )
-    normalized = re.sub(r"(?is)<[^>]*>", "", normalized)
+    soup = BeautifulSoup(html, "html.parser")
+
+    def walk(node: Tag | NavigableString, in_cloze: bool) -> str:
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag):
+            return ""
+        if node.name == "br":
+            return "\n"
+
+        classes = node.get("class", [])
+        is_active_cloze = "cloze" in classes and "cloze-inactive" not in classes
+        out = "".join(walk(child, in_cloze or is_active_cloze) for child in node.children)
+        if not in_cloze and is_active_cloze:
+            return f"[[CLOZE]]{out}[[/CLOZE]]"
+        return out
+
+    normalized = "".join(walk(child, False) for child in soup.contents)
     return text_part(normalized).strip()
+
+
+def _active_ordinal_from_rendered(rendered: str, indices: list[str]) -> str | None:
+    soup = BeautifulSoup(rendered, "html.parser")
+    for el in soup.select(".cloze[data-ordinal]"):
+        classes = el.get("class", [])
+        ordinal = el.get("data-ordinal")
+        if "cloze-inactive" not in classes and ordinal in indices:
+            return str(ordinal)
+    return None
 
 
 def _simulate_front(raw: str, test_idx: str) -> str:
@@ -111,15 +157,19 @@ def detect_active_idx_front(raw: str, rendered: str, body_class: str = "") -> st
     if not indices:
         return "1"
 
-    class_match = re.search(r"\bcard(\d+)\b", body_class)
-    if class_match and class_match.group(1) in indices:
-        return class_match.group(1)
+    rendered_ordinal = _active_ordinal_from_rendered(rendered, indices)
+    if rendered_ordinal:
+        return rendered_ordinal
 
     rendered_sig = _normalize_signature(rendered)
     for test_idx in indices:
         simulated = _simulate_front(raw, test_idx)
         if _normalize_signature(simulated) == rendered_sig:
             return test_idx
+
+    class_match = re.search(r"\bcard(\d+)\b", body_class)
+    if class_match and class_match.group(1) in indices:
+        return class_match.group(1)
 
     return indices[0]
 
@@ -130,15 +180,19 @@ def detect_active_idx_back(raw: str, rendered: str, body_class: str = "") -> str
     if not indices:
         return "1"
 
-    class_match = re.search(r"\bcard(\d+)\b", body_class)
-    if class_match and class_match.group(1) in indices:
-        return class_match.group(1)
+    rendered_ordinal = _active_ordinal_from_rendered(rendered, indices)
+    if rendered_ordinal:
+        return rendered_ordinal
 
     rendered_sig = _normalize_signature(rendered)
     for test_idx in indices:
         simulated = _simulate_back(raw, test_idx)
         if _normalize_signature(simulated) == rendered_sig:
             return test_idx
+
+    class_match = re.search(r"\bcard(\d+)\b", body_class)
+    if class_match and class_match.group(1) in indices:
+        return class_match.group(1)
 
     return indices[0]
 
@@ -234,11 +288,23 @@ class TestFrontDetection:
             f"  rendered: {rendered}"
         )
 
-    def test_body_class_priority(self):
+    def test_body_class_fallback(self):
         raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = anki_render_cloze(raw, 1, "front")
+        rendered = "unmatched render"
         detected = detect_active_idx_front(raw, rendered, body_class="card card2")
         assert detected == "2"
+
+    def test_desktop_template_card_class_does_not_override_rendered_cloze(self):
+        raw = "{{c1::dog}} chases {{c2::cat}}"
+        rendered = anki_render_cloze(raw, 2, "front")
+        detected = detect_active_idx_front(raw, rendered, body_class="card card1")
+        assert detected == "2"
+
+    def test_desktop_inactive_cloze_metadata_does_not_shift_front_detection(self):
+        raw = "{{c1::A}} {{c2::B}} {{c3::C}}"
+        rendered = anki_render_cloze_with_ordinals(raw, 3, "front")
+        detected = detect_active_idx_front(raw, rendered, body_class="card card2")
+        assert detected == "3"
 
 
 class TestBackDetection:
@@ -254,11 +320,23 @@ class TestBackDetection:
             f"  rendered: {rendered}"
         )
 
-    def test_body_class_priority(self):
+    def test_body_class_fallback(self):
         raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = anki_render_cloze(raw, 1, "back")
+        rendered = "unmatched render"
         detected = detect_active_idx_back(raw, rendered, body_class="card card2")
         assert detected == "2"
+
+    def test_desktop_template_card_class_does_not_override_rendered_cloze(self):
+        raw = "{{c1::dog}} chases {{c2::cat}}"
+        rendered = anki_render_cloze(raw, 2, "back")
+        detected = detect_active_idx_back(raw, rendered, body_class="card card1")
+        assert detected == "2"
+
+    def test_desktop_inactive_cloze_metadata_does_not_shift_back_detection(self):
+        raw = "{{c1::A}} {{c2::B}} {{c3::C}}"
+        rendered = anki_render_cloze_with_ordinals(raw, 3, "back")
+        detected = detect_active_idx_back(raw, rendered, body_class="card card2")
+        assert detected == "3"
 
 
 class TestAnkiRenderer:
@@ -292,3 +370,14 @@ class TestAnkiRenderer:
             "{{c1::dog}} and {{c1::cat}} are animals", 1, "front"
         )
         assert result.count("[...]") == 2
+
+
+def test_templates_do_not_expand_rendered_cloze_inside_script_comments():
+    """Anki expands template tags even inside JavaScript comments."""
+    note_type_dir = (
+        Path(__file__).parents[3] / "ankiops/note_types/AnkiOpsClozeHideAll"
+    )
+
+    for filename in ("Front.template.anki", "Back.template.anki"):
+        template = (note_type_dir / filename).read_text(encoding="utf-8")
+        assert template.count("{{cloze:Text}}") == 1

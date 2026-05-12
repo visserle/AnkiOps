@@ -41,6 +41,25 @@
             };
         }
 
+        function hasClass(node, className) {
+            var classes = " " + (node.className || "") + " ";
+            return classes.indexOf(" " + className + " ") !== -1;
+        }
+
+        function activeOrdinalFromRendered(html, indices) {
+            var root = document.createElement("div");
+            root.innerHTML = html;
+            var els = root.querySelectorAll(".cloze[data-ordinal]");
+            for (var elIdx = 0; elIdx < els.length; elIdx++) {
+                var el = els[elIdx];
+                var ordinal = el.getAttribute("data-ordinal");
+                if (!hasClass(el, "cloze-inactive") && indices.indexOf(ordinal) !== -1) {
+                    return ordinal;
+                }
+            }
+            return "";
+        }
+
         function normalizeSignature(html) {
             var root = document.createElement("div");
             root.innerHTML = html;
@@ -57,14 +76,15 @@
                     return "\n";
                 }
 
-                var nextInCloze =
-                    inCloze || /\bcloze\b/.test(node.className || "");
+                var isActiveCloze =
+                    hasClass(node, "cloze") && !hasClass(node, "cloze-inactive");
+                var nextInCloze = inCloze || isActiveCloze;
                 var out = "";
                 for (var childIdx = 0; childIdx < node.childNodes.length; childIdx++) {
                     out += walk(node.childNodes[childIdx], nextInCloze);
                 }
 
-                if (!inCloze && /\bcloze\b/.test(node.className || "")) {
+                if (!inCloze && isActiveCloze) {
                     return "[[CLOZE]]" + out + "[[/CLOZE]]";
                 }
                 return out;
@@ -93,13 +113,12 @@
                 return "1";
             }
 
-            // Primary strategy: use Anki's per-card CSS class (card1, card2, ...).
-            var classMatch = (document.body.className || "").match(/\bcard(\d+)\b/);
-            if (classMatch && indices.indexOf(classMatch[1]) !== -1) {
-                return classMatch[1];
+            // Prefer Anki's active cloze ordinal when desktop provides it.
+            var renderedOrdinal = activeOrdinalFromRendered(rendered, indices);
+            if (renderedOrdinal) {
+                return renderedOrdinal;
             }
 
-            // Fallback for preview contexts: compare structural signatures.
             var renderedSig = normalizeSignature(rendered);
             for (var idxPos = 0; idxPos < indices.length; idxPos++) {
                 var idx = indices[idxPos];
@@ -107,6 +126,13 @@
                 if (simulatedSig === renderedSig) {
                     return idx;
                 }
+            }
+
+            // Fallback for contexts where the rendered cloze field is unavailable.
+            // Desktop cardN can be the template ordinal, not the cloze index.
+            var classMatch = (document.body.className || "").match(/\bcard(\d+)\b/);
+            if (classMatch && indices.indexOf(classMatch[1]) !== -1) {
+                return classMatch[1];
             }
 
             return indices[0];
