@@ -260,12 +260,12 @@ user_prompt: !file grammar.md
 
 ### Model Registry (`llm/_models.yaml`)
 
-`llm/_models.yaml` is ejected during `ankiops init` and is the source of truth for OpenAI Responses API models. You can point an entry at another `base_url`, but it must support OpenAI's Responses API structured-output parsing.
+`llm/_models.yaml` is ejected during `ankiops init` and is the source of truth for OpenAI Responses API models. `api_url` must point directly to a Responses API endpoint that supports structured-output parsing.
 
 ```yaml
 - model: gpt-5.4-mini
   model_id: gpt-5.4-mini
-  base_url: https://api.openai.com/v1
+  api_url: https://api.openai.com/v1/responses
   api_key: $OPENAI_API_KEY
   concurrency: 8
 ```

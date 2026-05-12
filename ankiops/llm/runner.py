@@ -233,7 +233,7 @@ class LlmTaskExecutor:
         api_key = _resolve_api_key(task.model.api_key)
         client = AsyncOpenAI(
             api_key=api_key,
-            base_url=task.model.api_url,
+            base_url=task.model.api_url[: -len("/responses")],
             timeout=60.0,
             max_retries=0,
         )
@@ -846,7 +846,6 @@ async def _call_openai(
     if task.request.temperature is not None:
         request_kwargs["temperature"] = task.request.temperature
         request_json["temperature"] = task.request.temperature
-
     started_at = time.monotonic()
     try:
         response = await client.responses.parse(**request_kwargs)

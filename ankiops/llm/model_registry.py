@@ -164,7 +164,7 @@ def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
             key="model_id",
             item_label=item_label,
         ),
-        api_url=_require_string(
+        api_url=_parse_responses_api_url(
             entry.get("api_url"),
             key="api_url",
             item_label=item_label,
@@ -202,6 +202,21 @@ def _require_string(
     if not isinstance(value, str) or not value.strip():
         raise ModelRegistryError(f"{item_label}: '{key}' must be a non-empty string")
     return value.strip()
+
+
+def _parse_responses_api_url(
+    value: Any,
+    *,
+    key: str,
+    item_label: str,
+) -> str:
+    api_url = _require_string(value, key=key, item_label=item_label).rstrip("/")
+    if not api_url.endswith("/responses"):
+        raise ModelRegistryError(
+            f"{item_label}: '{key}' must be an OpenAI Responses API URL ending "
+            "in '/responses'"
+        )
+    return api_url
 
 
 def _parse_decimal(
