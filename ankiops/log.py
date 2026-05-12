@@ -11,6 +11,7 @@ from typing import Any
 from rich import get_console as rich_get_console
 from rich import reconfigure as rich_reconfigure
 from rich.highlighter import NullHighlighter
+from rich.markup import escape as rich_escape
 
 DEFAULT_QUIET_LOGGERS = (
     "urllib3.connectionpool",
@@ -22,17 +23,14 @@ DEFAULT_TRACEBACK_SUPPRESS: tuple[str | ModuleType, ...] = (argparse,)
 
 
 def clickable_path(file_path: Path | str, display_name: str | None = None) -> str:
-    """Create a clickable terminal hyperlink for a file path.
-
-    Uses OSC 8 escape sequences to create clickable links in modern terminals
-    (VSCode, iTerm2, Terminal.app, Windows Terminal, GNOME Terminal, etc.).
+    """Create Rich markup for a clickable file path.
 
     Args:
         file_path: Path object or string to make clickable
         display_name: Optional display text (defaults to filename only)
 
     Returns:
-        String with OSC 8 escape codes for terminal hyperlinks
+        Rich markup for a terminal hyperlink
     """
     path = Path(file_path).expanduser()
     absolute_path = path.resolve(strict=False)
@@ -42,8 +40,7 @@ def clickable_path(file_path: Path | str, display_name: str | None = None) -> st
     # (e.g. " " -> %20, "#" -> %23).
     file_uri = absolute_path.as_uri()
 
-    # OSC 8 format: \033]8;;FILE_URI\033\\TEXT\033]8;;\033\\
-    return f"\033]8;;{file_uri}\033\\{text}\033]8;;\033\\"
+    return f"[link={file_uri}]{rich_escape(text)}[/link]"
 
 
 def configure_logging(

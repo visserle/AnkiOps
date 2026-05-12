@@ -13,10 +13,9 @@ def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):
     rendered = clickable_path(file_path)
     file_uri = file_path.resolve().as_uri()
 
-    assert file_uri in rendered
+    assert rendered == f"[link={file_uri}]FILE {file_path.resolve()}[/link]"
     assert "%20" in file_uri
     assert "%23" in file_uri
-    assert f"FILE {file_path.resolve()}" in rendered
 
 
 def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
@@ -25,16 +24,21 @@ def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
 
     rendered = clickable_path(file_path)
 
-    assert file_path.resolve().as_uri() in rendered
-    assert f"FILE {file_path.resolve()}" in rendered
+    assert rendered == (
+        f"[link={file_path.resolve().as_uri()}]FILE {file_path.resolve()}[/link]"
+    )
+
+
+def test_clickable_path_escapes_display_text(tmp_path):
+    file_path = tmp_path / "Deck.md"
+
+    rendered = clickable_path(file_path, display_name="[red]")
+
+    assert rendered == f"[link={file_path.resolve().as_uri()}]\\[red][/link]"
 
 
 def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
     stream = io.StringIO()
-    quiet_logger_names = ("openai", "httpx", "httpcore", "urllib3.connectionpool")
-    original_levels = {
-        name: logging.getLogger(name).level for name in quiet_logger_names
-    }
     monkeypatch.setattr(sys, "stdout", stream)
 
     configure_logging(stream_level=logging.DEBUG)
