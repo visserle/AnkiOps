@@ -24,11 +24,11 @@ def _make_delete_change() -> Change:
     return Change(ChangeType.DELETE, 202, "note_key: delete")
 
 
-def _make_create_change() -> Change:
+def _make_create_change(entity_repr: str = "note_key: create") -> Change:
     return Change(
         ChangeType.CREATE,
         None,
-        "note_key: create",
+        entity_repr,
         {
             "note": Note(note_key=None, note_type="AnkiOpsQA", fields={}),
             "html_fields": {"Question": "Q", "Answer": "A"},
@@ -48,7 +48,11 @@ def test_apply_note_changes_collects_partial_errors():
 
     with patch(
         "ankiops.anki.invoke",
-        side_effect=[fake_non_create_result, ["create failed"]],
+        side_effect=[
+            fake_non_create_result,
+            [{"canAdd": True}],
+            ["create failed"],
+        ],
     ):
         created_ids, errors = adapter.apply_note_changes(
             deck_name="DeckX",
@@ -59,7 +63,7 @@ def test_apply_note_changes_collects_partial_errors():
             cards_to_move=[1001],
         )
 
-    assert created_ids == []
+    assert created_ids == [None]
     assert len(errors) == 4
     assert any("Update failed (note_key: update)" in error for error in errors)
     assert any("Create failed (note_key: create)" in error for error in errors)
@@ -82,6 +86,63 @@ def test_apply_note_changes_surfaces_ankiconnect_exception():
 
     assert created_ids == []
     assert errors == ["boom"]
+
+
+def test_apply_note_changes_preflight_reports_create_context():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        return_value=[
+            {
+                "canAdd": False,
+                "error": "cannot create note because it is a duplicate",
+            }
+        ],
+    ) as mock_invoke:
+        created_ids, errors = adapter.apply_note_changes(
+            deck_name="DeckY",
+            needs_create_deck=False,
+            creates=[_make_create_change("'Duplicate Q...'")],
+            updates=[],
+            deletes=[],
+            cards_to_move=[],
+        )
+
+    assert created_ids == [None]
+    assert errors == [
+        "Create failed ('Duplicate Q...'): "
+        "cannot create note because it is a duplicate"
+    ]
+    assert [call.args[0] for call in mock_invoke.call_args_list] == [
+        "canAddNotesWithErrorDetail"
+    ]
+
+
+def test_apply_note_changes_bulk_create_exception_keeps_create_context():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        side_effect=[
+            [{"canAdd": True}],
+            AnkiConnectError("cannot create note because it is a duplicate"),
+        ],
+    ):
+        created_ids, errors = adapter.apply_note_changes(
+            deck_name="DeckY",
+            needs_create_deck=False,
+            creates=[_make_create_change("'Duplicate Q...'")],
+            updates=[],
+            deletes=[],
+            cards_to_move=[],
+        )
+
+    assert created_ids == [None]
+    assert errors == [
+        "Create failed ('Duplicate Q...'): "
+        "cannot create note because it is a duplicate"
+    ]
 
 
 def test_fetch_model_states_normalizes_dict_styling_payload():

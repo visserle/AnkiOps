@@ -519,6 +519,8 @@ def _apply_changes_and_update_state(
 
     # Link mapped created IDs
     for note_id, create_change in zip(created_ids, result.change_buckets.creates):
+        if note_id is None:
+            continue
         note_key = create_change.context["note_key"]
         queue_note_mapping(note_key, note_id)
         queue_import_fingerprint(

@@ -314,11 +314,11 @@ class AnkiAdapter:
         updates: list[Change],
         deletes: list[Change],
         cards_to_move: list[int],
-    ) -> tuple[list[int], list[str]]:
+    ) -> tuple[list[int | None], list[str]]:
         actions = []
         tags = []
         errors = []
-        created_ids = []
+        created_ids: list[int | None] = []
         create_deck_failed = False
 
         if needs_create_deck:
@@ -375,7 +375,8 @@ class AnkiAdapter:
             if create_deck_failed:
                 for create_change in creates:
                     errors.append(
-                        f"Create failed ({create_change.entity_repr}): deck create failed"
+                        "Create failed "
+                        f"({create_change.entity_repr}): deck create failed"
                     )
             else:
                 create_ids, create_errors = self._create_notes_bulk(deck_name, creates)
@@ -399,12 +400,14 @@ class AnkiAdapter:
 
     def _collect_create_results(
         self, creates: list[Change], results: object
-    ) -> tuple[list[int], list[str]]:
-        created_ids: list[int] = []
+    ) -> tuple[list[int | None], list[str]]:
+        created_ids: list[int | None] = []
         errors: list[str] = []
 
         if not isinstance(results, list):
-            return [], [f"Create failed: unexpected addNotes result: {results!r}"]
+            return [None] * len(creates), [
+                f"Create failed: unexpected addNotes result: {results!r}"
+            ]
 
         normalized = list(results)
         if len(normalized) < len(creates):
@@ -414,24 +417,50 @@ class AnkiAdapter:
             if isinstance(create_result, int):
                 created_ids.append(create_result)
             else:
+                created_ids.append(None)
                 errors.append(
                     f"Create failed ({create_change.entity_repr}): {create_result}"
                 )
 
         return created_ids, errors
 
+    def _collect_can_add_errors(
+        self, creates: list[Change], results: object
+    ) -> list[str]:
+        if not isinstance(results, list) or len(results) != len(creates):
+            return []
+
+        errors: list[str] = []
+        for create_change, result in zip(creates, results):
+            if not isinstance(result, dict) or result.get("canAdd") is not False:
+                continue
+            error = result.get("error") or "cannot create note"
+            errors.append(f"Create failed ({create_change.entity_repr}): {error}")
+        return errors
+
     def _create_notes_bulk(
         self, deck_name: str, creates: list[Change]
-    ) -> tuple[list[int], list[str]]:
+    ) -> tuple[list[int | None], list[str]]:
         notes = [
             self._build_create_note_payload(deck_name, create_change)
             for create_change in creates
         ]
         try:
+            can_add_results = invoke("canAddNotesWithErrorDetail", notes=notes)
+            can_add_errors = self._collect_can_add_errors(creates, can_add_results)
+            if can_add_errors:
+                return [None] * len(creates), can_add_errors
+        except AnkiConnectError:
+            pass
+
+        try:
             results = invoke("addNotes", notes=notes)
             return self._collect_create_results(creates, results)
         except AnkiConnectError as error:
-            return [], [str(error)]
+            return [None] * len(creates), [
+                f"Create failed ({create_change.entity_repr}): {error}"
+                for create_change in creates
+            ]
 
     def get_media_dir(self) -> Path:
         """Return Anki's collection.media directory, cached after first call."""

@@ -177,7 +177,8 @@ class Note:
         if self.note_key is not None:
             return f"note_key: {self.note_key}"
         # For new notes falling back to first line
-        return f"'{self.first_field_line()[:60]}...'"
+        first_line = self.first_field_line()
+        return f"'{first_line[:60]}...'" if first_line else "unknown note"
 
     def first_field_line(self) -> str:
         """Return the first non-empty line of the first populated field."""
