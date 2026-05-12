@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
-from openai.types.responses import ParsedResponse
+from openai.types.responses import (
+    ParsedResponse,
+    ResponseOutputMessage,
+    ResponseOutputRefusal,
+)
 
 from ankiops.config import NOTE_TYPES_DIR
 from ankiops.fs import FileSystemAdapter
@@ -1277,20 +1281,13 @@ def _response_to_json(response: ParsedResponse[object]) -> str | None:
 
 
 def _extract_refusal_text(response: ParsedResponse[object]) -> str | None:
-    output = getattr(response, "output", None)
-    if not isinstance(output, list):
-        return None
-    refusal_parts: list[str] = []
-    for item in output:
-        content = getattr(item, "content", None)
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            if getattr(part, "type", None) != "refusal":
-                continue
-            refusal = getattr(part, "refusal", None)
-            if isinstance(refusal, str) and refusal:
-                refusal_parts.append(refusal)
+    refusal_parts = [
+        part.refusal
+        for item in response.output
+        if isinstance(item, ResponseOutputMessage)
+        for part in item.content
+        if isinstance(part, ResponseOutputRefusal) and part.refusal
+    ]
     return "\n".join(refusal_parts) if refusal_parts else None
 
 
