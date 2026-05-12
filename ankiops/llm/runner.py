@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
+from openai.types.responses import ParsedResponse
 
 from ankiops.config import NOTE_TYPES_DIR
 from ankiops.fs import FileSystemAdapter
@@ -848,7 +849,9 @@ async def _call_openai(
         request_json["temperature"] = task.request.temperature
     started_at = time.monotonic()
     try:
-        response = await client.responses.parse(**request_kwargs)
+        response: ParsedResponse[object] = await client.responses.parse(
+            **request_kwargs
+        )
     except AuthenticationError as error:
         return _openai_error_result(
             request_json=request_json,
@@ -1260,24 +1263,20 @@ def _resolve_api_key(configured_value: str) -> str:
     return resolved
 
 
-def _usage_value(response: object, name: str) -> int:
+def _usage_value(response: ParsedResponse[object], name: str) -> int:
     usage = getattr(response, "usage", None)
     value = getattr(usage, name, 0)
     return value if isinstance(value, int) else 0
 
 
-def _response_to_json(response: object) -> str | None:
-    model_dump_json = getattr(response, "model_dump_json", None)
-    if callable(model_dump_json):
-        try:
-            value = model_dump_json()
-            return value if isinstance(value, str) else None
-        except Exception:
-            return None
-    return None
+def _response_to_json(response: ParsedResponse[object]) -> str | None:
+    try:
+        return response.model_dump_json(warnings=False)
+    except Exception:
+        return None
 
 
-def _extract_refusal_text(response: object) -> str | None:
+def _extract_refusal_text(response: ParsedResponse[object]) -> str | None:
     output = getattr(response, "output", None)
     if not isinstance(output, list):
         return None
