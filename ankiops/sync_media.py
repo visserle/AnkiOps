@@ -178,7 +178,7 @@ def hash_and_update_references(
                     f"{LOCAL_MEDIA_DIR}/{new_name}"
                 )
                 rename_map[file_path.name] = f"{LOCAL_MEDIA_DIR}/{new_name}"
-                result.changes.append(
+                result.add_change(
                     Change(
                         ChangeType.HASH,
                         file_path.name,
@@ -323,7 +323,7 @@ def sync_media_to_anki(
 
             # Push safely via Port
             anki_port.push_media(file_path, name)
-            result.changes.append(Change(ChangeType.SYNC, name, name))
+            result.add_change(Change(ChangeType.SYNC, name, name))
             push_state_updates.append((name, digest))
             logger.debug(f"  Synced {clickable_path(file_path)}")
         elif not name.startswith("_"):
@@ -332,7 +332,7 @@ def sync_media_to_anki(
                 removed_file_path = file_path
                 file_path.unlink()
                 removed_names.append(name)
-                result.changes.append(Change(ChangeType.DELETE, name, name))
+                result.add_change(Change(ChangeType.DELETE, name, name))
                 logger.debug(f"  Deleted orphan {clickable_path(removed_file_path)}")
             except Exception as error:
                 result.errors.append(str(error))
@@ -367,15 +367,15 @@ def sync_media_from_anki(
         if not target.exists():
             success = anki_port.pull_media(name, target)
             if success:
-                result.changes.append(Change(ChangeType.SYNC, name, name))
+                result.add_change(Change(ChangeType.SYNC, name, name))
                 logger.debug(f"  Pulled {clickable_path(target)} from Anki")
             else:
                 result.missing += 1
                 logger.warning(f"Media {name} missing in Anki")
-                result.changes.append(Change(ChangeType.SKIP, name, name))
+                result.add_change(Change(ChangeType.SKIP, name, name))
         else:
             result.unchanged += 1
-            result.changes.append(Change(ChangeType.SKIP, name, name))
+            result.add_change(Change(ChangeType.SKIP, name, name))
 
     return result
 

@@ -193,11 +193,7 @@ def _collect_membership_affected_note_ids(results: list[SyncResult]) -> set[int]
     affected_note_ids: set[int] = set()
     for sync_result in results:
         for change in sync_result.changes:
-            if change.change_type not in {
-                ChangeType.CREATE,
-                ChangeType.DELETE,
-                ChangeType.MOVE,
-            }:
+            if not change.change_type.affects_membership:
                 continue
             if isinstance(change.entity_id, int):
                 affected_note_ids.add(change.entity_id)
@@ -291,7 +287,7 @@ def _sync_keyed_note(
     if not anki_note:
         html_fields = _to_html(parsed_note, cfg, fs_port)
         html_fields["AnkiOps Key"] = note_key
-        result.change_buckets.creates.append(
+        result.add_change(
             Change(
                 ChangeType.CREATE,
                 None,
@@ -322,7 +318,7 @@ def _sync_keyed_note(
             if source_deck:
                 moved_from_decks.add(source_deck)
     if cards_to_move_for_note:
-        result.change_buckets.moves.append(
+        result.add_change(
             Change(
                 ChangeType.MOVE,
                 note_id,
@@ -345,9 +341,7 @@ def _sync_keyed_note(
     current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
     cached = note_import_fingerprints_by_note_key.get(note_key)
     if cached == (md_hash, current_anki_hash):
-        result.change_buckets.skips.append(
-            Change(ChangeType.SKIP, note_id, parsed_note.identifier)
-        )
+        result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
@@ -356,14 +350,12 @@ def _sync_keyed_note(
         html_fields["AnkiOps Key"] = note_key
 
     if _html_match(html_fields, anki_note):
-        result.change_buckets.skips.append(
-            Change(ChangeType.SKIP, note_id, parsed_note.identifier)
-        )
+        result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
     target_anki_hash = note_fingerprint(parsed_note.note_type, html_fields)
-    result.change_buckets.updates.append(
+    result.add_change(
         Change(
             ChangeType.UPDATE,
             note_id,
@@ -395,7 +387,7 @@ def _sync_new_note(
     new_note_key = db_port.generate_note_key()
     html_fields = _to_html(parsed_note, cfg, fs_port)
     html_fields["AnkiOps Key"] = new_note_key
-    result.change_buckets.creates.append(
+    result.add_change(
         Change(
             ChangeType.CREATE,
             None,
@@ -450,7 +442,7 @@ def _collect_orphan_deletes(
             # Protect unmanaged legacy notes from deletion on import.
             if not embedded_note_key:
                 result.protected_keyless_notes += 1
-                result.change_buckets.skips.append(
+                result.add_change(
                     Change(
                         ChangeType.SKIP,
                         note_id,
@@ -466,7 +458,7 @@ def _collect_orphan_deletes(
 
             note_key = orphan_note_keys.get(note_id)
             delete_repr = f"note_key: {note_key}" if note_key else f"note_id: {note_id}"
-            result.change_buckets.deletes.append(
+            result.add_change(
                 Change(
                     ChangeType.DELETE,
                     note_id,
@@ -504,12 +496,15 @@ def _apply_changes_and_update_state(
     if not deck_context.deck_name:
         return []
 
+    creates = result.changes_for(ChangeType.CREATE)
+    updates = result.changes_for(ChangeType.UPDATE)
+    deletes = result.changes_for(ChangeType.DELETE)
     created_ids, errors = anki_port.apply_note_changes(
         deck_context.deck_name,
         deck_context.needs_create_deck,
-        result.change_buckets.creates,
-        result.change_buckets.updates,
-        result.change_buckets.deletes,
+        creates,
+        updates,
+        deletes,
         cards_to_move,
     )
     result.errors.extend(errors)
@@ -518,7 +513,7 @@ def _apply_changes_and_update_state(
     note_key_assignments: list[tuple[Note, str]] = []
 
     # Link mapped created IDs
-    for note_id, create_change in zip(created_ids, result.change_buckets.creates):
+    for note_id, create_change in zip(created_ids, creates):
         if note_id is None:
             continue
         note_key = create_change.context["note_key"]
@@ -531,17 +526,17 @@ def _apply_changes_and_update_state(
         create_change.entity_id = note_id
         note_key_assignments.append((create_change.context["note"], note_key))
 
-    for update_change in result.change_buckets.updates:
+    for update_change in updates:
         queue_import_fingerprint(
             update_change.context["note_key"],
             update_change.context["md_hash"],
             update_change.context["import_anki_hash"],
         )
 
-    if result.change_buckets.deletes and not delete_failed:
+    if deletes and not delete_failed:
         delete_note_keys = [
             delete_change.context.get("note_key")
-            for delete_change in result.change_buckets.deletes
+            for delete_change in deletes
             if delete_change.context
         ]
         delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
@@ -690,7 +685,7 @@ def _sync_file(
         db_port=db_port,
     )
 
-    result.materialize_changes()
+    result.order_changes()
     pending = _PendingWrite(fs, note_key_assignments)
     return result, pending, moved_from_decks
 

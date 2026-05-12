@@ -109,7 +109,6 @@ def _resolve_deck_notes(
 ) -> tuple[list[_ResolvedDeckNote], list[str]]:
     errors: list[str] = []
     resolved_notes: list[_ResolvedDeckNote] = []
-    bucketed_changes = result.change_buckets
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
         if note_keys_by_id.get(note_id) == note_key:
@@ -141,7 +140,7 @@ def _resolve_deck_notes(
             local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
             cached = note_export_fingerprints_by_note_key.get(note_key)
             if cached == (local_md_hash, observed_anki_hash):
-                bucketed_changes.skips.append(
+                result.add_change(
                     Change(ChangeType.SKIP, anki_note.note_id, local_match.identifier)
                 )
                 resolved_notes.append((note_key, anki_note.note_id, local_match))
@@ -171,7 +170,7 @@ def _resolve_deck_notes(
         domain_note.note_key = note_key
         local_match = local_notes_by_note_key.get(note_key)
         if local_match and local_match.fields == domain_note.fields:
-            bucketed_changes.skips.append(
+            result.add_change(
                 Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
             )
             resolved_notes.append((note_key, anki_note.note_id, local_match))
@@ -180,7 +179,7 @@ def _resolve_deck_notes(
             continue
 
         if not local_match:
-            bucketed_changes.creates.append(
+            result.add_change(
                 Change(
                     ChangeType.CREATE,
                     anki_note.note_id,
@@ -193,7 +192,7 @@ def _resolve_deck_notes(
                 note_key,
             )
         else:
-            bucketed_changes.updates.append(
+            result.add_change(
                 Change(
                     ChangeType.UPDATE,
                     anki_note.note_id,
@@ -292,7 +291,7 @@ def _can_skip_markdown_rebuild(
 ) -> bool:
     if is_first_export or resolve_errors:
         return False
-    if result.change_buckets.creates or result.change_buckets.updates:
+    if result.has_changes(ChangeType.CREATE, ChangeType.UPDATE):
         return False
     if len(final_notes) != len(fs.notes):
         return False
@@ -393,7 +392,7 @@ def _sync_deck(
         result=result,
         resolve_errors=resolve_errors,
     ):
-        result.materialize_changes(order=_SYNC_ORDER)
+        result.order_changes(order=_SYNC_ORDER)
         return result
 
     final_text = _render_notes_to_markdown(
@@ -412,15 +411,13 @@ def _sync_deck(
         if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
             db_port.delete_note_links_by_keys([old_note.note_key])
-            result.change_buckets.deletes.append(
-                Change(ChangeType.DELETE, None, old_note.identifier)
-            )
+            result.add_change(Change(ChangeType.DELETE, None, old_note.identifier))
             logger.debug(
                 "  Delete markdown note for removed Anki note (note_key=%s)",
                 old_note.note_key,
             )
 
-    result.materialize_changes(order=_SYNC_ORDER)
+    result.order_changes(order=_SYNC_ORDER)
     return result
 
 

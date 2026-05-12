@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -194,11 +194,11 @@ class Note:
         choice_fields = []
 
         has_choices = any(
-            "Choice" in field_config.name for field_config in config.fields
+            "choice" in field_config.name.lower() for field_config in config.fields
         )
 
         for field_config in config.fields:
-            if "Choice" in field_config.name:
+            if "choice" in field_config.name.lower():
                 choice_fields.append(field_config.name)
                 if self.fields.get(field_config.name):
                     choice_count += 1
@@ -283,14 +283,43 @@ class AnkiNote:
 
 
 class ChangeType(Enum):
-    CREATE = auto()
-    UPDATE = auto()
-    DELETE = auto()
-    MOVE = auto()
-    SKIP = auto()
-    CONFLICT = auto()
-    HASH = auto()
-    SYNC = auto()
+    CREATE = ("created", True, 4, True, True, True)
+    UPDATE = ("updated", True, 3, True, True, False)
+    DELETE = ("deleted", False, 6, True, True, True)
+    MOVE = ("moved", True, 5, True, True, True)
+    SKIP = ("skipped", True, 0, True, True, False)
+
+    CONFLICT = (None, False, 7, False, False, False)
+    HASH = ("hashed", True, 1, False, True, False)
+    SYNC = ("synced", True, 2, False, True, False)
+
+    def __init__(
+        self,
+        summary_field: str | None,
+        counts_total: bool,
+        priority: int,
+        report_in_notes: bool,
+        report_in_media: bool,
+        affects_membership: bool,
+    ) -> None:
+        self.summary_field = summary_field
+        self.counts_total = counts_total
+        self.priority = priority
+        self.report_in_notes = report_in_notes
+        self.report_in_media = report_in_media
+        self.affects_membership = affects_membership
+
+    @classmethod
+    def note_reported(cls) -> frozenset["ChangeType"]:
+        return frozenset(
+            change_type for change_type in cls if change_type.report_in_notes
+        )
+
+    @classmethod
+    def media_reported(cls) -> frozenset["ChangeType"]:
+        return frozenset(
+            change_type for change_type in cls if change_type.report_in_media
+        )
 
 
 @dataclass
@@ -301,25 +330,8 @@ class Change:
     context: dict[str, Any] = field(default_factory=dict)
 
 
-# Shared mapping for projecting change types into summary counters.
-_SUMMARY_FIELD_BY_CHANGE: dict[ChangeType, str] = {
-    ChangeType.CREATE: "created",
-    ChangeType.UPDATE: "updated",
-    ChangeType.DELETE: "deleted",
-    ChangeType.MOVE: "moved",
-    ChangeType.SKIP: "skipped",
-    ChangeType.HASH: "hashed",
-    ChangeType.SYNC: "synced",
-}
-_NOTE_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
-    {
-        ChangeType.CREATE,
-        ChangeType.UPDATE,
-        ChangeType.DELETE,
-        ChangeType.MOVE,
-        ChangeType.SKIP,
-    }
-)
+_NOTE_REPORTED_CHANGE_TYPES = ChangeType.note_reported()
+_MEDIA_REPORTED_CHANGE_TYPES = ChangeType.media_reported()
 _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
     ChangeType.CREATE,
     ChangeType.UPDATE,
@@ -327,65 +339,6 @@ _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
     ChangeType.SKIP,
     ChangeType.MOVE,
 )
-_TOTAL_EXCLUDED_CHANGE_TYPES: frozenset[ChangeType] = frozenset(
-    {ChangeType.DELETE, ChangeType.CONFLICT}
-)
-
-_MEDIA_REPORTED_CHANGE_TYPES: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES | {
-    ChangeType.HASH,
-    ChangeType.SYNC,
-}
-
-
-@dataclass
-class ChangeBuckets:
-    creates: list[Change] = field(default_factory=list)
-    updates: list[Change] = field(default_factory=list)
-    deletes: list[Change] = field(default_factory=list)
-    skips: list[Change] = field(default_factory=list)
-    moves: list[Change] = field(default_factory=list)
-    others: list[Change] = field(default_factory=list)
-
-    def add(self, change: Change) -> None:
-        if change.change_type == ChangeType.CREATE:
-            self.creates.append(change)
-        elif change.change_type == ChangeType.UPDATE:
-            self.updates.append(change)
-        elif change.change_type == ChangeType.DELETE:
-            self.deletes.append(change)
-        elif change.change_type == ChangeType.SKIP:
-            self.skips.append(change)
-        elif change.change_type == ChangeType.MOVE:
-            self.moves.append(change)
-        else:
-            self.others.append(change)
-
-    def extend(self, changes: list[Change]) -> None:
-        for change in changes:
-            self.add(change)
-
-    def ordered(
-        self,
-        *,
-        order: tuple[ChangeType, ...] = _NOTE_CHANGE_ORDER,
-        include_others: bool = True,
-    ) -> list[Change]:
-        ordered_changes: list[Change] = []
-        for change_type in order:
-            if change_type == ChangeType.CREATE:
-                ordered_changes.extend(self.creates)
-            elif change_type == ChangeType.UPDATE:
-                ordered_changes.extend(self.updates)
-            elif change_type == ChangeType.DELETE:
-                ordered_changes.extend(self.deletes)
-            elif change_type == ChangeType.SKIP:
-                ordered_changes.extend(self.skips)
-            elif change_type == ChangeType.MOVE:
-                ordered_changes.extend(self.moves)
-
-        if include_others:
-            ordered_changes.extend(self.others)
-        return ordered_changes
 
 
 @dataclass
@@ -393,7 +346,6 @@ class SyncResult:
     name: str | None = None
     file_path: Path | None = None
     changes: list[Change] = field(default_factory=list)
-    change_buckets: ChangeBuckets = field(default_factory=ChangeBuckets)
     errors: list[str] = field(default_factory=list)
     reported_change_types: frozenset[ChangeType] = _NOTE_REPORTED_CHANGE_TYPES
     checked: int = 0
@@ -418,21 +370,34 @@ class SyncResult:
         )
 
     def add_change(self, change: Change) -> None:
-        self.change_buckets.add(change)
+        self.changes.append(change)
 
-    def extend_changes_bucketed(self, changes: list[Change]) -> None:
-        self.change_buckets.extend(changes)
+    def changes_for(self, change_type: ChangeType) -> list[Change]:
+        return [change for change in self.changes if change.change_type == change_type]
 
-    def materialize_changes(
+    def has_changes(self, *change_types: ChangeType) -> bool:
+        return any(change.change_type in change_types for change in self.changes)
+
+    def order_changes(
         self,
         *,
         order: tuple[ChangeType, ...] = _NOTE_CHANGE_ORDER,
-        include_others: bool = True,
+        include_unordered: bool = True,
     ) -> None:
-        self.changes = self.change_buckets.ordered(
-            order=order,
-            include_others=include_others,
-        )
+        ordered_types = set(order)
+        ordered_changes = [
+            change
+            for change_type in order
+            for change in self.changes
+            if change.change_type == change_type
+        ]
+        if include_unordered:
+            ordered_changes.extend(
+                change
+                for change in self.changes
+                if change.change_type not in ordered_types
+            )
+        self.changes = ordered_changes
 
     @property
     def summary(self) -> SyncSummary:
@@ -443,34 +408,13 @@ class SyncResult:
         )
 
 
-# Priority order for deduplicating overlapping changes on the same entity.
-_CHANGE_PRIORITY = {
-    change_type: priority
-    for priority, change_type in enumerate(
-        [
-            ChangeType.SKIP,
-            ChangeType.HASH,
-            ChangeType.SYNC,
-            ChangeType.UPDATE,
-            ChangeType.CREATE,
-            ChangeType.MOVE,
-            ChangeType.DELETE,
-            ChangeType.CONFLICT,
-        ]
-    )
-}
-
-
 def _effective_change_types(changes: list[Change]) -> list[ChangeType]:
     """Return the highest-priority change per entity."""
     effective: dict[int | str, ChangeType] = {}
     for change in changes:
         entity_id = change.entity_id or change.entity_repr
         previous = effective.get(entity_id)
-        if (
-            previous is None
-            or _CHANGE_PRIORITY[change.change_type] > _CHANGE_PRIORITY[previous]
-        ):
+        if previous is None or change.change_type.priority > previous.priority:
             effective[entity_id] = change.change_type
     return list(effective.values())
 
@@ -547,16 +491,17 @@ class SyncSummary:
         include_total: bool = True,
     ) -> None:
         if change_type in reported_change_types:
-            field_name = _SUMMARY_FIELD_BY_CHANGE.get(change_type)
+            field_name = change_type.summary_field
             if field_name:
                 setattr(self, field_name, getattr(self, field_name) + 1)
 
-        if include_total and change_type not in _TOTAL_EXCLUDED_CHANGE_TYPES:
+        if include_total and change_type.counts_total:
             self.total += 1
 
     def to_dict(self) -> dict[str, int]:
         return {
-            field_name: getattr(self, field_name) for field_name in self.__annotations__
+            field_name: getattr(self, field_name)
+            for field_name in type(self).__annotations__
         }
 
     @staticmethod
