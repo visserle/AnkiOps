@@ -38,10 +38,20 @@ def _setup_vscode_settings(collection_dir: Path):
             settings = json.loads(settings_path.read_text())
         except (json.JSONDecodeError, ValueError):
             pass
-
-    settings["[markdown]"] = {"editor.formatOnSave": False}
-    settings["markdown.preview.breaks"] = True
-    settings["markdown.copyFiles.destination"] = {"**/*.md": f"{LOCAL_MEDIA_DIR}/"}
+    settings.update(
+        {
+            "[markdown]": {
+                "editor.formatOnSave": False,
+                "editor.wordWrap": "wordWrapColumn",
+                "editor.wordWrapColumn": 80,
+                "diffEditor.ignoreTrimWhitespace": False,
+            },
+            "markdown.preview.breaks": True,
+            "markdown.copyFiles.destination": {"**/*.md": f"{LOCAL_MEDIA_DIR}/"},
+            "markdown.preview.doubleClickToSwitchToEditor": True,
+            "markdown.preview.markEditorSelection": True,
+        }
+    )
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 
