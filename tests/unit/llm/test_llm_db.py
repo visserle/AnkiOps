@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.llm.db import LlmDb
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.types import LlmItemStatus
 
 

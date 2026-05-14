@@ -106,3 +106,4 @@ node_modules/
 .claude/
 AGENTS.md
 .gitignore
+_stuff.ipynb

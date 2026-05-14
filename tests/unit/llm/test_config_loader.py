@@ -25,6 +25,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
         request:
           temperature: 0.25
           max_output_tokens: 512
+          reasoning: low
         fields:
           default_access: read_only
           editable:
@@ -48,7 +49,11 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
         task.system_prompt_path == (llm_collection / "llm/prompts/system.md").resolve()
     )
     assert task.user_prompt_path == (llm_collection / "llm/prompts/user.md").resolve()
-    assert task.request == TaskRequestOptions(temperature=0.25, max_output_tokens=512)
+    assert task.request == TaskRequestOptions(
+        temperature=0.25,
+        max_output_tokens=512,
+        reasoning="low",
+    )
     assert task.field_access("AnkiOpsQA", "Question") is FieldAccess.READ_ONLY
     assert task.field_access("AnkiOpsQA", "AI Notes") is FieldAccess.EDITABLE
     assert task.field_access("AnkiOpsChoice", "Answer") is FieldAccess.HIDDEN
@@ -83,6 +88,16 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             user_prompt: user
             """,
             "!file path must stay within",
+        ),
+        (
+            """
+            model: test
+            system_prompt: system
+            user_prompt: user
+            request:
+              reasoning: extreme
+            """,
+            "request.reasoning' must be one of",
         ),
     ],
 )

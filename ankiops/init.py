@@ -16,7 +16,7 @@ from ankiops.config import (
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
-from ankiops.llm.db import LlmDb
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.model_registry import (
     MODEL_REGISTRY_FILE_NAME,
     SYSTEM_PROMPT_FILE_NAME,

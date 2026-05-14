@@ -73,6 +73,7 @@ class FieldAccessRule:
 class TaskRequestOptions:
     temperature: float | None = None
     max_output_tokens: int = 2048
+    reasoning: str | None = None
 
 
 @dataclass(frozen=True)

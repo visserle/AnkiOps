@@ -43,8 +43,18 @@ _SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
 _SUPPORTED_REQUEST_KEYS_ORDERED = (
     "temperature",
     "max_output_tokens",
+    "reasoning",
 )
 _SUPPORTED_REQUEST_KEYS = set(_SUPPORTED_REQUEST_KEYS_ORDERED)
+_SUPPORTED_REASONING_EFFORTS_ORDERED = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+)
+_SUPPORTED_REASONING_EFFORTS = set(_SUPPORTED_REASONING_EFFORTS_ORDERED)
 
 
 class _FileSource:
@@ -413,9 +423,28 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             raise LlmConfigError(f"{path}: 'request.max_output_tokens' must be >= 1")
         max_output_tokens = raw_max_output_tokens
 
+    reasoning = defaults.reasoning
+    if "reasoning" in value:
+        raw_reasoning = value.get("reasoning")
+        if raw_reasoning is None:
+            reasoning = None
+        elif not isinstance(raw_reasoning, str) or not raw_reasoning.strip():
+            raise LlmConfigError(
+                f"{path}: 'request.reasoning' must be a non-empty string"
+            )
+        else:
+            normalized = raw_reasoning.strip()
+            if normalized not in _SUPPORTED_REASONING_EFFORTS:
+                allowed = ", ".join(_SUPPORTED_REASONING_EFFORTS_ORDERED)
+                raise LlmConfigError(
+                    f"{path}: 'request.reasoning' must be one of: {allowed}"
+                )
+            reasoning = normalized
+
     return TaskRequestOptions(
         temperature=temperature,
         max_output_tokens=max_output_tokens,
+        reasoning=reasoning,
     )
 
 

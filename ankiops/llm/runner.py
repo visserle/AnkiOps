@@ -25,7 +25,7 @@ from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 from ankiops.serializer import deserialize, serialize
 
 from .config_loader import is_task_config_file, load_llm_task_catalog
-from .db import LlmDb, LlmJobDetail, LlmJobListItem
+from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .model_registry import parse_model
 from .schemas import build_response_model, parsed_response_json, parsed_updates
 from .types import (
@@ -835,22 +835,28 @@ async def _call_openai(
         note_type=candidate.payload.note_type,
         payloads=[candidate.payload],
     )
-    input_messages = _build_input_messages(task=task, candidate=candidate)
+    instructions, user_input = _build_request_content(task=task, candidate=candidate)
     request_json = {
         "model": task.model.model_id,
-        "input": input_messages,
+        "instructions": instructions,
+        "input": user_input,
         "max_output_tokens": task.request.max_output_tokens,
         "text_format": response_model.__name__,
     }
     request_kwargs: dict[str, Any] = {
         "model": task.model.model_id,
-        "input": input_messages,
+        "instructions": instructions,
+        "input": user_input,
         "max_output_tokens": task.request.max_output_tokens,
         "text_format": response_model,
     }
     if task.request.temperature is not None:
         request_kwargs["temperature"] = task.request.temperature
         request_json["temperature"] = task.request.temperature
+    if task.request.reasoning is not None:
+        reasoning_param = {"effort": task.request.reasoning}
+        request_kwargs["reasoning"] = reasoning_param
+        request_json["reasoning"] = reasoning_param
     started_at = time.monotonic()
     try:
         response: ParsedResponse[object] = await client.responses.parse(
@@ -931,25 +937,23 @@ async def _call_openai(
     )
 
 
-def _build_input_messages(
+def _build_request_content(
     *,
     task: TaskConfig,
     candidate: EligibleCandidate,
-) -> list[dict[str, str]]:
+) -> tuple[str, str]:
     payload = {
         "user_prompt": task.user_prompt,
         "note_key": candidate.payload.note_key,
         "note_type": candidate.payload.note_type,
         "editable_fields": candidate.payload.editable_fields,
-        "read_only_fields": candidate.payload.read_only_fields,
     }
-    return [
-        {"role": "system", "content": task.system_prompt.strip()},
-        {
-            "role": "user",
-            "content": json.dumps(payload, ensure_ascii=False, indent=2),
-        },
-    ]
+    if candidate.payload.read_only_fields:
+        payload["read_only_fields"] = candidate.payload.read_only_fields
+    return (
+        task.system_prompt.strip(),
+        json.dumps(payload, ensure_ascii=False),
+    )
 
 
 def _openai_error_result(
@@ -1242,6 +1246,8 @@ def _format_request_defaults(request: TaskRequestOptions) -> str:
     parts = [f"max_output_tokens={request.max_output_tokens}"]
     if request.temperature is not None:
         parts.append(f"temperature={request.temperature:g}")
+    if request.reasoning is not None:
+        parts.append(f"reasoning={request.reasoning}")
     return ", ".join(parts)
 
 

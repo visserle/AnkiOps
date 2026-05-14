@@ -1,0 +1,13 @@
+model: gpt-5.4-nano
+system_prompt: !file _system_prompt.md
+user_prompt: |
+  The following markdown text might contain artifacts from the HTML to Markdown conversion. 
+  Please fix any artifacts while preserving the original meaning, structure, cloze syntax, code fences, math, and URLs. 
+  Do not add facts or change correctness.
+
+fields:
+  default_access: editable
+  hidden:
+    "*": ["AI Notes"]
+  read_only:
+    "AnkiOpsChoice": ["Answer"]
