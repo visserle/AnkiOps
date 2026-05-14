@@ -27,26 +27,19 @@ from .types import (
     TaskRequestOptions,
 )
 
-
-class LlmConfigError(ValueError):
-    """Raised when a task config is invalid."""
-
-
-_SUPPORTED_TASK_KEYS_ORDERED = (
+_SUPPORTED_TASK_KEYS = (
     "model",
     "system_prompt",
     "user_prompt",
     "request",
     "fields",
 )
-_SUPPORTED_TASK_KEYS = set(_SUPPORTED_TASK_KEYS_ORDERED)
-_SUPPORTED_REQUEST_KEYS_ORDERED = (
+_SUPPORTED_REQUEST_KEYS = (
     "temperature",
     "max_output_tokens",
     "reasoning",
 )
-_SUPPORTED_REQUEST_KEYS = set(_SUPPORTED_REQUEST_KEYS_ORDERED)
-_SUPPORTED_REASONING_EFFORTS_ORDERED = (
+_SUPPORTED_REASONING_EFFORTS = (
     "none",
     "minimal",
     "low",
@@ -54,7 +47,10 @@ _SUPPORTED_REASONING_EFFORTS_ORDERED = (
     "high",
     "xhigh",
 )
-_SUPPORTED_REASONING_EFFORTS = set(_SUPPORTED_REASONING_EFFORTS_ORDERED)
+
+
+class LlmConfigError(ValueError):
+    """Raised when a task config is invalid."""
 
 
 class _FileSource:
@@ -212,10 +208,10 @@ def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
 
 
 def _validate_task_keys(mapping: dict[str, Any], path: Path) -> None:
-    unknown = sorted(set(mapping.keys()) - _SUPPORTED_TASK_KEYS)
+    unknown = sorted(set(mapping.keys()) - set(_SUPPORTED_TASK_KEYS))
     if not unknown:
         return
-    allowed = ", ".join(_SUPPORTED_TASK_KEYS_ORDERED)
+    allowed = ", ".join(_SUPPORTED_TASK_KEYS)
     raise LlmConfigError(
         f"{path}: unknown task key(s): {', '.join(unknown)}. Allowed keys: {allowed}"
     )
@@ -388,9 +384,9 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'request' must be a mapping")
 
-    unknown = sorted(set(value.keys()) - _SUPPORTED_REQUEST_KEYS)
+    unknown = sorted(set(value.keys()) - set(_SUPPORTED_REQUEST_KEYS))
     if unknown:
-        allowed = ", ".join(_SUPPORTED_REQUEST_KEYS_ORDERED)
+        allowed = ", ".join(_SUPPORTED_REQUEST_KEYS)
         raise LlmConfigError(
             f"{path}: unknown request key(s): {', '.join(unknown)}. "
             f"Allowed request keys: {allowed}"
@@ -435,7 +431,7 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
         else:
             normalized = raw_reasoning.strip()
             if normalized not in _SUPPORTED_REASONING_EFFORTS:
-                allowed = ", ".join(_SUPPORTED_REASONING_EFFORTS_ORDERED)
+                allowed = ", ".join(_SUPPORTED_REASONING_EFFORTS)
                 raise LlmConfigError(
                     f"{path}: 'request.reasoning' must be one of: {allowed}"
                 )
