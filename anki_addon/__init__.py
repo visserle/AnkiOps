@@ -127,22 +127,24 @@ def _show_output(title: str, body: str) -> None:
 
 
 def _on_toolbar_init(links: list[str], toolbar: Toolbar) -> None:
-    links.append(
-        toolbar.create_link(
-            cmd="ankiops_markdown_to_anki",
-            label="ma",
-            func=lambda: _run_ankiops("ma"),
-            tip="ankiops markdown-to-anki",
-            id="ankiops-markdown-to-anki",
-        ),
-    )
-    links.append(
+    links.insert(
+        -2,
         toolbar.create_link(
             cmd="ankiops_anki_to_markdown",
             label="am",
             func=lambda: _run_ankiops("am"),
             tip="ankiops anki-to-markdown",
             id="ankiops-anki-to-markdown",
+        ),
+    )
+    links.insert(
+        -2,
+        toolbar.create_link(
+            cmd="ankiops_markdown_to_anki",
+            label="ma",
+            func=lambda: _run_ankiops("ma"),
+            tip="ankiops markdown-to-anki",
+            id="ankiops-markdown-to-anki",
         ),
     )
 
