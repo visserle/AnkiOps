@@ -8,3 +8,6 @@ fields:
   default_access: read_only
   editable:
     "*": ["AI Notes"]
+
+request:
+  reasoning: high
