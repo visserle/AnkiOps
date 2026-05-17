@@ -597,8 +597,14 @@ def export_collection(
 
                 db_port.delete_deck(deck_name)
                 md_file.unlink()
-                extra_changes.append(
-                    Change(ChangeType.DELETE, None, f"file: {md_file.name}")
+                if not keyed_notes:
+                    logger.debug(
+                        "Removed empty orphan markdown deck file: %s",
+                        md_file.name,
+                    )
+                extra_changes.extend(
+                    Change(ChangeType.DELETE, None, orphan.identifier)
+                    for orphan in keyed_notes
                 )
         return CollectionResult.for_export(
             results=results,

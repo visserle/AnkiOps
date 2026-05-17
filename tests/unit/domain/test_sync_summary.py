@@ -42,12 +42,12 @@ def test_media_summary_tracks_sync_and_hash_with_deduplication():
     assert summary.total == 2
 
 
-def test_collection_export_extra_changes_update_counters_not_total():
+def test_collection_export_extra_note_changes_update_counters_not_total():
     deck_result = SyncResult.for_notes(name="Deck", file_path=None)
     deck_result.changes = [Change(ChangeType.CREATE, 1, "note_key: one")]
     export_result = CollectionResult.for_export(
         results=[deck_result],
-        extra_changes=[Change(ChangeType.DELETE, None, "file: Deck.md")],
+        extra_changes=[Change(ChangeType.DELETE, None, "note_key: stale")],
     )
 
     summary = export_result.summary

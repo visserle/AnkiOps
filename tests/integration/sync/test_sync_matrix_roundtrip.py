@@ -181,8 +181,7 @@ def test_rt_run_delete_001_roundtrip_preserves_delete(world):
         assert note_id not in world.mock_anki.notes
 
         exp = world.sync_export(db)
-        assert exp.summary.deleted >= 1
-        assert exp.summary.errors == 0
+        assert_summary(exp.summary, deleted=0, errors=0)
         assert not world.deck_path("RoundTripDelete").exists()
 
 

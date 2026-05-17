@@ -235,6 +235,27 @@ def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
     assert result.protected_note_groups == []
 
 
+def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_delete(
+    world,
+    caplog,
+):
+    """EXP-RUN-DELETE-004."""
+    orphan_file = world.write_qa_deck("EmptyOrphanDeck", [])
+    assert orphan_file.exists()
+
+    with world.db_session() as db:
+        with caplog.at_level(logging.DEBUG, logger="ankiops.export_notes"):
+            result = world.sync_export(db)
+
+    assert not orphan_file.exists()
+    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
+    assert result.protected_note_groups == []
+    assert (
+        "Removed empty orphan markdown deck file: EmptyOrphanDeck.md"
+        in caplog.messages
+    )
+
+
 def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(world):
     """EXP-RUN-PROTECT-001."""
     keep_key = "exp-protect-active-keep"
