@@ -87,9 +87,9 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     assert plan.summary.notes_seen == 2
     assert plan.summary.eligible == 2
     assert plan.requests_estimate == 2
-    assert plan.output_tokens_cap == 4096
+    assert plan.output_tokens_cap is None
     assert plan.input_tokens_estimate > 0
-    assert plan.format_cost_estimate().startswith("$")
+    assert plan.format_cost_estimate() == "n/a (max_output_tokens unset)"
     assert "<system>\nYou are a strict editor.\n</system>" in plan.format_full_prompt()
 
     surface_by_type = {surface.note_type: surface for surface in plan.field_surface}

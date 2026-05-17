@@ -408,16 +408,19 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
     max_output_tokens = defaults.max_output_tokens
     if "max_output_tokens" in value:
         raw_max_output_tokens = value.get("max_output_tokens")
-        if isinstance(raw_max_output_tokens, bool) or not isinstance(
+        if raw_max_output_tokens is None:
+            max_output_tokens = None
+        elif isinstance(raw_max_output_tokens, bool) or not isinstance(
             raw_max_output_tokens,
             int,
         ):
             raise LlmConfigError(
-                f"{path}: 'request.max_output_tokens' must be an integer"
+                f"{path}: 'request.max_output_tokens' must be an integer or null"
             )
-        if raw_max_output_tokens < 1:
+        elif raw_max_output_tokens < 1:
             raise LlmConfigError(f"{path}: 'request.max_output_tokens' must be >= 1")
-        max_output_tokens = raw_max_output_tokens
+        else:
+            max_output_tokens = raw_max_output_tokens
 
     reasoning = defaults.reasoning
     if "reasoning" in value:

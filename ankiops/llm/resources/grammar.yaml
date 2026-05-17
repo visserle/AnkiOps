@@ -9,9 +9,9 @@ fields:
   default_access: editable
   hidden:
     "*": ["AI Notes"]
+    "AnkiOpsImageOcclusion": ["*"]
   read_only:
     "AnkiOpsChoice": ["Answer"]
 
 request:
   reasoning: low
-  temperature: 0.25

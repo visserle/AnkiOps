@@ -8,6 +8,8 @@ fields:
   default_access: read_only
   editable:
     "*": ["AI Notes"]
+  hidden:
+    "AnkiOpsImageOcclusion": ["*"]
 
 request:
   reasoning: high

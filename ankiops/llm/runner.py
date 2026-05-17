@@ -836,27 +836,20 @@ async def _call_openai(
         payloads=[candidate.payload],
     )
     instructions, user_input = _build_request_content(task=task, candidate=candidate)
-    request_json = {
-        "model": task.model.model_id,
-        "instructions": instructions,
-        "input": user_input,
-        "max_output_tokens": task.request.max_output_tokens,
-        "text_format": response_model.__name__,
-    }
     request_kwargs: dict[str, Any] = {
         "model": task.model.model_id,
         "instructions": instructions,
         "input": user_input,
-        "max_output_tokens": task.request.max_output_tokens,
         "text_format": response_model,
     }
+    if task.request.max_output_tokens is not None:
+        request_kwargs["max_output_tokens"] = task.request.max_output_tokens
     if task.request.temperature is not None:
         request_kwargs["temperature"] = task.request.temperature
-        request_json["temperature"] = task.request.temperature
     if task.request.reasoning is not None:
-        reasoning_param = {"effort": task.request.reasoning}
-        request_kwargs["reasoning"] = reasoning_param
-        request_json["reasoning"] = reasoning_param
+        request_kwargs["reasoning"] = {"effort": task.request.reasoning}
+    request_json = dict(request_kwargs)
+    request_json["text_format"] = response_model.__name__
     started_at = time.monotonic()
     try:
         response: ParsedResponse[object] = await client.responses.parse(
@@ -1155,7 +1148,11 @@ def _build_task_plan_result(
         ),
         requests_estimate=len(eligible_items),
         input_tokens_estimate=input_tokens_estimate,
-        output_tokens_cap=len(eligible_items) * task.request.max_output_tokens,
+        output_tokens_cap=(
+            None
+            if task.request.max_output_tokens is None
+            else len(eligible_items) * task.request.max_output_tokens
+        ),
     )
 
 
@@ -1243,7 +1240,11 @@ def _format_serializer_scope(task: TaskConfig) -> str:
 
 
 def _format_request_defaults(request: TaskRequestOptions) -> str:
-    parts = [f"max_output_tokens={request.max_output_tokens}"]
+    parts = [
+        "max_output_tokens=unset"
+        if request.max_output_tokens is None
+        else f"max_output_tokens={request.max_output_tokens}"
+    ]
     if request.temperature is not None:
         parts.append(f"temperature={request.temperature:g}")
     if request.reasoning is not None:

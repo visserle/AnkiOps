@@ -84,6 +84,16 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
         (
             """
             model: test
+            system_prompt: system
+            user_prompt: user
+            request:
+              max_output_tokens: false
+            """,
+            "max_output_tokens' must be an integer or null",
+        ),
+        (
+            """
+            model: test
             system_prompt: !file ../outside.md
             user_prompt: user
             """,
@@ -118,3 +128,26 @@ def test_load_llm_task_catalog_reports_invalid_task_config(
 
     assert not catalog.tasks_by_name
     assert expected_error in catalog.errors[str(llm_collection / "llm/grammar.yaml")]
+
+
+def test_load_llm_task_catalog_defaults_to_unset_max_output_tokens(
+    llm_collection,
+    write_file,
+    llm_qa_config,
+):
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        """,
+    )
+
+    catalog = load_llm_task_catalog(
+        llm_collection,
+        note_type_configs=[llm_qa_config],
+    )
+
+    assert not catalog.errors
+    assert catalog.tasks_by_name["grammar"].request.max_output_tokens is None
