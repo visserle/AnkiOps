@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from urllib.parse import unquote
 
+from rich.markup import escape as rich_escape
+
 from ankiops.anki import AnkiAdapter
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.db import SQLiteDbAdapter
@@ -201,7 +203,9 @@ def hash_and_update_references(
 
         except Exception as error:
             logger.warning(
-                f"Failed to hash media file {clickable_path(file_path)}: {error}"
+                f"Failed to hash media file {clickable_path(file_path)}: "
+                f"{rich_escape(str(error))}",
+                extra={"markup": True},
             )
             result.errors.append(str(error))
 
@@ -325,7 +329,10 @@ def sync_media_to_anki(
             anki_port.push_media(file_path, name)
             result.add_change(Change(ChangeType.SYNC, name, name))
             push_state_updates.append((name, digest))
-            logger.debug(f"  Synced {clickable_path(file_path)}")
+            logger.debug(
+                f"  Synced {clickable_path(file_path)}",
+                extra={"markup": True},
+            )
         elif not name.startswith("_"):
             try:
                 # Store the path before unlinking it so clickable_path can see it exists
@@ -333,7 +340,10 @@ def sync_media_to_anki(
                 file_path.unlink()
                 removed_names.append(name)
                 result.add_change(Change(ChangeType.DELETE, name, name))
-                logger.debug(f"  Deleted orphan {clickable_path(removed_file_path)}")
+                logger.debug(
+                    f"  Deleted orphan {clickable_path(removed_file_path)}",
+                    extra={"markup": True},
+                )
             except Exception as error:
                 result.errors.append(str(error))
 
@@ -368,7 +378,10 @@ def sync_media_from_anki(
             success = anki_port.pull_media(name, target)
             if success:
                 result.add_change(Change(ChangeType.SYNC, name, name))
-                logger.debug(f"  Pulled {clickable_path(target)} from Anki")
+                logger.debug(
+                    f"  Pulled {clickable_path(target)} from Anki",
+                    extra={"markup": True},
+                )
             else:
                 result.missing += 1
                 logger.warning(f"Media {name} missing in Anki")

@@ -243,13 +243,14 @@ def deserialize(
                 f"  Created {clickable_path(output_path)} ({written_notes} notes)"
             )
             if quiet:
-                logger.debug(created_message)
+                logger.debug(created_message, extra={"markup": True})
             else:
-                logger.info(created_message)
+                logger.info(created_message, extra={"markup": True})
         else:
             logger.warning(
                 f"Skipped {clickable_path(output_path)} "
-                "(already exists, use --overwrite to replace)"
+                "(already exists, use --overwrite to replace)",
+                extra={"markup": True},
             )
 
         total_decks += 1

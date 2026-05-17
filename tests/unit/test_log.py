@@ -13,7 +13,7 @@ def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):
     rendered = clickable_path(file_path)
     file_uri = file_path.resolve().as_uri()
 
-    assert rendered == f"[link={file_uri}]FILE {file_path.resolve()}[/link]"
+    assert rendered == f"[link={file_uri}]{file_path.resolve()}[/link]"
     assert "%20" in file_uri
     assert "%23" in file_uri
 
@@ -25,16 +25,8 @@ def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
     rendered = clickable_path(file_path)
 
     assert rendered == (
-        f"[link={file_path.resolve().as_uri()}]FILE {file_path.resolve()}[/link]"
+        f"[link={file_path.resolve().as_uri()}]{file_path.resolve()}[/link]"
     )
-
-
-def test_clickable_path_escapes_display_text(tmp_path):
-    file_path = tmp_path / "Deck.md"
-
-    rendered = clickable_path(file_path, display_name="[red]")
-
-    assert rendered == f"[link={file_path.resolve().as_uri()}]\\[red][/link]"
 
 
 def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
@@ -70,3 +62,18 @@ def test_configure_logging_compact_uses_rich_level_column(monkeypatch):
     assert "INFO" in rendered
     assert "WARNING" in rendered
     assert "WARNING:" not in rendered
+
+
+def test_configure_logging_requires_per_record_markup_opt_in(monkeypatch):
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    configure_logging(stream_level=logging.INFO)
+
+    logging.info("[bold]literal[/bold]")
+    logging.info("[bold]rendered[/bold]", extra={"markup": True})
+
+    rendered = stream.getvalue()
+    assert "[bold]literal[/bold]" in rendered
+    assert "rendered" in rendered
+    assert "[bold]rendered[/bold]" not in rendered

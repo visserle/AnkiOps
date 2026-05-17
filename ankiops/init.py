@@ -170,13 +170,19 @@ def create_tutorial(collection_dir: Path) -> Path:
         # Python 3.9+ style
         ref = resources.files("ankiops.tutorial").joinpath("AnkiOps Tutorial.md")
         tutorial_dst.write_text(ref.read_text(encoding="utf-8"), encoding="utf-8")
-        logger.info(f"Tutorial file created: {clickable_path(tutorial_dst)}")
+        logger.info(
+            f"Tutorial file created: {clickable_path(tutorial_dst)}",
+            extra={"markup": True},
+        )
 
         # Copy the image
         img_ref = resources.files("ankiops.tutorial").joinpath("sync_arrows.png")
         img_dst = collection_dir / LOCAL_MEDIA_DIR / "sync_arrows.png"
         img_dst.write_bytes(img_ref.read_bytes())
-        logger.info(f"Tutorial image created: {clickable_path(img_dst)}")
+        logger.info(
+            f"Tutorial image created: {clickable_path(img_dst)}",
+            extra={"markup": True},
+        )
 
     except Exception as error:
         logger.warning(f"Could not create tutorial file: {error}")

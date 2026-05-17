@@ -408,5 +408,8 @@ def run(args) -> None:
         f"Copied note type '{note_type_name}' with {len(fields)} fields "
         f"({identifying_count} identifying)."
     )
-    logger.info(f"Saved to: {clickable_path(destination_dir)}")
-    logger.info(f"Config: {clickable_path(config_path)}")
+    logger.info(
+        f"Saved to: {clickable_path(destination_dir)}",
+        extra={"markup": True},
+    )
+    logger.info(f"Config: {clickable_path(config_path)}", extra={"markup": True})

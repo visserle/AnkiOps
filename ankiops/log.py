@@ -22,23 +22,21 @@ DEFAULT_QUIET_LOGGERS = (
 DEFAULT_TRACEBACK_SUPPRESS: tuple[str | ModuleType, ...] = (argparse,)
 
 
-def clickable_path(file_path: Path | str, display_name: str | None = None) -> str:
+def clickable_path(file_path: Path | str) -> str:
     """Create Rich markup for a clickable file path.
 
     Args:
         file_path: Path object or string to make clickable
-        display_name: Optional display text (defaults to filename only)
 
     Returns:
         Rich markup for a terminal hyperlink
     """
-    path = Path(file_path).expanduser()
-    absolute_path = path.resolve(strict=False)
-    text = display_name if display_name is not None else f"FILE {absolute_path}"
+    path = Path(file_path).expanduser().resolve(strict=False)
+    text = path.name if path.name else str(path)
 
     # Build an RFC-compliant file URI so spaces/special chars are encoded
     # (e.g. " " -> %20, "#" -> %23).
-    file_uri = absolute_path.as_uri()
+    file_uri = path.as_uri()
 
     return f"[link={file_uri}]{rich_escape(text)}[/link]"
 
@@ -109,7 +107,7 @@ def configure_logging(
             "enable_link_path": False,
             "rich_tracebacks": verbose,
             "tracebacks_suppress": suppress_targets,
-            "markup": True,
+            "markup": False,
             "highlighter": NullHighlighter(),
             "log_time_format": "%H:%M:%S",
             "formatter": "stream_verbose" if verbose else "stream_compact",

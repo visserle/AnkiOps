@@ -3,6 +3,8 @@ import logging
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from rich.markup import escape as rich_escape
+
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
 from ankiops.config import NOTE_TYPES_DIR, get_collection_dir, require_collection_dir
@@ -51,12 +53,15 @@ def _log_import_errors(import_summary: CollectionResult) -> None:
             logger.error("Import errors:")
             has_errors = True
 
-        source = result.name or "unknown deck"
+        source = rich_escape(result.name or "unknown deck")
         if result.file_path:
             source = f"{source} ({clickable_path(result.file_path)})"
 
         for error in result.errors:
-            logger.error(f"  {source}: {error}")
+            logger.error(
+                f"  {source}: {rich_escape(str(error))}",
+                extra={"markup": True},
+            )
 
 
 def run_init(args):
@@ -70,7 +75,8 @@ def run_init(args):
         create_tutorial(collection_dir)
 
     logger.info(
-        f"Initialized AnkiOps collection in {collection_dir} (profile: {profile})"
+        f"Initialized AnkiOps collection in {collection_dir} (profile: {profile}). "
+        f"For the Anki add-on, set ankiops_dir to: {collection_dir}"
     )
 
 
@@ -109,7 +115,10 @@ def run_am(args):
         deck_summary = res.summary
         deck_fmt = deck_summary.format()
         if deck_fmt != "no changes" and res.file_path:
-            logger.info(f"  {clickable_path(res.file_path)}  {deck_fmt}")
+            logger.info(
+                f"  {clickable_path(res.file_path)}  {deck_fmt}",
+                extra={"markup": True},
+            )
 
     protected = export_summary.protected_note_groups
     if protected:
