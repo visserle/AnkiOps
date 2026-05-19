@@ -9,7 +9,7 @@ import shlex
 import shutil
 import sys
 import textwrap
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ from ankiops.config import (
 from ankiops.fs import FileSystemAdapter
 
 from .config_loader import load_llm_task_catalog
+from .llm_db import LlmJobRequestNoteRef
 from .model_registry import MODEL_REGISTRY_FILE_NAME
 from .runner import list_jobs as list_llm_jobs
 from .runner import plan_task, run_task, show_job
@@ -227,9 +228,7 @@ def _show_job(
                 item.deck_name,
                 item.note_type or "unknown",
                 item.item_status.value,
-                str(item.attempts),
-                f"{_format_count(item.input_tokens)}/{_format_count(item.output_tokens)}",
-                f"{item.latency_ms / 1000:.2f}s",
+                str(item.request_count),
                 _format_field_list(item.changed_fields),
             ]
         )
@@ -241,9 +240,7 @@ def _show_job(
             "Deck",
             "Type",
             "Final",
-            "Attempts",
-            "Tokens",
-            "Latency",
+            "Requests",
             "Changed",
         ],
         item_rows,
@@ -251,6 +248,30 @@ def _show_job(
     for item in detail.items:
         if item.error_message:
             logger.error("  #%d error=%s", item.ordinal, item.error_message)
+
+    logger.info("")
+    logger.info("Requests:")
+    if not detail.requests:
+        logger.info("  none")
+        return
+
+    request_rows: list[list[str]] = []
+    for request in detail.requests:
+        request_rows.append(
+            [
+                str(request.request_id),
+                request.outcome,
+                f"{_format_count(request.input_tokens)}/{_format_count(request.output_tokens)}",
+                f"{request.latency_ms / 1000:.2f}s",
+                _format_request_notes(request.notes),
+                request.error_message or "-",
+            ]
+        )
+
+    _log_table(
+        ["Request", "Outcome", "Tokens", "Latency", "Notes", "Error"],
+        request_rows,
+    )
 
 
 def _show_status(
@@ -470,6 +491,11 @@ def _usage_error(message: str) -> None:
 
 def _format_field_list(fields: list[str]) -> str:
     return ", ".join(fields) if fields else "-"
+
+
+def _format_request_notes(notes: Iterable[LlmJobRequestNoteRef]) -> str:
+    formatted = [f"#{note.ordinal} {note.note_key or 'unknown'}" for note in notes]
+    return ", ".join(formatted) if formatted else "-"
 
 
 def _format_count(value: int) -> str:

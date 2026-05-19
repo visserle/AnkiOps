@@ -44,10 +44,25 @@ class LlmJobItemDetail:
     item_status: LlmItemStatus
     error_message: str | None
     changed_fields: list[str]
-    attempts: int
+    request_count: int
+
+
+@dataclass(frozen=True)
+class LlmJobRequestNoteRef:
+    ordinal: int
+    note_key: str | None
+
+
+@dataclass(frozen=True)
+class LlmJobRequestDetail:
+    request_id: int
+    outcome: str
+    error_message: str | None
     input_tokens: int
     output_tokens: int
     latency_ms: int
+    created_at: str
+    notes: tuple[LlmJobRequestNoteRef, ...]
 
 
 @dataclass(frozen=True)
@@ -64,6 +79,7 @@ class LlmJobDetail:
     fatal_error: str | None
     summary: TaskRunSummary
     items: list[LlmJobItemDetail]
+    requests: list[LlmJobRequestDetail]
 
 
 @dataclass(frozen=True)
@@ -446,13 +462,9 @@ class LlmDb:
             f"""
             SELECT i.ordinal, i.note_key, i.deck_name, i.note_type, i.item_status,
                    i.error_message, i.changed_fields_json,
-                   COUNT(r.id) attempts,
-                   COALESCE(SUM(r.input_tokens), 0) input_tokens,
-                   COALESCE(SUM(r.output_tokens), 0) output_tokens,
-                   COALESCE(SUM(r.latency_ms), 0) latency_ms
+                   COUNT(ri.request_id) request_count
             FROM {_ITEM_TABLE} i
             LEFT JOIN {_REQUEST_ITEM_TABLE} ri ON ri.job_item_id = i.id
-            LEFT JOIN {_REQUEST_TABLE} r ON r.id = ri.request_id
             WHERE i.job_id = ?
             GROUP BY i.id
             ORDER BY i.ordinal ASC
@@ -471,12 +483,55 @@ class LlmDb:
                     str(item["error_message"]) if item["error_message"] else None
                 ),
                 changed_fields=_parse_json_list(item["changed_fields_json"]),
-                attempts=int(item["attempts"] or 0),
-                input_tokens=int(item["input_tokens"] or 0),
-                output_tokens=int(item["output_tokens"] or 0),
-                latency_ms=int(item["latency_ms"] or 0),
+                request_count=int(item["request_count"] or 0),
             )
             for item in item_rows
+        ]
+
+        request_rows = self._conn.execute(
+            f"""
+            SELECT r.id request_id, r.outcome, r.error_message, r.input_tokens,
+                   r.output_tokens, r.latency_ms, r.created_at,
+                   i.ordinal, i.note_key
+            FROM {_REQUEST_TABLE} r
+            LEFT JOIN {_REQUEST_ITEM_TABLE} ri ON ri.request_id = r.id
+            LEFT JOIN {_ITEM_TABLE} i ON i.id = ri.job_item_id
+            WHERE r.job_id = ?
+            ORDER BY r.id ASC, i.ordinal ASC
+            """,
+            (job_id,),
+        ).fetchall()
+        request_metadata: dict[int, sqlite3.Row] = {}
+        request_notes: dict[int, list[LlmJobRequestNoteRef]] = {}
+        for request in request_rows:
+            request_id = int(request["request_id"])
+            if request_id not in request_metadata:
+                request_metadata[request_id] = request
+                request_notes[request_id] = []
+            if request["ordinal"] is not None:
+                request_notes[request_id].append(
+                    LlmJobRequestNoteRef(
+                        ordinal=int(request["ordinal"]),
+                        note_key=(
+                            str(request["note_key"]) if request["note_key"] else None
+                        ),
+                    )
+                )
+
+        requests = [
+            LlmJobRequestDetail(
+                request_id=request_id,
+                outcome=str(request["outcome"]),
+                error_message=(
+                    str(request["error_message"]) if request["error_message"] else None
+                ),
+                input_tokens=int(request["input_tokens"] or 0),
+                output_tokens=int(request["output_tokens"] or 0),
+                latency_ms=int(request["latency_ms"] or 0),
+                created_at=str(request["created_at"]),
+                notes=tuple(request_notes[request_id]),
+            )
+            for request_id, request in request_metadata.items()
         ]
 
         return LlmJobDetail(
@@ -492,6 +547,7 @@ class LlmDb:
             fatal_error=(str(row["fatal_error"]) if row["fatal_error"] else None),
             summary=aggregate.summary,
             items=items,
+            requests=requests,
         )
 
     def _create_schema(self) -> None:
@@ -599,9 +655,7 @@ class LlmDb:
         required_request_item_columns = {"request_id", "job_item_id"}
         request_item_columns = {
             str(row["name"])
-            for row in self._conn.execute(
-                f"PRAGMA table_info({_REQUEST_ITEM_TABLE})"
-            )
+            for row in self._conn.execute(f"PRAGMA table_info({_REQUEST_ITEM_TABLE})")
         }
         if (
             required_request_columns - request_columns
