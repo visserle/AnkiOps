@@ -11,3 +11,6 @@ fields:
     "*": ["AI Notes"]
   read_only:
     "AnkiOpsChoice": ["Answer"]
+
+request:
+  notes_per_request: 4

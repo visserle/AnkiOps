@@ -26,7 +26,7 @@ def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
         db.close()
 
 
-def test_write_tx_rolls_back_attempt(tmp_path):
+def test_write_tx_rolls_back_request(tmp_path):
     db = LlmDb.open(tmp_path)
     try:
         job_id = _start_job(db)
@@ -42,8 +42,9 @@ def test_write_tx_rolls_back_attempt(tmp_path):
 
         with pytest.raises(RuntimeError, match="boom"):
             with db.write_tx():
-                db.insert_attempt(
-                    item_id=item_id,
+                db.insert_request(
+                    job_id=job_id,
+                    item_ids=[item_id],
                     outcome="provider_error",
                     request_json={"model": "gpt-test"},
                     parsed_response_json=None,
@@ -55,9 +56,14 @@ def test_write_tx_rolls_back_attempt(tmp_path):
                 )
                 raise RuntimeError("boom")
 
-        row = db._conn.execute("SELECT COUNT(*) AS total FROM llm_attempt").fetchone()
+        row = db._conn.execute("SELECT COUNT(*) AS total FROM llm_request").fetchone()
+        link_row = db._conn.execute(
+            "SELECT COUNT(*) AS total FROM llm_request_item"
+        ).fetchone()
         assert row is not None
+        assert link_row is not None
         assert int(row["total"]) == 0
+        assert int(link_row["total"]) == 0
     finally:
         db.close()
 

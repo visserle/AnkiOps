@@ -12,4 +12,5 @@ fields:
     "AnkiOpsImageOcclusion": ["*"]
 
 request:
+  notes_per_request: 4
   reasoning: high

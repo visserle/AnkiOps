@@ -18,6 +18,7 @@ from ankiops.llm.types import (
     LlmItemStatus,
     NotePayload,
     TaskConfig,
+    TaskRequestOptions,
 )
 
 
@@ -68,7 +69,12 @@ def _fatal_error() -> OpenAIResult:
     )
 
 
-def _context(llm_qa_config, *, concurrency: int = 2) -> MaterializedTaskContext:
+def _context(
+    llm_qa_config,
+    *,
+    notes_per_request: int = 2,
+    concurrency: int = 2,
+) -> MaterializedTaskContext:
     task = TaskConfig(
         name="grammar",
         model=ModelSpec(
@@ -80,6 +86,7 @@ def _context(llm_qa_config, *, concurrency: int = 2) -> MaterializedTaskContext:
         ),
         system_prompt="system",
         user_prompt="user",
+        request=TaskRequestOptions(notes_per_request=notes_per_request),
     )
     notes = [
         {
@@ -140,14 +147,16 @@ def test_executor_persists_successful_updates(
     context = _context(llm_qa_config)
     persisted = {}
 
-    async def fake_call_openai(*, candidate, **_kwargs):
-        if candidate.payload.note_key == "nk-1":
-            return _success(
-                _parsed_response(("nk-1", "Question", "Fixed question")),
-                input_tokens=11,
-                output_tokens=5,
-            )
-        return _success(_parsed_response(), input_tokens=7, output_tokens=3)
+    async def fake_call_openai(*, batch, **_kwargs):
+        assert [candidate.payload.note_key for candidate in batch.candidates] == [
+            "nk-1",
+            "nk-2",
+        ]
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
 
     def fake_deserialize(data, **_kwargs):
         persisted["data"] = data
@@ -169,9 +178,9 @@ def test_executor_persists_successful_updates(
     assert result.persisted
     assert result.summary.updated == 1
     assert result.summary.unchanged == 1
-    assert result.summary.requests == 2
-    assert result.summary.input_tokens == 18
-    assert result.summary.output_tokens == 8
+    assert result.summary.requests == 1
+    assert result.summary.input_tokens == 12
+    assert result.summary.output_tokens == 6
     assert persisted["data"]["decks"][0]["notes"][0]["fields"]["Question"] == (
         "Fixed question"
     )
@@ -182,7 +191,7 @@ def test_executor_cancels_queued_items_after_fatal_error(
     monkeypatch,
     llm_qa_config,
 ):
-    context = _context(llm_qa_config, concurrency=1)
+    context = _context(llm_qa_config, notes_per_request=1, concurrency=1)
 
     async def fake_call_openai(**_kwargs):
         return _fatal_error()

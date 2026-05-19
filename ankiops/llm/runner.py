@@ -76,6 +76,38 @@ class OpenAIResult:
     fatal: bool = False
 
 
+@dataclass(frozen=True)
+class EligibleBatch:
+    note_type: str
+    note_type_config: NoteTypeConfig
+    candidates: list[EligibleCandidate]
+
+    @property
+    def item_ids(self) -> list[int]:
+        return [candidate.item_id for candidate in self.candidates]
+
+    @property
+    def note_count(self) -> int:
+        return len(self.candidates)
+
+    @property
+    def payloads(self) -> list[NotePayload]:
+        return [candidate.payload for candidate in self.candidates]
+
+
+@dataclass(frozen=True)
+class _BatchProcessResult:
+    statuses: tuple[LlmItemStatus, ...]
+
+
+@dataclass(frozen=True)
+class _CandidateApplyResult:
+    candidate: EligibleCandidate
+    status: LlmItemStatus
+    changed_fields: list[str]
+    error_message: str | None = None
+
+
 @dataclass
 class _ExecutionProgressState:
     job_id: int
@@ -183,6 +215,7 @@ class LlmTaskExecutor:
                 try:
                     await self._execute_candidates(
                         db=db,
+                        job_id=job_id,
                         task=task,
                         candidates=candidates,
                         progress_state=progress_state,
@@ -231,6 +264,7 @@ class LlmTaskExecutor:
         self,
         *,
         db: LlmDb,
+        job_id: int,
         task: TaskConfig,
         candidates: list[EligibleCandidate],
         progress_state: _ExecutionProgressState,
@@ -243,40 +277,56 @@ class LlmTaskExecutor:
             max_retries=0,
         )
         try:
-            in_flight_limit = min(max(task.model.concurrency, 1), len(candidates))
+            batches = _build_candidate_batches(
+                candidates,
+                notes_per_request=task.request.notes_per_request,
+            )
+            in_flight_limit = min(max(task.model.concurrency, 1), len(batches))
             next_index = 0
-            in_flight: set[asyncio.Task[LlmItemStatus]] = set()
+            in_flight: dict[asyncio.Task[_BatchProcessResult], EligibleBatch] = {}
 
-            def start(candidate: EligibleCandidate) -> asyncio.Task[LlmItemStatus]:
-                return asyncio.create_task(
-                    self._process_candidate(
+            def in_flight_notes() -> int:
+                return sum(batch.note_count for batch in in_flight.values())
+
+            def start(batch: EligibleBatch) -> None:
+                task_handle = asyncio.create_task(
+                    self._process_batch(
                         db=db,
+                        job_id=job_id,
                         task=task,
                         client=client,
-                        candidate=candidate,
+                        batch=batch,
                     )
                 )
+                in_flight[task_handle] = batch
 
             while next_index < in_flight_limit:
-                in_flight.add(start(candidates[next_index]))
+                start(batches[next_index])
                 next_index += 1
 
             first_fatal: RuntimeError | None = None
             while in_flight:
-                done, pending = await asyncio.wait(
-                    in_flight,
+                done, _pending = await asyncio.wait(
+                    set(in_flight),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                in_flight = set(pending)
                 for completed in done:
+                    batch = in_flight.pop(completed)
                     try:
-                        status = await completed
-                        progress_state.record_status(status)
+                        result = await completed
+                        for status in result.statuses:
+                            progress_state.record_status(status)
                     except RuntimeError as error:
-                        progress_state.record_status(LlmItemStatus.FATAL_ERROR)
+                        progress_state.record_status(
+                            LlmItemStatus.FATAL_ERROR,
+                            count=batch.note_count,
+                        )
                         if first_fatal is None:
                             first_fatal = error
-                    self._emit_progress(progress_state, in_flight=len(in_flight))
+                    self._emit_progress(
+                        progress_state,
+                        in_flight=in_flight_notes(),
+                    )
 
                 if first_fatal is not None:
                     for pending_task in in_flight:
@@ -284,24 +334,25 @@ class LlmTaskExecutor:
                     await asyncio.gather(*in_flight, return_exceptions=True)
                     raise first_fatal
 
-                while next_index < len(candidates) and len(in_flight) < in_flight_limit:
-                    in_flight.add(start(candidates[next_index]))
+                while next_index < len(batches) and len(in_flight) < in_flight_limit:
+                    start(batches[next_index])
                     next_index += 1
         finally:
             await client.close()
 
-    async def _process_candidate(
+    async def _process_batch(
         self,
         *,
         db: LlmDb,
+        job_id: int,
         task: TaskConfig,
         client: AsyncOpenAI,
-        candidate: EligibleCandidate,
-    ) -> LlmItemStatus:
+        batch: EligibleBatch,
+    ) -> _BatchProcessResult:
         result = await _call_openai(
             client=client,
             task=task,
-            candidate=candidate,
+            batch=batch,
         )
         if result.parsed_response is None:
             status = (
@@ -310,8 +361,9 @@ class LlmTaskExecutor:
                 else LlmItemStatus.PROVIDER_ERROR
             )
             with db.write_tx():
-                db.insert_attempt(
-                    item_id=candidate.item_id,
+                db.insert_request(
+                    job_id=job_id,
+                    item_ids=batch.item_ids,
                     outcome=result.outcome,
                     request_json=result.request_json,
                     parsed_response_json=result.parsed_response_json,
@@ -321,26 +373,32 @@ class LlmTaskExecutor:
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
                 )
-                db.update_job_item_status(
-                    item_id=candidate.item_id,
-                    item_status=status,
-                    error_message=result.error_message,
-                )
+                for candidate in batch.candidates:
+                    db.update_job_item_status(
+                        item_id=candidate.item_id,
+                        item_status=status,
+                        error_message=result.error_message,
+                    )
             if result.fatal:
                 raise RuntimeError(result.error_message or "Fatal OpenAI error")
-            _log_note_error(candidate, result.error_message or "OpenAI request failed")
-            return status
+            for candidate in batch.candidates:
+                _log_note_error(
+                    candidate,
+                    result.error_message or "OpenAI request failed",
+                )
+            return _BatchProcessResult(statuses=tuple(status for _ in batch.candidates))
 
         try:
-            changed_fields = _apply_parsed_response(
+            apply_results = _apply_batch_parsed_response(
                 parsed_response=result.parsed_response,
-                candidate=candidate,
+                batch=batch,
             )
         except ValueError as error:
             message = str(error)
             with db.write_tx():
-                db.insert_attempt(
-                    item_id=candidate.item_id,
+                db.insert_request(
+                    job_id=job_id,
+                    item_ids=batch.item_ids,
                     outcome="validation_error",
                     request_json=result.request_json,
                     parsed_response_json=result.parsed_response_json,
@@ -350,45 +408,59 @@ class LlmTaskExecutor:
                     input_tokens=result.input_tokens,
                     output_tokens=result.output_tokens,
                 )
-                db.update_job_item_status(
-                    item_id=candidate.item_id,
-                    item_status=LlmItemStatus.NOTE_ERROR,
-                    error_message=message,
-                )
-            _log_note_error(candidate, message)
-            return LlmItemStatus.NOTE_ERROR
+                for candidate in batch.candidates:
+                    db.update_job_item_status(
+                        item_id=candidate.item_id,
+                        item_status=LlmItemStatus.NOTE_ERROR,
+                        error_message=message,
+                    )
+            for candidate in batch.candidates:
+                _log_note_error(candidate, message)
+            return _BatchProcessResult(
+                statuses=tuple(LlmItemStatus.NOTE_ERROR for _ in batch.candidates)
+            )
 
-        status = (
-            LlmItemStatus.SUCCEEDED_UPDATED
-            if changed_fields
-            else LlmItemStatus.SUCCEEDED_UNCHANGED
-        )
+        errors = [
+            f"{item.candidate.payload.note_key}: {item.error_message}"
+            for item in apply_results
+            if item.error_message
+        ]
+        outcome = "validation_error" if errors else "success"
+        request_error = "; ".join(errors) if errors else None
         with db.write_tx():
-            db.insert_attempt(
-                item_id=candidate.item_id,
-                outcome="success",
+            db.insert_request(
+                job_id=job_id,
+                item_ids=batch.item_ids,
+                outcome=outcome,
                 request_json=result.request_json,
                 parsed_response_json=result.parsed_response_json,
                 response_json=result.response_json,
-                error_message=None,
+                error_message=request_error,
                 latency_ms=result.latency_ms,
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
             )
-            db.update_job_item_status(
-                item_id=candidate.item_id,
-                item_status=status,
-                changed_fields=changed_fields,
-            )
-        if changed_fields:
-            logger.debug(
-                "  Updated %s in '%s' (%s): fields=%s",
-                candidate.payload.note_key,
-                candidate.deck_name,
-                candidate.payload.note_type,
-                ",".join(changed_fields),
-            )
-        return status
+            for item in apply_results:
+                db.update_job_item_status(
+                    item_id=item.candidate.item_id,
+                    item_status=item.status,
+                    error_message=item.error_message,
+                    changed_fields=item.changed_fields,
+                )
+        for item in apply_results:
+            if item.error_message is not None:
+                _log_note_error(item.candidate, item.error_message)
+            elif item.changed_fields:
+                logger.debug(
+                    "  Updated %s in '%s' (%s): fields=%s",
+                    item.candidate.payload.note_key,
+                    item.candidate.deck_name,
+                    item.candidate.payload.note_type,
+                    ",".join(item.changed_fields),
+                )
+        return _BatchProcessResult(
+            statuses=tuple(item.status for item in apply_results)
+        )
 
     def _emit_progress(
         self,
@@ -825,25 +897,62 @@ def _record_discovery_item(
     )
 
 
+def _build_candidate_batches(
+    candidates: list[EligibleCandidate],
+    *,
+    notes_per_request: int,
+) -> list[EligibleBatch]:
+    by_note_type: dict[str, list[EligibleCandidate]] = {}
+    for candidate in candidates:
+        by_note_type.setdefault(candidate.payload.note_type, []).append(candidate)
+
+    batches: list[EligibleBatch] = []
+    for note_type, grouped_candidates in by_note_type.items():
+        for start in range(0, len(grouped_candidates), notes_per_request):
+            chunk = grouped_candidates[start : start + notes_per_request]
+            batches.append(
+                EligibleBatch(
+                    note_type=note_type,
+                    note_type_config=chunk[0].note_type_config,
+                    candidates=chunk,
+                )
+            )
+    return batches
+
+
+def _build_payload_batches(
+    payloads: list[NotePayload],
+    *,
+    notes_per_request: int,
+) -> list[list[NotePayload]]:
+    by_note_type: dict[str, list[NotePayload]] = {}
+    for payload in payloads:
+        by_note_type.setdefault(payload.note_type, []).append(payload)
+
+    batches: list[list[NotePayload]] = []
+    for grouped_payloads in by_note_type.values():
+        for start in range(0, len(grouped_payloads), notes_per_request):
+            batches.append(grouped_payloads[start : start + notes_per_request])
+    return batches
+
+
 async def _call_openai(
     *,
     client: AsyncOpenAI,
     task: TaskConfig,
-    candidate: EligibleCandidate,
+    batch: EligibleBatch,
 ) -> OpenAIResult:
     response_model = build_response_model(
-        note_type=candidate.payload.note_type,
-        payloads=[candidate.payload],
+        note_type=batch.note_type,
+        payloads=batch.payloads,
     )
-    instructions, user_input = _build_request_content(task=task, candidate=candidate)
+    instructions, user_input = _build_request_content(task=task, batch=batch)
     request_kwargs: dict[str, Any] = {
         "model": task.model.model_id,
         "instructions": instructions,
         "input": user_input,
         "text_format": response_model,
     }
-    if task.request.max_output_tokens is not None:
-        request_kwargs["max_output_tokens"] = task.request.max_output_tokens
     if task.request.temperature is not None:
         request_kwargs["temperature"] = task.request.temperature
     if task.request.reasoning is not None:
@@ -933,16 +1042,23 @@ async def _call_openai(
 def _build_request_content(
     *,
     task: TaskConfig,
-    candidate: EligibleCandidate,
+    batch: EligibleBatch,
 ) -> tuple[str, str]:
+    notes: list[dict[str, object]] = []
+    for candidate in batch.candidates:
+        note_payload: dict[str, object] = {
+            "note_key": candidate.payload.note_key,
+            "editable_fields": candidate.payload.editable_fields,
+        }
+        if candidate.payload.read_only_fields:
+            note_payload["read_only_fields"] = candidate.payload.read_only_fields
+        notes.append(note_payload)
+
     payload = {
         "user_prompt": task.user_prompt,
-        "note_key": candidate.payload.note_key,
-        "note_type": candidate.payload.note_type,
-        "editable_fields": candidate.payload.editable_fields,
+        "note_type": batch.note_type,
+        "notes": notes,
     }
-    if candidate.payload.read_only_fields:
-        payload["read_only_fields"] = candidate.payload.read_only_fields
     return (
         task.system_prompt.strip(),
         json.dumps(payload, ensure_ascii=False),
@@ -977,13 +1093,85 @@ def _apply_parsed_response(
     candidate: EligibleCandidate,
 ) -> list[str]:
     updates = parsed_updates(parsed_response)
+    unexpected_note_keys = sorted(
+        {note_key for note_key, _field_name, _value in updates}
+        - {candidate.payload.note_key}
+    )
+    if unexpected_note_keys:
+        raise ValueError(
+            "Model returned update for unexpected note_key "
+            f"'{unexpected_note_keys[0]}'"
+        )
+    return _apply_candidate_updates(candidate=candidate, updates=updates)
+
+
+def _apply_batch_parsed_response(
+    *,
+    parsed_response: object,
+    batch: EligibleBatch,
+) -> list[_CandidateApplyResult]:
+    updates = parsed_updates(parsed_response)
+    candidates_by_note_key = {
+        candidate.payload.note_key: candidate for candidate in batch.candidates
+    }
+    unexpected_note_keys = sorted(
+        {
+            note_key
+            for note_key, _field_name, _value in updates
+            if note_key not in candidates_by_note_key
+        }
+    )
+    if unexpected_note_keys:
+        raise ValueError(
+            "Model returned update for unexpected note_key "
+            f"'{unexpected_note_keys[0]}'"
+        )
+
+    updates_by_note_key: dict[str, list[tuple[str, str, str]]] = {
+        note_key: [] for note_key in candidates_by_note_key
+    }
+    for update in updates:
+        updates_by_note_key[update[0]].append(update)
+
+    results: list[_CandidateApplyResult] = []
+    for candidate in batch.candidates:
+        try:
+            changed_fields = _apply_candidate_updates(
+                candidate=candidate,
+                updates=updates_by_note_key[candidate.payload.note_key],
+            )
+        except ValueError as error:
+            results.append(
+                _CandidateApplyResult(
+                    candidate=candidate,
+                    status=LlmItemStatus.NOTE_ERROR,
+                    changed_fields=[],
+                    error_message=str(error),
+                )
+            )
+        else:
+            results.append(
+                _CandidateApplyResult(
+                    candidate=candidate,
+                    status=(
+                        LlmItemStatus.SUCCEEDED_UPDATED
+                        if changed_fields
+                        else LlmItemStatus.SUCCEEDED_UNCHANGED
+                    ),
+                    changed_fields=changed_fields,
+                )
+            )
+    return results
+
+
+def _apply_candidate_updates(
+    *,
+    candidate: EligibleCandidate,
+    updates: list[tuple[str, str, str]],
+) -> list[str]:
     seen_fields: set[str] = set()
     edits: dict[str, str] = {}
-    for note_key, field_name, value in updates:
-        if note_key != candidate.payload.note_key:
-            raise ValueError(
-                f"Model returned update for unexpected note_key '{note_key}'"
-            )
+    for _note_key, field_name, value in updates:
         if field_name in seen_fields:
             raise ValueError(f"Model returned duplicate update for '{field_name}'")
         seen_fields.add(field_name)
@@ -1102,6 +1290,10 @@ def _build_task_plan_result(
     eligible_payloads = [
         item.payload for item in eligible_items if item.payload is not None
     ]
+    payload_batches = _build_payload_batches(
+        eligible_payloads,
+        notes_per_request=task.request.notes_per_request,
+    )
     skipped = sum(
         1
         for item in snapshot.items
@@ -1111,7 +1303,8 @@ def _build_task_plan_result(
         1 for item in snapshot.items if item.item_status is LlmItemStatus.INVALID_NOTE
     )
     input_tokens_estimate = sum(
-        _estimate_note_input_tokens(task, payload) for payload in eligible_payloads
+        _estimate_batch_input_tokens(task, payload_batch)
+        for payload_batch in payload_batches
     )
     summary = TaskRunSummary(
         task_name=task.name,
@@ -1122,7 +1315,7 @@ def _build_task_plan_result(
         eligible=len(eligible_items),
         skipped_no_editable_fields=skipped,
         errors=errors,
-        requests=len(eligible_items),
+        requests=len(payload_batches),
     )
     return TaskPlanResult(
         task_name=task.name,
@@ -1146,13 +1339,8 @@ def _build_task_plan_result(
             note_type_configs=note_type_configs,
             snapshot_items=snapshot.items,
         ),
-        requests_estimate=len(eligible_items),
+        requests_estimate=len(payload_batches),
         input_tokens_estimate=input_tokens_estimate,
-        output_tokens_cap=(
-            None
-            if task.request.max_output_tokens is None
-            else len(eligible_items) * task.request.max_output_tokens
-        ),
     )
 
 
@@ -1202,18 +1390,32 @@ def _build_plan_field_surface(
     return surface
 
 
-def _estimate_note_input_tokens(task: TaskConfig, payload: NotePayload) -> int:
-    parts = [
-        task.system_prompt,
-        task.user_prompt,
-        payload.note_key,
-        payload.note_type,
-    ]
-    for name, value in sorted(payload.editable_fields.items()):
-        parts.extend([name, value])
-    for name, value in sorted(payload.read_only_fields.items()):
-        parts.extend([name, value])
-    return _estimate_tokens("\n".join(parts))
+def _estimate_batch_input_tokens(task: TaskConfig, payloads: list[NotePayload]) -> int:
+    if not payloads:
+        return 0
+    notes: list[dict[str, object]] = []
+    for payload in payloads:
+        note_payload: dict[str, object] = {
+            "note_key": payload.note_key,
+            "editable_fields": payload.editable_fields,
+        }
+        if payload.read_only_fields:
+            note_payload["read_only_fields"] = payload.read_only_fields
+        notes.append(note_payload)
+
+    request_payload = {
+        "user_prompt": task.user_prompt,
+        "note_type": payloads[0].note_type,
+        "notes": notes,
+    }
+    return _estimate_tokens(
+        "\n".join(
+            [
+                task.system_prompt,
+                json.dumps(request_payload, ensure_ascii=False),
+            ]
+        )
+    )
 
 
 def _estimate_tokens(text: str) -> int:
@@ -1240,11 +1442,7 @@ def _format_serializer_scope(task: TaskConfig) -> str:
 
 
 def _format_request_defaults(request: TaskRequestOptions) -> str:
-    parts = [
-        "max_output_tokens=unset"
-        if request.max_output_tokens is None
-        else f"max_output_tokens={request.max_output_tokens}"
-    ]
+    parts = [f"notes_per_request={request.notes_per_request}"]
     if request.temperature is not None:
         parts.append(f"temperature={request.temperature:g}")
     if request.reasoning is not None:

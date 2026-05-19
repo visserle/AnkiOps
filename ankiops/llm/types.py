@@ -71,8 +71,8 @@ class FieldAccessRule:
 
 @dataclass(frozen=True)
 class TaskRequestOptions:
+    notes_per_request: int = 1
     temperature: float | None = None
-    max_output_tokens: int | None = None
     reasoning: str | None = None
 
 
@@ -248,7 +248,6 @@ class TaskPlanResult:
     field_surface: list[PlanFieldSurface]
     requests_estimate: int
     input_tokens_estimate: int
-    output_tokens_cap: int | None
 
     def format_full_prompt(self) -> str:
         return (
@@ -257,11 +256,10 @@ class TaskPlanResult:
         )
 
     def format_cost_estimate(self) -> str:
-        if self.output_tokens_cap is None:
-            return "n/a (max_output_tokens unset)"
         estimate = self.model.estimate_cost(
             input_tokens=self.input_tokens_estimate,
-            output_tokens=self.output_tokens_cap,
+            # we assume input and output tokens are the same for estimation purposes
+            output_tokens=self.input_tokens_estimate,
         )
         if estimate is None:
             return "n/a"

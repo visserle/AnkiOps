@@ -19,7 +19,8 @@ from .types import LlmItemStatus, LlmJobStatus, TaskRunSummary
 _DEFAULT_JOB_LIST_LIMIT = 20
 _JOB_TABLE = "llm_job"
 _ITEM_TABLE = "llm_job_item"
-_ATTEMPT_TABLE = "llm_attempt"
+_REQUEST_TABLE = "llm_request"
+_REQUEST_ITEM_TABLE = "llm_request_item"
 EnumT = TypeVar("EnumT", bound=Enum)
 
 
@@ -202,10 +203,11 @@ class LlmDb:
             (item_status.value, error_message, _as_json(changed_fields or []), item_id),
         )
 
-    def insert_attempt(
+    def insert_request(
         self,
         *,
-        item_id: int,
+        job_id: int,
+        item_ids: list[int],
         outcome: str,
         request_json: dict[str, Any],
         parsed_response_json: dict[str, Any] | None,
@@ -215,17 +217,33 @@ class LlmDb:
         input_tokens: int,
         output_tokens: int,
     ) -> int:
+        if self._tx_depth == 0:
+            with self.write_tx():
+                return self.insert_request(
+                    job_id=job_id,
+                    item_ids=item_ids,
+                    outcome=outcome,
+                    request_json=request_json,
+                    parsed_response_json=parsed_response_json,
+                    response_json=response_json,
+                    error_message=error_message,
+                    latency_ms=latency_ms,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+        if not item_ids:
+            raise ValueError("LLM request must be linked to at least one job item")
         now = _utc_now()
         cursor = self._write(
             f"""
-            INSERT INTO {_ATTEMPT_TABLE} (
-                job_item_id, outcome, request_json,
+            INSERT INTO {_REQUEST_TABLE} (
+                job_id, outcome, request_json,
                 parsed_response_json, response_json, error_message,
                 latency_ms, input_tokens, output_tokens, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                item_id,
+                job_id,
                 outcome,
                 _as_json(request_json),
                 _as_json(parsed_response_json) if parsed_response_json else None,
@@ -237,7 +255,15 @@ class LlmDb:
                 now,
             ),
         )
-        return _lastrowid(cursor, _ATTEMPT_TABLE)
+        request_id = _lastrowid(cursor, _REQUEST_TABLE)
+        self._conn.executemany(
+            f"""
+            INSERT INTO {_REQUEST_ITEM_TABLE} (request_id, job_item_id)
+            VALUES (?, ?)
+            """,
+            [(request_id, item_id) for item_id in item_ids],
+        )
+        return request_id
 
     def mark_unfinished_items_canceled(self, *, job_id: int) -> int:
         cursor = self._write(
@@ -329,19 +355,18 @@ class LlmDb:
         ).fetchone()
         assert item_counts is not None
 
-        attempts = self._conn.execute(
+        requests = self._conn.execute(
             f"""
             SELECT COUNT(*) requests,
                    COALESCE(SUM(input_tokens), 0) input_tokens,
                    COALESCE(SUM(output_tokens), 0) output_tokens,
                    COALESCE(SUM(latency_ms), 0) latency_ms
-            FROM {_ATTEMPT_TABLE} a
-            JOIN {_ITEM_TABLE} i ON i.id = a.job_item_id
-            WHERE i.job_id = ?
+            FROM {_REQUEST_TABLE}
+            WHERE job_id = ?
             """,
             (job_id,),
         ).fetchone()
-        assert attempts is not None
+        assert requests is not None
 
         summary.eligible = int(item_counts["eligible"] or 0)
         summary.updated = int(item_counts["updated"] or 0)
@@ -349,10 +374,10 @@ class LlmDb:
         summary.skipped_no_editable_fields = int(item_counts["skipped"] or 0)
         summary.errors = int(item_counts["errors"] or 0)
         summary.canceled = int(item_counts["canceled"] or 0)
-        summary.requests = int(attempts["requests"] or 0)
-        summary.input_tokens = int(attempts["input_tokens"] or 0)
-        summary.output_tokens = int(attempts["output_tokens"] or 0)
-        summary.provider_latency_ms_total = int(attempts["latency_ms"] or 0)
+        summary.requests = int(requests["requests"] or 0)
+        summary.input_tokens = int(requests["input_tokens"] or 0)
+        summary.output_tokens = int(requests["output_tokens"] or 0)
+        summary.provider_latency_ms_total = int(requests["latency_ms"] or 0)
 
         status = _parse_enum(LlmJobStatus, row["status"])
         persisted = bool(row["persisted"])
@@ -421,12 +446,13 @@ class LlmDb:
             f"""
             SELECT i.ordinal, i.note_key, i.deck_name, i.note_type, i.item_status,
                    i.error_message, i.changed_fields_json,
-                   COUNT(a.id) attempts,
-                   COALESCE(SUM(a.input_tokens), 0) input_tokens,
-                   COALESCE(SUM(a.output_tokens), 0) output_tokens,
-                   COALESCE(SUM(a.latency_ms), 0) latency_ms
+                   COUNT(r.id) attempts,
+                   COALESCE(SUM(r.input_tokens), 0) input_tokens,
+                   COALESCE(SUM(r.output_tokens), 0) output_tokens,
+                   COALESCE(SUM(r.latency_ms), 0) latency_ms
             FROM {_ITEM_TABLE} i
-            LEFT JOIN {_ATTEMPT_TABLE} a ON a.job_item_id = i.id
+            LEFT JOIN {_REQUEST_ITEM_TABLE} ri ON ri.job_item_id = i.id
+            LEFT JOIN {_REQUEST_TABLE} r ON r.id = ri.request_id
             WHERE i.job_id = ?
             GROUP BY i.id
             ORDER BY i.ordinal ASC
@@ -508,9 +534,9 @@ class LlmDb:
                     FOREIGN KEY(job_id) REFERENCES {_JOB_TABLE}(id) ON DELETE CASCADE
                 );
 
-                CREATE TABLE IF NOT EXISTS {_ATTEMPT_TABLE} (
+                CREATE TABLE IF NOT EXISTS {_REQUEST_TABLE} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_item_id INTEGER NOT NULL,
+                    job_id INTEGER NOT NULL,
                     outcome TEXT NOT NULL,
                     request_json TEXT NOT NULL,
                     parsed_response_json TEXT,
@@ -520,6 +546,15 @@ class LlmDb:
                     input_tokens INTEGER NOT NULL,
                     output_tokens INTEGER NOT NULL,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY(job_id) REFERENCES {_JOB_TABLE}(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS {_REQUEST_ITEM_TABLE} (
+                    request_id INTEGER NOT NULL,
+                    job_item_id INTEGER NOT NULL,
+                    PRIMARY KEY(request_id, job_item_id),
+                    FOREIGN KEY(request_id)
+                        REFERENCES {_REQUEST_TABLE}(id) ON DELETE CASCADE,
                     FOREIGN KEY(job_item_id)
                         REFERENCES {_ITEM_TABLE}(id) ON DELETE CASCADE
                 );
@@ -534,15 +569,19 @@ class LlmDb:
                 f"ON {_ITEM_TABLE}(job_id)"
             )
             self._conn.execute(
-                f"CREATE INDEX IF NOT EXISTS idx_llm_attempt_item "
-                f"ON {_ATTEMPT_TABLE}(job_item_id)"
+                f"CREATE INDEX IF NOT EXISTS idx_llm_request_job "
+                f"ON {_REQUEST_TABLE}(job_id)"
+            )
+            self._conn.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_llm_request_item_item "
+                f"ON {_REQUEST_ITEM_TABLE}(job_item_id)"
             )
         self._assert_schema()
 
     def _assert_schema(self) -> None:
-        required_attempt_columns = {
+        required_request_columns = {
             "id",
-            "job_item_id",
+            "job_id",
             "outcome",
             "request_json",
             "parsed_response_json",
@@ -553,11 +592,21 @@ class LlmDb:
             "output_tokens",
             "created_at",
         }
-        attempt_columns = {
+        request_columns = {
             str(row["name"])
-            for row in self._conn.execute(f"PRAGMA table_info({_ATTEMPT_TABLE})")
+            for row in self._conn.execute(f"PRAGMA table_info({_REQUEST_TABLE})")
         }
-        if required_attempt_columns - attempt_columns:
+        required_request_item_columns = {"request_id", "job_item_id"}
+        request_item_columns = {
+            str(row["name"])
+            for row in self._conn.execute(
+                f"PRAGMA table_info({_REQUEST_ITEM_TABLE})"
+            )
+        }
+        if (
+            required_request_columns - request_columns
+            or required_request_item_columns - request_item_columns
+        ):
             raise RuntimeError(
                 "LLM DB schema is from an older AnkiOps build. "
                 f"Delete '{self._db_path}' to reinitialize it."

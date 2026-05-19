@@ -21,6 +21,8 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
           You are a strict editor.
         user_prompt: |
           Fix grammar.
+        request:
+          notes_per_request: 4
         fields:
           default_access: editable
           read_only:
@@ -66,6 +68,16 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
                                 "AI Notes": "private",
                             },
                         },
+                        {
+                            "note_key": "nk-3",
+                            "note_type": "AnkiOpsQA",
+                            "fields": {
+                                "Question": "another broken question",
+                                "Answer": "another answer",
+                                "Source": "article",
+                                "AI Notes": "private",
+                            },
+                        },
                     ],
                 }
             ]
@@ -84,12 +96,16 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     assert plan.task_name == "grammar"
     assert plan.summary.decks_seen == 1
     assert plan.summary.decks_matched == 1
-    assert plan.summary.notes_seen == 2
-    assert plan.summary.eligible == 2
+    assert plan.summary.notes_seen == 3
+    assert plan.summary.eligible == 3
     assert plan.requests_estimate == 2
-    assert plan.output_tokens_cap is None
     assert plan.input_tokens_estimate > 0
-    assert plan.format_cost_estimate() == "n/a (max_output_tokens unset)"
+    expected_cost = plan.model.estimate_cost(
+        input_tokens=plan.input_tokens_estimate,
+        output_tokens=plan.input_tokens_estimate,
+    )
+    assert expected_cost is not None
+    assert plan.format_cost_estimate() == expected_cost.format()
     assert "<system>\nYou are a strict editor.\n</system>" in plan.format_full_prompt()
 
     surface_by_type = {surface.note_type: surface for surface in plan.field_surface}
