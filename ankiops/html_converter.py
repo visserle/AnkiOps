@@ -3,14 +3,12 @@
 import re
 import warnings
 
-import html_to_markdown._html_to_markdown as _htm_native
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-
-# TODO: Bug in html-to-markdown 3.3.2 - update and use public API when fixed.
-# Use native options to match the native converter's enum types.
-ConversionOptions = _htm_native.ConversionOptions
+from html_to_markdown import ConversionOptions, HeadingStyle, HighlightStyle
+from html_to_markdown import convert as convert_html_to_markdown
 
 from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.math_delimiters import normalize_double_escaped_math_delimiters
 
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
@@ -45,7 +43,7 @@ _HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);")
 # unescaped closing delimiter inside, otherwise literals like \[\]\] are
 # misclassified as math and accumulate backslashes across roundtrips.
 _MATH_PATTERN = re.compile(
-    r"(\\\((?:(?!\\\))[\s\S])+?\\\)|\\\[(?:(?!\\\])[\s\S])+?\\\])",
+    r"(\\{1,}\((?:(?!\\{1,}\))[\s\S])+?\\{1,}\)|\\{1,}\[(?:(?!\\{1,}\])[\s\S])+?\\{1,}\])",
     re.DOTALL,
 )
 _ESCAPED_RIGHT_BRACKET_RUN_RE = re.compile(r"(\\{2,}\])")
@@ -58,6 +56,7 @@ def _looks_like_html(text: str) -> bool:
 
 def _escape_special_chars(text: str) -> str:
     """Escape markdown special chars while preserving explicit LaTeX math blocks."""
+    text = normalize_double_escaped_math_delimiters(text)
 
     def _escape_segment(segment: str) -> str:
         preserved_runs: dict[str, str] = {}
@@ -289,35 +288,11 @@ class HTMLToMarkdown:
 
     @staticmethod
     def _build_options() -> ConversionOptions:
-        defaults = ConversionOptions()
-
-        heading_default = getattr(defaults, "heading_style", "atx")
-        if isinstance(heading_default, str):
-            heading_style = "atx"
-        else:
-            heading_enum = type(heading_default)
-            heading_style = getattr(
-                heading_enum, "Atx", getattr(heading_enum, "ATX", heading_default)
-            )
-
-        highlight_default = getattr(defaults, "highlight_style", "double-equal")
-        if isinstance(highlight_default, str):
-            highlight_style = (
-                "double_equal" if "_" in highlight_default else "double-equal"
-            )
-        else:
-            highlight_enum = type(highlight_default)
-            highlight_style = getattr(
-                highlight_enum,
-                "DoubleEqual",
-                getattr(highlight_enum, "DOUBLE_EQUAL", highlight_default),
-            )
-
         return ConversionOptions(
-            heading_style=heading_style,
+            heading_style=HeadingStyle.ATX,
             bullets="-",
             list_indent_width=3,
-            highlight_style=highlight_style,
+            highlight_style=HighlightStyle.DOUBLE_EQUAL,
             autolinks=False,
             extract_metadata=False,
         )
@@ -344,7 +319,7 @@ class HTMLToMarkdown:
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
-            result = _htm_native.convert(html, self._OPTIONS, None)
+            result = convert_html_to_markdown(html, self._OPTIONS, None)
             md = getattr(result, "content", None)
             if md is None and isinstance(result, dict):
                 md = result.get("content")

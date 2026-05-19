@@ -12,6 +12,7 @@ from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
 from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.math_delimiters import normalize_double_escaped_math_delimiters
 
 _IMG_WIDTH_RE = re.compile(r'(<img src="[^"]*" alt="[^"]*")>\{width=(\d+)\}')
 # Rewrite [text](url_with_(parens)) to [text](<url>) so mistune doesn't
@@ -158,6 +159,7 @@ class MarkdownToHTML:
 
         # Normalize NBSP to space
         markdown = markdown.replace("\u00a0", " ")
+        markdown = normalize_double_escaped_math_delimiters(markdown)
 
         # Arrow replacements: Replace before parsing to avoid conflicts
         # with markdown syntax (== is used for highlighting)
