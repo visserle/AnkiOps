@@ -23,8 +23,8 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
         system_prompt: !file prompts/system.md
         user_prompt: !file prompts/user.md
         request:
+          notes_per_request: 3
           temperature: 0.25
-          max_output_tokens: 512
           reasoning: low
         fields:
           default_access: read_only
@@ -50,8 +50,8 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
     )
     assert task.user_prompt_path == (llm_collection / "llm/prompts/user.md").resolve()
     assert task.request == TaskRequestOptions(
+        notes_per_request=3,
         temperature=0.25,
-        max_output_tokens=512,
         reasoning="low",
     )
     assert task.field_access("AnkiOpsQA", "Question") is FieldAccess.READ_ONLY
@@ -77,9 +77,9 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
-              max_output_tokens: 0
+              max_output_tokens: 512
             """,
-            "max_output_tokens' must be >= 1",
+            "unknown request key(s): max_output_tokens",
         ),
         (
             """
@@ -87,9 +87,19 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
-              max_output_tokens: false
+              notes_per_request: 0
             """,
-            "max_output_tokens' must be an integer or null",
+            "request.notes_per_request' must be >= 1",
+        ),
+        (
+            """
+            model: test
+            system_prompt: system
+            user_prompt: user
+            request:
+              notes_per_request: false
+            """,
+            "request.notes_per_request' must be an integer",
         ),
         (
             """
@@ -105,6 +115,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
+              notes_per_request: 1
               reasoning: extreme
             """,
             "request.reasoning' must be one of",
@@ -130,7 +141,7 @@ def test_load_llm_task_catalog_reports_invalid_task_config(
     assert expected_error in catalog.errors[str(llm_collection / "llm/grammar.yaml")]
 
 
-def test_load_llm_task_catalog_defaults_to_unset_max_output_tokens(
+def test_load_llm_task_catalog_requires_notes_per_request(
     llm_collection,
     write_file,
     llm_qa_config,
@@ -149,5 +160,7 @@ def test_load_llm_task_catalog_defaults_to_unset_max_output_tokens(
         note_type_configs=[llm_qa_config],
     )
 
-    assert not catalog.errors
-    assert catalog.tasks_by_name["grammar"].request.max_output_tokens is None
+    assert not catalog.tasks_by_name
+    assert "request.notes_per_request' is required" in catalog.errors[
+        str(llm_collection / "llm/grammar.yaml")
+    ]

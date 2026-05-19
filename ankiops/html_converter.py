@@ -8,7 +8,7 @@ from html_to_markdown import ConversionOptions, HeadingStyle, HighlightStyle
 from html_to_markdown import convert as convert_html_to_markdown
 
 from ankiops.config import LOCAL_MEDIA_DIR
-from ankiops.math_delimiters import normalize_double_escaped_math_delimiters
+from ankiops.math_delimiters import normalize_escaped_math_delimiters
 
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
@@ -56,7 +56,7 @@ def _looks_like_html(text: str) -> bool:
 
 def _escape_special_chars(text: str) -> str:
     """Escape markdown special chars while preserving explicit LaTeX math blocks."""
-    text = normalize_double_escaped_math_delimiters(text)
+    text = normalize_escaped_math_delimiters(text)
 
     def _escape_segment(segment: str) -> str:
         preserved_runs: dict[str, str] = {}

@@ -873,23 +873,33 @@ class TestMathRoundTrips:
         assert "E=mc^2" in back
         assert "famous" in back
 
-    def test_double_escaped_display_math_delimiters_are_canonicalized(
-        self, md_to_html, html_to_md
+    @pytest.mark.parametrize(
+        "markdown",
+        [
+            (
+                r"\[\sigma^2=\frac{1}{N} "
+                r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
+            ),
+            (
+                r"\\[\sigma^2=\frac{1}{N} "
+                r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
+            ),
+            (
+                r"\\[\sigma^2=\frac{1}{N} "
+                r"\sum_{i=1}^N\left(x_i-\mu\right)^2\\]"
+            ),
+        ],
+    )
+    def test_display_math_delimiters_are_canonicalized_without_shortening(
+        self, md_to_html, html_to_md, markdown
     ):
-        md_legacy = (
-            r"\\[\sigma^2=\frac{1}{N} "
-            r"\sum_{i=1}^N\left(x_i-\mu\right)^2\\]"
-        )
-        html = (
-            r"<div>\\[\sigma^2=\frac{1}{N} "
-            r"\sum_{i=1}^N\left(x_i-\mu\right)^2\\]</div>"
-        )
+        html = f"<div>{markdown}</div>"
         expected_math = (
             r"\[\sigma^2=\frac{1}{N} "
             r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
         )
 
-        html_from_legacy_md = md_to_html.convert(md_legacy)
+        html_from_legacy_md = md_to_html.convert(markdown)
         assert "<sup>" not in html_from_legacy_md
         assert expected_math in html_from_legacy_md
 

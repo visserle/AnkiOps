@@ -279,6 +279,30 @@ def test_imp_fresh_create_002_literal_double_underscore_deck_name(world):
         assert "Literal::Deck" not in world.mock_anki.decks
 
 
+def test_imp_fresh_create_003_display_math_is_not_shortened(world):
+    """IMP-FRESH-CREATE-003."""
+    markdown = (
+        r"\\[\sigma^2=\frac{1}{N} "
+        r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
+    )
+    expected = (
+        r"\[\sigma^2=\frac{1}{N} "
+        r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
+    )
+    world.write_qa_deck("MathDeck", [("Math Q", markdown, None)])
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+        note = next(iter(world.mock_anki.notes.values()))
+        value = note["fields"]["Answer"]["value"]
+        assert value == expected
+        assert "<sup>" not in value
+
+
 def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
     """IMP-RUN-RENAME-001."""
     note_key = "imp-run-rename-001"

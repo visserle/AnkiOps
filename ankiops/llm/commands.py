@@ -423,7 +423,10 @@ def _show_plan(
     logger.info("%s", plan.format_full_prompt())
     logger.info("")
     logger.info("Request estimate: %s", _format_count(plan.requests_estimate))
-    logger.info("Cost estimate (worst-case): %s", plan.format_cost_estimate())
+    logger.info(
+        "Cost estimate (assuming number of input tokens equals output tokens): %s",
+        plan.format_cost_estimate(),
+    )
     run_command = f"ankiops llm {plan.task_name} --run"
     if model_override:
         run_command = f"{run_command} --model {model_override}"

@@ -35,8 +35,8 @@ _SUPPORTED_TASK_KEYS = (
     "fields",
 )
 _SUPPORTED_REQUEST_KEYS = (
+    "notes_per_request",
     "temperature",
-    "max_output_tokens",
     "reasoning",
 )
 _SUPPORTED_REASONING_EFFORTS = (
@@ -380,7 +380,7 @@ def _parse_access_rules_by_note_type(
 def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
     defaults = TaskRequestOptions()
     if value is None:
-        return defaults
+        raise LlmConfigError(f"{path}: 'request.notes_per_request' is required")
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'request' must be a mapping")
 
@@ -391,6 +391,19 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             f"{path}: unknown request key(s): {', '.join(unknown)}. "
             f"Allowed request keys: {allowed}"
         )
+
+    raw_notes_per_request = value.get("notes_per_request")
+    if raw_notes_per_request is None:
+        raise LlmConfigError(f"{path}: 'request.notes_per_request' is required")
+    if isinstance(raw_notes_per_request, bool) or not isinstance(
+        raw_notes_per_request,
+        int,
+    ):
+        raise LlmConfigError(
+            f"{path}: 'request.notes_per_request' must be an integer"
+        )
+    if raw_notes_per_request < 1:
+        raise LlmConfigError(f"{path}: 'request.notes_per_request' must be >= 1")
 
     temperature = defaults.temperature
     if "temperature" in value:
@@ -404,23 +417,6 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             raise LlmConfigError(f"{path}: 'request.temperature' must be numeric")
         else:
             temperature = float(raw_temperature)
-
-    max_output_tokens = defaults.max_output_tokens
-    if "max_output_tokens" in value:
-        raw_max_output_tokens = value.get("max_output_tokens")
-        if raw_max_output_tokens is None:
-            max_output_tokens = None
-        elif isinstance(raw_max_output_tokens, bool) or not isinstance(
-            raw_max_output_tokens,
-            int,
-        ):
-            raise LlmConfigError(
-                f"{path}: 'request.max_output_tokens' must be an integer or null"
-            )
-        elif raw_max_output_tokens < 1:
-            raise LlmConfigError(f"{path}: 'request.max_output_tokens' must be >= 1")
-        else:
-            max_output_tokens = raw_max_output_tokens
 
     reasoning = defaults.reasoning
     if "reasoning" in value:
@@ -441,8 +437,8 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             reasoning = normalized
 
     return TaskRequestOptions(
+        notes_per_request=raw_notes_per_request,
         temperature=temperature,
-        max_output_tokens=max_output_tokens,
         reasoning=reasoning,
     )
 
