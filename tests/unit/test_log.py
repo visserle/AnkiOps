@@ -13,7 +13,7 @@ def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):
     rendered = clickable_path(file_path)
     file_uri = file_path.resolve().as_uri()
 
-    assert rendered == f"[link={file_uri}]{file_path.resolve()}[/link]"
+    assert rendered == f"[link={file_uri}]{file_path.name}[/link]"
     assert "%20" in file_uri
     assert "%23" in file_uri
 
@@ -24,9 +24,7 @@ def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
 
     rendered = clickable_path(file_path)
 
-    assert rendered == (
-        f"[link={file_path.resolve().as_uri()}]{file_path.resolve()}[/link]"
-    )
+    assert rendered == f"[link={file_path.resolve().as_uri()}]{file_path.name}[/link]"
 
 
 def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
