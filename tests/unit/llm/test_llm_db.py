@@ -68,6 +68,70 @@ def test_write_tx_rolls_back_request(tmp_path):
         db.close()
 
 
+def test_get_job_detail_reports_usage_at_request_level(tmp_path):
+    db = LlmDb.open(tmp_path)
+    try:
+        job_id = _start_job(db)
+        first_id = db.insert_job_item(
+            job_id=job_id,
+            ordinal=1,
+            deck_name="Deck",
+            note_key="nk-1",
+            note_type="AnkiOpsQA",
+            item_status=LlmItemStatus.SUCCEEDED_UPDATED,
+            skip_reason=None,
+            changed_fields=["Question"],
+        )
+        second_id = db.insert_job_item(
+            job_id=job_id,
+            ordinal=2,
+            deck_name="Deck",
+            note_key="nk-2",
+            note_type="AnkiOpsQA",
+            item_status=LlmItemStatus.SUCCEEDED_UNCHANGED,
+            skip_reason=None,
+        )
+        request_id = db.insert_request(
+            job_id=job_id,
+            item_ids=[second_id, first_id],
+            outcome="success",
+            request_json={"model": "gpt-test"},
+            parsed_response_json={"updates": []},
+            response_json="{}",
+            error_message=None,
+            latency_ms=101,
+            input_tokens=5,
+            output_tokens=2,
+        )
+
+        detail = db.get_job_detail(job_id)
+    finally:
+        db.close()
+
+    assert detail is not None
+    assert [(item.ordinal, item.request_count) for item in detail.items] == [
+        (1, 1),
+        (2, 1),
+    ]
+    assert not hasattr(detail.items[0], "input_tokens")
+    assert not hasattr(detail.items[0], "latency_ms")
+    assert detail.summary.requests == 1
+    assert detail.summary.input_tokens == 5
+    assert detail.summary.output_tokens == 2
+    assert detail.summary.provider_latency_ms_total == 101
+    assert len(detail.requests) == 1
+    request = detail.requests[0]
+    assert request.request_id == request_id
+    assert request.outcome == "success"
+    assert request.input_tokens == 5
+    assert request.output_tokens == 2
+    assert request.latency_ms == 101
+    assert [(note.ordinal, note.note_key) for note in request.notes] == [
+        (1, "nk-1"),
+        (2, "nk-2"),
+    ]
+
+
 def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
     db = LlmDb.open(tmp_path)
     try:

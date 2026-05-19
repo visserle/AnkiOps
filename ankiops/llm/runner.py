@@ -80,7 +80,7 @@ class OpenAIResult:
 class EligibleBatch:
     note_type: str
     note_type_config: NoteTypeConfig
-    candidates: list[EligibleCandidate]
+    candidates: tuple[EligibleCandidate, ...]
 
     @property
     def item_ids(self) -> list[int]:
@@ -914,7 +914,7 @@ def _build_candidate_batches(
                 EligibleBatch(
                     note_type=note_type,
                     note_type_config=chunk[0].note_type_config,
-                    candidates=chunk,
+                    candidates=tuple(chunk),
                 )
             )
     return batches
@@ -1087,24 +1087,6 @@ def _openai_error_result(
     )
 
 
-def _apply_parsed_response(
-    *,
-    parsed_response: object,
-    candidate: EligibleCandidate,
-) -> list[str]:
-    updates = parsed_updates(parsed_response)
-    unexpected_note_keys = sorted(
-        {note_key for note_key, _field_name, _value in updates}
-        - {candidate.payload.note_key}
-    )
-    if unexpected_note_keys:
-        raise ValueError(
-            "Model returned update for unexpected note_key "
-            f"'{unexpected_note_keys[0]}'"
-        )
-    return _apply_candidate_updates(candidate=candidate, updates=updates)
-
-
 def _apply_batch_parsed_response(
     *,
     parsed_response: object,
@@ -1123,8 +1105,7 @@ def _apply_batch_parsed_response(
     )
     if unexpected_note_keys:
         raise ValueError(
-            "Model returned update for unexpected note_key "
-            f"'{unexpected_note_keys[0]}'"
+            f"Model returned update for unexpected note_key '{unexpected_note_keys[0]}'"
         )
 
     updates_by_note_key: dict[str, list[tuple[str, str, str]]] = {

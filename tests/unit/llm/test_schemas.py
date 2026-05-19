@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from ankiops.llm.runner import _apply_parsed_response
+from ankiops.llm.runner import EligibleBatch, _apply_batch_parsed_response
 from ankiops.llm.schemas import build_response_model
-from ankiops.llm.types import EligibleCandidate, NotePayload
+from ankiops.llm.types import EligibleCandidate, LlmItemStatus, NotePayload
 
 
 def _parsed_response(*updates):
@@ -45,6 +45,14 @@ def _candidate(llm_qa_config) -> EligibleCandidate:
     )
 
 
+def _batch(candidate: EligibleCandidate) -> EligibleBatch:
+    return EligibleBatch(
+        note_type=candidate.payload.note_type,
+        note_type_config=candidate.note_type_config,
+        candidates=(candidate,),
+    )
+
+
 def test_response_model_accepts_only_known_note_keys_and_editable_fields():
     response_model = build_response_model(
         note_type="AnkiOpsQA",
@@ -70,15 +78,18 @@ def test_response_model_accepts_only_known_note_keys_and_editable_fields():
         )
 
 
-def test_apply_parsed_response_updates_editable_fields(llm_qa_config):
+def test_apply_batch_parsed_response_updates_editable_fields(llm_qa_config):
     candidate = _candidate(llm_qa_config)
 
-    changed_fields = _apply_parsed_response(
+    results = _apply_batch_parsed_response(
         parsed_response=_parsed_response(("nk-1", "Question", "Fixed question")),
-        candidate=candidate,
+        batch=_batch(candidate),
     )
 
-    assert changed_fields == ["Question"]
+    assert len(results) == 1
+    assert results[0].status is LlmItemStatus.SUCCEEDED_UPDATED
+    assert results[0].changed_fields == ["Question"]
+    assert results[0].error_message is None
     assert candidate.serialized_note["fields"] == {
         "Question": "Fixed question",
         "Answer": "Existing answer",
@@ -87,13 +98,17 @@ def test_apply_parsed_response_updates_editable_fields(llm_qa_config):
     }
 
 
+def test_apply_batch_parsed_response_rejects_unexpected_note_key(llm_qa_config):
+    with pytest.raises(ValueError, match="unexpected note_key 'nk-2'"):
+        _apply_batch_parsed_response(
+            parsed_response=_parsed_response(("nk-2", "Question", "Fixed question")),
+            batch=_batch(_candidate(llm_qa_config)),
+        )
+
+
 @pytest.mark.parametrize(
     ("updates", "expected_error"),
     [
-        (
-            [("nk-2", "Question", "Fixed question")],
-            "unexpected note_key 'nk-2'",
-        ),
         (
             [
                 ("nk-1", "Question", "Fixed question"),
@@ -111,13 +126,18 @@ def test_apply_parsed_response_updates_editable_fields(llm_qa_config):
         ),
     ],
 )
-def test_apply_parsed_response_rejects_unsafe_updates(
+def test_apply_batch_parsed_response_marks_unsafe_candidate_updates(
     llm_qa_config,
     updates,
     expected_error,
 ):
-    with pytest.raises(ValueError, match=expected_error):
-        _apply_parsed_response(
-            parsed_response=_parsed_response(*updates),
-            candidate=_candidate(llm_qa_config),
-        )
+    results = _apply_batch_parsed_response(
+        parsed_response=_parsed_response(*updates),
+        batch=_batch(_candidate(llm_qa_config)),
+    )
+
+    assert len(results) == 1
+    assert results[0].status is LlmItemStatus.NOTE_ERROR
+    assert results[0].changed_fields == []
+    assert results[0].error_message is not None
+    assert expected_error in results[0].error_message
