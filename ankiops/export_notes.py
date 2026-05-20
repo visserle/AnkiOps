@@ -598,7 +598,7 @@ def export_collection(
                 db_port.delete_deck(deck_name)
                 md_file.unlink()
                 if not keyed_notes:
-                    logger.debug(
+                    logger.info(
                         "Removed empty orphan markdown deck file: %s",
                         md_file.name,
                     )
