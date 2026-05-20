@@ -1,4 +1,4 @@
-model: gpt-5.4-mini
+model: gpt-5.4-nano
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
@@ -14,5 +14,5 @@ fields:
     "AnkiOpsChoice": ["Answer"]
 
 request:
-  notes_per_request: 4
+  notes_per_request: 3
   reasoning: low
