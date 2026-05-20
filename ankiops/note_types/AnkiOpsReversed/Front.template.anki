@@ -1,10 +1,4 @@
-<style>
-    #_flag {
-        visibility: hidden;
-    }
-</style>
-
-{{edit:Front}}
+{{Front}}
 
 {{#Divider}}
 <div class="hr-with-text">
