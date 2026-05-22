@@ -1,6 +1,6 @@
 - model: gpt-5.4
   model_id: gpt-5.4
-  api_url: https://api.openai.com/v1/responses
+  base_url: https://api.openai.com/v1
   api_key: $OPENAI_API_KEY
   concurrency: 8
   input_usd_per_mtok: 2.5
@@ -8,7 +8,7 @@
 
 - model: gpt-5.4-mini
   model_id: gpt-5.4-mini
-  api_url: https://api.openai.com/v1/responses
+  base_url: https://api.openai.com/v1
   api_key: $OPENAI_API_KEY
   concurrency: 8
   input_usd_per_mtok: 0.75
@@ -16,7 +16,7 @@
 
 - model: gpt-5.4-nano
   model_id: gpt-5.4-nano
-  api_url: https://api.openai.com/v1/responses
+  base_url: https://api.openai.com/v1
   api_key: $OPENAI_API_KEY
   concurrency: 8
   input_usd_per_mtok: 0.2

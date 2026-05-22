@@ -26,7 +26,7 @@ def llm_collection(tmp_path: Path, write_file):
         """
         - model: test
           model_id: gpt-test
-          api_url: https://api.openai.com/v1/responses
+          base_url: https://api.openai.com/v1
           api_key: $OPENAI_API_KEY
           concurrency: 2
           input_usd_per_mtok: 1

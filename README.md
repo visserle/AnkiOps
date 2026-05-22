@@ -158,6 +158,10 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 **`markdown-to-anki` / `ma`:**
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
+**`note-types`:**
+- `ankiops note-types` - Show note types, identifying labels, and the label registry
+- `ankiops note-types --add <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
+
 **`serialize`:**
 - `--output`, `-o` - Output file path (default: `<collection-name>.json`)
 - `--deck` - Serialize only one deck (includes subdecks by default)
@@ -172,7 +176,3 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 - `ankiops llm <task_name> [--model <model>] [--deck <deck_name>]` - Plan one configured task
 - `ankiops llm <task_name> --run [--model <model>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
-
-**`note-types`:**
-- `ankiops note-types` - Show note types, identifying labels, and the label registry
-- `ankiops note-types --add <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts

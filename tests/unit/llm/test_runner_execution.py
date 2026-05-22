@@ -80,7 +80,7 @@ def _context(
         model=ModelSpec(
             model="test",
             model_id="gpt-test",
-            api_url="https://api.openai.com/v1/responses",
+            base_url="https://api.openai.com/v1",
             api_key="$OPENAI_API_KEY",
             concurrency=concurrency,
         ),

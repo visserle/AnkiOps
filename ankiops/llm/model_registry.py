@@ -16,7 +16,7 @@ MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "model",
     "model_id",
-    "api_url",
+    "base_url",
     "api_key",
     "concurrency",
     "input_usd_per_mtok",
@@ -49,7 +49,7 @@ class ModelSpec:
 
     model: str
     model_id: str
-    api_url: str
+    base_url: str
     api_key: str
     concurrency: int = 8
     input_usd_per_mtok: Decimal | None = None
@@ -164,9 +164,9 @@ def _parse_model_entry(entry: Any, *, index: int) -> ModelSpec:
             key="model_id",
             item_label=item_label,
         ),
-        api_url=_parse_responses_api_url(
-            entry.get("api_url"),
-            key="api_url",
+        base_url=_parse_responses_base_url(
+            entry.get("base_url"),
+            key="base_url",
             item_label=item_label,
         ),
         api_key=_require_string(
@@ -204,19 +204,18 @@ def _require_string(
     return value.strip()
 
 
-def _parse_responses_api_url(
+def _parse_responses_base_url(
     value: Any,
     *,
     key: str,
     item_label: str,
 ) -> str:
-    api_url = _require_string(value, key=key, item_label=item_label).rstrip("/")
-    if not api_url.endswith("/responses"):
+    base_url = _require_string(value, key=key, item_label=item_label).rstrip("/")
+    if base_url.endswith("/responses"):
         raise ModelRegistryError(
-            f"{item_label}: '{key}' must be an OpenAI Responses API URL ending "
-            "in '/responses'"
+            f"{item_label}: '{key}' must be an OpenAI base URL without '/responses'"
         )
-    return api_url
+    return base_url
 
 
 def _parse_decimal(

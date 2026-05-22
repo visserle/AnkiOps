@@ -272,7 +272,7 @@ class LlmTaskExecutor:
         api_key = _resolve_api_key(task.model.api_key)
         client = AsyncOpenAI(
             api_key=api_key,
-            base_url=task.model.api_url[: -len("/responses")],
+            base_url=task.model.base_url,
             timeout=60.0,
             max_retries=0,
         )
