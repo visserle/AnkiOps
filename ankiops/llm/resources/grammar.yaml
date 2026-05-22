@@ -1,4 +1,4 @@
-model: gpt-5.4-nano
+model: gpt-5.4-mini
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
