@@ -1214,6 +1214,7 @@ def _validate_cloze_text_fields(
 
 
 def _cloze_template_field_names(config: NoteTypeConfig) -> set[str]:
+    """Find the actualname of the cloze field used in the cloze template."""
     cloze_template_field_pattern = re.compile(
         r"\{\{\s*(?:[A-Za-z]+:)*cloze:([^}]+?)\s*\}\}",
         re.IGNORECASE,

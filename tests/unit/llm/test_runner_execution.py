@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 from ankiops.llm.model_registry import ModelSpec
@@ -10,6 +11,7 @@ from ankiops.llm.runner import (
     LlmTaskExecutor,
     MaterializedTaskContext,
     OpenAIResult,
+    _validate_cloze_text_fields,
 )
 from ankiops.llm.types import (
     DiscoveryCounts,
@@ -20,6 +22,7 @@ from ankiops.llm.types import (
     TaskConfig,
     TaskRequestOptions,
 )
+from ankiops.models import Note
 
 
 class _FakeAsyncOpenAI:
@@ -212,3 +215,38 @@ def test_executor_cancels_queued_items_after_fatal_error(
     assert not result.persisted
     assert result.summary.errors == 1
     assert result.summary.canceled == 1
+
+
+def test_validate_cloze_text_fields_uses_template_cloze_sources(llm_qa_config):
+    config = replace(
+        llm_qa_config,
+        is_cloze=True,
+        templates=[
+            {
+                "Name": "Cloze",
+                "Front": "{{edit:cloze:Question}}",
+                "Back": "{{Answer}}",
+            }
+        ],
+    )
+    valid_note = Note(
+        note_key="nk-1",
+        note_type="AnkiOpsQA",
+        fields={
+            "Question": "{{c1::broken question}}",
+            "Answer": "Existing answer",
+        },
+    )
+    invalid_note = Note(
+        note_key="nk-2",
+        note_type="AnkiOpsQA",
+        fields={
+            "Question": "Broken question",
+            "Answer": "{{c1::wrong field}}",
+        },
+    )
+
+    assert _validate_cloze_text_fields(valid_note, config) == []
+    assert _validate_cloze_text_fields(invalid_note, config) == [
+        "AnkiOpsQA field 'Question' must contain cloze syntax (e.g. {{c1::answer}})"
+    ]

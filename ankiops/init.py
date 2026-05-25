@@ -44,12 +44,13 @@ def _setup_vscode_settings(collection_dir: Path):
                 "editor.formatOnSave": False,
                 "editor.wordWrap": "wordWrapColumn",
                 "editor.wordWrapColumn": 80,
-                "diffEditor.ignoreTrimWhitespace": False,
+                "editor.stickyScroll.enabled": False,
+                "diffEditor.ignoreTrimWhitespace": True,
             },
             "markdown.preview.breaks": True,
-            "markdown.copyFiles.destination": {"**/*.md": f"{LOCAL_MEDIA_DIR}/"},
             "markdown.preview.doubleClickToSwitchToEditor": True,
             "markdown.preview.markEditorSelection": True,
+            "markdown.copyFiles.destination": {"**/*.md": f"{LOCAL_MEDIA_DIR}/"},
         }
     )
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
