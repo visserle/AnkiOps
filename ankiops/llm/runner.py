@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -1201,16 +1202,32 @@ def _validate_cloze_text_fields(
     if not config.is_cloze:
         return []
     errors: list[str] = []
-    for field in config.fields:
-        if field.label not in {"T:", "TH:"}:
-            continue
-        value = note.fields.get(field.name, "")
+    field_names = _cloze_template_field_names(config)
+    for field_name in sorted(field_names):
+        value = note.fields.get(field_name, "")
         if "{{c" not in value:
             errors.append(
-                f"{note.note_type} field '{field.name}' must contain cloze syntax "
+                f"{note.note_type} field '{field_name}' must contain cloze syntax "
                 "(e.g. {{c1::answer}})"
             )
     return errors
+
+
+def _cloze_template_field_names(config: NoteTypeConfig) -> set[str]:
+    cloze_template_field_pattern = re.compile(
+        r"\{\{\s*(?:[A-Za-z]+:)*cloze:([^}]+?)\s*\}\}",
+        re.IGNORECASE,
+    )
+    field_names: set[str] = set()
+    for template in config.templates:
+        for template_value in template.values():
+            if not isinstance(template_value, str):
+                continue
+            for match in cloze_template_field_pattern.finditer(template_value):
+                field_name = match.group(1).strip()
+                if field_name:
+                    field_names.add(field_name)
+    return field_names
 
 
 def _persist_updates(

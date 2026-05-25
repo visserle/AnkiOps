@@ -9,7 +9,7 @@ templates:
     back: Back.template.anki
 fields:
   - name: Text
-    label: "TH:"
+    label: "THA:"
     identifying: true
   - name: Extra
     label: "E:"
