@@ -23,7 +23,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
         system_prompt: !file prompts/system.md
         user_prompt: !file prompts/user.md
         request:
-          notes_per_request: 3
+          max_notes_per_request: 3
           temperature: 0.25
           reasoning: low
         fields:
@@ -50,7 +50,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
     )
     assert task.user_prompt_path == (llm_collection / "llm/prompts/user.md").resolve()
     assert task.request == TaskRequestOptions(
-        notes_per_request=3,
+        max_notes_per_request=3,
         temperature=0.25,
         reasoning="low",
     )
@@ -87,9 +87,9 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
-              notes_per_request: 0
+              max_notes_per_request: 0
             """,
-            "request.notes_per_request' must be >= 1",
+            "request.max_notes_per_request' must be >= 1",
         ),
         (
             """
@@ -97,9 +97,9 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
-              notes_per_request: false
+              max_notes_per_request: false
             """,
-            "request.notes_per_request' must be an integer",
+            "request.max_notes_per_request' must be an integer",
         ),
         (
             """
@@ -115,7 +115,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             system_prompt: system
             user_prompt: user
             request:
-              notes_per_request: 1
+              max_notes_per_request: 1
               reasoning: extreme
             """,
             "request.reasoning' must be one of",
@@ -141,7 +141,7 @@ def test_load_llm_task_catalog_reports_invalid_task_config(
     assert expected_error in catalog.errors[str(llm_collection / "llm/grammar.yaml")]
 
 
-def test_load_llm_task_catalog_requires_notes_per_request(
+def test_load_llm_task_catalog_requires_max_notes_per_request(
     llm_collection,
     write_file,
     llm_qa_config,
@@ -161,6 +161,7 @@ def test_load_llm_task_catalog_requires_notes_per_request(
     )
 
     assert not catalog.tasks_by_name
-    assert "request.notes_per_request' is required" in catalog.errors[
-        str(llm_collection / "llm/grammar.yaml")
-    ]
+    assert (
+        "request.max_notes_per_request' is required"
+        in catalog.errors[str(llm_collection / "llm/grammar.yaml")]
+    )

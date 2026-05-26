@@ -22,7 +22,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         user_prompt: |
           Fix grammar.
         request:
-          notes_per_request: 4
+          max_notes_per_request: 4
         fields:
           default_access: editable
           read_only:

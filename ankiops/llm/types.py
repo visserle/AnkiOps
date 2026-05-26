@@ -71,7 +71,7 @@ class FieldAccessRule:
 
 @dataclass(frozen=True)
 class TaskRequestOptions:
-    notes_per_request: int = 1
+    max_notes_per_request: int = 1
     temperature: float | None = None
     reasoning: str | None = None
 

@@ -35,7 +35,7 @@ _SUPPORTED_TASK_KEYS = (
     "fields",
 )
 _SUPPORTED_REQUEST_KEYS = (
-    "notes_per_request",
+    "max_notes_per_request",
     "temperature",
     "reasoning",
 )
@@ -380,7 +380,7 @@ def _parse_access_rules_by_note_type(
 def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
     defaults = TaskRequestOptions()
     if value is None:
-        raise LlmConfigError(f"{path}: 'request.notes_per_request' is required")
+        raise LlmConfigError(f"{path}: 'request.max_notes_per_request' is required")
     if not isinstance(value, dict):
         raise LlmConfigError(f"{path}: 'request' must be a mapping")
 
@@ -392,18 +392,18 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             f"Allowed request keys: {allowed}"
         )
 
-    raw_notes_per_request = value.get("notes_per_request")
-    if raw_notes_per_request is None:
-        raise LlmConfigError(f"{path}: 'request.notes_per_request' is required")
-    if isinstance(raw_notes_per_request, bool) or not isinstance(
-        raw_notes_per_request,
+    raw_max_notes_per_request = value.get("max_notes_per_request")
+    if raw_max_notes_per_request is None:
+        raise LlmConfigError(f"{path}: 'request.max_notes_per_request' is required")
+    if isinstance(raw_max_notes_per_request, bool) or not isinstance(
+        raw_max_notes_per_request,
         int,
     ):
         raise LlmConfigError(
-            f"{path}: 'request.notes_per_request' must be an integer"
+            f"{path}: 'request.max_notes_per_request' must be an integer"
         )
-    if raw_notes_per_request < 1:
-        raise LlmConfigError(f"{path}: 'request.notes_per_request' must be >= 1")
+    if raw_max_notes_per_request < 1:
+        raise LlmConfigError(f"{path}: 'request.max_notes_per_request' must be >= 1")
 
     temperature = defaults.temperature
     if "temperature" in value:
@@ -437,7 +437,7 @@ def _parse_request_options(value: Any, *, path: Path) -> TaskRequestOptions:
             reasoning = normalized
 
     return TaskRequestOptions(
-        notes_per_request=raw_notes_per_request,
+        max_notes_per_request=raw_max_notes_per_request,
         temperature=temperature,
         reasoning=reasoning,
     )

@@ -13,5 +13,5 @@ fields:
     "AnkiOpsChoice": ["Answer"]
 
 request:
-  notes_per_request: 3
+  max_notes_per_request: 3
   reasoning: low

@@ -75,7 +75,7 @@ def _fatal_error() -> OpenAIResult:
 def _context(
     llm_qa_config,
     *,
-    notes_per_request: int = 2,
+    max_notes_per_request: int = 2,
     concurrency: int = 2,
 ) -> MaterializedTaskContext:
     task = TaskConfig(
@@ -89,7 +89,7 @@ def _context(
         ),
         system_prompt="system",
         user_prompt="user",
-        request=TaskRequestOptions(notes_per_request=notes_per_request),
+        request=TaskRequestOptions(max_notes_per_request=max_notes_per_request),
     )
     notes = [
         {
@@ -194,7 +194,7 @@ def test_executor_cancels_queued_items_after_fatal_error(
     monkeypatch,
     llm_qa_config,
 ):
-    context = _context(llm_qa_config, notes_per_request=1, concurrency=1)
+    context = _context(llm_qa_config, max_notes_per_request=1, concurrency=1)
 
     async def fake_call_openai(**_kwargs):
         return _fatal_error()

@@ -280,7 +280,7 @@ class LlmTaskExecutor:
         try:
             batches = _build_candidate_batches(
                 candidates,
-                notes_per_request=task.request.notes_per_request,
+                max_notes_per_request=task.request.max_notes_per_request,
             )
             in_flight_limit = min(max(task.model.concurrency, 1), len(batches))
             next_index = 0
@@ -901,7 +901,7 @@ def _record_discovery_item(
 def _build_candidate_batches(
     candidates: list[EligibleCandidate],
     *,
-    notes_per_request: int,
+    max_notes_per_request: int,
 ) -> list[EligibleBatch]:
     by_note_type: dict[str, list[EligibleCandidate]] = {}
     for candidate in candidates:
@@ -909,8 +909,8 @@ def _build_candidate_batches(
 
     batches: list[EligibleBatch] = []
     for note_type, grouped_candidates in by_note_type.items():
-        for start in range(0, len(grouped_candidates), notes_per_request):
-            chunk = grouped_candidates[start : start + notes_per_request]
+        for start in range(0, len(grouped_candidates), max_notes_per_request):
+            chunk = grouped_candidates[start : start + max_notes_per_request]
             batches.append(
                 EligibleBatch(
                     note_type=note_type,
@@ -924,7 +924,7 @@ def _build_candidate_batches(
 def _build_payload_batches(
     payloads: list[NotePayload],
     *,
-    notes_per_request: int,
+    max_notes_per_request: int,
 ) -> list[list[NotePayload]]:
     by_note_type: dict[str, list[NotePayload]] = {}
     for payload in payloads:
@@ -932,8 +932,8 @@ def _build_payload_batches(
 
     batches: list[list[NotePayload]] = []
     for grouped_payloads in by_note_type.values():
-        for start in range(0, len(grouped_payloads), notes_per_request):
-            batches.append(grouped_payloads[start : start + notes_per_request])
+        for start in range(0, len(grouped_payloads), max_notes_per_request):
+            batches.append(grouped_payloads[start : start + max_notes_per_request])
     return batches
 
 
@@ -1291,7 +1291,7 @@ def _build_task_plan_result(
     ]
     payload_batches = _build_payload_batches(
         eligible_payloads,
-        notes_per_request=task.request.notes_per_request,
+        max_notes_per_request=task.request.max_notes_per_request,
     )
     skipped = sum(
         1
@@ -1441,7 +1441,7 @@ def _format_serializer_scope(task: TaskConfig) -> str:
 
 
 def _format_request_defaults(request: TaskRequestOptions) -> str:
-    parts = [f"notes_per_request={request.notes_per_request}"]
+    parts = [f"max_notes_per_request={request.max_notes_per_request}"]
     if request.temperature is not None:
         parts.append(f"temperature={request.temperature:g}")
     if request.reasoning is not None:
