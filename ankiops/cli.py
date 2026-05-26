@@ -458,7 +458,7 @@ def main():
     # Image width fixer parser
     fix_widths_parser = subparsers.add_parser(
         "fix-image-widths",
-        help="Normalize or force Markdown image widths via local file edits)",
+        help="Normalize or force Markdown image widths via local file edits",
     )
     fix_widths_parser.add_argument(
         "--deck",
