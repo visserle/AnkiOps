@@ -6,7 +6,11 @@ from pathlib import Path
 
 from ankiops.config import NOTE_TYPES_DIR, get_collection_dir
 from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import _order_resolved_notes, _sync_deck
+from ankiops.export_notes import (
+    _order_resolved_notes,
+    _render_notes_to_markdown,
+    _sync_deck,
+)
 from ankiops.fs import FileSystemAdapter
 from ankiops.import_notes import _flush_writes, _PendingWrite
 from ankiops.models import AnkiNote, MarkdownFile, Note
@@ -103,6 +107,22 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
         assert_summary(result.summary, total=0)
     finally:
         db.close()
+
+
+def test_render_notes_to_markdown_places_tags_after_note_key(fs):
+    config_by_name = {config.name: config for config in fs._note_type_configs}
+    note = Note(
+        note_key="key-1",
+        note_type="AnkiOpsQA",
+        fields={"Question": "Q", "Answer": "A"},
+        tags=("z", "a"),
+    )
+
+    rendered = _render_notes_to_markdown([note], config_by_name)
+
+    assert rendered.startswith(
+        "<!-- note_key: key-1 -->\n<!-- tags: a z -->\nQ: Q\nA: A"
+    )
 
 
 def test_order_resolved_notes_preserves_existing_and_appends_new():

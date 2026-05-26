@@ -20,10 +20,11 @@ from ankiops.models import (
     Note,
     NoteTypeConfig,
 )
+from ankiops.tags import parse_tags_comment
 
 logger = logging.getLogger(__name__)
 
-_NOTE_KEY_PATTERN = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
+_NOTE_KEY_PATTERN = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
 _CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 _LABEL_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*:)(?:\s|$)")
 _RESERVED_NOTE_FIELD_NAMES = frozenset({ANKIOPS_KEY_FIELD.name})
@@ -109,6 +110,7 @@ class FileSystemAdapter:
 
             lines = stripped_block.split("\n")
             note_key: str | None = None
+            tags: tuple[str, ...] = ()
             fields: dict[str, str] = {}
             current_field: str | None = None
             current_content: list[str] = []
@@ -126,14 +128,19 @@ class FileSystemAdapter:
                         current_content.append(line)
                     continue
 
+                if in_code_block:
+                    if current_field:
+                        current_content.append(line)
+                    continue
+
                 key_match = _NOTE_KEY_PATTERN.match(line)
                 if key_match:
                     note_key = key_match.group(1)
                     continue
 
-                if in_code_block:
-                    if current_field:
-                        current_content.append(line)
+                tag_values = parse_tags_comment(line)
+                if tag_values is not None:
+                    tags = tag_values
                     continue
 
                 matched_field = None
@@ -210,7 +217,12 @@ class FileSystemAdapter:
                         line_number=first_field_line or note_start_line,
                     )
                 ) from error
-            note = Note(note_key=note_key, note_type=note_type, fields=fields)
+            note = Note(
+                note_key=note_key,
+                note_type=note_type,
+                fields=fields,
+                tags=tags,
+            )
 
             # Validate
             note_type_config = config_by_name[note_type]

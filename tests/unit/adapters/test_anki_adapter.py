@@ -111,8 +111,7 @@ def test_apply_note_changes_preflight_reports_create_context():
 
     assert created_ids == [None]
     assert errors == [
-        "Create failed ('Duplicate Q...'): "
-        "cannot create note because it is a duplicate"
+        "Create failed ('Duplicate Q...'): cannot create note because it is a duplicate"
     ]
     assert [call.args[0] for call in mock_invoke.call_args_list] == [
         "canAddNotesWithErrorDetail"
@@ -140,9 +139,105 @@ def test_apply_note_changes_bulk_create_exception_keeps_create_context():
 
     assert created_ids == [None]
     assert errors == [
-        "Create failed ('Duplicate Q...'): "
-        "cannot create note because it is a duplicate"
+        "Create failed ('Duplicate Q...'): cannot create note because it is a duplicate"
     ]
+
+
+def test_fetch_notes_info_maps_tags():
+    adapter = AnkiAdapter()
+
+    with patch(
+        "ankiops.anki.invoke",
+        return_value=[
+            {
+                "noteId": 101,
+                "modelName": "AnkiOpsQA",
+                "fields": {
+                    "Question": {"value": "Q"},
+                    "Answer": {"value": "A"},
+                },
+                "cards": [1001],
+                "tags": ["z", "a", "z"],
+            }
+        ],
+    ):
+        notes = adapter.fetch_notes_info([101])
+
+    assert notes[101].tags == ("a", "z")
+
+
+def test_apply_note_changes_updates_fields_and_tags_with_update_note():
+    adapter = AnkiAdapter()
+    update_change = Change(
+        ChangeType.UPDATE,
+        101,
+        "note_key: update",
+        {
+            "html_fields": {"Question": "Q", "Answer": "A2"},
+            "tags": ("z", "a"),
+        },
+    )
+
+    with patch("ankiops.anki.invoke", return_value=[None]) as mock_invoke:
+        created_ids, errors = adapter.apply_note_changes(
+            deck_name="DeckY",
+            needs_create_deck=False,
+            creates=[],
+            updates=[update_change],
+            deletes=[],
+            cards_to_move=[],
+        )
+
+    assert created_ids == []
+    assert errors == []
+    action = mock_invoke.call_args.kwargs["actions"][0]
+    assert action["action"] == "updateNote"
+    assert action["params"]["note"] == {
+        "id": 101,
+        "fields": {"Question": "Q", "Answer": "A2"},
+        "tags": ["a", "z"],
+    }
+
+
+def test_apply_note_changes_bulk_create_includes_tags():
+    adapter = AnkiAdapter()
+    create_change = Change(
+        ChangeType.CREATE,
+        None,
+        "note_key: create",
+        {
+            "note": Note(
+                note_key=None,
+                note_type="AnkiOpsQA",
+                fields={},
+                tags=("z", "a"),
+            ),
+            "html_fields": {"Question": "Q", "Answer": "A"},
+            "note_key": "created-key",
+        },
+    )
+
+    with patch(
+        "ankiops.anki.invoke",
+        side_effect=[
+            [{"canAdd": True}],
+            [303],
+        ],
+    ) as mock_invoke:
+        created_ids, errors = adapter.apply_note_changes(
+            deck_name="DeckY",
+            needs_create_deck=False,
+            creates=[create_change],
+            updates=[],
+            deletes=[],
+            cards_to_move=[],
+        )
+
+    assert created_ids == [303]
+    assert errors == []
+    add_notes_call = mock_invoke.call_args_list[1]
+    note_payload = add_notes_call.kwargs["notes"][0]
+    assert note_payload["tags"] == ["a", "z"]
 
 
 def test_fetch_model_states_normalizes_dict_styling_payload():

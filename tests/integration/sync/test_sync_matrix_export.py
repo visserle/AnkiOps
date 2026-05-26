@@ -39,6 +39,30 @@ def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
         assert db.resolve_note_keys([note_id]).get(note_id) == keys[0]
 
 
+def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
+    """Export should write Anki tags as note metadata."""
+    world.add_qa_note(
+        deck_name="TaggedExportDeck",
+        question="Q1",
+        answer="A1",
+        tags=("z", "high-yield", "z"),
+    )
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+        _assert_deck_contains(
+            world,
+            "TaggedExportDeck",
+            "<!-- tags: high-yield z -->",
+            "Q: Q1",
+            "A: A1",
+        )
+
+
 def test_exp_run_update_001_updates_existing_markdown_note(world):
     """EXP-RUN-UPDATE-001."""
     note_key = "exp-run-update-001"
@@ -61,6 +85,31 @@ def test_exp_run_update_001_updates_existing_markdown_note(world):
             result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
         )
         _assert_deck_contains(world, "UpdateDeck", "A: New Anki A")
+
+
+def test_exp_run_update_004_tag_only_anki_edit_updates_markdown(world):
+    """Anki tag changes should update Markdown even when fields match."""
+    note_key = "exp-run-update-tags-001"
+    note_id = world.add_qa_note(
+        deck_name="TagExportDeck",
+        question="Q0",
+        answer="A0",
+        note_key=note_key,
+        tags=("old",),
+    )
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        first = world.sync_export(db)
+        assert_summary(first.summary, created=1, updated=0, errors=0)
+
+        world.mock_anki.notes[note_id]["tags"] = ["new", "z"]
+        second = world.sync_export(db)
+        assert_summary(second.summary, created=0, updated=1, errors=0)
+        _assert_deck_contains(world, "TagExportDeck", "<!-- tags: new z -->")
+
+        third = world.sync_export(db)
+        assert_summary(third.summary, created=0, updated=0, errors=0)
 
 
 def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):
@@ -251,8 +300,7 @@ def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_dele
     assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
     assert result.protected_note_groups == []
     assert (
-        "Removed empty orphan markdown deck file: EmptyOrphanDeck.md"
-        in caplog.messages
+        "Removed empty orphan markdown deck file: EmptyOrphanDeck.md" in caplog.messages
     )
 
 

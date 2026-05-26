@@ -17,6 +17,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
 from ankiops.import_notes import import_collection
+from ankiops.tags import format_tags_comment
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
@@ -98,19 +99,22 @@ class SyncWorld:
         safe = deck_name_to_file_stem(deck_name)
         return self.root / f"{safe}.md"
 
-    def write_qa_deck(
-        self, deck_name: str, notes: list[tuple[str, str, str | None]]
-    ) -> Path:
+    def write_qa_deck(self, deck_name: str, notes: list[tuple]) -> Path:
         path = self.deck_path(deck_name)
         if not notes:
             path.write_text("", encoding="utf-8")
             return path
 
         blocks = []
-        for question, answer, note_key in notes:
+        for note_data in notes:
+            question, answer, note_key = note_data[:3]
+            tags = note_data[3] if len(note_data) > 3 else ()
             lines = []
             if note_key:
                 lines.append(f"<!-- note_key: {note_key} -->")
+            tag_comment = format_tags_comment(tags)
+            if tag_comment:
+                lines.append(tag_comment)
             lines.append(f"Q: {question}")
             lines.append(f"A: {answer}")
             blocks.append("\n".join(lines))
@@ -131,11 +135,12 @@ class SyncWorld:
         question: str,
         answer: str,
         note_key: str | None = None,
+        tags=(),
     ) -> int:
         fields = {"Question": question, "Answer": answer}
         if note_key is not None:
             fields["AnkiOps Key"] = note_key
-        self.mock_anki.add_note(deck_name, "AnkiOpsQA", fields)
+        self.mock_anki.add_note(deck_name, "AnkiOpsQA", fields, tags=tags)
         return max(self.mock_anki.notes.keys())
 
     def set_note_answer(self, note_id: int, answer: str) -> None:

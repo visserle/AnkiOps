@@ -23,6 +23,7 @@ from ankiops.models import (
     ProtectedNoteGroup,
     SyncResult,
 )
+from ankiops.tags import format_tags_comment
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ def _from_html(
         note_key=note_key if note_key else None,
         note_type=anki_note.note_type,
         fields=fields,
+        tags=anki_note.tags,
     )
 
 
@@ -125,7 +127,11 @@ def _resolve_deck_notes(
     for anki_note in anki_notes:
         note_key = note_keys_by_id.get(anki_note.note_id)
         embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
-        observed_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
+        observed_anki_hash = note_fingerprint(
+            anki_note.note_type,
+            anki_note.fields,
+            tags=anki_note.tags,
+        )
 
         # Stale note_id->note_key mapping: prefer embedded note_key from Anki note.
         if note_key and embedded_note_key and note_key != embedded_note_key:
@@ -137,7 +143,11 @@ def _resolve_deck_notes(
 
         local_match = local_notes_by_note_key.get(note_key) if note_key else None
         if note_key and local_match:
-            local_md_hash = note_fingerprint(local_match.note_type, local_match.fields)
+            local_md_hash = note_fingerprint(
+                local_match.note_type,
+                local_match.fields,
+                tags=local_match.tags,
+            )
             cached = note_export_fingerprints_by_note_key.get(note_key)
             if cached == (local_md_hash, observed_anki_hash):
                 result.add_change(
@@ -169,12 +179,20 @@ def _resolve_deck_notes(
 
         domain_note.note_key = note_key
         local_match = local_notes_by_note_key.get(note_key)
-        if local_match and local_match.fields == domain_note.fields:
+        if (
+            local_match
+            and local_match.fields == domain_note.fields
+            and local_match.tags == domain_note.tags
+        ):
             result.add_change(
                 Change(ChangeType.SKIP, anki_note.note_id, domain_note.identifier)
             )
             resolved_notes.append((note_key, anki_note.note_id, local_match))
-            md_hash = note_fingerprint(local_match.note_type, local_match.fields)
+            md_hash = note_fingerprint(
+                local_match.note_type,
+                local_match.fields,
+                tags=local_match.tags,
+            )
             _queue_export_fingerprint(note_key, md_hash, observed_anki_hash)
             continue
 
@@ -206,7 +224,11 @@ def _resolve_deck_notes(
             )
 
         resolved_notes.append((note_key, anki_note.note_id, domain_note))
-        md_hash = note_fingerprint(domain_note.note_type, domain_note.fields)
+        md_hash = note_fingerprint(
+            domain_note.note_type,
+            domain_note.fields,
+            tags=domain_note.tags,
+        )
         _queue_export_fingerprint(note_key, md_hash, observed_anki_hash)
 
     return resolved_notes, errors
@@ -232,7 +254,11 @@ def _order_resolved_notes(
     resolved_by_fingerprint: dict[str, list[_ResolvedDeckNote]] = {}
     for resolved in resolved_notes:
         resolved_note = resolved[_RESOLVED_NOTE_VALUE]
-        resolved_hash = note_fingerprint(resolved_note.note_type, resolved_note.fields)
+        resolved_hash = note_fingerprint(
+            resolved_note.note_type,
+            resolved_note.fields,
+            tags=resolved_note.tags,
+        )
         resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved)
 
     consumed_note_keys: set[str] = set()
@@ -251,7 +277,11 @@ def _order_resolved_notes(
             consumed_note_keys.add(resolved_key)
             continue
 
-        existing_hash = note_fingerprint(existing_note.note_type, existing_note.fields)
+        existing_hash = note_fingerprint(
+            existing_note.note_type,
+            existing_note.fields,
+            tags=existing_note.tags,
+        )
         candidates = resolved_by_fingerprint.get(existing_hash, [])
         matched = next(
             (
@@ -312,6 +342,9 @@ def _render_notes_to_markdown(
         parts = []
         if note.note_key:
             parts.append(f"<!-- note_key: {note.note_key} -->")
+        tags_comment = format_tags_comment(note.tags)
+        if tags_comment:
+            parts.append(tags_comment)
 
         cfg = config_by_name[note.note_type]
         for field_config in cfg.fields:

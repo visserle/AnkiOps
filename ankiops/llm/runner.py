@@ -24,6 +24,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 from ankiops.serializer import deserialize, serialize
+from ankiops.tags import normalize_tags
 
 from .config_loader import is_task_config_file, load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
@@ -1185,6 +1186,7 @@ def _apply_candidate_updates(
         note_key=candidate.payload.note_key,
         note_type=candidate.payload.note_type,
         fields=next_fields,
+        tags=normalize_tags(candidate.serialized_note.get("tags", ())),
     )
     errors = [*_validate_cloze_text_fields(note, candidate.note_type_config)]
     errors.extend(note.validate(candidate.note_type_config))
