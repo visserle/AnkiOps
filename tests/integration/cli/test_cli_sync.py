@@ -1,6 +1,7 @@
 """CLI sync behavior tests."""
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +9,7 @@ import pytest
 
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli import main, run_am, run_ma, run_serialize
-from ankiops.config import ANKIOPS_DB
+from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
 from ankiops.models import (
     Change,
     ChangeType,
@@ -319,6 +320,32 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
         tmp_path / "out.json",
         deck="Parent",
         no_subdecks=True,
+    )
+
+
+def test_run_serialize_defaults_output_to_deck_name(tmp_path):
+    db_path = tmp_path / ANKIOPS_DB
+    db_path.write_text("", encoding="utf-8")
+
+    deck_name = "Parent::Child"
+    args = SimpleNamespace(
+        output=None,
+        deck=deck_name,
+        no_subdecks=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    expected_output = Path(f"{deck_name_to_file_stem(deck_name)}.json")
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        expected_output,
+        deck=deck_name,
+        no_subdecks=False,
     )
 
 
