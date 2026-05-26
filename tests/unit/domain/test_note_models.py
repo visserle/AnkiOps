@@ -380,7 +380,10 @@ class TestParseQABlock:
         md.write_text("Q: Question only")
         with pytest.raises(
             ValueError,
-            match=r"Cannot determine note type from fields: Question \(file: broken-note\.md, line: 1\)",
+            match=(
+                r"Cannot determine note type from fields: Question "
+                r"\(file: broken-note\.md, line: 1\)"
+            ),
         ):
             fs.read_markdown_file(md)
 
@@ -393,7 +396,10 @@ class TestParseQABlock:
         md.write_text("Q: Question only")
         with pytest.raises(
             ValueError,
-            match=r"Cannot determine note type from fields: Question \(file: nested/broken-note\.md, line: 1\)",
+            match=(
+                r"Cannot determine note type from fields: Question "
+                r"\(file: nested/broken-note\.md, line: 1\)"
+            ),
         ):
             fs.read_markdown_file(md, context_root=tmp_path)
 
@@ -402,9 +408,57 @@ class TestParseQABlock:
         md.write_text("<!-- note_key: key-1 -->\nQ: Question only")
         with pytest.raises(
             ValueError,
-            match=r"Cannot determine note type from fields: Question \(file: broken-note\.md, line: 2\)",
+            match=(
+                r"Cannot determine note type from fields: Question "
+                r"\(file: broken-note\.md, line: 2\)"
+            ),
         ):
             fs.read_markdown_file(md)
+
+    def test_qa_with_tags_metadata(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text(
+            "<!-- note_key: key-1 -->\n"
+            "<!-- tags: z high-yield topic::subtopic z -->\n"
+            "Q: What?\n"
+            "A: Answer"
+        )
+        result = fs.read_markdown_file(md)
+        note = result.notes[0]
+        assert note.note_key == "key-1"
+        assert note.tags == ("high-yield", "topic::subtopic", "z")
+
+    def test_qa_with_tags_before_note_key(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text(
+            "<!-- tags: anatomy -->\n<!-- note_key: key-1 -->\nQ: What?\nA: Answer"
+        )
+        result = fs.read_markdown_file(md)
+        note = result.notes[0]
+        assert note.note_key == "key-1"
+        assert note.tags == ("anatomy",)
+
+    def test_qa_missing_or_empty_tags_are_empty(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text(
+            "<!-- tags: -->\n"
+            "Q: With empty tags\n"
+            "A: Answer\n\n"
+            "---\n\n"
+            "Q: Without tags\n"
+            "A: Answer"
+        )
+        result = fs.read_markdown_file(md)
+        assert result.notes[0].tags == ()
+        assert result.notes[1].tags == ()
+
+    def test_tags_comment_inside_code_block_is_field_content(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text("Q: What?\nA:\n```\n<!-- tags: not-metadata -->\n```")
+        result = fs.read_markdown_file(md)
+        note = result.notes[0]
+        assert note.tags == ()
+        assert "<!-- tags: not-metadata -->" in note.fields["Answer"]
 
 
 class TestMultiNoteFile:
@@ -423,7 +477,10 @@ class TestMultiNoteFile:
         md.write_text("Q: Q1\nA: A1\n\n---\n\nQ: Question only")
         with pytest.raises(
             ValueError,
-            match=r"Cannot determine note type from fields: Question \(file: deck\.md, line: 6\)",
+            match=(
+                r"Cannot determine note type from fields: Question "
+                r"\(file: deck\.md, line: 6\)"
+            ),
         ):
             fs.read_markdown_file(md)
 

@@ -12,6 +12,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from ankiops.tags import normalize_tags
+
 _CLOZE_PATTERN = re.compile(r"\{\{c\d+::")
 
 
@@ -170,6 +172,10 @@ class Note:
     note_key: str | None
     note_type: str
     fields: dict[str, str]  # {field_name: markdown_content}
+    tags: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.tags = normalize_tags(self.tags)
 
     @property
     def identifier(self) -> str:
@@ -280,6 +286,10 @@ class AnkiNote:
     note_type: str
     fields: dict[str, str]  # HTML content
     card_ids: list[int]
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        self.tags = normalize_tags(self.tags)
 
 
 class ChangeType(Enum):

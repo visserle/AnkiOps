@@ -95,6 +95,7 @@ def _context(
         {
             "note_key": "nk-1",
             "note_type": "AnkiOpsQA",
+            "tags": ["keep-me"],
             "fields": {
                 "Question": "Broken",
                 "Answer": "Existing answer",
@@ -187,6 +188,7 @@ def test_executor_persists_successful_updates(
     assert persisted["data"]["decks"][0]["notes"][0]["fields"]["Question"] == (
         "Fixed question"
     )
+    assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["keep-me"]
 
 
 def test_executor_cancels_queued_items_after_fatal_error(

@@ -10,6 +10,7 @@ from ankiops.models import (
     Change,
     NoteTypeConfig,
 )
+from ankiops.tags import normalize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class AnkiAdapter:
                 note_type=note_data.get("modelName", ""),
                 fields=fields,
                 card_ids=note_data.get("cards", []),
+                tags=normalize_tags(note_data.get("tags", ())),
             )
         return notes_by_id
 
@@ -316,28 +318,36 @@ class AnkiAdapter:
         cards_to_move: list[int],
     ) -> tuple[list[int | None], list[str]]:
         actions = []
-        tags = []
+        action_tags = []
         errors = []
         created_ids: list[int | None] = []
         create_deck_failed = False
 
         if needs_create_deck:
             actions.append(_action("createDeck", deck=deck_name))
-            tags.append("create_deck")
+            action_tags.append("create_deck")
 
         if cards_to_move:
             actions.append(
                 _action("changeDeck", cards=sorted(set(cards_to_move)), deck=deck_name)
             )
-            tags.append("change_deck")
+            action_tags.append("change_deck")
 
         for update_change in updates:
             note_id = update_change.entity_id
             fields = update_change.context.get("html_fields", {})
+            note_tags = normalize_tags(update_change.context.get("tags", ()))
             actions.append(
-                _action("updateNoteFields", note={"id": note_id, "fields": fields})
+                _action(
+                    "updateNote",
+                    note={
+                        "id": note_id,
+                        "fields": fields,
+                        "tags": list(note_tags),
+                    },
+                )
             )
-            tags.append("update")
+            action_tags.append("update")
 
         if deletes:
             note_ids = [
@@ -346,13 +356,13 @@ class AnkiAdapter:
                 if delete_change.entity_id
             ]
             actions.append(_action("deleteNotes", notes=note_ids))
-            tags.append("delete")
+            action_tags.append("delete")
 
         if actions:
             try:
                 results = invoke("multi", actions=actions)
                 update_idx = 0
-                for tag, action_result in zip(tags, results):
+                for tag, action_result in zip(action_tags, results):
                     if tag == "update":
                         if isinstance(action_result, str):
                             errors.append(
@@ -395,6 +405,7 @@ class AnkiAdapter:
             "deckName": deck_name,
             "modelName": note_type,
             "fields": fields,
+            "tags": list(note.tags) if note else [],
             "options": {"allowDuplicate": False},
         }
 

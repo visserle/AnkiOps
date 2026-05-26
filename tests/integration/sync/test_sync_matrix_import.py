@@ -30,6 +30,25 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
         assert db.resolve_note_ids([note_keys[0]]).get(note_keys[0]) == note_id
 
 
+def test_imp_fresh_create_002_creates_note_with_tags(world):
+    """Import should create Anki notes with Markdown tags."""
+    world.write_qa_deck(
+        "TaggedFreshDeck",
+        [("Tagged Q", "Tagged A", None, ("z", "high-yield", "z"))],
+    )
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+        note_id = next(iter(world.mock_anki.notes.keys()))
+        assert world.mock_anki.notes[note_id]["tags"] == ["high-yield", "z"]
+        content = world.read_deck("TaggedFreshDeck")
+        assert content.index("<!-- note_key:") < content.index("<!-- tags:")
+
+
 def test_imp_run_update_001_updates_existing_note(world):
     """IMP-RUN-UPDATE-001."""
     note_key = "imp-run-update-001"
@@ -53,6 +72,55 @@ def test_imp_run_update_001_updates_existing_note(world):
         assert (
             world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Updated A"
         )
+
+
+def test_imp_run_update_003_tag_only_edit_updates_existing_note(world):
+    """Markdown tag changes should update Anki even when fields match."""
+    note_key = "imp-run-update-tags-001"
+    note_id = world.add_qa_note(
+        deck_name="TagUpdateDeck",
+        question="Original Q",
+        answer="Original A",
+        note_key=note_key,
+        tags=("old",),
+    )
+
+    world.write_qa_deck(
+        "TagUpdateDeck",
+        [("Original Q", "Original A", note_key, ("new", "z"))],
+    )
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert world.mock_anki.notes[note_id]["tags"] == ["new", "z"]
+
+
+def test_imp_run_update_004_missing_tags_comment_clears_anki_tags(world):
+    """Markdown without tags should make Anki tags empty."""
+    note_key = "imp-run-update-tags-002"
+    note_id = world.add_qa_note(
+        deck_name="TagClearDeck",
+        question="Original Q",
+        answer="Original A",
+        note_key=note_key,
+        tags=("old",),
+    )
+
+    world.write_qa_deck("TagClearDeck", [("Original Q", "Original A", note_key)])
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert world.mock_anki.notes[note_id]["tags"] == []
 
 
 def test_imp_run_move_001_moves_note_between_decks(world):

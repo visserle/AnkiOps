@@ -71,6 +71,23 @@ def test_in_memory_serialize(collection, monkeypatch):
     assert result["decks"][0]["notes"][1]["note_key"] == "nk-2"
 
 
+def test_serialize_includes_tags(collection, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    deck_file = collection / f"{deck_name_to_file_stem('TestDeck')}.md"
+    deck_file.write_text(
+        deck_file.read_text(encoding="utf-8").replace(
+            "<!-- note_key: nk-1 -->",
+            "<!-- note_key: nk-1 -->\n<!-- tags: z high-yield -->",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = serialize(collection)
+
+    assert result["decks"][0]["notes"][0]["tags"] == ["high-yield", "z"]
+
+
 def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
 
@@ -203,6 +220,41 @@ def test_roundtrip_in_memory(collection, tmp_path, monkeypatch):
     content = md_files[0].read_text(encoding="utf-8")
     assert "What is 2+2?" in content
     assert "What is 3+3?" in content
+
+
+def test_roundtrip_preserves_tags(collection, tmp_path, monkeypatch):
+    _set_collection_paths(monkeypatch, collection)
+    deck_file = collection / f"{deck_name_to_file_stem('TestDeck')}.md"
+    deck_file.write_text(
+        deck_file.read_text(encoding="utf-8").replace(
+            "<!-- note_key: nk-1 -->",
+            "<!-- note_key: nk-1 -->\n<!-- tags: z high-yield -->",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    serialized_data = serialize(collection)
+
+    fresh_dir = tmp_path / "fresh-tags"
+    fresh_dir.mkdir()
+    _set_collection_paths(monkeypatch, fresh_dir)
+
+    fs = FileSystemAdapter()
+    note_types_dst = fresh_dir / "note_types"
+    fs.eject_builtin_note_types(note_types_dst)
+
+    deserialize(
+        serialized_data,
+        collection_dir=fresh_dir,
+        note_types_dir=note_types_dst,
+        overwrite=True,
+    )
+
+    md_files = list(fresh_dir.glob("*.md"))
+    assert len(md_files) == 1
+    content = md_files[0].read_text(encoding="utf-8")
+    assert "<!-- tags: high-yield z -->" in content
 
 
 def test_deserialize_unknown_note_type_skips_note_without_orphan_key(

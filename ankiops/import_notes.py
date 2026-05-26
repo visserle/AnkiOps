@@ -22,9 +22,11 @@ from ankiops.models import (
     SyncResult,
     UntrackedDeck,
 )
+from ankiops.tags import TAGS_COMMENT_RE
 
 logger = logging.getLogger(__name__)
 _NOTE_KEY_LINE_RE = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
+_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 
 @dataclass
@@ -77,6 +79,20 @@ def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
     )
 
 
+def _find_tags_comment_index(lines: list[str]) -> int | None:
+    in_code_block = False
+    for line_index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if _CODE_FENCE_PATTERN.match(stripped):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if TAGS_COMMENT_RE.match(line):
+            return line_index
+    return None
+
+
 def _upsert_note_key_in_block(block: str, note: Note, note_key: str) -> str:
     """Insert or replace note_key in a single markdown note block."""
     note_key_line = f"<!-- note_key: {note_key} -->"
@@ -90,7 +106,10 @@ def _upsert_note_key_in_block(block: str, note: Note, note_key: str) -> str:
             lines[line_index] = note_key_line
             return "\n".join(lines)
 
-    insert_idx = _find_first_markdown_line_index(note, lines)
+    tag_idx = _find_tags_comment_index(lines)
+    insert_idx = (
+        tag_idx if tag_idx is not None else _find_first_markdown_line_index(note, lines)
+    )
     lines.insert(insert_idx, note_key_line)
     return "\n".join(lines)
 
@@ -160,6 +179,12 @@ def _html_match(html: dict[str, str], anki: AnkiNote) -> bool:
         anki.fields.get(field_name) == field_value
         for field_name, field_value in html.items()
     )
+
+
+def _anki_note_match(
+    html: dict[str, str], tags: tuple[str, ...], anki: AnkiNote
+) -> bool:
+    return _html_match(html, anki) and anki.tags == tags
 
 
 def _group_note_ids_by_deck_name(anki_cards: dict[int, dict]) -> dict[str, set[int]]:
@@ -298,8 +323,11 @@ def _sync_keyed_note(
                     "note_key": note_key,
                     "md_hash": md_hash,
                     "import_anki_hash": note_fingerprint(
-                        parsed_note.note_type, html_fields
+                        parsed_note.note_type,
+                        html_fields,
+                        tags=parsed_note.tags,
                     ),
+                    "tags": parsed_note.tags,
                 },
             )
         )
@@ -338,7 +366,11 @@ def _sync_keyed_note(
         )
         return
 
-    current_anki_hash = note_fingerprint(anki_note.note_type, anki_note.fields)
+    current_anki_hash = note_fingerprint(
+        anki_note.note_type,
+        anki_note.fields,
+        tags=anki_note.tags,
+    )
     cached = note_import_fingerprints_by_note_key.get(note_key)
     if cached == (md_hash, current_anki_hash):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
@@ -349,12 +381,16 @@ def _sync_keyed_note(
     if anki_note.fields.get("AnkiOps Key", "") != note_key:
         html_fields["AnkiOps Key"] = note_key
 
-    if _html_match(html_fields, anki_note):
+    if _anki_note_match(html_fields, parsed_note.tags, anki_note):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
-    target_anki_hash = note_fingerprint(parsed_note.note_type, html_fields)
+    target_anki_hash = note_fingerprint(
+        parsed_note.note_type,
+        html_fields,
+        tags=parsed_note.tags,
+    )
     result.add_change(
         Change(
             ChangeType.UPDATE,
@@ -365,6 +401,7 @@ def _sync_keyed_note(
                 "note_key": note_key,
                 "md_hash": md_hash,
                 "import_anki_hash": target_anki_hash,
+                "tags": parsed_note.tags,
             },
         )
     )
@@ -398,8 +435,11 @@ def _sync_new_note(
                 "note_key": new_note_key,
                 "md_hash": md_hash,
                 "import_anki_hash": note_fingerprint(
-                    parsed_note.note_type, html_fields
+                    parsed_note.note_type,
+                    html_fields,
+                    tags=parsed_note.tags,
                 ),
+                "tags": parsed_note.tags,
             },
         )
     )
@@ -623,7 +663,11 @@ def _sync_file(
 
     for parsed_note in fs.notes:
         cfg = config_by_name[parsed_note.note_type]
-        md_hash = note_fingerprint(parsed_note.note_type, parsed_note.fields)
+        md_hash = note_fingerprint(
+            parsed_note.note_type,
+            parsed_note.fields,
+            tags=parsed_note.tags,
+        )
 
         if parsed_note.note_key:
             _sync_keyed_note(

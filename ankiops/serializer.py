@@ -15,6 +15,7 @@ from ankiops.config import (
 )
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
+from ankiops.tags import format_tags_comment, normalize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,7 @@ def serialize(
                     "note_key": note.note_key,
                     "note_type": note.note_type,
                     "fields": note.fields,
+                    "tags": list(note.tags),
                 }
             )
 
@@ -193,6 +195,7 @@ def deserialize(
         for note in notes:
             note_key = note.get("note_key")
             fields = note["fields"]
+            tags = normalize_tags(note.get("tags", ()))
 
             note_type = note.get("note_type")
             config = (
@@ -221,6 +224,9 @@ def deserialize(
 
             if note_key:
                 lines.append(f"<!-- note_key: {note_key} -->")
+            tag_comment = format_tags_comment(tags)
+            if tag_comment:
+                lines.append(tag_comment)
 
             for field in config.fields:
                 field_content = fields.get(field.name)

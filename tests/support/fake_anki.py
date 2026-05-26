@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ankiops.anki_client import AnkiConnectError
+from ankiops.tags import normalize_tags
 
 
 class MockAnki:
@@ -179,6 +180,7 @@ class MockAnki:
                         for field_name, field_value in note_data["fields"].items()
                     },
                     "cards": [card_id],
+                    "tags": list(normalize_tags(note_data.get("tags", ()))),
                 }
                 self.cards[card_id] = {
                     "cardId": card_id,
@@ -204,6 +206,33 @@ class MockAnki:
                             "value": field_value
                         }
                 return None
+
+            case "updateNote":
+                note_info = params["note"]
+                note_id = note_info["id"]
+                if note_id in self.notes:
+                    for field_name, field_value in note_info.get("fields", {}).items():
+                        self.notes[note_id]["fields"][field_name] = {
+                            "value": field_value
+                        }
+                    if "tags" in note_info:
+                        self.notes[note_id]["tags"] = list(
+                            normalize_tags(note_info["tags"])
+                        )
+                return None
+
+            case "updateNoteTags":
+                note_id = params["note"]
+                if note_id in self.notes:
+                    self.notes[note_id]["tags"] = list(
+                        normalize_tags(params.get("tags", ()))
+                    )
+                return None
+
+            case "getNoteTags":
+                note_id = params["note"]
+                note = self.notes.get(note_id)
+                return list(note.get("tags", [])) if note else []
 
             case "deleteNotes":
                 note_ids = params["notes"]
@@ -271,12 +300,23 @@ class MockAnki:
             case _:
                 return None
 
-    def add_note(self, deck_name: str, note_type: str, fields: dict):
+    def add_note(
+        self,
+        deck_name: str,
+        note_type: str,
+        fields: dict,
+        tags=(),
+    ):
         """Convenience helper for test setup."""
         if deck_name not in self.decks:
             self.invoke("createDeck", deck=deck_name)
 
         self.invoke(
             "addNote",
-            note={"deckName": deck_name, "modelName": note_type, "fields": fields},
+            note={
+                "deckName": deck_name,
+                "modelName": note_type,
+                "fields": fields,
+                "tags": list(normalize_tags(tags)),
+            },
         )
