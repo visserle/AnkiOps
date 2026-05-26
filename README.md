@@ -71,7 +71,7 @@ Create a new Markdown file in your initialized AnkiOps folder. For the first imp
 
 ```markdown
 <!-- note_key: 123487556abc -->
-<!-- tags: anatomy::heart high-yield -->
+<!-- tags: AnkiOps -->
 Q: Question text here
 A: Answer text here
 E: Extra information (optional)
@@ -80,7 +80,8 @@ M: Content behind a "more" button (optional)
 ---
 
 <!-- note_key: 123474567def -->
-T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
+T: Text with the {{c1::first}} cloze.
+Text with the {{c1::second}} cloze.
 E: Some *formatted* extra info.
 
 ![image with set width](im.png){width=700}
@@ -95,7 +96,6 @@ A: 1, 3
 ```
 
 In this example, the last note is a new note which will get a `note_key` comment assigned on the next import.
-Tags are optional note-level metadata. A `<!-- tags: ... -->` comment uses whitespace-separated Anki tag names and is synced separately from note fields.
 
 ### How are different note types handled?
 
@@ -114,7 +114,7 @@ For the last option specifically, the recommended workflow is:
 
 ### How does it work?
 
-AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. Tags are represented by a separate `<!-- tags: ... -->` comment because Anki treats tags as note metadata rather than note type fields. One AnkiOps folder represents one Anki profile. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
+AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
 
 ### What is the recommended workflow?
 
