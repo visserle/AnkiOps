@@ -172,7 +172,7 @@ class Note:
     note_key: str | None
     note_type: str
     fields: dict[str, str]  # {field_name: markdown_content}
-    tags: tuple[str, ...] = field(default_factory=tuple)
+    tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.tags = normalize_tags(self.tags)
