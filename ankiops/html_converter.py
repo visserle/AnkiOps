@@ -4,7 +4,7 @@ import re
 import warnings
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
-from html_to_markdown import ConversionOptions, HeadingStyle, HighlightStyle
+from html_to_markdown import ConversionOptions
 from html_to_markdown import convert as convert_html_to_markdown
 
 from ankiops.config import LOCAL_MEDIA_DIR
@@ -289,10 +289,10 @@ class HTMLToMarkdown:
     @staticmethod
     def _build_options() -> ConversionOptions:
         return ConversionOptions(
-            heading_style=HeadingStyle.ATX,
+            heading_style="atx",
             bullets="-",
             list_indent_width=3,
-            highlight_style=HighlightStyle.DOUBLE_EQUAL,
+            highlight_style="double-equal",
             autolinks=False,
             extract_metadata=False,
         )

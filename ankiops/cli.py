@@ -5,8 +5,8 @@ from pathlib import Path
 
 from rich.markup import escape as rich_escape
 
-from ankiops.anki import AnkiAdapter
 from ankiops.anki_client import AnkiConnectError
+from ankiops.cli_anki import connect_or_exit
 from ankiops.config import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
@@ -38,22 +38,6 @@ from ankiops.sync_media import (
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
-
-
-def connect_or_exit() -> AnkiAdapter:
-    """Verify AnkiConnect is reachable; exit on failure."""
-    anki = AnkiAdapter()
-    try:
-        version = anki.get_version()
-        logger.debug(f"Connected to AnkiConnect (version {version})")
-    except Exception as error:
-        logger.error(
-            "Error connecting to AnkiConnect. Make sure Anki is running and "
-            "AnkiConnect is installed."
-        )
-        logger.debug(f"Connection error details: {error}")
-        raise SystemExit(1)
-    return anki
 
 
 def run_init(args):
