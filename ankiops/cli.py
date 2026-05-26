@@ -270,8 +270,7 @@ def run_deserialize(args):
     if args.input:
         serialized_file = Path(args.input)
     else:
-        collection_dir = get_collection_dir()
-        serialized_file = Path(f"{collection_dir.name}.json")
+        serialized_file = Path("AnkiCollection.json")
 
     if not serialized_file.exists():
         logger.error(f"Serialized file not found: {serialized_file}")
