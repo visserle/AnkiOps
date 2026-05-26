@@ -12,7 +12,10 @@ from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
 from ankiops.config import LOCAL_MEDIA_DIR
-from ankiops.math_delimiters import normalize_escaped_math_delimiters
+from ankiops.math_delimiters import (
+    normalize_escaped_math_delimiters,
+    preserve_math_delimiters_plugin,
+)
 
 _IMG_WIDTH_RE = re.compile(r'(<img src="[^"]*" alt="[^"]*")>\{width=(\d+)\}')
 # Rewrite [text](url_with_(parens)) to [text](<url>) so mistune doesn't
@@ -23,52 +26,6 @@ _LINK_WITH_PARENS_RE = re.compile(
     r"\)"
 )
 _PYGMENTS_FORMATTER = HtmlFormatter(nowrap=True)
-_INLINE_MATH_PAREN_PATTERN = r"\\\((?P<ipm_text>[\s\S]+?)\\\)"
-_INLINE_MATH_BRACKET_PATTERN = r"\\\[(?P<ibm_text>[\s\S]+?)\\\]"
-_BLOCK_MATH_PATTERN = r"^\\\[(?P<bm_text>[\s\S]+?)\\\][ \t]*$"
-
-
-def _math_plugin(md):
-    """Preserve LaTeX math delimiters \\(...\\) and \\[...\\] through parsing."""
-
-    def _parse_token(token_type, group_name):
-        def parser(_, regex_match, state):
-            state.append_token(
-                {"type": token_type, "raw": regex_match.group(group_name)}
-            )
-            return regex_match.end()
-
-        return parser
-
-    def _parse_block(_, regex_match, state):
-        state.append_token({"type": "block_math", "raw": regex_match.group("bm_text")})
-        return regex_match.end() + 1
-
-    md.inline.register(
-        "inline_math_paren",
-        _INLINE_MATH_PAREN_PATTERN,
-        _parse_token("inline_math_paren", "ipm_text"),
-        before="escape",
-    )
-    md.inline.register(
-        "inline_math_bracket",
-        _INLINE_MATH_BRACKET_PATTERN,
-        _parse_token("inline_math_bracket", "ibm_text"),
-        before="escape",
-    )
-    md.block.register("block_math", _BLOCK_MATH_PATTERN, _parse_block, before="list")
-    if md.renderer and md.renderer.NAME == "html":
-        md.renderer.register(
-            "inline_math_paren",
-            lambda _, token_text: "\\(" + token_text + "\\)",
-        )
-        md.renderer.register(
-            "inline_math_bracket",
-            lambda _, token_text: "\\[" + token_text + "\\]",
-        )
-        md.renderer.register(
-            "block_math", lambda _, token_text: "\\[" + token_text + "\\]"
-        )
 
 
 class AnkiRenderer(mistune.HTMLRenderer):
@@ -152,7 +109,7 @@ class MarkdownToHTML:
                 strikethrough,
                 superscript,
                 subscript,
-                _math_plugin,
+                preserve_math_delimiters_plugin,
             ],
         )
 
