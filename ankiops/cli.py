@@ -5,12 +5,11 @@ from pathlib import Path
 
 from rich.markup import escape as rich_escape
 
+from ankiops.anki import AnkiAdapter
 from ankiops.anki_client import AnkiConnectError
-from ankiops.cli_anki import connect_or_exit
 from ankiops.config import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
-    get_collection_dir,
     require_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -41,32 +40,20 @@ from ankiops.sync_note_types import sync_note_types
 logger = logging.getLogger(__name__)
 
 
-def _get_cli_version() -> str:
+def connect_or_exit() -> AnkiAdapter:
+    """Verify AnkiConnect is reachable; exit on failure."""
+    anki = AnkiAdapter()
     try:
-        return version("ankiops")
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def _log_import_errors(import_summary: CollectionResult) -> None:
-    has_errors = False
-    for result in import_summary.results:
-        if not result.errors:
-            continue
-
-        if not has_errors:
-            logger.error("Import errors:")
-            has_errors = True
-
-        source = rich_escape(result.name or "unknown deck")
-        if result.file_path:
-            source = f"{source} ({clickable_path(result.file_path)})"
-
-        for error in result.errors:
-            logger.error(
-                f"  {source}: {rich_escape(str(error))}",
-                extra={"markup": True},
-            )
+        version = anki.get_version()
+        logger.debug(f"Connected to AnkiConnect (version {version})")
+    except Exception as error:
+        logger.error(
+            "Error connecting to AnkiConnect. Make sure Anki is running and "
+            "AnkiConnect is installed."
+        )
+        logger.debug(f"Connection error details: {error}")
+        raise SystemExit(1)
+    return anki
 
 
 def run_init(args):
@@ -148,6 +135,27 @@ def run_am(args):
         logger.info(format_media_status(media_result, from_anki=True))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
+
+
+def _log_import_errors(import_summary: CollectionResult) -> None:
+    has_errors = False
+    for result in import_summary.results:
+        if not result.errors:
+            continue
+
+        if not has_errors:
+            logger.error("Import errors:")
+            has_errors = True
+
+        source = rich_escape(result.name or "unknown deck")
+        if result.file_path:
+            source = f"{source} ({clickable_path(result.file_path)})"
+
+        for error in result.errors:
+            logger.error(
+                f"  {source}: {rich_escape(str(error))}",
+                extra={"markup": True},
+            )
 
 
 def run_ma(args):
@@ -298,6 +306,13 @@ def run_llm(args):
         list_jobs_fn=list_llm_jobs,
         show_job_fn=show_job,
     )
+
+
+def _get_cli_version() -> str:
+    try:
+        return version("ankiops")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def main():
