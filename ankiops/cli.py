@@ -7,7 +7,12 @@ from rich.markup import escape as rich_escape
 
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
-from ankiops.config import NOTE_TYPES_DIR, get_collection_dir, require_collection_dir
+from ankiops.config import (
+    NOTE_TYPES_DIR,
+    deck_name_to_file_stem,
+    get_collection_dir,
+    require_collection_dir,
+)
 from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
@@ -240,8 +245,10 @@ def run_serialize(args):
 
     if args.output:
         output_file = Path(args.output)
+    elif args.deck:
+        output_file = Path(f"{deck_name_to_file_stem(args.deck)}.json")
     else:
-        output_file = Path(f"{collection_dir.name}.json")
+        output_file = Path("AnkiCollection.json")
 
     logger.debug(f"Serializing collection from: {collection_dir}")
     logger.debug(f"Output file: {output_file}")
@@ -263,8 +270,7 @@ def run_deserialize(args):
     if args.input:
         serialized_file = Path(args.input)
     else:
-        collection_dir = get_collection_dir()
-        serialized_file = Path(f"{collection_dir.name}.json")
+        serialized_file = Path("AnkiCollection.json")
 
     if not serialized_file.exists():
         logger.error(f"Serialized file not found: {serialized_file}")
@@ -360,7 +366,10 @@ def main():
     serialize_parser.add_argument(
         "--output",
         "-o",
-        help="Output file path (default: <collection-name>.json)",
+        help=(
+            "Output file path (default: AnkiCollection.json, "
+            "<deck-stem>.json when --deck is set)"
+        ),
     )
     serialize_parser.add_argument(
         "--deck",
