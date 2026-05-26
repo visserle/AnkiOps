@@ -99,11 +99,15 @@ class AnkiRenderer(mistune.HTMLRenderer):
                     output.append("<br>")
                 output.append(part)
         html = "".join(output)
+        html = re.sub(r"(</h[1-6]>)(<br>)+", r"\1", html)
         html = re.sub(r"(<br>){3,}", "<br><br>", html)
         return html
 
     def text(self, text):
         return text
+
+    def heading(self, text, level, **attrs):
+        return f"<h{level}>{text}</h{level}>"
 
     def softbreak(self):
         return "<br>"

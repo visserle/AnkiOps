@@ -703,6 +703,16 @@ class TestComplexEdgeCases:
         assert "Bold" in back
         assert "Title" in back
 
+    def test_heading_followed_by_text_no_extra_br(self, md_to_html):
+        """No <br> between a heading and the following content in Anki HTML."""
+        assert md_to_html.convert("# Test\n\nText") == "<h1>Test</h1>Text"
+        assert md_to_html.convert("## Test\n\nText") == "<h2>Test</h2>Text"
+        assert md_to_html.convert("# Test\nText") == "<h1>Test</h1>Text"
+
+    def test_heading_between_paragraphs_no_extra_br(self, md_to_html):
+        """Blank line before heading is preserved; no br between heading and next block."""
+        assert md_to_html.convert("Text\n\n# H1\n\nMore") == "Text<br><br><h1>H1</h1>More"
+
     def test_list_with_formatting(self, md_to_html, html_to_md):
         md = "- **Bold** item\n- *Italic* item\n- `code` item"
         html = md_to_html.convert(md)
