@@ -163,7 +163,7 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 - `ankiops note-types --add <name>` - Copy a note type from Anki into local `note_types/` with interactive label/identifying prompts
 
 **`serialize`:**
-- `--output`, `-o` - Output file path (default: `<collection-name>.json`, `<deck-name>.json` when `--deck` is set)
+- `--output`, `-o` - Output file path (default: `<collection-name>.json`, `<deck-stem>.json` when `--deck` is set; deck names are encoded like markdown filenames, e.g. `A::B` → `A__B`)
 - `--deck` - Serialize only one deck (includes subdecks by default)
 - `--no-subdecks` - With `--deck`, exclude subdecks (exact deck only)
 

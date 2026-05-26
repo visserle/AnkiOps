@@ -369,7 +369,8 @@ def main():
         "-o",
         help=(
             "Output file path (default: <collection-name>.json, "
-            "<deck-name>.json when --deck is set)"
+            "<deck-stem>.json when --deck is set; uses the same encoding as "
+            "markdown filenames)"
         ),
     )
     serialize_parser.add_argument(
