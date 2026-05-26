@@ -26,6 +26,7 @@ from ankiops.tags import TAGS_COMMENT_RE
 
 logger = logging.getLogger(__name__)
 _NOTE_KEY_LINE_RE = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
+_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 
 @dataclass
@@ -78,6 +79,20 @@ def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
     )
 
 
+def _find_tags_comment_index(lines: list[str]) -> int | None:
+    in_code_block = False
+    for line_index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if _CODE_FENCE_PATTERN.match(stripped):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if TAGS_COMMENT_RE.match(line):
+            return line_index
+    return None
+
+
 def _upsert_note_key_in_block(block: str, note: Note, note_key: str) -> str:
     """Insert or replace note_key in a single markdown note block."""
     note_key_line = f"<!-- note_key: {note_key} -->"
@@ -91,14 +106,7 @@ def _upsert_note_key_in_block(block: str, note: Note, note_key: str) -> str:
             lines[line_index] = note_key_line
             return "\n".join(lines)
 
-    tag_idx = next(
-        (
-            line_index
-            for line_index, line in enumerate(lines)
-            if TAGS_COMMENT_RE.match(line)
-        ),
-        None,
-    )
+    tag_idx = _find_tags_comment_index(lines)
     insert_idx = (
         tag_idx if tag_idx is not None else _find_first_markdown_line_index(note, lines)
     )
