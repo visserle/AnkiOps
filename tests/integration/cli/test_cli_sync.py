@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ankiops.anki_client import AnkiConnectError
-from ankiops.cli import main, run_am, run_ma, run_serialize
+from ankiops.cli import main, run_am, run_fix_image_widths, run_ma, run_serialize
 from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
+from ankiops.image_widths import ImageWidthFixResult
 from ankiops.models import (
     Change,
     ChangeType,
@@ -362,5 +363,83 @@ def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
     with patch("ankiops.cli.require_collection_dir", return_value=tmp_path):
         with pytest.raises(SystemExit) as exc:
             run_serialize(args)
+
+    assert exc.value.code == 2
+
+
+def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
+    args = SimpleNamespace(
+        deck="Parent",
+        no_subdecks=True,
+        tolerance=7,
+        width=None,
+        no_auto_commit=False,
+    )
+    result = ImageWidthFixResult(
+        decks_checked=1,
+        notes_checked=2,
+        images_checked=3,
+        decks_changed=1,
+        notes_changed=1,
+        images_changed=1,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch(
+            "ankiops.cli.fix_image_widths_collection",
+            return_value=result,
+        ) as fix_mock,
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_called_once_with(tmp_path, "fix-image-widths")
+    fix_mock.assert_called_once_with(
+        tmp_path,
+        deck="Parent",
+        no_subdecks=True,
+        tolerance=7,
+        width=None,
+    )
+
+
+def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
+    tmp_path, caplog
+):
+    args = SimpleNamespace(
+        deck=None,
+        no_subdecks=False,
+        tolerance=5,
+        width=320,
+        no_auto_commit=True,
+    )
+    result = ImageWidthFixResult(images_changed=2)
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.fix_image_widths_collection", return_value=result),
+        caplog.at_level(logging.INFO),
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_not_called()
+    assert "Only local Markdown files were edited" in caplog.text
+    assert "ankiops ma" in caplog.text
+
+
+def test_run_fix_image_widths_rejects_no_subdecks_without_deck(tmp_path):
+    args = SimpleNamespace(
+        deck=None,
+        no_subdecks=True,
+        tolerance=5,
+        width=None,
+        no_auto_commit=True,
+    )
+
+    with patch("ankiops.cli.require_collection_dir", return_value=tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            run_fix_image_widths(args)
 
     assert exc.value.code == 2

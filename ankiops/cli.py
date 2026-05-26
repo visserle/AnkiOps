@@ -16,6 +16,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
+from ankiops.image_widths import fix_image_widths_collection
 from ankiops.import_notes import import_collection
 from ankiops.init import create_tutorial, initialize_collection
 from ankiops.llm.commands import configure_llm_parser
@@ -38,6 +39,20 @@ from ankiops.sync_media import (
 from ankiops.sync_note_types import sync_note_types
 
 logger = logging.getLogger(__name__)
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
 
 
 def run_init(args):
@@ -274,6 +289,48 @@ def run_deserialize(args):
     )
 
 
+def run_fix_image_widths(args):
+    """Fix Markdown image width annotations in local deck files."""
+    if args.no_subdecks and not args.deck:
+        logger.error("--no-subdecks requires --deck")
+        raise SystemExit(2)
+
+    collection_dir = require_collection_dir()
+
+    if not args.no_auto_commit:
+        logger.debug("Creating pre-image-width-fix git snapshot")
+        git_snapshot(collection_dir, "fix-image-widths")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
+    try:
+        result = fix_image_widths_collection(
+            collection_dir,
+            deck=args.deck,
+            no_subdecks=args.no_subdecks,
+            tolerance=args.tolerance,
+            width=args.width,
+        )
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+
+    mode = (
+        f"forced width {args.width}px"
+        if args.width is not None
+        else f"auto tolerance ±{args.tolerance}px"
+    )
+    logger.info(
+        "Image widths: "
+        f"{result.decks_checked} decks, {result.notes_checked} notes, "
+        f"{result.images_checked} images checked ({mode}) — "
+        f"{result.decks_changed} decks, {result.notes_changed} notes, "
+        f"{result.images_changed} images changed"
+    )
+    if result.changed:
+        logger.info("Only local Markdown files were edited. Run 'ankiops ma' to sync.")
+
+
 def run_llm(args):
     """Delegates LLM command handling to the LLM CLI module."""
     run_llm_impl(
@@ -398,6 +455,39 @@ def main():
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
+    # Image width fixer parser
+    fix_widths_parser = subparsers.add_parser(
+        "fix-image-widths",
+        help="Normalize or force Markdown image widths via local file edits)",
+    )
+    fix_widths_parser.add_argument(
+        "--deck",
+        help="Fix only this deck (includes subdecks by default)",
+    )
+    fix_widths_parser.add_argument(
+        "--no-subdecks",
+        action="store_true",
+        help="With --deck, fix only the exact deck (exclude subdecks)",
+    )
+    fix_widths_parser.add_argument(
+        "--tolerance",
+        type=_non_negative_int,
+        default=5,
+        help="Pixel tolerance for auto mode (default: 5)",
+    )
+    fix_widths_parser.add_argument(
+        "--width",
+        type=_positive_int,
+        help="Force every Markdown image in scope to this width in pixels",
+    )
+    fix_widths_parser.add_argument(
+        "--no-auto-commit",
+        "-n",
+        action="store_true",
+        help="Skip the automatic git commit for this operation",
+    )
+    fix_widths_parser.set_defaults(handler=run_fix_image_widths)
+
     configure_llm_parser(subparsers, handler=run_llm)
 
     note_types_parser = subparsers.add_parser(
@@ -446,6 +536,7 @@ def main():
         print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
         print("  serialize         Serialize Markdown decks to JSON format")
         print("  deserialize       Deserialize JSON file to Markdown decks")
+        print("  fix-image-widths  Normalize or force Markdown image widths")
         print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
         print("  note-types        List note type labels or add note types from Anki")
         print()
@@ -468,6 +559,10 @@ def main():
         print(
             "  ankiops deserialize -i my-deck.json          "
             "# Deserialize file to markdown"
+        )
+        print(
+            "  ankiops fix-image-widths                     "
+            "# Normalize near-equal image widths"
         )
         print(
             "  ankiops llm                                  "

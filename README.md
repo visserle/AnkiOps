@@ -171,6 +171,13 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 - `--input`, `-i` - Input file path (default: `AnkiCollection.json`)
 - `--overwrite` - Overwrite existing markdown files
 
+**`fix-image-widths`:**
+- `--deck` - Fix only one deck (includes subdecks by default)
+- `--no-subdecks` - With `--deck`, exclude subdecks (exact deck only)
+- `--tolerance` - Pixel tolerance for near-equal width fixes (default: `5`)
+- `--width` - Force all Markdown images in scope to this width
+- `--no-auto-commit`, `-n` - Skip automatic git commit
+
 **`llm`:**
 - `ankiops llm` - Show LLM status dashboard (tasks + recent jobs)
 - `ankiops llm <task_name> [--model <model>] [--deck <deck_name>]` - Plan one configured task
