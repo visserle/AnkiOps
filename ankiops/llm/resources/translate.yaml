@@ -12,5 +12,7 @@ fields:
   read_only:
     "AnkiOpsChoice": ["Answer"]
 
+tags: editable
+
 request:
   max_notes_per_request: 3
