@@ -769,11 +769,10 @@ def _discover_note(
     read_only_tags = tags if task.tag_access is FieldAccess.READ_ONLY else None
     has_editable_surface = bool(editable_fields) or editable_tags is not None
     has_visible_field_surface = bool(editable_fields) or bool(read_only_fields)
-    if not has_editable_surface or (
-        editable_tags is not None
-        and not editable_fields
-        and not has_visible_field_surface
-    ):
+    tag_only_without_fields = (
+        editable_tags is not None and not has_visible_field_surface
+    )
+    if not has_editable_surface or tag_only_without_fields:
         skip_reason = (
             "no readable fields" if has_editable_surface else "no editable fields"
         )
