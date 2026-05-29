@@ -12,6 +12,8 @@ fields:
   read_only:
     "AnkiOpsChoice": ["Answer"]
 
+tags: hidden
+
 request:
   max_notes_per_request: 3
   reasoning: low

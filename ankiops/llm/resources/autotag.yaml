@@ -1,9 +1,10 @@
-model: gpt-5.4-mini
+model: gpt-5.4-nano
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Add or update Anki tags based only on the readable note text.
   Preserve useful existing tags and existing tag namespace style.
   Return the complete replacement tag list only when tags should change.
+# alternatively, the prompt could define a list of tags from which to choose
 
 fields:
   default_access: hidden
