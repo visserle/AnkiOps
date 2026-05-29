@@ -5,6 +5,7 @@ from __future__ import annotations
 from ankiops.config import LLM_DB_FILENAME
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.runner import plan_task
+from ankiops.llm.types import FieldAccess
 
 
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
@@ -111,4 +112,83 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     surface_by_type = {surface.note_type: surface for surface in plan.field_surface}
     assert "AI Notes" in surface_by_type["AnkiOpsQA"].hidden_fields
     assert "Answer" in surface_by_type["AnkiOpsChoice"].read_only_fields
+    assert surface_by_type["AnkiOpsQA"].tag_access is FieldAccess.HIDDEN
     assert not (llm_collection / "llm" / LLM_DB_FILENAME).exists()
+
+
+def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    write_file(
+        llm_collection / "llm/autotagger.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: Tag the note.
+        fields:
+          default_access: hidden
+          read_only:
+            "*": ["Text", "Question", "Answer"]
+        tags: editable
+        request:
+          max_notes_per_request: 4
+        """,
+    )
+
+    def fake_serialize(collection_dir, *, deck=None, no_subdecks=False, note_types_dir):
+        return {
+            "decks": [
+                {
+                    "name": "Deck",
+                    "notes": [
+                        {
+                            "note_key": "qa-1",
+                            "note_type": "AnkiOpsQA",
+                            "tags": ["old"],
+                            "fields": {
+                                "Question": "What?",
+                                "Answer": "That.",
+                                "Source": "book",
+                            },
+                        },
+                        {
+                            "note_key": "cloze-1",
+                            "note_type": "AnkiOpsCloze",
+                            "tags": [],
+                            "fields": {
+                                "Text": "{{c1::Cloze}} text",
+                                "Source": "article",
+                            },
+                        },
+                        {
+                            "note_key": "rev-1",
+                            "note_type": "AnkiOpsReversed",
+                            "tags": ["old"],
+                            "fields": {
+                                "Front": "front",
+                                "Back": "back",
+                            },
+                        },
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize", fake_serialize)
+
+    plan = plan_task(collection_dir=llm_collection, task_name="autotagger")
+
+    assert plan.summary.notes_seen == 3
+    assert plan.summary.eligible == 2
+    assert plan.summary.skipped == 1
+    assert plan.requests_estimate == 2
+    surface_by_type = {surface.note_type: surface for surface in plan.field_surface}
+    assert surface_by_type["AnkiOpsQA"].tag_access is FieldAccess.EDITABLE
+    assert surface_by_type["AnkiOpsCloze"].tag_access is FieldAccess.EDITABLE
+    assert surface_by_type["AnkiOpsReversed"].tag_access is FieldAccess.EDITABLE
+    assert surface_by_type["AnkiOpsQA"].read_only_fields == ["Question", "Answer"]
+    assert surface_by_type["AnkiOpsCloze"].read_only_fields == ["Text"]
+    assert surface_by_type["AnkiOpsReversed"].candidate_notes == 0

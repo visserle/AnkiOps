@@ -29,7 +29,12 @@ from ankiops.tags import normalize_tags
 from .config_loader import is_task_config_file, load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
 from .model_registry import parse_model
-from .schemas import build_response_model, parsed_response_json, parsed_updates
+from .schemas import (
+    build_response_model,
+    parsed_response_json,
+    parsed_tag_updates,
+    parsed_updates,
+)
 from .types import (
     DeckScope,
     DiscoveryCounts,
@@ -454,7 +459,7 @@ class LlmTaskExecutor:
                 _log_note_error(item.candidate, item.error_message)
             elif item.changed_fields:
                 logger.debug(
-                    "  Updated %s in '%s' (%s): fields=%s",
+                    "  Updated %s in '%s' (%s): changed=%s",
                     item.candidate.payload.note_key,
                     item.candidate.deck_name,
                     item.candidate.payload.note_type,
@@ -759,14 +764,25 @@ def _discover_note(
         else:
             editable_fields[field.name] = raw_value
 
-    if not editable_fields:
+    tags = normalize_tags(note.get("tags", ()))
+    editable_tags = tags if task.tag_access is FieldAccess.EDITABLE else None
+    read_only_tags = tags if task.tag_access is FieldAccess.READ_ONLY else None
+    has_editable_surface = bool(editable_fields) or editable_tags is not None
+    has_visible_field_surface = bool(editable_fields) or bool(read_only_fields)
+    tag_only_without_fields = (
+        editable_tags is not None and not has_visible_field_surface
+    )
+    if not has_editable_surface or tag_only_without_fields:
+        skip_reason = (
+            "no readable fields" if has_editable_surface else "no editable fields"
+        )
         return DiscoveryItem(
             ordinal=ordinal,
             deck_name=deck_name,
             note_key=note_key,
             note_type=note_type_name,
             item_status=LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS,
-            skip_reason="no editable fields",
+            skip_reason=skip_reason,
             error_message=None,
             payload=None,
             note_type_config=note_type_config,
@@ -786,6 +802,8 @@ def _discover_note(
             note_type=note_type_name,
             editable_fields=editable_fields,
             read_only_fields=read_only_fields,
+            editable_tags=editable_tags,
+            read_only_tags=read_only_tags,
         ),
         note_type_config=note_type_config,
         serialized_note=note,
@@ -1046,25 +1064,32 @@ def _build_request_content(
     task: TaskConfig,
     batch: EligibleBatch,
 ) -> tuple[str, str]:
-    notes: list[dict[str, object]] = []
-    for candidate in batch.candidates:
-        note_payload: dict[str, object] = {
-            "note_key": candidate.payload.note_key,
-            "editable_fields": candidate.payload.editable_fields,
-        }
-        if candidate.payload.read_only_fields:
-            note_payload["read_only_fields"] = candidate.payload.read_only_fields
-        notes.append(note_payload)
-
     payload = {
         "user_prompt": task.user_prompt,
         "note_type": batch.note_type,
-        "notes": notes,
+        "notes": [
+            _build_note_request_payload(candidate.payload)
+            for candidate in batch.candidates
+        ],
     }
     return (
         task.system_prompt.strip(),
         json.dumps(payload, ensure_ascii=False),
     )
+
+
+def _build_note_request_payload(payload: NotePayload) -> dict[str, object]:
+    note_payload: dict[str, object] = {
+        "note_key": payload.note_key,
+        "editable_fields": payload.editable_fields,
+    }
+    if payload.read_only_fields:
+        note_payload["read_only_fields"] = payload.read_only_fields
+    if payload.editable_tags is not None:
+        note_payload["editable_tags"] = list(payload.editable_tags)
+    if payload.read_only_tags is not None:
+        note_payload["read_only_tags"] = list(payload.read_only_tags)
+    return note_payload
 
 
 def _openai_error_result(
@@ -1095,6 +1120,7 @@ def _apply_batch_parsed_response(
     batch: EligibleBatch,
 ) -> list[_CandidateApplyResult]:
     updates = parsed_updates(parsed_response)
+    tag_updates = parsed_tag_updates(parsed_response)
     candidates_by_note_key = {
         candidate.payload.note_key: candidate for candidate in batch.candidates
     }
@@ -1102,6 +1128,11 @@ def _apply_batch_parsed_response(
         {
             note_key
             for note_key, _field_name, _value in updates
+            if note_key not in candidates_by_note_key
+        }
+        | {
+            note_key
+            for note_key, _tags in tag_updates
             if note_key not in candidates_by_note_key
         }
     )
@@ -1113,8 +1144,13 @@ def _apply_batch_parsed_response(
     updates_by_note_key: dict[str, list[tuple[str, str, str]]] = {
         note_key: [] for note_key in candidates_by_note_key
     }
+    tag_updates_by_note_key: dict[str, list[tuple[str, list[str]]]] = {
+        note_key: [] for note_key in candidates_by_note_key
+    }
     for update in updates:
         updates_by_note_key[update[0]].append(update)
+    for tag_update in tag_updates:
+        tag_updates_by_note_key[tag_update[0]].append(tag_update)
 
     results: list[_CandidateApplyResult] = []
     for candidate in batch.candidates:
@@ -1122,6 +1158,7 @@ def _apply_batch_parsed_response(
             changed_fields = _apply_candidate_updates(
                 candidate=candidate,
                 updates=updates_by_note_key[candidate.payload.note_key],
+                tag_updates=tag_updates_by_note_key[candidate.payload.note_key],
             )
         except ValueError as error:
             results.append(
@@ -1151,6 +1188,7 @@ def _apply_candidate_updates(
     *,
     candidate: EligibleCandidate,
     updates: list[tuple[str, str, str]],
+    tag_updates: list[tuple[str, list[str]]] | None = None,
 ) -> list[str]:
     seen_fields: set[str] = set()
     edits: dict[str, str] = {}
@@ -1168,16 +1206,31 @@ def _apply_candidate_updates(
             )
         edits[field_name] = value
 
+    tag_edit: tuple[str, ...] | None = None
+    if tag_updates:
+        if len(tag_updates) > 1:
+            raise ValueError("Model returned duplicate update for 'tags'")
+        if candidate.payload.editable_tags is None:
+            if candidate.payload.read_only_tags is not None:
+                raise ValueError("Model attempted to update read-only tags")
+            raise ValueError("Model attempted to update hidden tags")
+        _note_key, raw_tags = tag_updates[0]
+        tag_edit = normalize_tags(raw_tags)
+
     raw_fields = candidate.serialized_note.get("fields")
     if not isinstance(raw_fields, dict):
         raise ValueError("Serialized note fields must be a mapping")
 
     next_fields = dict(raw_fields)
+    next_tags = normalize_tags(candidate.serialized_note.get("tags", ()))
     changed_fields: list[str] = []
     for field_name, value in edits.items():
         if next_fields.get(field_name, "") != value:
             next_fields[field_name] = value
             changed_fields.append(field_name)
+    if tag_edit is not None and next_tags != tag_edit:
+        next_tags = tag_edit
+        changed_fields.append("tags")
 
     if not changed_fields:
         return []
@@ -1186,7 +1239,7 @@ def _apply_candidate_updates(
         note_key=candidate.payload.note_key,
         note_type=candidate.payload.note_type,
         fields=next_fields,
-        tags=normalize_tags(candidate.serialized_note.get("tags", ())),
+        tags=next_tags,
     )
     errors = [*_validate_cloze_text_fields(note, candidate.note_type_config)]
     errors.extend(note.validate(candidate.note_type_config))
@@ -1194,6 +1247,7 @@ def _apply_candidate_updates(
         raise ValueError("; ".join(errors))
 
     candidate.serialized_note["fields"] = next_fields
+    candidate.serialized_note["tags"] = list(next_tags)
     return changed_fields
 
 
@@ -1386,6 +1440,7 @@ def _build_plan_field_surface(
                 editable_fields=editable_fields,
                 read_only_fields=read_only_fields,
                 hidden_fields=hidden_fields,
+                tag_access=task.tag_access,
             )
         )
     return surface
@@ -1394,20 +1449,10 @@ def _build_plan_field_surface(
 def _estimate_batch_input_tokens(task: TaskConfig, payloads: list[NotePayload]) -> int:
     if not payloads:
         return 0
-    notes: list[dict[str, object]] = []
-    for payload in payloads:
-        note_payload: dict[str, object] = {
-            "note_key": payload.note_key,
-            "editable_fields": payload.editable_fields,
-        }
-        if payload.read_only_fields:
-            note_payload["read_only_fields"] = payload.read_only_fields
-        notes.append(note_payload)
-
     request_payload = {
         "user_prompt": task.user_prompt,
         "note_type": payloads[0].note_type,
-        "notes": notes,
+        "notes": [_build_note_request_payload(payload) for payload in payloads],
     }
     return _estimate_tokens(
         "\n".join(

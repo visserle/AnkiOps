@@ -17,6 +17,7 @@ from ankiops.llm.types import (
     DiscoveryCounts,
     DiscoveryItem,
     DiscoverySnapshot,
+    FieldAccess,
     LlmItemStatus,
     NotePayload,
     TaskConfig,
@@ -33,11 +34,15 @@ class _FakeAsyncOpenAI:
         pass
 
 
-def _parsed_response(*updates):
+def _parsed_response(*updates, tag_updates=()):
     return SimpleNamespace(
         updates=[
             SimpleNamespace(note_key=note_key, field=field, value=value)
             for note_key, field, value in updates
+        ],
+        tag_updates=[
+            SimpleNamespace(note_key=note_key, tags=tags)
+            for note_key, tags in tag_updates
         ],
         model_dump=lambda mode: {"updates": []},
     )
@@ -189,6 +194,93 @@ def test_executor_persists_successful_updates(
         "Fixed question"
     )
     assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["keep-me"]
+
+
+def test_executor_persists_successful_tag_updates(
+    tmp_path,
+    monkeypatch,
+    llm_qa_config,
+):
+    task = TaskConfig(
+        name="autotagger",
+        model=ModelSpec(
+            model="test",
+            model_id="gpt-test",
+            base_url="https://api.openai.com/v1",
+            api_key="$OPENAI_API_KEY",
+            concurrency=1,
+        ),
+        system_prompt="system",
+        user_prompt="user",
+        tag_access=FieldAccess.EDITABLE,
+        request=TaskRequestOptions(max_notes_per_request=1),
+    )
+    note = {
+        "note_key": "nk-1",
+        "note_type": "AnkiOpsQA",
+        "tags": ["old"],
+        "fields": {
+            "Question": "Question",
+            "Answer": "Answer",
+        },
+    }
+    item = DiscoveryItem(
+        ordinal=1,
+        deck_name="Deck",
+        note_key="nk-1",
+        note_type="AnkiOpsQA",
+        item_status=LlmItemStatus.QUEUED,
+        skip_reason=None,
+        error_message=None,
+        payload=NotePayload(
+            note_key="nk-1",
+            note_type="AnkiOpsQA",
+            editable_fields={},
+            read_only_fields={"Question": "Question", "Answer": "Answer"},
+            editable_tags=("old",),
+        ),
+        note_type_config=llm_qa_config,
+        serialized_note=note,
+    )
+    context = MaterializedTaskContext(
+        task=task,
+        note_type_configs={"AnkiOpsQA": llm_qa_config},
+        serialized_data={"decks": [{"name": "Deck", "notes": [note]}]},
+        discovery_snapshot=DiscoverySnapshot(
+            counts=DiscoveryCounts(decks_seen=1, decks_matched=1, notes_seen=1),
+            items=[item],
+        ),
+    )
+    persisted = {}
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        assert batch.candidates[0].payload.editable_tags == ("old",)
+        return _success(
+            _parsed_response(tag_updates=[("nk-1", ["new", "old", "new"])]),
+            input_tokens=7,
+            output_tokens=4,
+        )
+
+    def fake_deserialize(data, **_kwargs):
+        persisted["data"] = data
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
+
+    result = asyncio.run(
+        LlmTaskExecutor(
+            collection_dir=tmp_path,
+            materialized_context=context,
+            no_auto_commit=True,
+        ).execute()
+    )
+
+    assert not result.failed
+    assert result.persisted
+    assert result.summary.updated == 1
+    assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["new", "old"]
 
 
 def test_executor_cancels_queued_items_after_fatal_error(

@@ -32,6 +32,7 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
             "*": ["AI Notes"]
           hidden:
             "AnkiOpsChoice": ["Answer"]
+        tags: editable
         """,
     )
 
@@ -57,6 +58,32 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
     assert task.field_access("AnkiOpsQA", "Question") is FieldAccess.READ_ONLY
     assert task.field_access("AnkiOpsQA", "AI Notes") is FieldAccess.EDITABLE
     assert task.field_access("AnkiOpsChoice", "Answer") is FieldAccess.HIDDEN
+    assert task.tag_access is FieldAccess.EDITABLE
+
+
+def test_load_llm_task_catalog_defaults_tags_hidden(
+    llm_collection,
+    write_file,
+    llm_qa_config,
+):
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        request:
+          max_notes_per_request: 1
+        """,
+    )
+
+    catalog = load_llm_task_catalog(
+        llm_collection,
+        note_type_configs=[llm_qa_config],
+    )
+
+    assert not catalog.errors
+    assert catalog.tasks_by_name["grammar"].tag_access is FieldAccess.HIDDEN
 
 
 @pytest.mark.parametrize(
@@ -119,6 +146,17 @@ def test_load_llm_task_catalog_loads_files_fields_and_request(
               reasoning: extreme
             """,
             "request.reasoning' must be one of",
+        ),
+        (
+            """
+            model: test
+            system_prompt: system
+            user_prompt: user
+            tags: read-only
+            request:
+              max_notes_per_request: 1
+            """,
+            "'tags' must be one of",
         ),
     ],
 )
