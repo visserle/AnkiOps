@@ -26,7 +26,9 @@ Q: How fast do actions potentials propagate in the human body?
 ![](img_hash.png){width=700}
 ```
 
-With the first import, AnkiOps adds a stable `note_key` comment above each note for tracking. -->
+With the first import, AnkiOps adds a stable `note_key` comment above each note for tracking.
+
+same for note type:Inference is only for fresh notes that do not yet have metadata. -->
 
 ## Installation
 

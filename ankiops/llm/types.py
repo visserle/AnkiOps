@@ -87,6 +87,7 @@ class TaskConfig:
     decks: DeckScope = field(default_factory=DeckScope)
     default_field_access: FieldAccess = FieldAccess.EDITABLE
     field_rules: list[FieldAccessRule] = field(default_factory=list)
+    tag_access: FieldAccess = FieldAccess.HIDDEN
     request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
 
     def field_access(self, note_type: str, field_name: str) -> FieldAccess:
@@ -115,6 +116,8 @@ class NotePayload:
     note_type: str
     editable_fields: dict[str, str]
     read_only_fields: dict[str, str] = field(default_factory=dict)
+    editable_tags: tuple[str, ...] | None = None
+    read_only_tags: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +234,7 @@ class PlanFieldSurface:
     editable_fields: list[str]
     read_only_fields: list[str]
     hidden_fields: list[str]
+    tag_access: FieldAccess
 
 
 @dataclass(frozen=True)

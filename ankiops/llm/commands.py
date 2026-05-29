@@ -425,11 +425,12 @@ def _show_plan(
     logger.info("Field surface:")
     if plan.field_surface:
         _log_table(
-            ["Type", "Candidates", "Editable", "Read-only", "Hidden"],
+            ["Type", "Candidates", "Tags", "Editable", "Read-only", "Hidden"],
             [
                 [
                     surface.note_type,
                     str(surface.candidate_notes),
+                    surface.tag_access.value,
                     _format_field_list(surface.editable_fields),
                     _format_field_list(surface.read_only_fields),
                     _format_field_list(surface.hidden_fields),

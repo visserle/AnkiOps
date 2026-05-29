@@ -33,6 +33,7 @@ _SUPPORTED_TASK_KEYS = (
     "user_prompt",
     "request",
     "fields",
+    "tags",
 )
 _SUPPORTED_REQUEST_KEYS = (
     "max_notes_per_request",
@@ -172,6 +173,7 @@ def _parse_task(
         note_type_configs=note_type_configs,
         path=path,
     )
+    tag_access = _parse_tag_access(mapping.get("tags"), path=path)
     request = _parse_request_options(mapping.get("request"), path=path)
 
     return TaskConfig(
@@ -183,6 +185,7 @@ def _parse_task(
         user_prompt_path=user_prompt_path,
         default_field_access=default_field_access,
         field_rules=field_rules,
+        tag_access=tag_access,
         request=request,
     )
 
@@ -282,7 +285,12 @@ def _parse_field_rules(
             f"{path}: unknown fields config key(s): {', '.join(unknown_fields)}"
         )
 
-    default_access = _parse_field_access_value(value.get("default_access"), path=path)
+    default_access = _parse_access_value(
+        value.get("default_access"),
+        path=path,
+        key="fields.default_access",
+        default=FieldAccess.EDITABLE,
+    )
     note_type_names = [config.name for config in note_type_configs]
     field_names = {
         config.name: {field.name for field in config.fields}
@@ -304,21 +312,36 @@ def _parse_field_rules(
     return default_access, rules
 
 
-def _parse_field_access_value(value: Any, *, path: Path) -> FieldAccess:
+def _parse_tag_access(value: Any, *, path: Path) -> FieldAccess:
+    return _parse_access_value(
+        value,
+        path=path,
+        key="tags",
+        default=FieldAccess.HIDDEN,
+    )
+
+
+def _parse_access_value(
+    value: Any,
+    *,
+    path: Path,
+    key: str,
+    default: FieldAccess,
+) -> FieldAccess:
     if value is None:
-        return FieldAccess.EDITABLE
+        return default
     if not isinstance(value, str):
-        return _raise_invalid_field_access(path)
+        return _raise_invalid_access(path, key=key)
     normalized = value.strip()
     for access in FieldAccess:
         if normalized == access.value:
             return access
-    return _raise_invalid_field_access(path)
+    return _raise_invalid_access(path, key=key)
 
 
-def _raise_invalid_field_access(path: Path) -> FieldAccess:
+def _raise_invalid_access(path: Path, *, key: str) -> FieldAccess:
     supported = ", ".join(access.value for access in FieldAccess)
-    raise LlmConfigError(f"{path}: 'fields.default_access' must be one of: {supported}")
+    raise LlmConfigError(f"{path}: '{key}' must be one of: {supported}")
 
 
 def _parse_access_rules_by_note_type(

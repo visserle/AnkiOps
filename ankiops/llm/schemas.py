@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import ConfigDict, create_model
 
@@ -25,27 +25,46 @@ def build_response_model(
     editable_fields = sorted(
         {field_name for payload in payloads for field_name in payload.editable_fields}
     )
-    if not editable_fields:
-        raise ValueError("response model requires at least one editable field")
+    has_editable_tags = any(payload.editable_tags is not None for payload in payloads)
+    if not editable_fields and not has_editable_tags:
+        raise ValueError(
+            "response model requires at least one editable field or editable tags"
+        )
 
     suffix = _safe_type_name(note_type)
-    update_model = create_model(
-        f"{suffix}Update",
-        __config__=ConfigDict(extra="forbid"),
-        note_key=(_literal(note_keys), ...),
-        field=(_literal(editable_fields), ...),
-        value=(str, ...),
-    )
-    return create_model(
-        f"{suffix}Response",
-        __config__=ConfigDict(extra="forbid"),
-        updates=(list[update_model], ...),
+    response_fields: dict[str, Any] = {}
+    if editable_fields:
+        update_model = create_model(
+            f"{suffix}Update",
+            __config__=ConfigDict(extra="forbid"),
+            note_key=(_literal(note_keys), ...),
+            field=(_literal(editable_fields), ...),
+            value=(str, ...),
+        )
+        update_model_type: Any = update_model
+        response_fields["updates"] = (list[update_model_type], ...)
+    if has_editable_tags:
+        tag_update_model = create_model(
+            f"{suffix}TagUpdate",
+            __config__=ConfigDict(extra="forbid"),
+            note_key=(_literal(note_keys), ...),
+            tags=(list[str], ...),
+        )
+        tag_update_model_type: Any = tag_update_model
+        response_fields["tag_updates"] = (list[tag_update_model_type], ...)
+    return cast(
+        type[Any],
+        create_model(
+            f"{suffix}Response",
+            __config__=ConfigDict(extra="forbid"),
+            **response_fields,
+        ),
     )
 
 
 def parsed_updates(parsed_response: object) -> list[tuple[str, str, str]]:
     """Return ``(note_key, field, value)`` tuples from a parsed Pydantic object."""
-    raw_updates = getattr(parsed_response, "updates", None)
+    raw_updates = getattr(parsed_response, "updates", [])
     if not isinstance(raw_updates, list):
         raise ValueError("Parsed response is missing updates list")
 
@@ -61,6 +80,26 @@ def parsed_updates(parsed_response: object) -> list[tuple[str, str, str]]:
         if not isinstance(value, str):
             raise ValueError("Parsed update value must be a string")
         updates.append((note_key, field, value))
+    return updates
+
+
+def parsed_tag_updates(parsed_response: object) -> list[tuple[str, list[str]]]:
+    """Return ``(note_key, tags)`` tuples from a parsed Pydantic object."""
+    raw_updates = getattr(parsed_response, "tag_updates", [])
+    if not isinstance(raw_updates, list):
+        raise ValueError("Parsed response is missing tag_updates list")
+
+    updates: list[tuple[str, list[str]]] = []
+    for raw_update in raw_updates:
+        note_key = getattr(raw_update, "note_key", None)
+        tags = getattr(raw_update, "tags", None)
+        if not isinstance(note_key, str):
+            raise ValueError("Parsed tag update note_key must be a string")
+        if not isinstance(tags, list) or not all(
+            isinstance(tag, str) for tag in tags
+        ):
+            raise ValueError("Parsed tag update tags must be a list of strings")
+        updates.append((note_key, tags))
     return updates
 
 
