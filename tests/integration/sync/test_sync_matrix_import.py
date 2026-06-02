@@ -21,6 +21,7 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
 
         note_keys = world.extract_note_keys("FreshDeck")
         assert len(note_keys) == 1
+        assert "<!-- note_type: AnkiOpsQA -->" in world.read_deck("FreshDeck")
 
         note_id = next(iter(world.mock_anki.notes.keys()))
         assert (
@@ -46,7 +47,8 @@ def test_imp_fresh_create_002_creates_note_with_tags(world):
         note_id = next(iter(world.mock_anki.notes.keys()))
         assert world.mock_anki.notes[note_id]["tags"] == ["high-yield", "z"]
         content = world.read_deck("TaggedFreshDeck")
-        assert content.index("<!-- note_key:") < content.index("<!-- tags:")
+        assert content.index("<!-- note_key:") < content.index("<!-- note_type:")
+        assert content.index("<!-- note_type:") < content.index("<!-- tags:")
 
 
 def test_imp_run_update_001_updates_existing_note(world):

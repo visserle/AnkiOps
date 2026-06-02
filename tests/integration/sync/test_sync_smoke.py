@@ -458,6 +458,7 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
 
     content = deck_file.read_text(encoding="utf-8")
     assert "<!-- note_key:" in content
+    assert "<!-- note_type: AnkiOpsQA -->" in content
 
     lines = content.splitlines()
     key_line_idx = next(
@@ -465,8 +466,9 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
         for line_index, line in enumerate(lines)
         if line.startswith("<!-- note_key:")
     )
-    assert key_line_idx + 1 < len(lines)
-    assert lines[key_line_idx + 1].startswith("Q: Trailing Space Question ")
+    assert key_line_idx + 2 < len(lines)
+    assert lines[key_line_idx + 1] == "<!-- note_type: AnkiOpsQA -->"
+    assert lines[key_line_idx + 2].startswith("Q: Trailing Space Question ")
 
 
 def test_import_key_insertion_preserves_note_block_order(
@@ -504,7 +506,8 @@ def test_import_key_insertion_preserves_note_block_order(
         line_index for line_index, line in enumerate(lines) if line.startswith("Q: ")
     ]
     for question_index in question_indexes:
-        assert question_index > 0
-        assert lines[question_index - 1].startswith("<!-- note_key:")
+        assert question_index > 1
+        assert lines[question_index - 2].startswith("<!-- note_key:")
+        assert lines[question_index - 1] == "<!-- note_type: AnkiOpsQA -->"
 
     assert len(_extract_note_key_order(content)) == 3

@@ -423,7 +423,7 @@ def test_duplicate_field_names_within_note_type_fail():
 
 def test_duplicate_field_labels_within_note_type_fail():
     config = NoteTypeConfig(
-        name="DuplicatePrefixes",
+        name="DuplicateLabels",
         fields=[
             Field("Question", "Q:", identifying=True),
             Field("Answer", "Q:", identifying=True),

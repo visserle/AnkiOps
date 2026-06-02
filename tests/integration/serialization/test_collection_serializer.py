@@ -332,5 +332,6 @@ def test_deserialize_unknown_note_type_falls_back_to_inference(
         encoding="utf-8"
     )
     assert "<!-- note_key: nk-infer -->" in content
+    assert "<!-- note_type: AnkiOpsQA -->" in content
     assert "Q: Q infer" in content
     assert "A: A infer" in content

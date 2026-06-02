@@ -51,12 +51,13 @@ def test_flush_writes_handles_duplicate_first_lines_with_explicit_note_mapping(
     content = md_path.read_text(encoding="utf-8")
     assert "<!-- note_key: k1 -->" in content
     assert "<!-- note_key: k2 -->" in content
+    assert content.count("<!-- note_type: AnkiOpsQA -->") == 2
 
 
-def test_flush_writes_updates_existing_key_comment(tmp_path):
+def test_flush_writes_updates_existing_metadata_comments(tmp_path):
     fs_port = FileSystemAdapter()
     md_path = tmp_path / "UpdateKey.md"
-    raw = "<!-- note_key: old-key -->\nQ: Q1\nA: A1\n"
+    raw = "<!-- note_key: old-key -->\n<!-- note_type: WrongType -->\nQ: Q1\nA: A1\n"
     md_path.write_text(raw, encoding="utf-8")
 
     note = Note(
@@ -74,6 +75,35 @@ def test_flush_writes_updates_existing_key_comment(tmp_path):
     content = md_path.read_text(encoding="utf-8")
     assert "<!-- note_key: new-key -->" in content
     assert "<!-- note_key: old-key -->" not in content
+    assert "<!-- note_type: AnkiOpsQA -->" in content
+    assert "<!-- note_type: WrongType -->" not in content
+
+
+def test_flush_writes_adds_note_type_without_key_assignment(tmp_path):
+    fs_port = FileSystemAdapter()
+    md_path = tmp_path / "ExistingKey.md"
+    raw = "<!-- note_key: key-1 -->\n<!-- tags: z -->\nQ: Q1\nA: A1\n"
+    md_path.write_text(raw, encoding="utf-8")
+
+    note = Note(
+        note_key="key-1",
+        note_type="AnkiOpsQA",
+        fields={"Question": "Q1", "Answer": "A1"},
+        tags=("z",),
+    )
+    pending = _PendingWrite(
+        file_state=_mk_markdown_state(md_path, raw, notes=[note]),
+        note_key_assignments=[],
+    )
+
+    _flush_writes(fs_port, [pending])
+
+    assert md_path.read_text(encoding="utf-8").startswith(
+        "<!-- note_key: key-1 -->\n"
+        "<!-- note_type: AnkiOpsQA -->\n"
+        "<!-- tags: z -->\n"
+        "Q: Q1\n"
+    )
 
 
 def test_sync_deck_records_unknown_note_type_error(tmp_path):
@@ -109,7 +139,7 @@ def test_sync_deck_records_unknown_note_type_error(tmp_path):
         db.close()
 
 
-def test_render_notes_to_markdown_places_tags_after_note_key(fs):
+def test_render_notes_to_markdown_places_tags_after_managed_metadata(fs):
     config_by_name = {config.name: config for config in fs._note_type_configs}
     note = Note(
         note_key="key-1",
@@ -121,7 +151,11 @@ def test_render_notes_to_markdown_places_tags_after_note_key(fs):
     rendered = _render_notes_to_markdown([note], config_by_name)
 
     assert rendered.startswith(
-        "<!-- note_key: key-1 -->\n<!-- tags: a z -->\nQ: Q\nA: A"
+        "<!-- note_key: key-1 -->\n"
+        "<!-- note_type: AnkiOpsQA -->\n"
+        "<!-- tags: a z -->\n"
+        "Q: Q\n"
+        "A: A"
     )
 
 

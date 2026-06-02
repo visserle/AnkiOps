@@ -319,10 +319,10 @@ class TestParseClozeBlock:
 
     def test_unknown_label_before_first_field_fails(self, fs, tmp_path):
         md = tmp_path / "deck.md"
-        md.write_text("RANDOMPREFIX: {{c1::text}}\nE: extra info")
+        md.write_text("RANDOMLABEL: {{c1::text}}\nE: extra info")
         with pytest.raises(
             ValueError,
-            match=r"Unknown field label 'RANDOMPREFIX:'.* \(file: deck\.md, line: 1\)",
+            match=r"Unknown field label 'RANDOMLABEL:'.* \(file: deck\.md, line: 1\)",
         ):
             fs.read_markdown_file(md)
 
@@ -414,6 +414,19 @@ class TestParseQABlock:
             ),
         ):
             fs.read_markdown_file(md)
+
+    def test_qa_with_note_type_metadata(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text(
+            "<!-- note_key: key-1 -->\n"
+            "<!-- note_type: StaleType -->\n"
+            "Q: What?\n"
+            "A: Answer"
+        )
+        result = fs.read_markdown_file(md)
+        note = result.notes[0]
+        assert note.note_key == "key-1"
+        assert note.note_type == "AnkiOpsQA"
 
     def test_qa_with_tags_metadata(self, fs, tmp_path):
         md = tmp_path / "deck.md"

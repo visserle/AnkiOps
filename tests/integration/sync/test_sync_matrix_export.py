@@ -6,6 +6,7 @@ import logging
 
 from ankiops.config import ANKIOPS_DB
 from ankiops.db import SQLiteDbAdapter
+from ankiops.fingerprints import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
@@ -32,7 +33,13 @@ def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
 
         file_path = world.deck_path("FreshExportDeck")
         assert file_path.exists()
-        _assert_deck_contains(world, "FreshExportDeck", "Q: Q1", "A: A1")
+        _assert_deck_contains(
+            world,
+            "FreshExportDeck",
+            "<!-- note_type: AnkiOpsQA -->",
+            "Q: Q1",
+            "A: A1",
+        )
 
         keys = world.extract_note_keys("FreshExportDeck")
         assert len(keys) == 1
@@ -57,6 +64,7 @@ def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
         _assert_deck_contains(
             world,
             "TaggedExportDeck",
+            "<!-- note_type: AnkiOpsQA -->",
             "<!-- tags: high-yield z -->",
             "Q: Q1",
             "A: A1",
@@ -110,6 +118,48 @@ def test_exp_run_update_004_tag_only_anki_edit_updates_markdown(world):
 
         third = world.sync_export(db)
         assert_summary(third.summary, created=0, updated=0, errors=0)
+
+
+def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(world):
+    """Export should normalize metadata even when fields and cached hashes match."""
+    note_key = "exp-run-update-note-type-001"
+    note_id = world.add_qa_note(
+        deck_name="MetadataBackfillDeck",
+        question="Q0",
+        answer="A0",
+        note_key=note_key,
+    )
+    world.write_qa_deck("MetadataBackfillDeck", [("Q0", "A0", note_key)])
+
+    local_note = world.fs.read_markdown_file(
+        world.deck_path("MetadataBackfillDeck")
+    ).notes[0]
+    local_md_hash = note_fingerprint(
+        local_note.note_type,
+        local_note.fields,
+        tags=local_note.tags,
+    )
+    anki_note = world.anki.fetch_notes_info([note_id])[note_id]
+    observed_anki_hash = note_fingerprint(
+        anki_note.note_type,
+        anki_note.fields,
+        tags=anki_note.tags,
+    )
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        db.upsert_export_hashes([(note_key, local_md_hash, observed_anki_hash)])
+
+        result = world.sync_export(db)
+        assert_summary(result.summary, created=0, updated=0, errors=0)
+        _assert_deck_contains(
+            world,
+            "MetadataBackfillDeck",
+            "<!-- note_key: exp-run-update-note-type-001 -->",
+            "<!-- note_type: AnkiOpsQA -->",
+            "Q: Q0",
+            "A: A0",
+        )
 
 
 def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):

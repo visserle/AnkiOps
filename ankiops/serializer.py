@@ -224,6 +224,7 @@ def deserialize(
 
             if note_key:
                 lines.append(f"<!-- note_key: {note_key} -->")
+            lines.append(f"<!-- note_type: {note_type} -->")
             tag_comment = format_tags_comment(tags)
             if tag_comment:
                 lines.append(tag_comment)

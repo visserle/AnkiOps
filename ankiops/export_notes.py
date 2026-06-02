@@ -5,7 +5,9 @@ from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
 from ankiops.config import (
+    CODE_FENCE_PATTERN,
     NOTE_SEPARATOR,
+    NOTE_TYPE_PATTERN,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
 )
@@ -329,7 +331,42 @@ def _can_skip_markdown_rebuild(
     for existing_note, final_note in zip(fs.notes, final_notes):
         if final_note is not existing_note:
             return False
-    return True
+    return _has_current_note_type_metadata(fs, final_notes)
+
+
+def _has_current_note_type_metadata(fs: MarkdownFile, notes: list[Note]) -> bool:
+    blocks = fs.raw_content.split(NOTE_SEPARATOR)
+    note_idx = 0
+    for block in blocks:
+        stripped_block = block.strip()
+        if not stripped_block or not stripped_block.replace("-", ""):
+            continue
+        if note_idx >= len(notes):
+            return False
+        note = notes[note_idx]
+        note_idx += 1
+        if not _block_has_current_note_type_metadata(block, note.note_type):
+            return False
+    return note_idx == len(notes)
+
+
+def _block_has_current_note_type_metadata(block: str, note_type: str) -> bool:
+    expected = f"<!-- note_type: {note_type} -->"
+    found = False
+    in_code_block = False
+    for line in block.split("\n"):
+        stripped = line.lstrip()
+        if CODE_FENCE_PATTERN.match(stripped):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if not NOTE_TYPE_PATTERN.match(line):
+            continue
+        if line.strip() != expected:
+            return False
+        found = True
+    return found
 
 
 def _render_notes_to_markdown(
@@ -342,6 +379,7 @@ def _render_notes_to_markdown(
         parts = []
         if note.note_key:
             parts.append(f"<!-- note_key: {note.note_key} -->")
+        parts.append(f"<!-- note_type: {note.note_type} -->")
         tags_comment = format_tags_comment(note.tags)
         if tags_comment:
             parts.append(tags_comment)

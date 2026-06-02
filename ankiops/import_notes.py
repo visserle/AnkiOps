@@ -1,12 +1,17 @@
 """Use Case: Import Markdown Notes into Anki."""
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import NOTE_SEPARATOR, file_stem_to_deck_name
+from ankiops.config import (
+    CODE_FENCE_PATTERN,
+    NOTE_KEY_PATTERN,
+    NOTE_SEPARATOR,
+    NOTE_TYPE_PATTERN,
+    file_stem_to_deck_name,
+)
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
@@ -25,8 +30,6 @@ from ankiops.models import (
 from ankiops.tags import TAGS_COMMENT_RE
 
 logger = logging.getLogger(__name__)
-_NOTE_KEY_LINE_RE = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
-_CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
 
 
 @dataclass
@@ -68,8 +71,8 @@ def _find_first_markdown_line_index(note: Note, lines: list[str]) -> int:
             # Verify this is a labeled line (e.g. "Q: Question 1").
             try:
                 idx = stripped.rindex(first_value_stripped)
-                prefix_part = stripped[:idx].rstrip()
-                if prefix_part.endswith(":"):
+                label_part = stripped[:idx].rstrip()
+                if label_part.endswith(":"):
                     return line_index
             except ValueError:
                 pass
@@ -83,7 +86,7 @@ def _find_tags_comment_index(lines: list[str]) -> int | None:
     in_code_block = False
     for line_index, line in enumerate(lines):
         stripped = line.lstrip()
-        if _CODE_FENCE_PATTERN.match(stripped):
+        if CODE_FENCE_PATTERN.match(stripped):
             in_code_block = not in_code_block
             continue
         if in_code_block:
@@ -93,32 +96,48 @@ def _find_tags_comment_index(lines: list[str]) -> int | None:
     return None
 
 
-def _upsert_note_key_in_block(block: str, note: Note, note_key: str) -> str:
-    """Insert or replace note_key in a single markdown note block."""
-    note_key_line = f"<!-- note_key: {note_key} -->"
-    lines = block.split("\n")
-
-    # Replace an existing note_key comment in place.
+def _find_managed_metadata_indices(lines: list[str]) -> set[int]:
+    indices: set[int] = set()
+    in_code_block = False
     for line_index, line in enumerate(lines):
-        if _NOTE_KEY_LINE_RE.match(line):
-            if line.strip() == note_key_line:
-                return block
-            lines[line_index] = note_key_line
-            return "\n".join(lines)
+        stripped = line.lstrip()
+        if CODE_FENCE_PATTERN.match(stripped):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        if NOTE_KEY_PATTERN.match(line) or NOTE_TYPE_PATTERN.match(line):
+            indices.add(line_index)
+    return indices
 
-    tag_idx = _find_tags_comment_index(lines)
+
+def _upsert_note_metadata_in_block(block: str, note: Note, note_key: str | None) -> str:
+    """Insert or replace managed metadata in a single markdown note block."""
+    lines = block.split("\n")
+    metadata_indices = _find_managed_metadata_indices(lines)
+    content_lines = [
+        line
+        for line_index, line in enumerate(lines)
+        if line_index not in metadata_indices
+    ]
+
+    metadata_lines = []
+    if note_key:
+        metadata_lines.append(f"<!-- note_key: {note_key} -->")
+    metadata_lines.append(f"<!-- note_type: {note.note_type} -->")
+
+    tag_idx = _find_tags_comment_index(content_lines)
     insert_idx = (
-        tag_idx if tag_idx is not None else _find_first_markdown_line_index(note, lines)
+        tag_idx
+        if tag_idx is not None
+        else _find_first_markdown_line_index(note, content_lines)
     )
-    lines.insert(insert_idx, note_key_line)
-    return "\n".join(lines)
+    content_lines[insert_idx:insert_idx] = metadata_lines
+    return "\n".join(content_lines)
 
 
 def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> None:
     for pending_write in writes:
-        if not pending_write.note_key_assignments:
-            continue
-
         note_key_by_note = {
             id(note): note_key for note, note_key in pending_write.note_key_assignments
         }
@@ -139,12 +158,9 @@ def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> No
 
             note = pending_write.file_state.notes[note_idx]
             note_idx += 1
-            note_key = note_key_by_note.get(id(note))
-            if note_key is None:
-                out_blocks.append(block)
-                continue
+            note_key = note_key_by_note.get(id(note), note.note_key)
 
-            updated_block = _upsert_note_key_in_block(block, note, note_key)
+            updated_block = _upsert_note_metadata_in_block(block, note, note_key)
             changed = changed or updated_block != block
             out_blocks.append(updated_block)
 

@@ -1,8 +1,11 @@
 """Configuration for Anki to Markdown conversion."""
 
 import logging
+import re
 from pathlib import Path
 from urllib.parse import unquote
+
+from ankiops.models import ANKIOPS_KEY_FIELD
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +16,12 @@ LLM_DIR = "llm"
 LLM_DB_FILENAME = ".llm.db"
 
 NOTE_SEPARATOR = "\n\n---\n\n"  # changing the whitespace might lead to issues
+
+NOTE_KEY_PATTERN = re.compile(r"^\s*<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->\s*$")
+NOTE_TYPE_PATTERN = re.compile(r"^\s*<!--\s*note_type:\s*.*?\s*-->\s*$")
+CODE_FENCE_PATTERN = re.compile(r"^(```|~~~)")
+LABEL_CANDIDATE_PATTERN = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*:)(?:\s|$)")
+RESERVED_NOTE_FIELD_NAMES = frozenset({ANKIOPS_KEY_FIELD.name})
 
 
 def sanitize_filename(deck_name: str) -> str:
