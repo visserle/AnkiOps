@@ -15,6 +15,7 @@ from ankiops.config import (
 )
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
+from ankiops.markdown_format import format_note_key_comment, format_note_type_comment
 from ankiops.tags import format_tags_comment, normalize_tags
 
 logger = logging.getLogger(__name__)
@@ -223,8 +224,8 @@ def deserialize(
                 continue
 
             if note_key:
-                lines.append(f"<!-- note_key: {note_key} -->")
-            lines.append(f"<!-- note_type: {note_type} -->")
+                lines.append(format_note_key_comment(note_key))
+            lines.append(format_note_type_comment(note_type))
             tag_comment = format_tags_comment(tags)
             if tag_comment:
                 lines.append(tag_comment)

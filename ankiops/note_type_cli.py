@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 
 import yaml
 from rich import get_console as rich_get_console
@@ -13,11 +12,11 @@ from ankiops.cli_anki import connect_or_exit
 from ankiops.config import NOTE_TYPES_DIR, require_collection_dir
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
+from ankiops.markdown_format import FIELD_LABEL_NAME_RE
 from ankiops.models import Field, NoteTypeConfig
 
 logger = logging.getLogger(__name__)
 _TABLE_MAX_WIDTH = 120
-_VALID_FIELD_LABEL_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 def _parse_identifying_answer(value: str) -> bool:
@@ -35,7 +34,7 @@ def _validate_label_input(label: str, *, used_labels: set[str]) -> str:
         normalized = normalized[:-1].strip()
     if not normalized:
         raise ValueError("Label cannot be empty.")
-    if not _VALID_FIELD_LABEL_PATTERN.match(normalized):
+    if not FIELD_LABEL_NAME_RE.match(normalized):
         raise ValueError(
             "Label must start with a letter and contain only letters, "
             "numbers, '_' or '-'."

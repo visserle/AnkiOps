@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 
-TAGS_COMMENT_RE = re.compile(r"^\s*<!--\s*tags:\s*(.*?)\s*-->\s*$")
+from ankiops.markdown_format import TAGS_COMMENT_RE
 
 
 def normalize_tags(tags: Iterable[str] | str | None = None) -> tuple[str, ...]:

@@ -5,17 +5,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
-from ankiops.config import (
-    CODE_FENCE_PATTERN,
-    NOTE_KEY_PATTERN,
-    NOTE_SEPARATOR,
-    NOTE_TYPE_PATTERN,
-    file_stem_to_deck_name,
-)
+from ankiops.config import file_stem_to_deck_name
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
+from ankiops.markdown_format import (
+    NOTE_SEPARATOR,
+    format_note_key_comment,
+    format_note_type_comment,
+    is_code_fence_line,
+    is_note_type_comment,
+    parse_note_key_comment,
+)
 from ankiops.models import (
+    ANKIOPS_KEY_FIELD,
     AnkiNote,
     Change,
     ChangeType,
@@ -27,7 +30,7 @@ from ankiops.models import (
     SyncResult,
     UntrackedDeck,
 )
-from ankiops.tags import TAGS_COMMENT_RE
+from ankiops.tags import parse_tags_comment
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,7 @@ def _format_note_type_mismatch_error(
         f"Note type mismatch for note_key: {note_key}: markdown uses "
         f"'{markdown_note_type}' but Anki has '{anki_note_type}'. "
         "AnkiConnect cannot convert existing notes between note types. "
-        f"Remove this note's key comment (<!-- note_key: {note_key} -->) "
+        f"Remove this note's key comment ({format_note_key_comment(note_key)}) "
         "to force creating a new note with the new type on the next import."
     )
 
@@ -86,12 +89,12 @@ def _find_tags_comment_index(lines: list[str]) -> int | None:
     in_code_block = False
     for line_index, line in enumerate(lines):
         stripped = line.lstrip()
-        if CODE_FENCE_PATTERN.match(stripped):
+        if is_code_fence_line(stripped):
             in_code_block = not in_code_block
             continue
         if in_code_block:
             continue
-        if TAGS_COMMENT_RE.match(line):
+        if parse_tags_comment(line) is not None:
             return line_index
     return None
 
@@ -101,12 +104,12 @@ def _find_managed_metadata_indices(lines: list[str]) -> set[int]:
     in_code_block = False
     for line_index, line in enumerate(lines):
         stripped = line.lstrip()
-        if CODE_FENCE_PATTERN.match(stripped):
+        if is_code_fence_line(stripped):
             in_code_block = not in_code_block
             continue
         if in_code_block:
             continue
-        if NOTE_KEY_PATTERN.match(line) or NOTE_TYPE_PATTERN.match(line):
+        if parse_note_key_comment(line) is not None or is_note_type_comment(line):
             indices.add(line_index)
     return indices
 
@@ -123,8 +126,8 @@ def _upsert_note_metadata_in_block(block: str, note: Note, note_key: str | None)
 
     metadata_lines = []
     if note_key:
-        metadata_lines.append(f"<!-- note_key: {note_key} -->")
-    metadata_lines.append(f"<!-- note_type: {note.note_type} -->")
+        metadata_lines.append(format_note_key_comment(note_key))
+    metadata_lines.append(format_note_type_comment(note.note_type))
 
     tag_idx = _find_tags_comment_index(content_lines)
     insert_idx = (
@@ -315,11 +318,11 @@ def _sync_keyed_note(
         clear_note_mapping(note_key)
         note_id = None
 
-    # Keyed sync trusts a non-empty embedded AnkiOps Key as source of truth.
+    # Keyed sync trusts a non-empty embedded key field as source of truth.
     # If mapped note_id points to a different non-empty key, treat mapping as stale.
     # Empty embedded keys are treated as backfill candidates.
     if anki_note and note_id:
-        embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+        embedded_note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
         if embedded_note_key and embedded_note_key != note_key:
             clear_note_mapping(note_key)
             note_id = None
@@ -327,7 +330,7 @@ def _sync_keyed_note(
 
     if not anki_note:
         html_fields = _to_html(parsed_note, cfg, fs_port)
-        html_fields["AnkiOps Key"] = note_key
+        html_fields[ANKIOPS_KEY_FIELD.name] = note_key
         result.add_change(
             Change(
                 ChangeType.CREATE,
@@ -394,8 +397,8 @@ def _sync_keyed_note(
         return
 
     html_fields = _to_html(parsed_note, cfg, fs_port)
-    if anki_note.fields.get("AnkiOps Key", "") != note_key:
-        html_fields["AnkiOps Key"] = note_key
+    if anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "") != note_key:
+        html_fields[ANKIOPS_KEY_FIELD.name] = note_key
 
     if _anki_note_match(html_fields, parsed_note.tags, anki_note):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
@@ -439,7 +442,7 @@ def _sync_new_note(
 ) -> None:
     new_note_key = db_port.generate_note_key()
     html_fields = _to_html(parsed_note, cfg, fs_port)
-    html_fields["AnkiOps Key"] = new_note_key
+    html_fields[ANKIOPS_KEY_FIELD.name] = new_note_key
     result.add_change(
         Change(
             ChangeType.CREATE,
@@ -493,7 +496,9 @@ def _collect_orphan_deletes(
             orphan_note = anki_notes.get(note_id)
             embedded_note_key = ""
             if orphan_note is not None:
-                embedded_note_key = orphan_note.fields.get("AnkiOps Key", "").strip()
+                embedded_note_key = orphan_note.fields.get(
+                    ANKIOPS_KEY_FIELD.name, ""
+                ).strip()
 
             # Protect unmanaged legacy notes from deletion on import.
             if not embedded_note_key:
@@ -799,10 +804,11 @@ def import_collection(
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
 
         # Collaboration mode: rebuild note_key->note_id mappings from embedded
-        # AnkiOps Key.
-        # so move/delete decisions do not depend on a pre-existing local DB.
+        # key fields, so move/delete decisions do not depend on a local DB.
         for anki_note in anki_notes.values():
-            embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+            embedded_note_key = anki_note.fields.get(
+                ANKIOPS_KEY_FIELD.name, ""
+            ).strip()
             if not embedded_note_key or embedded_note_key not in global_note_keys:
                 continue
             if note_ids_by_note_key.get(embedded_note_key) == anki_note.note_id:

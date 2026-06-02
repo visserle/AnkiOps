@@ -10,17 +10,16 @@ from urllib.parse import unquote
 import yaml
 from blake3 import blake3
 
-from ankiops.config import (
-    CODE_FENCE_PATTERN,
-    LABEL_CANDIDATE_PATTERN,
-    LOCAL_MEDIA_DIR,
-    NOTE_KEY_PATTERN,
-    NOTE_SEPARATOR,
-    NOTE_TYPE_PATTERN,
-    RESERVED_NOTE_FIELD_NAMES,
-)
+from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
+from ankiops.markdown_format import (
+    NOTE_SEPARATOR,
+    FIELD_LABEL_CANDIDATE_RE,
+    is_code_fence_line,
+    is_note_type_comment,
+    parse_note_key_comment,
+)
 from ankiops.models import (
     ANKIOPS_KEY_FIELD,
     Field,
@@ -125,7 +124,7 @@ class FileSystemAdapter:
             for offset, line in enumerate(lines):
                 current_line_number = note_start_line + offset
                 stripped = line.lstrip()
-                if CODE_FENCE_PATTERN.match(stripped):
+                if is_code_fence_line(stripped):
                     in_code_block = not in_code_block
                     if current_field:
                         current_content.append(line)
@@ -136,12 +135,12 @@ class FileSystemAdapter:
                         current_content.append(line)
                     continue
 
-                key_match = NOTE_KEY_PATTERN.match(line)
-                if key_match:
-                    note_key = key_match.group(1)
+                parsed_note_key = parse_note_key_comment(line)
+                if parsed_note_key is not None:
+                    note_key = parsed_note_key
                     continue
 
-                if NOTE_TYPE_PATTERN.match(line):
+                if is_note_type_comment(line):
                     continue
 
                 tag_values = parse_tags_comment(line)
@@ -180,7 +179,7 @@ class FileSystemAdapter:
                 if matched_field is None and current_field:
                     current_content.append(line)
                 elif matched_field is None:
-                    label_match = LABEL_CANDIDATE_PATTERN.match(stripped)
+                    label_match = FIELD_LABEL_CANDIDATE_RE.match(stripped)
                     if label_match:
                         unknown_label = label_match.group(1)
                         if unknown_label not in self._label_to_field:
@@ -262,7 +261,7 @@ class FileSystemAdapter:
         labels: set[str] | None = None,
     ) -> str:
         note_fields_frozen = frozenset(
-            key for key in fields.keys() if key not in RESERVED_NOTE_FIELD_NAMES
+            key for key in fields.keys() if key != ANKIOPS_KEY_FIELD.name
         )
         note_labels_frozen = frozenset(labels) if labels is not None else None
         signature = (note_fields_frozen, note_labels_frozen)

@@ -5,16 +5,21 @@ from pathlib import Path
 
 from ankiops.anki import AnkiAdapter
 from ankiops.config import (
-    CODE_FENCE_PATTERN,
-    NOTE_SEPARATOR,
-    NOTE_TYPE_PATTERN,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
 from ankiops.fs import FileSystemAdapter
+from ankiops.markdown_format import (
+    NOTE_SEPARATOR,
+    format_note_key_comment,
+    format_note_type_comment,
+    is_code_fence_line,
+    is_note_type_comment,
+)
 from ankiops.models import (
+    ANKIOPS_KEY_FIELD,
     AnkiNote,
     Change,
     ChangeType,
@@ -50,14 +55,14 @@ def _from_html(
     """Convert an AnkiNote into a Domain Note using the FS Port."""
     fields = {}
     for field_config in config.fields:
-        if field_config.name == "AnkiOps Key":
+        if field_config.name == ANKIOPS_KEY_FIELD.name:
             continue
         if field_config.name in anki_note.fields:
             md_val = fs_port.convert_to_markdown(anki_note.fields[field_config.name])
             if md_val:
                 fields[field_config.name] = md_val
 
-    note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+    note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
     return Note(
         note_key=note_key if note_key else None,
         note_type=anki_note.note_type,
@@ -128,7 +133,7 @@ def _resolve_deck_notes(
 
     for anki_note in anki_notes:
         note_key = note_keys_by_id.get(anki_note.note_id)
-        embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+        embedded_note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
         observed_anki_hash = note_fingerprint(
             anki_note.note_type,
             anki_note.fields,
@@ -351,17 +356,17 @@ def _has_current_note_type_metadata(fs: MarkdownFile, notes: list[Note]) -> bool
 
 
 def _block_has_current_note_type_metadata(block: str, note_type: str) -> bool:
-    expected = f"<!-- note_type: {note_type} -->"
+    expected = format_note_type_comment(note_type)
     found = False
     in_code_block = False
     for line in block.split("\n"):
         stripped = line.lstrip()
-        if CODE_FENCE_PATTERN.match(stripped):
+        if is_code_fence_line(stripped):
             in_code_block = not in_code_block
             continue
         if in_code_block:
             continue
-        if not NOTE_TYPE_PATTERN.match(line):
+        if not is_note_type_comment(line):
             continue
         if line.strip() != expected:
             return False
@@ -378,8 +383,8 @@ def _render_notes_to_markdown(
     for note in notes:
         parts = []
         if note.note_key:
-            parts.append(f"<!-- note_key: {note.note_key} -->")
-        parts.append(f"<!-- note_type: {note.note_type} -->")
+            parts.append(format_note_key_comment(note.note_key))
+        parts.append(format_note_type_comment(note.note_type))
         tags_comment = format_tags_comment(note.tags)
         if tags_comment:
             parts.append(tags_comment)
@@ -535,7 +540,9 @@ def export_collection(
         pending_note_mappings: list[tuple[str, int]] = []
         note_key_candidates = set(note_keys_by_id.values())
         for anki_note in anki_notes.values():
-            embedded_note_key = anki_note.fields.get("AnkiOps Key", "").strip()
+            embedded_note_key = anki_note.fields.get(
+                ANKIOPS_KEY_FIELD.name, ""
+            ).strip()
             if embedded_note_key:
                 note_key_candidates.add(embedded_note_key)
         note_export_fingerprints_by_note_key = db_port.resolve_export_hashes(

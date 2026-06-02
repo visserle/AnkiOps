@@ -9,7 +9,6 @@ from pathlib import Path
 from ankiops.anki import AnkiAdapter
 from ankiops.config import (
     ANKIOPS_DB,
-    NOTE_SEPARATOR,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
 )
@@ -17,6 +16,7 @@ from ankiops.db import SQLiteDbAdapter
 from ankiops.export_notes import export_collection
 from ankiops.fs import FileSystemAdapter
 from ankiops.import_notes import import_collection
+from ankiops.markdown_format import NOTE_SEPARATOR
 from ankiops.tags import format_tags_comment
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
