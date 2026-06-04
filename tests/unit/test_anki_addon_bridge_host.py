@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import pytest
+
 
 def _load_bridge_host_module():
     addon_dir = Path(__file__).resolve().parents[2] / "anki_addon"
@@ -93,3 +95,20 @@ def test_bridge_host_reads_json_request_body():
     )
 
     assert host.read_payload(handler) == {"action": "version", "params": {}}
+
+
+def test_bridge_host_rejects_invalid_content_length():
+    host = AnkiOpsBridgeHost(
+        get_collection=lambda: object(),
+        run_on_main=lambda work: work(),
+    )
+    handler = SimpleNamespace(
+        headers={
+            "Content-Type": "application/json",
+            "Content-Length": "chunked",
+        },
+        rfile=io.BytesIO(b""),
+    )
+
+    with pytest.raises(ValueError, match="Invalid Content-Length header"):
+        host.read_payload(handler)

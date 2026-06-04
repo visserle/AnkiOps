@@ -80,7 +80,10 @@ class AnkiOpsBridgeHost:
         raw_length = handler.headers.get("Content-Length")
         if raw_length is None:
             raise ValueError("Missing Content-Length.")
-        length = int(raw_length)
+        try:
+            length = int(raw_length)
+        except ValueError as error:
+            raise ValueError("Invalid Content-Length header.") from error
         if length > self._body_limit:
             raise ValueError("Bridge request body is too large.")
         raw = handler.rfile.read(length)

@@ -10,10 +10,12 @@ from ankiops.ankiops_bridge import AnkiOpsBridgeError
 from ankiops.collab import (
     _ensure_publish_repo,
     _git_commit_paths,
+    _git_commit_publish,
     _parse_slug,
     _subtree_add,
     _subtree_pull,
     _subtree_split,
+    _unlink_published_source_files,
     run_contribute,
     run_publish,
 )
@@ -40,9 +42,9 @@ def _patch_publish_git(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        "ankiops.collab._git_commit_paths",
-        lambda collection_dir, paths, message: calls.append(
-            ("commit", collection_dir, paths, message)
+        "ankiops.collab._git_commit_publish",
+        lambda collection_dir, plan, paths, message: calls.append(
+            ("commit", collection_dir, plan, paths, message)
         ),
     )
     monkeypatch.setattr(
@@ -189,6 +191,31 @@ def test_publish_missing_referenced_media_blocks_before_file_mutations(
     assert not (collection_dir / "collab").exists()
 
 
+def test_publish_commit_failure_keeps_source_file(tmp_path, monkeypatch):
+    collection_dir = _setup_collection(tmp_path)
+    deck = collection_dir / "Deck.md"
+    original = "Q: local\nA: deck\n"
+    deck.write_text(original, encoding="utf-8")
+    anki = _empty_anki()
+    monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_publish_repo",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr("ankiops.collab.connect_or_exit", lambda: anki)
+    monkeypatch.setattr(
+        "ankiops.collab._git_commit_publish",
+        lambda *_args: (_ for _ in ()).throw(ValueError("commit failed")),
+    )
+
+    with pytest.raises(ValueError, match="commit failed"):
+        run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
+
+    assert deck.read_text(encoding="utf-8") == original
+    assert (collection_dir / "collab" / "owner" / "repo" / "Deck.md").exists()
+
+
 def test_git_commit_paths_ignores_missing_untracked_source_path(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(
@@ -206,6 +233,58 @@ def test_git_commit_paths_ignores_missing_untracked_source_path(tmp_path):
     target.write_text("Q: moved\nA: deck\n", encoding="utf-8")
 
     _git_commit_paths(tmp_path, [target, tmp_path / "Segeln.md"], "publish")
+
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert status.stdout == ""
+
+
+def test_git_commit_publish_stages_source_removal_before_unlink(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=tmp_path,
+        check=True,
+    )
+    source = tmp_path / "Deck.md"
+    source.write_text("Q: root\nA: deck\n", encoding="utf-8")
+    subprocess.run(["git", "add", "Deck.md"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "root"], cwd=tmp_path, check=True)
+
+    target = tmp_path / "collab" / "owner" / "repo" / "Deck.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("Q: collab\nA: deck\n", encoding="utf-8")
+    plan = SimpleNamespace(files=[SimpleNamespace(source_path=source)])
+
+    _git_commit_publish(
+        tmp_path,
+        plan,
+        [target.parent, target, source],
+        "publish",
+    )
+
+    assert source.exists()
+    show = subprocess.run(
+        ["git", "show", "--name-status", "--format=", "HEAD"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "D\tDeck.md" in show.stdout
+    assert "A\tcollab/owner/repo/Deck.md" in show.stdout
+
+    _unlink_published_source_files(plan)
 
     status = subprocess.run(
         ["git", "status", "--short"],
@@ -290,13 +369,22 @@ def test_publish_synced_deck_creates_scoped_model_and_calls_bridge(
     anki.fetch_cards_info.return_value = {
         1000: {"cardId": 1000, "note": 100, "deckName": "Deck"}
     }
-    anki.fetch_model_names.return_value = ["AnkiOpsQA"]
+    anki.fetch_model_names.return_value = [
+        "AnkiOpsQA",
+        "AnkiOpsCloze",
+        "Basic",
+        "collab/owner/old/AnkiOpsQA",
+        "collab/owner/old/AnkiOpsCloze",
+    ]
     _patch_publish_git(monkeypatch)
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
     monkeypatch.setattr("ankiops.collab.connect_or_exit", lambda: anki)
 
     run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
 
+    anki.fetch_all_note_ids.assert_called_once_with(
+        ["AnkiOpsQA", "collab/owner/old/AnkiOpsQA"]
+    )
     created = anki.create_models.call_args.args[0]
     assert [config.name for config in created] == ["collab/owner/repo/AnkiOpsQA"]
     anki.change_notes_notetype.assert_called_once_with(
@@ -380,6 +468,9 @@ def test_publish_blocks_note_already_scoped_to_different_collab_slug(
     with pytest.raises(ValueError, match="same owner/repo slug"):
         run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
 
+    anki.fetch_all_note_ids.assert_called_once_with(
+        ["AnkiOpsQA", "collab/owner/old/AnkiOpsQA"]
+    )
     assert deck.exists()
     assert not (collection_dir / "collab").exists()
     anki.change_notes_notetype.assert_not_called()

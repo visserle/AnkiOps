@@ -164,6 +164,58 @@ def _git_commit_paths(collection_dir: Path, paths: list[Path], message: str) -> 
     _run_git(collection_dir, ["commit", "-m", message, "--", *rel_paths])
 
 
+def _ensure_clean_git_index(collection_dir: Path) -> None:
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(
+            "Collab publish requires a clean git index. Commit or unstage "
+            "existing changes before publishing."
+        )
+
+
+def _git_commit_publish(
+    collection_dir: Path,
+    plan: _PublishPlan,
+    paths: list[Path],
+    message: str,
+) -> None:
+    _ensure_clean_git_index(collection_dir)
+    add_paths = [
+        str(path.relative_to(collection_dir))
+        for path in paths
+        if path.exists() and path not in {file.source_path for file in plan.files}
+    ]
+    if add_paths:
+        _run_git(collection_dir, ["add", "-A", "--", *add_paths])
+
+    source_paths = [
+        str(rendered.source_path.relative_to(collection_dir))
+        for rendered in plan.files
+    ]
+    if source_paths:
+        _run_git(
+            collection_dir,
+            ["rm", "--cached", "-f", "--ignore-unmatch", "--", *source_paths],
+        )
+
+    diff = subprocess.run(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if diff.returncode == 0:
+        return
+    _run_git(collection_dir, ["commit", "-m", message])
+
+
 def _subtree_add(collection_dir: Path, source: SyncSource) -> None:
     if source.github_url is None:
         raise ValueError(f"Cannot derive GitHub URL for {source.display_name}")
@@ -407,7 +459,8 @@ def _prepare_publish_plan(
 
 
 def _collect_notes_to_convert(anki, plan: _PublishPlan) -> dict[str, list[int]]:
-    note_ids = anki.fetch_all_note_ids(sorted(anki.fetch_model_names()))
+    model_names = _publish_model_names_to_query(anki, plan)
+    note_ids = anki.fetch_all_note_ids(model_names)
     notes = anki.fetch_notes_info(note_ids)
     card_ids = [
         card_id
@@ -458,6 +511,28 @@ def _collect_notes_to_convert(anki, plan: _PublishPlan) -> dict[str, list[int]]:
         notes_to_convert.setdefault(markdown_note_type, []).append(note.note_id)
 
     return notes_to_convert
+
+
+def _publish_model_names_to_query(anki, plan: _PublishPlan) -> list[str]:
+    used = set(plan.note_types_used)
+    existing = set(anki.fetch_model_names())
+    target_scoped = {
+        plan.source.scope_note_type_name(note_type)
+        for note_type in used
+    }
+    relevant = {
+        model_name
+        for model_name in existing
+        if model_name in used
+        or model_name in target_scoped
+        or _is_collab_model_for_note_type(model_name, used)
+    }
+    return sorted(relevant)
+
+
+def _is_collab_model_for_note_type(model_name: str, note_types: set[str]) -> bool:
+    parts = model_name.split("/")
+    return len(parts) == 4 and parts[0] == "collab" and parts[-1] in note_types
 
 
 def _convert_publish_notes(anki, plan: _PublishPlan) -> None:
@@ -552,7 +627,6 @@ def _write_publish_files(collection_dir: Path, plan: _PublishPlan) -> list[Path]
     touched: list[Path] = [source.root]
     for rendered in plan.files:
         rendered.target_path.write_text(rendered.content, encoding="utf-8")
-        rendered.source_path.unlink()
         touched.extend([rendered.target_path, rendered.source_path])
 
     for note_type in sorted(plan.note_types_used):
@@ -578,6 +652,11 @@ def _write_publish_files(collection_dir: Path, plan: _PublishPlan) -> list[Path]
         touched.append(dst)
 
     return touched
+
+
+def _unlink_published_source_files(plan: _PublishPlan) -> None:
+    for rendered in plan.files:
+        rendered.source_path.unlink()
 
 
 def _ensure_contributable_note_keys(source: SyncSource) -> None:
@@ -668,11 +747,13 @@ def run_publish(args) -> None:
     anki = connect_or_exit()
     _convert_publish_notes(anki, plan)
     touched = _write_publish_files(collection_dir, plan)
-    _git_commit_paths(
+    _git_commit_publish(
         collection_dir,
+        plan,
         touched,
         f"AnkiOps: publish {args.deck} to {source.source_id}",
     )
+    _unlink_published_source_files(plan)
     branch = _subtree_split(collection_dir, source)
     if source.github_url:
         _run_git(
@@ -694,14 +775,15 @@ def run_subscribe(args) -> None:
 
 def run_pull(args) -> None:
     collection_dir = require_collection_dir()
+    requested_source = None
     if args.repo:
-        source = _source_for_slug(collection_dir, args.repo)
+        requested_source = _source_for_slug(collection_dir, args.repo)
     _ensure_git_repo(collection_dir)
     sources = discover_sync_sources(collection_dir)
-    if args.repo:
-        if not source.root.exists():
-            raise ValueError(f"Unknown collab source: {source.source_id}")
-        targets = [source]
+    if requested_source is not None:
+        if not requested_source.root.exists():
+            raise ValueError(f"Unknown collab source: {requested_source.source_id}")
+        targets = [requested_source]
     else:
         targets = [source for source in sources if source.is_collab]
     if not targets:
