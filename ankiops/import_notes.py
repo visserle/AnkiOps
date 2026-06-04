@@ -54,15 +54,32 @@ class _SourceMarkdownFile:
     file_state: MarkdownFile
 
 
-def _format_note_type_mismatch_error(
+@dataclass(frozen=True)
+class _NoteTypeConversion:
+    note_id: int
+    note_key: str
+    old_model: str
+    new_model: str
+    entity_repr: str
+    md_hash: str
+    import_anki_hash: str
+
+
+def _collab_scope(note_type: str) -> str | None:
+    parts = note_type.split("/")
+    if len(parts) == 4 and parts[0] == "collab":
+        return "/".join(parts[:3])
+    return None
+
+
+def _format_cross_collab_conversion_error(
     *, note_key: str, markdown_note_type: str, anki_note_type: str
 ) -> str:
     return (
-        f"Note type mismatch for note_key: {note_key}: markdown uses "
-        f"'{markdown_note_type}' but Anki has '{anki_note_type}'. "
-        "AnkiOps will not create a duplicate note to resolve this. "
-        "Fix the Markdown note_type metadata or intentionally convert the "
-        "existing Anki note type, then re-run import."
+        f"Cannot convert note_key {note_key} from '{anki_note_type}' to "
+        f"'{markdown_note_type}': the Anki note already belongs to a different "
+        "collab source. Use the matching collab source or resolve the note "
+        "ownership manually."
     )
 
 
@@ -314,6 +331,7 @@ def _sync_keyed_note(
     result: SyncResult,
     cards_to_move: list[int],
     moved_from_decks: set[str],
+    note_type_conversions: list[_NoteTypeConversion],
     queue_note_mapping,
     clear_note_mapping,
     queue_import_fingerprint,
@@ -388,23 +406,14 @@ def _sync_keyed_note(
         )
         cards_to_move.extend(cards_to_move_for_note)
 
-    if anki_note.note_type != parsed_note.note_type:
-        result.errors.append(
-            _format_note_type_mismatch_error(
-                note_key=note_key,
-                markdown_note_type=parsed_note.note_type,
-                anki_note_type=anki_note.note_type,
-            )
-        )
-        return
-
+    needs_note_type_conversion = anki_note.note_type != parsed_note.note_type
     current_anki_hash = note_fingerprint(
         anki_note.note_type,
         anki_note.fields,
         tags=anki_note.tags,
     )
     cached = note_import_fingerprints_by_note_key.get(note_key)
-    if cached == (md_hash, current_anki_hash):
+    if not needs_note_type_conversion and cached == (md_hash, current_anki_hash):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
@@ -412,17 +421,63 @@ def _sync_keyed_note(
     html_fields = _to_html(parsed_note, cfg, fs_port)
     if anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "") != note_key:
         html_fields[ANKIOPS_KEY_FIELD.name] = note_key
-
-    if _anki_note_match(html_fields, parsed_note.tags, anki_note):
-        result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
-        queue_import_fingerprint(note_key, md_hash, current_anki_hash)
-        return
-
     target_anki_hash = note_fingerprint(
         parsed_note.note_type,
         html_fields,
         tags=parsed_note.tags,
     )
+
+    if needs_note_type_conversion:
+        anki_scope = _collab_scope(anki_note.note_type)
+        markdown_scope = _collab_scope(parsed_note.note_type)
+        if anki_scope is not None and anki_scope != markdown_scope:
+            result.errors.append(
+                _format_cross_collab_conversion_error(
+                    note_key=note_key,
+                    markdown_note_type=parsed_note.note_type,
+                    anki_note_type=anki_note.note_type,
+                )
+            )
+            return
+        result.add_change(
+            Change(
+                ChangeType.CONVERT,
+                note_id,
+                parsed_note.identifier,
+                {
+                    "note_key": note_key,
+                    "old_model": anki_note.note_type,
+                    "new_model": parsed_note.note_type,
+                    "md_hash": md_hash,
+                    "import_anki_hash": target_anki_hash,
+                },
+            )
+        )
+        note_type_conversions.append(
+            _NoteTypeConversion(
+                note_id=note_id,
+                note_key=note_key,
+                old_model=anki_note.note_type,
+                new_model=parsed_note.note_type,
+                entity_repr=parsed_note.identifier,
+                md_hash=md_hash,
+                import_anki_hash=target_anki_hash,
+            )
+        )
+
+    if (
+        not needs_note_type_conversion
+        and _anki_note_match(html_fields, parsed_note.tags, anki_note)
+    ):
+        result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
+        queue_import_fingerprint(note_key, md_hash, current_anki_hash)
+        return
+
+    if needs_note_type_conversion and _anki_note_match(
+        html_fields, parsed_note.tags, anki_note
+    ):
+        return
+
     result.add_change(
         Change(
             ChangeType.UPDATE,
@@ -553,6 +608,42 @@ def _collect_orphan_deletes(
                 )
 
 
+def _apply_note_type_conversions(
+    *,
+    anki_port: AnkiAdapter,
+    conversions: list[_NoteTypeConversion],
+    queue_import_fingerprint,
+) -> list[str]:
+    if not conversions:
+        return []
+
+    by_model_pair: dict[tuple[str, str], list[_NoteTypeConversion]] = {}
+    for conversion in conversions:
+        by_model_pair.setdefault(
+            (conversion.old_model, conversion.new_model),
+            [],
+        ).append(conversion)
+
+    try:
+        for (old_model, new_model), grouped in sorted(by_model_pair.items()):
+            anki_port.change_notes_notetype(
+                sorted(conversion.note_id for conversion in grouped),
+                old_model,
+                new_model,
+            )
+    except Exception as error:
+        affected = ", ".join(conversion.entity_repr for conversion in conversions)
+        return [f"Failed note type conversion ({affected}): {error}"]
+
+    for conversion in conversions:
+        queue_import_fingerprint(
+            conversion.note_key,
+            conversion.md_hash,
+            conversion.import_anki_hash,
+        )
+    return []
+
+
 def _apply_changes_and_update_state(
     *,
     deck_context: _DeckContext,
@@ -560,6 +651,7 @@ def _apply_changes_and_update_state(
     db_port: SQLiteDbAdapter,
     result: SyncResult,
     cards_to_move: list[int],
+    note_type_conversions: list[_NoteTypeConversion],
     note_ids_by_note_key: dict[str, int],
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
@@ -568,6 +660,18 @@ def _apply_changes_and_update_state(
     queue_import_fingerprint,
 ) -> list[tuple[Note, str]]:
     if not deck_context.deck_name:
+        return []
+
+    if result.errors:
+        return []
+
+    conversion_errors = _apply_note_type_conversions(
+        anki_port=anki_port,
+        conversions=note_type_conversions,
+        queue_import_fingerprint=queue_import_fingerprint,
+    )
+    if conversion_errors:
+        result.errors.extend(conversion_errors)
         return []
 
     creates = result.changes_for(ChangeType.CREATE)
@@ -667,6 +771,7 @@ def _sync_file(
     result = SyncResult.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
     cards_to_move: list[int] = []
     moved_from_decks: set[str] = set()
+    note_type_conversions: list[_NoteTypeConversion] = []
 
     def _queue_note_mapping(note_key: str, note_id: int) -> None:
         existing_note_id = note_ids_by_note_key.get(note_key)
@@ -717,6 +822,7 @@ def _sync_file(
                 result=result,
                 cards_to_move=cards_to_move,
                 moved_from_decks=moved_from_decks,
+                note_type_conversions=note_type_conversions,
                 queue_note_mapping=_queue_note_mapping,
                 clear_note_mapping=_clear_note_mapping,
                 queue_import_fingerprint=_queue_import_fingerprint,
@@ -747,6 +853,7 @@ def _sync_file(
         db_port=db_port,
         result=result,
         cards_to_move=cards_to_move,
+        note_type_conversions=note_type_conversions,
         note_ids_by_note_key=note_ids_by_note_key,
         global_note_keys=global_note_keys,
         global_mapped_note_ids=global_mapped_note_ids,

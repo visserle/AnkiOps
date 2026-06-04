@@ -15,15 +15,17 @@ def test_note_summary_prefers_higher_priority_change_per_entity():
         Change(ChangeType.UPDATE, 1, "note_key: one"),
         Change(ChangeType.CREATE, 2, "note_key: two"),
         Change(ChangeType.DELETE, 3, "note_key: three"),
+        Change(ChangeType.CONVERT, 4, "note_key: four"),
     ]
 
     summary = result.summary
 
     assert summary.updated == 1
     assert summary.created == 1
+    assert summary.converted == 1
     assert summary.skipped == 0
     assert summary.deleted == 1
-    assert summary.total == 2
+    assert summary.total == 3
 
 
 def test_media_summary_tracks_sync_and_hash_with_deduplication():

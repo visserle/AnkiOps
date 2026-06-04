@@ -114,10 +114,8 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
         file_path=tmp_path / "Rhetorik.md",
     )
     sync_result.errors.append(
-        "Note type mismatch for note_key: nk-1: markdown uses 'AnkiOpsQA' "
-        "but Anki has 'AnkiOpsCloze'. AnkiOps will not create a duplicate "
-        "note to resolve this. Fix the Markdown note_type metadata or "
-        "intentionally convert the existing Anki note type, then re-run import."
+        "Failed note type conversion: Cannot convert AnkiOpsCloze to "
+        "AnkiOpsQA: field names differ"
     )
     summary = CollectionResult.for_import(results=[sync_result], untracked_decks=[])
 
@@ -125,7 +123,7 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
 
     assert "Import errors:" in caplog.text
     assert "Rhetorik" in caplog.text
-    assert "will not create a duplicate note" in caplog.text
+    assert "field names differ" in caplog.text
     assert "Review and resolve errors above" in caplog.text
 
 

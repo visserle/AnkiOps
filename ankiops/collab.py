@@ -12,8 +12,6 @@ from pathlib import Path
 
 import yaml
 
-from ankiops.ankiops_bridge import AnkiOpsBridgeError
-from ankiops.cli_anki import connect_or_exit
 from ankiops.config import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -23,7 +21,7 @@ from ankiops.config import (
 from ankiops.export_notes import _render_notes_to_markdown
 from ankiops.fs import FileSystemAdapter
 from ankiops.log import clickable_path
-from ankiops.models import ANKIOPS_KEY_FIELD, MarkdownFile, NoteTypeConfig
+from ankiops.models import MarkdownFile, NoteTypeConfig
 from ankiops.sources import (
     COLLAB_BRANCH,
     SyncSource,
@@ -32,7 +30,6 @@ from ankiops.sources import (
     markdown_files_for_source,
 )
 from ankiops.sync_media import _extract_media_references
-from ankiops.sync_note_types import sync_note_type_configs
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +50,9 @@ class _RenderedPublishFile:
 @dataclass(frozen=True)
 class _PublishPlan:
     source: SyncSource
-    deck_name: str
-    deck_names: set[str]
     files: list[_RenderedPublishFile]
-    scoped_configs: list[NoteTypeConfig]
     note_types_used: set[str]
-    note_type_by_key: dict[str, str]
     media_used: set[str]
-    note_keys: set[str]
 
 
 def _parse_slug(slug: str) -> tuple[str, str]:
@@ -164,6 +156,19 @@ def _git_commit_paths(collection_dir: Path, paths: list[Path], message: str) -> 
     _run_git(collection_dir, ["commit", "-m", message, "--", *rel_paths])
 
 
+def _git_head(collection_dir: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def _ensure_clean_git_index(collection_dir: Path) -> None:
     result = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
@@ -214,6 +219,34 @@ def _git_commit_publish(
     if diff.returncode == 0:
         return
     _run_git(collection_dir, ["commit", "-m", message])
+
+
+def _cleanup_failed_publish(collection_dir: Path, plan: _PublishPlan) -> None:
+    if _git_head(collection_dir) is not None:
+        _run_git(collection_dir, ["reset", "--mixed", "HEAD"])
+    else:
+        _run_git(
+            collection_dir,
+            [
+                "rm",
+                "-r",
+                "--cached",
+                "--ignore-unmatch",
+                "--",
+                _source_prefix(collection_dir, plan.source),
+            ],
+        )
+    _remove_publish_source_root(plan)
+
+
+def _remove_publish_source_root(plan: _PublishPlan) -> None:
+    if plan.source.root.exists():
+        shutil.rmtree(plan.source.root)
+    for parent in (plan.source.root.parent, plan.source.root.parent.parent):
+        try:
+            parent.rmdir()
+        except OSError:
+            pass
 
 
 def _subtree_add(collection_dir: Path, source: SyncSource) -> None:
@@ -361,10 +394,6 @@ def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
     return files
 
 
-def _deck_names_for_files(files: list[Path]) -> set[str]:
-    return {file_stem_to_deck_name(md_file.stem) for md_file in files}
-
-
 def _scoped_configs(
     source: SyncSource,
     configs: list[NoteTypeConfig],
@@ -387,27 +416,32 @@ def _prepare_publish_plan(
     parser.set_configs(root_configs)
 
     selected_files = _selected_deck_files(collection_dir, deck)
-    deck_names = _deck_names_for_files(selected_files)
     parsed_files: list[tuple[Path, MarkdownFile]] = []
     note_types_used: set[str] = set()
-    note_type_by_key: dict[str, str] = {}
     media_used: set[str] = set()
     note_keys: set[str] = set()
+    missing_note_keys: list[str] = []
 
     for md_file in selected_files:
         parsed = parser.read_markdown_file(md_file, context_root=collection_dir)
         parsed_files.append((md_file, parsed))
-        for note in parsed.notes:
-            if note.note_key:
-                if note.note_key in note_keys:
-                    raise ValueError(
-                        f"Duplicate note_key in publish set: {note.note_key}"
-                    )
+        for index, note in enumerate(parsed.notes, start=1):
+            if not note.note_key:
+                missing_note_keys.append(f"{md_file.name} note {index}")
+            elif note.note_key in note_keys:
+                raise ValueError(f"Duplicate note_key in publish set: {note.note_key}")
+            else:
                 note_keys.add(note.note_key)
-                note_type_by_key[note.note_key] = note.note_type
             note_types_used.add(note.note_type)
             for field_value in note.fields.values():
                 media_used.update(_extract_media_references(field_value))
+
+    if missing_note_keys:
+        raise ValueError(
+            "Cannot publish: notes are missing note_key metadata: "
+            + ", ".join(missing_note_keys)
+            + ". Run 'ankiops ma' first or add explicit note_key comments."
+        )
 
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
@@ -447,109 +481,10 @@ def _prepare_publish_plan(
 
     return _PublishPlan(
         source=source,
-        deck_name=deck,
-        deck_names=deck_names,
         files=rendered_files,
-        scoped_configs=scoped_configs,
         note_types_used=note_types_used,
-        note_type_by_key=note_type_by_key,
         media_used=media_used,
-        note_keys=note_keys,
     )
-
-
-def _collect_notes_to_convert(anki, plan: _PublishPlan) -> dict[str, list[int]]:
-    model_names = _publish_model_names_to_query(anki, plan)
-    note_ids = anki.fetch_all_note_ids(model_names)
-    notes = anki.fetch_notes_info(note_ids)
-    card_ids = [
-        card_id
-        for note in notes.values()
-        for card_id in note.card_ids
-    ]
-    cards = anki.fetch_cards_info(card_ids)
-    notes_to_convert: dict[str, list[int]] = {}
-
-    for note in notes.values():
-        deck_names = {
-            card["deckName"]
-            for card_id in note.card_ids
-            if (card := cards.get(card_id)) and card.get("deckName")
-        }
-        if not deck_names.intersection(plan.deck_names):
-            continue
-        outside_decks = deck_names - plan.deck_names
-        if outside_decks:
-            raise ValueError(
-                f"Cannot publish note {note.note_id}: it has cards both inside "
-                f"the published deck tree and outside it ({', '.join(outside_decks)})."
-            )
-        note_key = note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
-        if not note_key:
-            raise ValueError(
-                f"Cannot publish note {note.note_id}: it has no AnkiOps Key. "
-                "Run 'ankiops am' first so the note can be tracked."
-            )
-        if note_key not in plan.note_keys:
-            raise ValueError(
-                f"Cannot publish note {note.note_id}: its AnkiOps Key "
-                f"'{note_key}' is not present in the local Markdown files. "
-                "Run 'ankiops am' before publishing."
-            )
-        markdown_note_type = plan.note_type_by_key[note_key]
-        target_note_type = plan.source.scope_note_type_name(markdown_note_type)
-        if note.note_type == target_note_type:
-            continue
-        if note.note_type != markdown_note_type:
-            raise ValueError(
-                f"Cannot publish note {note.note_id}: Markdown would publish "
-                f"note_key '{note_key}' as '{target_note_type}', but Anki "
-                f"already has '{note.note_type}'. Use the same owner/repo slug "
-                "as the existing collab source, or intentionally convert the "
-                "Anki note type first."
-            )
-        notes_to_convert.setdefault(markdown_note_type, []).append(note.note_id)
-
-    return notes_to_convert
-
-
-def _publish_model_names_to_query(anki, plan: _PublishPlan) -> list[str]:
-    used = set(plan.note_types_used)
-    existing = set(anki.fetch_model_names())
-    target_scoped = {
-        plan.source.scope_note_type_name(note_type)
-        for note_type in used
-    }
-    relevant = {
-        model_name
-        for model_name in existing
-        if model_name in used
-        or model_name in target_scoped
-        or _is_collab_model_for_note_type(model_name, used)
-    }
-    return sorted(relevant)
-
-
-def _is_collab_model_for_note_type(model_name: str, note_types: set[str]) -> bool:
-    parts = model_name.split("/")
-    return len(parts) == 4 and parts[0] == "collab" and parts[-1] in note_types
-
-
-def _convert_publish_notes(anki, plan: _PublishPlan) -> None:
-    notes_to_convert = _collect_notes_to_convert(anki, plan)
-    if not notes_to_convert:
-        return
-
-    sync_note_type_configs(anki, plan.scoped_configs, db_port=None)
-    try:
-        for old_model, note_ids in sorted(notes_to_convert.items()):
-            anki.change_notes_notetype(
-                sorted(note_ids),
-                old_model,
-                plan.source.scope_note_type_name(old_model),
-            )
-    except AnkiOpsBridgeError as error:
-        raise ValueError(str(error)) from error
 
 
 def _styling_refs(note_type_dir: Path) -> list[str]:
@@ -744,15 +679,17 @@ def run_publish(args) -> None:
         source,
         public=bool(getattr(args, "public", False)),
     )
-    anki = connect_or_exit()
-    _convert_publish_notes(anki, plan)
-    touched = _write_publish_files(collection_dir, plan)
-    _git_commit_publish(
-        collection_dir,
-        plan,
-        touched,
-        f"AnkiOps: publish {args.deck} to {source.source_id}",
-    )
+    try:
+        touched = _write_publish_files(collection_dir, plan)
+        _git_commit_publish(
+            collection_dir,
+            plan,
+            touched,
+            f"AnkiOps: publish {args.deck} to {source.source_id}",
+        )
+    except Exception:
+        _cleanup_failed_publish(collection_dir, plan)
+        raise
     _unlink_published_source_files(plan)
     branch = _subtree_split(collection_dir, source)
     if source.github_url:
@@ -760,7 +697,11 @@ def run_publish(args) -> None:
             collection_dir,
             ["push", source.github_url, f"{branch}:{COLLAB_BRANCH}"],
         )
-    logger.info("Published %s to %s", args.deck, source.source_id)
+    logger.info(
+        "Published %s to %s. Run 'ankiops ma' to apply scoped note types to Anki.",
+        args.deck,
+        source.source_id,
+    )
 
 
 def run_subscribe(args) -> None:

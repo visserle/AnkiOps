@@ -20,6 +20,13 @@ class MockAnki:
         self.next_deck_id = 10
         self.calls = []
 
+    def _base_model_name(self, model_name: str | None) -> str | None:
+        if model_name == "RenamedQA":
+            return "AnkiOpsQA"
+        if model_name and model_name.startswith("collab/"):
+            return model_name.split("/")[-1]
+        return model_name
+
     def _search_value(self, term: str) -> str:
         value = term.split(":", 1)[1]
         if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
@@ -99,7 +106,7 @@ class MockAnki:
                 ]
 
             case "modelFieldNames":
-                model = params.get("modelName")
+                model = self._base_model_name(params.get("modelName"))
                 if model == "AnkiOpsQA":
                     return [
                         "Question",
@@ -326,3 +333,32 @@ class MockAnki:
                 "tags": list(normalize_tags(tags)),
             },
         )
+
+    def change_notes_notetype(
+        self,
+        note_ids: list[int],
+        old_model: str,
+        new_model: str,
+    ) -> None:
+        self.calls.append(
+            (
+                "changeNotesNotetype",
+                {"noteIds": note_ids, "oldModel": old_model, "newModel": new_model},
+            )
+        )
+        for note_id in note_ids:
+            note = self.notes[note_id]
+            if note["modelName"] != old_model:
+                raise ValueError(
+                    f"note {note_id} has model {note['modelName']}, expected "
+                    f"{old_model}"
+                )
+            old_fields = set(self.invoke("modelFieldNames", modelName=old_model))
+            new_fields = set(self.invoke("modelFieldNames", modelName=new_model))
+            if old_fields != new_fields:
+                raise ValueError(
+                    f"Cannot convert {old_model} to {new_model}: field names differ"
+                )
+            note["modelName"] = new_model
+            for card_id in note["cards"]:
+                self.cards[card_id]["modelName"] = new_model

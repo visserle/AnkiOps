@@ -73,6 +73,110 @@ def test_import_syncs_root_and_collab_sources_as_one_collection(world):
     assert collab_id in world.mock_anki.notes
 
 
+def test_import_converts_root_note_to_scoped_collab_type_without_duplicate(world):
+    collab_root = _setup_collab_root(world)
+    note_key = "published-key-1"
+    world.mock_anki.add_note(
+        "CollabDeck",
+        "AnkiOpsQA",
+        {
+            "Question": "Collab Q",
+            "Answer": "Collab A",
+            "AnkiOps Key": note_key,
+        },
+    )
+    note_id = max(world.mock_anki.notes.keys())
+    _write_collab_qa_deck(
+        collab_root,
+        "CollabDeck",
+        "Collab Q",
+        "Collab A",
+        note_key,
+    )
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+    assert result.summary.converted == 1
+    assert len(world.mock_anki.notes) == 1
+    assert note_id in world.mock_anki.notes
+    assert world.mock_anki.notes[note_id]["modelName"] == (
+        "collab/owner/repo/AnkiOpsQA"
+    )
+    assert (
+        "changeNotesNotetype",
+        {
+            "noteIds": [note_id],
+            "oldModel": "AnkiOpsQA",
+            "newModel": "collab/owner/repo/AnkiOpsQA",
+        },
+    ) in world.mock_anki.calls
+
+
+def test_import_bridge_failure_blocks_conversion_without_duplicate(world, monkeypatch):
+    collab_root = _setup_collab_root(world)
+    note_key = "published-key-bridge-down"
+    world.mock_anki.add_note(
+        "CollabDeck",
+        "AnkiOpsQA",
+        {
+            "Question": "Collab Q",
+            "Answer": "Collab A",
+            "AnkiOps Key": note_key,
+        },
+    )
+    note_id = max(world.mock_anki.notes.keys())
+    _write_collab_qa_deck(
+        collab_root,
+        "CollabDeck",
+        "Collab Q",
+        "Collab A",
+        note_key,
+    )
+    monkeypatch.setattr(
+        "ankiops.anki.change_notes_notetype",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("bridge down")),
+    )
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+    assert result.summary.errors == 1
+    assert len(world.mock_anki.notes) == 1
+    assert world.mock_anki.notes[note_id]["modelName"] == "AnkiOpsQA"
+
+
+def test_import_blocks_cross_collab_conversion_without_duplicate(world):
+    collab_root = _setup_collab_root(world)
+    note_key = "published-key-wrong-collab"
+    world.mock_anki.add_note(
+        "CollabDeck",
+        "collab/owner/old/AnkiOpsQA",
+        {
+            "Question": "Collab Q",
+            "Answer": "Collab A",
+            "AnkiOps Key": note_key,
+        },
+    )
+    note_id = max(world.mock_anki.notes.keys())
+    _write_collab_qa_deck(
+        collab_root,
+        "CollabDeck",
+        "Collab Q",
+        "Collab A",
+        note_key,
+    )
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+    assert result.summary.errors == 1
+    assert len(world.mock_anki.notes) == 1
+    assert world.mock_anki.notes[note_id]["modelName"] == (
+        "collab/owner/old/AnkiOpsQA"
+    )
+
+
 def test_import_rejects_duplicate_deck_names_across_sources(world):
     collab_root = _setup_collab_root(world)
 
@@ -278,3 +382,33 @@ def test_export_writes_anki_edits_back_to_collab_source(world):
         encoding="utf-8"
     )
     assert not world.deck_path("CollabDeck").exists()
+
+
+def test_export_blocks_pending_collab_note_type_conversion(world):
+    collab_root = _setup_collab_root(world)
+    note_key = "pending-conversion-export-key"
+    deck = _write_collab_qa_deck(
+        collab_root,
+        "CollabDeck",
+        "Collab Q",
+        "Local Collab A",
+        note_key,
+    )
+    original = deck.read_text(encoding="utf-8")
+    world.mock_anki.add_note(
+        "CollabDeck",
+        "AnkiOpsQA",
+        {
+            "Question": "Collab Q",
+            "Answer": "Anki Root A",
+            "AnkiOps Key": note_key,
+        },
+    )
+    note_id = max(world.mock_anki.notes.keys())
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        result = world.sync_export(db)
+
+    assert result.summary.errors == 1
+    assert deck.read_text(encoding="utf-8") == original

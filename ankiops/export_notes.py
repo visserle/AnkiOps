@@ -48,10 +48,21 @@ _ResolvedDeckNote = tuple[str, int, Note]
 _SYNC_ORDER = (
     ChangeType.DELETE,
     ChangeType.CREATE,
+    ChangeType.CONVERT,
     ChangeType.UPDATE,
     ChangeType.SKIP,
     ChangeType.MOVE,
 )
+
+
+def _format_pending_note_type_conversion_error(
+    *, note_key: str, markdown_note_type: str, anki_note_type: str
+) -> str:
+    return (
+        f"Pending note type conversion for note_key {note_key}: Markdown uses "
+        f"'{markdown_note_type}' but Anki has '{anki_note_type}'. Run "
+        "'ankiops ma' before exporting with 'ankiops am'."
+    )
 
 
 def _from_html(
@@ -157,6 +168,15 @@ def _resolve_deck_notes(
 
         local_match = local_notes_by_note_key.get(note_key) if note_key else None
         if note_key and local_match:
+            if local_match.note_type != anki_note.note_type:
+                errors.append(
+                    _format_pending_note_type_conversion_error(
+                        note_key=note_key,
+                        markdown_note_type=local_match.note_type,
+                        anki_note_type=anki_note.note_type,
+                    )
+                )
+                continue
             local_md_hash = note_fingerprint(
                 local_match.note_type,
                 local_match.fields,
@@ -460,6 +480,9 @@ def _sync_deck(
         local_notes_by_content=local_notes_by_content,
     )
     result.errors.extend(resolve_errors)
+    if resolve_errors:
+        result.order_changes(order=_SYNC_ORDER)
+        return result
 
     final_notes, protected_keyless_count = _order_resolved_notes(
         resolved_notes=resolved_notes,
