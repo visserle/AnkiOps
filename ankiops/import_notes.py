@@ -30,6 +30,13 @@ from ankiops.models import (
     SyncResult,
     UntrackedDeck,
 )
+from ankiops.note_identity import resolve_import_note_identity
+from ankiops.sources import (
+    SyncSource,
+    discover_sync_sources,
+    load_configs_for_sources,
+    markdown_files_for_source,
+)
 from ankiops.tags import parse_tags_comment
 
 logger = logging.getLogger(__name__)
@@ -41,15 +48,21 @@ class _PendingWrite:
     note_key_assignments: list[tuple[Note, str]]
 
 
+@dataclass(frozen=True)
+class _SourceMarkdownFile:
+    source: SyncSource
+    file_state: MarkdownFile
+
+
 def _format_note_type_mismatch_error(
     *, note_key: str, markdown_note_type: str, anki_note_type: str
 ) -> str:
     return (
         f"Note type mismatch for note_key: {note_key}: markdown uses "
         f"'{markdown_note_type}' but Anki has '{anki_note_type}'. "
-        "AnkiConnect cannot convert existing notes between note types. "
-        f"Remove this note's key comment ({format_note_key_comment(note_key)}) "
-        "to force creating a new note with the new type on the next import."
+        "AnkiOps will not create a duplicate note to resolve this. "
+        "Fix the Markdown note_type metadata or intentionally convert the "
+        "existing Anki note type, then re-run import."
     )
 
 
@@ -320,7 +333,7 @@ def _sync_keyed_note(
 
     # Keyed sync trusts a non-empty embedded key field as source of truth.
     # If mapped note_id points to a different non-empty key, treat mapping as stale.
-    # Empty embedded keys are treated as backfill candidates.
+    # Empty embedded keys can receive the Markdown note_key during this import.
     if anki_note and note_id:
         embedded_note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
         if embedded_note_key and embedded_note_key != note_key:
@@ -500,7 +513,7 @@ def _collect_orphan_deletes(
                     ANKIOPS_KEY_FIELD.name, ""
                 ).strip()
 
-            # Protect unmanaged legacy notes from deletion on import.
+            # Protect unmanaged keyless notes from deletion on import.
             if not embedded_note_key:
                 result.protected_keyless_notes += 1
                 result.add_change(
@@ -762,14 +775,52 @@ def import_collection(
     collection_dir: Path,
     note_types_dir: Path,
 ) -> CollectionResult:
-    configs = fs_port.load_note_type_configs(note_types_dir)
+    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    source_configs = load_configs_for_sources(sources)
+    configs = [
+        config
+        for source_config in source_configs
+        for config in source_config.configs
+    ]
     required_note_types = [config.name for config in configs]
     config_by_name = {config.name: config for config in configs}
-    md_files = fs_port.find_markdown_files(collection_dir)
-    fs_docs = [
-        fs_port.read_markdown_file(md_file, context_root=collection_dir)
-        for md_file in md_files
-    ]
+    fs_port.set_configs(configs)
+    source_docs: list[_SourceMarkdownFile] = []
+    for source_config in source_configs:
+        source_fs = FileSystemAdapter()
+        source_fs.set_configs(source_config.configs)
+        for md_file in markdown_files_for_source(source_config.source):
+            source_docs.append(
+                _SourceMarkdownFile(
+                    source=source_config.source,
+                    file_state=source_fs.read_markdown_file(
+                        md_file,
+                        context_root=source_config.source.root,
+                    ),
+                )
+            )
+    fs_docs = [source_doc.file_state for source_doc in source_docs]
+
+    deck_sources: dict[str, str] = {}
+    deck_duplicates: list[str] = []
+    for source_doc in source_docs:
+        deck_name = file_stem_to_deck_name(source_doc.file_state.file_path.stem)
+        previous = deck_sources.get(deck_name)
+        current = (
+            f"{source_doc.source.display_name}:"
+            f"{source_doc.file_state.file_path.name}"
+        )
+        if previous is not None:
+            deck_duplicates.append(
+                f"Deck '{deck_name}' is defined by both {previous} and {current}"
+            )
+            continue
+        deck_sources[deck_name] = current
+    if deck_duplicates:
+        raise ValueError(
+            "Aborting import: deck ownership conflicts found: "
+            + "; ".join(deck_duplicates)
+        )
 
     global_note_keys = set()
     note_key_sources = {}
@@ -781,16 +832,16 @@ def import_collection(
                 if note.note_key in note_key_sources:
                     duplicates.append(f"Duplicate note_key {note.note_key}")
                 else:
-                    note_key_sources[note.note_key] = markdown_file.file_path.name
+                    note_key_sources[note.note_key] = str(
+                        markdown_file.file_path.relative_to(collection_dir)
+                    )
                 global_note_keys.add(note.note_key)
 
     if duplicates:
         raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
-    note_ids_by_note_key = db_port.resolve_note_ids(global_note_keys)
     note_import_fingerprints_by_note_key = db_port.resolve_import_hashes(
         global_note_keys
     )
-    pending_note_mappings: list[tuple[str, int]] = []
     pending_import_fingerprints: list[tuple[str, str, str]] = []
 
     with db_port.write_tx():
@@ -800,21 +851,15 @@ def import_collection(
             deck_id: deck_name for deck_name, deck_id in deck_ids_by_name.items()
         }
 
-        all_note_ids = anki_port.fetch_all_note_ids(required_note_types)
-        anki_notes = anki_port.fetch_notes_info(all_note_ids)
-
-        # Collaboration mode: rebuild note_key->note_id mappings from embedded
-        # key fields, so move/delete decisions do not depend on a local DB.
-        for anki_note in anki_notes.values():
-            embedded_note_key = anki_note.fields.get(
-                ANKIOPS_KEY_FIELD.name, ""
-            ).strip()
-            if not embedded_note_key or embedded_note_key not in global_note_keys:
-                continue
-            if note_ids_by_note_key.get(embedded_note_key) == anki_note.note_id:
-                continue
-            note_ids_by_note_key[embedded_note_key] = anki_note.note_id
-            pending_note_mappings.append((embedded_note_key, anki_note.note_id))
+        identity = resolve_import_note_identity(
+            anki_port=anki_port,
+            db_port=db_port,
+            note_keys=global_note_keys,
+            required_note_types=required_note_types,
+        )
+        anki_notes = identity.anki_notes
+        note_ids_by_note_key = identity.note_ids_by_note_key
+        pending_note_mappings = list(identity.pending_note_mappings)
 
         global_mapped_note_ids = {
             note_id
@@ -840,7 +885,8 @@ def import_collection(
         }
         rename_candidates: set[tuple[str, str]] = set()
 
-        for markdown_file in fs_docs:
+        for source_doc in source_docs:
+            markdown_file = source_doc.file_state
             # Determine actual anki_deck_note_ids for this specific file
             # We find what the deck name maps to...
             deck_name = file_stem_to_deck_name(markdown_file.file_path.stem)

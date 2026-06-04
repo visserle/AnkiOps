@@ -115,10 +115,9 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
     )
     sync_result.errors.append(
         "Note type mismatch for note_key: nk-1: markdown uses 'AnkiOpsQA' "
-        "but Anki has 'AnkiOpsCloze'. Anki cannot convert existing notes "
-        "between note types. Remove this note's key comment "
-        "(<!-- note_key: nk-1 -->) to force creating a new note with the "
-        "new type on the next import."
+        "but Anki has 'AnkiOpsCloze'. AnkiOps will not create a duplicate "
+        "note to resolve this. Fix the Markdown note_type metadata or "
+        "intentionally convert the existing Anki note type, then re-run import."
     )
     summary = CollectionResult.for_import(results=[sync_result], untracked_decks=[])
 
@@ -126,7 +125,7 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
 
     assert "Import errors:" in caplog.text
     assert "Rhetorik" in caplog.text
-    assert "Remove this note's key comment" in caplog.text
+    assert "will not create a duplicate note" in caplog.text
     assert "Review and resolve errors above" in caplog.text
 
 
@@ -267,6 +266,26 @@ def test_cli_help_lists_version_flag(capsys):
     assert exc.value.code == 0
     captured = capsys.readouterr()
     assert "--version" in captured.out
+
+
+def test_cli_collab_publish_accepts_public_visibility_flag():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli.run_collab_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            ["ankiops", "collab", "publish", "Deck", "owner/repo", "--public"],
+        ),
+    ):
+        main()
+
+    assert captured[0].deck == "Deck"
+    assert captured[0].repo == "owner/repo"
+    assert captured[0].public is True
 
 
 def test_cli_init_exits_cleanly_on_anki_connect_error(caplog):

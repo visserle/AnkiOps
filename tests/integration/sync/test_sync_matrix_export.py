@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from ankiops.config import ANKIOPS_DB
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fingerprints import note_fingerprint
@@ -69,6 +71,31 @@ def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
             "Q: Q1",
             "A: A1",
         )
+
+
+def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(world):
+    """Export must not write two Markdown notes with the same note_key."""
+    note_key = "exp-duplicate-key"
+    first_id = world.add_qa_note(
+        deck_name="DuplicateExportDeck",
+        question="Q1",
+        answer="A1",
+        note_key=note_key,
+    )
+    second_id = world.add_qa_note(
+        deck_name="DuplicateExportDeck",
+        question="Q2",
+        answer="A2",
+        note_key=note_key,
+    )
+
+    with world.db_session() as db:
+        with pytest.raises(ValueError, match=f"Duplicate AnkiOps Key '{note_key}'"):
+            world.sync_export(db)
+
+    assert world.deck_path("DuplicateExportDeck").exists() is False
+    assert first_id in world.mock_anki.notes
+    assert second_id in world.mock_anki.notes
 
 
 def test_exp_run_update_001_updates_existing_markdown_note(world):

@@ -166,6 +166,33 @@ def test_fetch_notes_info_maps_tags():
     assert notes[101].tags == ("a", "z")
 
 
+def test_change_notes_notetype_calls_ankiops_bridge():
+    adapter = AnkiAdapter()
+
+    with patch("ankiops.anki.change_notes_notetype") as mock_bridge:
+        adapter.change_notes_notetype([101, 102], "AnkiOpsQA", "collab/o/r/AnkiOpsQA")
+
+    mock_bridge.assert_called_once_with(
+        [101, 102],
+        "AnkiOpsQA",
+        "collab/o/r/AnkiOpsQA",
+    )
+
+
+def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model():
+    adapter = AnkiAdapter()
+
+    with patch("ankiops.anki.invoke", return_value=[[101], [201, 202]]) as mock_invoke:
+        note_ids = adapter.fetch_note_ids_by_note_keys({"key-b", "key-a"})
+
+    assert note_ids == {"key-a": [101], "key-b": [201, 202]}
+    assert mock_invoke.call_args.args == ("multi",)
+    assert mock_invoke.call_args.kwargs["actions"] == [
+        {"action": "findNotes", "params": {"query": '"AnkiOps Key:key-a"'}},
+        {"action": "findNotes", "params": {"query": '"AnkiOps Key:key-b"'}},
+    ]
+
+
 def test_apply_note_changes_updates_fields_and_tags_with_update_note():
     adapter = AnkiAdapter()
     update_change = Change(

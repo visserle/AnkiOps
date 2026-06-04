@@ -20,6 +20,12 @@ class MockAnki:
         self.next_deck_id = 10
         self.calls = []
 
+    def _search_value(self, term: str) -> str:
+        value = term.split(":", 1)[1]
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            return value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        return value
+
     def invoke(self, action: str, **params) -> Any:
         self.calls.append((action, params))
 
@@ -43,13 +49,13 @@ class MockAnki:
                         matches_all_terms = True
                         for term in terms:
                             if term.startswith("note:"):
-                                model = term.split(":", 1)[1]
+                                model = self._search_value(term)
                                 note = self.notes.get(card["note"])
                                 if not note or note["modelName"] != model:
                                     matches_all_terms = False
                                     break
                             elif term.startswith("deck:"):
-                                deck_name = term.split(":", 1)[1]
+                                deck_name = self._search_value(term)
                                 if card["deckName"] != deck_name:
                                     matches_all_terms = False
                                     break
@@ -275,13 +281,13 @@ class MockAnki:
                         match_all = True
                         for term in terms:
                             if term.startswith("note:"):
-                                model = term.split(":", 1)[1]
+                                model = self._search_value(term)
                                 if note["modelName"] != model:
                                     match_all = False
                                     break
                             elif term.startswith("deck:"):
                                 deck_match = False
-                                target_deck = term.split(":", 1)[1]
+                                target_deck = self._search_value(term)
                                 for card in self.cards.values():
                                     if (
                                         card["note"] == note_id
