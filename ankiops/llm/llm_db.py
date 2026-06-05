@@ -39,6 +39,7 @@ class LlmJobListItem:
 class LlmJobItemDetail:
     ordinal: int
     note_key: str | None
+    source: str
     deck_name: str
     note_type: str | None
     item_status: LlmItemStatus
@@ -170,6 +171,7 @@ class LlmDb:
         *,
         job_id: int,
         ordinal: int,
+        source: str,
         deck_name: str,
         note_key: str | None,
         note_type: str | None,
@@ -182,15 +184,16 @@ class LlmDb:
         cursor = self._write(
             f"""
             INSERT INTO {_ITEM_TABLE} (
-                job_id, ordinal, note_key, deck_name, note_type,
+                job_id, ordinal, note_key, source, deck_name, note_type,
                 item_status, skip_reason, error_message,
                 changed_fields_json, applied_to_markdown
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
                 ordinal,
                 note_key,
+                source,
                 deck_name,
                 note_type,
                 item_status.value,
@@ -460,8 +463,8 @@ class LlmDb:
         aggregate = self.aggregate_job(job_id)
         item_rows = self._conn.execute(
             f"""
-            SELECT i.ordinal, i.note_key, i.deck_name, i.note_type, i.item_status,
-                   i.error_message, i.changed_fields_json,
+            SELECT i.ordinal, i.note_key, i.source, i.deck_name, i.note_type,
+                   i.item_status, i.error_message, i.changed_fields_json,
                    COUNT(ri.request_id) request_count
             FROM {_ITEM_TABLE} i
             LEFT JOIN {_REQUEST_ITEM_TABLE} ri ON ri.job_item_id = i.id
@@ -476,6 +479,7 @@ class LlmDb:
             LlmJobItemDetail(
                 ordinal=int(item["ordinal"]),
                 note_key=(str(item["note_key"]) if item["note_key"] else None),
+                source=str(item["source"]),
                 deck_name=str(item["deck_name"]),
                 note_type=(str(item["note_type"]) if item["note_type"] else None),
                 item_status=_parse_enum(LlmItemStatus, item["item_status"]),
@@ -577,6 +581,7 @@ class LlmDb:
                     job_id INTEGER NOT NULL,
                     ordinal INTEGER NOT NULL,
                     note_key TEXT,
+                    source TEXT NOT NULL,
                     deck_name TEXT NOT NULL,
                     note_type TEXT,
                     item_status TEXT NOT NULL
@@ -635,6 +640,20 @@ class LlmDb:
         self._assert_schema()
 
     def _assert_schema(self) -> None:
+        required_item_columns = {
+            "id",
+            "job_id",
+            "ordinal",
+            "note_key",
+            "source",
+            "deck_name",
+            "note_type",
+            "item_status",
+            "skip_reason",
+            "error_message",
+            "changed_fields_json",
+            "applied_to_markdown",
+        }
         required_request_columns = {
             "id",
             "job_id",
@@ -652,13 +671,18 @@ class LlmDb:
             str(row["name"])
             for row in self._conn.execute(f"PRAGMA table_info({_REQUEST_TABLE})")
         }
+        item_columns = {
+            str(row["name"])
+            for row in self._conn.execute(f"PRAGMA table_info({_ITEM_TABLE})")
+        }
         required_request_item_columns = {"request_id", "job_item_id"}
         request_item_columns = {
             str(row["name"])
             for row in self._conn.execute(f"PRAGMA table_info({_REQUEST_ITEM_TABLE})")
         }
         if (
-            required_request_columns - request_columns
+            required_item_columns - item_columns
+            or required_request_columns - request_columns
             or required_request_item_columns - request_item_columns
         ):
             raise RuntimeError(

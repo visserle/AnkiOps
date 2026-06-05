@@ -30,7 +30,7 @@ from ankiops.config import (
     file_stem_to_deck_name,
     require_collection_dir,
 )
-from ankiops.fs import FileSystemAdapter
+from ankiops.sources import discover_sync_sources, load_configs_for_sources
 
 from .config_loader import load_llm_task_catalog
 from .llm_db import LlmJobRequestNoteRef
@@ -225,6 +225,7 @@ def _show_job(
             [
                 str(item.ordinal),
                 item.note_key or "unknown",
+                item.source,
                 item.deck_name,
                 item.note_type or "unknown",
                 item.item_status.value,
@@ -237,6 +238,7 @@ def _show_job(
         [
             "#",
             "Note",
+            "Source",
             "Deck",
             "Type",
             "Final",
@@ -425,9 +427,10 @@ def _show_plan(
     logger.info("Field surface:")
     if plan.field_surface:
         _log_table(
-            ["Type", "Candidates", "Tags", "Editable", "Read-only", "Hidden"],
+            ["Source", "Type", "Candidates", "Tags", "Editable", "Read-only", "Hidden"],
             [
                 [
+                    surface.source,
                     surface.note_type,
                     str(surface.candidate_notes),
                     surface.tag_access.value,
@@ -458,7 +461,13 @@ def _show_plan(
 
 
 def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
-    return FileSystemAdapter().load_note_type_configs(note_types_dir)
+    collection_dir = note_types_dir.parent
+    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    return [
+        config
+        for source_config in load_configs_for_sources(sources)
+        for config in source_config.configs
+    ]
 
 
 def _normalize_deck_override(value: str | None) -> str | None:

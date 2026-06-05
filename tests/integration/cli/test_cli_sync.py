@@ -8,7 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ankiops.anki_client import AnkiConnectError
-from ankiops.cli import main, run_am, run_fix_image_widths, run_ma, run_serialize
+from ankiops.cli import (
+    main,
+    run_am,
+    run_deserialize,
+    run_fix_image_widths,
+    run_ma,
+    run_serialize,
+)
 from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
 from ankiops.image_widths import ImageWidthFixResult
 from ankiops.models import (
@@ -384,6 +391,54 @@ def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
     assert exc.value.code == 2
 
 
+def test_run_deserialize_snapshots_by_default(tmp_path):
+    json_file = tmp_path / "in.json"
+    json_file.write_text('{"decks": []}', encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=True,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_called_once_with(tmp_path, "deserialize")
+    deserialize_mock.assert_called_once_with(
+        json_file,
+        overwrite=True,
+        collection_dir=tmp_path,
+    )
+
+
+def test_run_deserialize_can_skip_snapshot(tmp_path):
+    json_file = tmp_path / "in.json"
+    json_file.write_text('{"decks": []}', encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=False,
+        no_auto_commit=True,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_not_called()
+    deserialize_mock.assert_called_once_with(
+        json_file,
+        overwrite=False,
+        collection_dir=tmp_path,
+    )
+
+
 def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
     args = SimpleNamespace(
         deck="Parent",
@@ -442,7 +497,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
         run_fix_image_widths(args)
 
     snapshot_mock.assert_not_called()
-    assert "Only local Markdown files were edited" in caplog.text
+    assert "Only Markdown files were edited" in caplog.text
     assert "ankiops ma" in caplog.text
 
 

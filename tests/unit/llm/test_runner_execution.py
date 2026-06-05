@@ -120,6 +120,7 @@ def _context(
     items = [
         DiscoveryItem(
             ordinal=index,
+            source="local",
             deck_name="Deck",
             note_key=note["note_key"],
             note_type="AnkiOpsQA",
@@ -140,7 +141,9 @@ def _context(
     return MaterializedTaskContext(
         task=task,
         note_type_configs={"AnkiOpsQA": llm_qa_config},
-        serialized_data={"decks": [{"name": "Deck", "notes": notes}]},
+        serialized_data={
+            "decks": [{"source": "local", "name": "Deck", "notes": notes}]
+        },
         discovery_snapshot=DiscoverySnapshot(
             counts=DiscoveryCounts(decks_seen=1, decks_matched=1, notes_seen=2),
             items=items,
@@ -226,6 +229,7 @@ def test_executor_persists_successful_tag_updates(
     }
     item = DiscoveryItem(
         ordinal=1,
+        source="local",
         deck_name="Deck",
         note_key="nk-1",
         note_type="AnkiOpsQA",
@@ -245,7 +249,9 @@ def test_executor_persists_successful_tag_updates(
     context = MaterializedTaskContext(
         task=task,
         note_type_configs={"AnkiOpsQA": llm_qa_config},
-        serialized_data={"decks": [{"name": "Deck", "notes": [note]}]},
+        serialized_data={
+            "decks": [{"source": "local", "name": "Deck", "notes": [note]}]
+        },
         discovery_snapshot=DiscoverySnapshot(
             counts=DiscoveryCounts(decks_seen=1, decks_matched=1, notes_seen=1),
             items=[item],

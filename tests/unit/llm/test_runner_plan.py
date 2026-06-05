@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ankiops.config import LLM_DB_FILENAME
+from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
 from ankiops.llm.runner import plan_task
 from ankiops.llm.types import FieldAccess
+
+
+def _init_collection_db(collection_dir):
+    db = SQLiteDbAdapter.open(collection_dir)
+    try:
+        db.set_profile_name("test")
+    finally:
+        db.close()
 
 
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
@@ -46,6 +57,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         return {
             "decks": [
                 {
+                    "source": "local",
                     "name": "Deck",
                     "notes": [
                         {
@@ -142,6 +154,7 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
         return {
             "decks": [
                 {
+                    "source": "local",
                     "name": "Deck",
                     "notes": [
                         {
@@ -192,3 +205,87 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
     assert surface_by_type["AnkiOpsQA"].read_only_fields == ["Question", "Answer"]
     assert surface_by_type["AnkiOpsCloze"].read_only_fields == ["Text"]
     assert surface_by_type["AnkiOpsReversed"].candidate_notes == 0
+
+
+def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_file):
+    _init_collection_db(llm_collection)
+    fs = FileSystemAdapter()
+    fs.eject_builtin_note_types(llm_collection / "note_types")
+    collab_root = llm_collection / "collab" / "owner" / "repo"
+    fs.eject_builtin_note_types(collab_root / "note_types")
+    write_file(
+        llm_collection / "Local.md",
+        """
+        <!-- note_key: local-1 -->
+        Q: local question
+        A: local answer
+        """,
+    )
+    write_file(
+        collab_root / "Shared.md",
+        """
+        <!-- note_key: collab-1 -->
+        Q: collab question
+        A: collab answer
+        """,
+    )
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: Fix grammar.
+        request:
+          max_notes_per_request: 4
+        fields:
+          default_access: editable
+          read_only:
+            "*AnkiOpsQA": ["Answer"]
+        """,
+    )
+
+    plan = plan_task(collection_dir=llm_collection, task_name="grammar")
+
+    surface = {
+        (item.source, item.note_type): item
+        for item in plan.field_surface
+    }
+    assert ("local", "AnkiOpsQA") in surface
+    assert ("collab/owner/repo", "collab/owner/repo/AnkiOpsQA") in surface
+    assert surface[("local", "AnkiOpsQA")].candidate_notes == 1
+    assert surface[
+        ("collab/owner/repo", "collab/owner/repo/AnkiOpsQA")
+    ].candidate_notes == 1
+
+
+def test_plan_task_rejects_explicit_note_type_pattern_after_deck_filter(
+    llm_collection,
+    write_file,
+):
+    _init_collection_db(llm_collection)
+    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: qa-1 -->
+        Q: question
+        A: answer
+        """,
+    )
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: Fix grammar.
+        request:
+          max_notes_per_request: 4
+        fields:
+          default_access: editable
+          read_only:
+            "AnkiOpsChoice": ["Answer"]
+        """,
+    )
+
+    with pytest.raises(ValueError, match="matched no notes after deck filtering"):
+        plan_task(collection_dir=llm_collection, task_name="grammar")

@@ -300,9 +300,17 @@ def run_deserialize(args):
         logger.error(f"Serialized file not found: {serialized_file}")
         raise SystemExit(1)
 
+    collection_dir = require_collection_dir()
+    if not args.no_auto_commit:
+        logger.debug("Creating pre-deserialize git snapshot")
+        git_snapshot(collection_dir, "deserialize")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
     deserialize_from_file(
         serialized_file,
         overwrite=args.overwrite,
+        collection_dir=collection_dir,
     )
 
 
@@ -345,7 +353,7 @@ def run_fix_image_widths(args):
         f"{result.images_changed} images changed"
     )
     if result.changed:
-        logger.info("Only local Markdown files were edited. Run 'ankiops ma' to sync.")
+        logger.info("Only Markdown files were edited. Run 'ankiops ma' to sync.")
 
 
 def run_llm(args):
@@ -354,9 +362,16 @@ def run_llm(args):
         args,
         require_collection_dir_fn=require_collection_dir,
         load_note_type_configs_fn=(
-            lambda note_types_dir: FileSystemAdapter().load_note_type_configs(
-                note_types_dir
-            )
+            lambda note_types_dir: [
+                config
+                for source_config in load_configs_for_sources(
+                    discover_sync_sources(
+                        note_types_dir.parent,
+                        note_types_dir=note_types_dir,
+                    )
+                )
+                for config in source_config.configs
+            ]
         ),
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
@@ -474,7 +489,7 @@ def main():
     # Deserialize parser
     deserialize_parser = subparsers.add_parser(
         "deserialize",
-        help="Import markdown from JSON (run 'init' after to set up)",
+        help="Import markdown from JSON into an initialized collection",
     )
     deserialize_parser.add_argument(
         "--input",
@@ -485,6 +500,12 @@ def main():
         "--overwrite",
         action="store_true",
         help="Overwrite existing markdown files",
+    )
+    deserialize_parser.add_argument(
+        "--no-auto-commit",
+        "-n",
+        action="store_true",
+        help="Skip the automatic git commit for this operation",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
