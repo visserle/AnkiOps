@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from ankiops.collab import _parse_slug, run_contribute, run_publish
+from ankiops.collab import run_contribute, run_publish
+from ankiops.collab.commands import _parse_slug
 from ankiops.collab.hosting import ensure_publish_repo
 from ankiops.collab.publish import _unlink_published_source_files
 from ankiops.fs import FileSystemAdapter
