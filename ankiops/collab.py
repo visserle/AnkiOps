@@ -190,7 +190,6 @@ def _git_commit_publish(
     paths: list[Path],
     message: str,
 ) -> None:
-    _ensure_clean_git_index(collection_dir)
     add_paths = [
         str(path.relative_to(collection_dir))
         for path in paths
@@ -222,8 +221,15 @@ def _git_commit_publish(
 
 
 def _cleanup_failed_publish(collection_dir: Path, plan: _PublishPlan) -> None:
+    publish_paths = [
+        _source_prefix(collection_dir, plan.source),
+        *[
+            str(rendered.source_path.relative_to(collection_dir))
+            for rendered in plan.files
+        ],
+    ]
     if _git_head(collection_dir) is not None:
-        _run_git(collection_dir, ["reset", "--mixed", "HEAD"])
+        _run_git(collection_dir, ["reset", "HEAD", "--", *publish_paths])
     else:
         _run_git(
             collection_dir,
@@ -233,7 +239,7 @@ def _cleanup_failed_publish(collection_dir: Path, plan: _PublishPlan) -> None:
                 "--cached",
                 "--ignore-unmatch",
                 "--",
-                _source_prefix(collection_dir, plan.source),
+                *publish_paths,
             ],
         )
     _remove_publish_source_root(plan)
@@ -674,6 +680,7 @@ def run_publish(args) -> None:
         raise ValueError(f"Collab source already exists: {source.source_id}")
 
     plan = _prepare_publish_plan(collection_dir, args.deck, source)
+    _ensure_clean_git_index(collection_dir)
     _ensure_publish_repo(
         collection_dir,
         source,

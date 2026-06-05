@@ -33,6 +33,10 @@ def _patch_publish_git(monkeypatch):
 
     monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
     monkeypatch.setattr(
+        "ankiops.collab._ensure_clean_git_index",
+        lambda _collection_dir: None,
+    )
+    monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda collection_dir, source, *, public: calls.append(
             ("ensure_repo", collection_dir, source, public)
@@ -121,6 +125,10 @@ def test_publish_missing_repo_blocks_before_anki_or_file_mutations(
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
     monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
     monkeypatch.setattr(
+        "ankiops.collab._ensure_clean_git_index",
+        lambda _collection_dir: None,
+    )
+    monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             ValueError("GitHub repository does not exist")
@@ -199,6 +207,10 @@ def test_publish_commit_failure_keeps_source_file(tmp_path, monkeypatch):
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
     monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
     monkeypatch.setattr(
+        "ankiops.collab._ensure_clean_git_index",
+        lambda _collection_dir: None,
+    )
+    monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: None,
     )
@@ -214,6 +226,61 @@ def test_publish_commit_failure_keeps_source_file(tmp_path, monkeypatch):
     assert not (collection_dir / "collab").exists()
 
 
+def test_publish_dirty_index_blocks_before_file_mutations_and_preserves_stage(
+    tmp_path,
+    monkeypatch,
+):
+    collection_dir = _setup_collection(tmp_path)
+    subprocess.run(["git", "init"], cwd=collection_dir, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=collection_dir,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=collection_dir,
+        check=True,
+    )
+    deck = collection_dir / "Deck.md"
+    original = "<!-- note_key: key-1 -->\nQ: local\nA: deck\n"
+    deck.write_text(original, encoding="utf-8")
+    other = collection_dir / "Other.md"
+    other.write_text("original\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=collection_dir, check=True)
+    subprocess.run(["git", "commit", "-m", "root"], cwd=collection_dir, check=True)
+
+    other.write_text("changed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "Other.md"], cwd=collection_dir, check=True)
+    monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_publish_repo",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._write_publish_files",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected write")),
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._cleanup_failed_publish",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected cleanup")),
+    )
+
+    with pytest.raises(ValueError, match="clean git index"):
+        run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
+
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert status.stdout == "M  Other.md\n"
+    assert deck.read_text(encoding="utf-8") == original
+    assert not (collection_dir / "collab").exists()
+
+
 def test_publish_subtree_split_failure_keeps_source_file(tmp_path, monkeypatch):
     collection_dir = _setup_collection(tmp_path)
     deck = collection_dir / "Deck.md"
@@ -221,6 +288,10 @@ def test_publish_subtree_split_failure_keeps_source_file(tmp_path, monkeypatch):
     deck.write_text(original, encoding="utf-8")
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
     monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_clean_git_index",
+        lambda _collection_dir: None,
+    )
     monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: None,
@@ -247,6 +318,10 @@ def test_publish_push_failure_keeps_source_file(tmp_path, monkeypatch):
     deck.write_text(original, encoding="utf-8")
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
     monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_clean_git_index",
+        lambda _collection_dir: None,
+    )
     monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: None,
