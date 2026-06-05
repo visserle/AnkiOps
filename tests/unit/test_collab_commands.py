@@ -214,6 +214,63 @@ def test_publish_commit_failure_keeps_source_file(tmp_path, monkeypatch):
     assert not (collection_dir / "collab").exists()
 
 
+def test_publish_subtree_split_failure_keeps_source_file(tmp_path, monkeypatch):
+    collection_dir = _setup_collection(tmp_path)
+    deck = collection_dir / "Deck.md"
+    original = "<!-- note_key: key-1 -->\nQ: local\nA: deck\n"
+    deck.write_text(original, encoding="utf-8")
+    monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_publish_repo",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._git_commit_publish",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._subtree_split",
+        lambda *_args: (_ for _ in ()).throw(ValueError("split failed")),
+    )
+
+    with pytest.raises(ValueError, match="split failed"):
+        run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
+
+    assert deck.read_text(encoding="utf-8") == original
+
+
+def test_publish_push_failure_keeps_source_file(tmp_path, monkeypatch):
+    collection_dir = _setup_collection(tmp_path)
+    deck = collection_dir / "Deck.md"
+    original = "<!-- note_key: key-1 -->\nQ: local\nA: deck\n"
+    deck.write_text(original, encoding="utf-8")
+    monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
+    monkeypatch.setattr(
+        "ankiops.collab._ensure_publish_repo",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._git_commit_publish",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.collab._subtree_split",
+        lambda *_args: "ankiops-test-branch",
+    )
+
+    def fail_push(_collection_dir, _args):
+        raise ValueError("push failed")
+
+    monkeypatch.setattr("ankiops.collab._run_git", fail_push)
+
+    with pytest.raises(ValueError, match="push failed"):
+        run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
+
+    assert deck.read_text(encoding="utf-8") == original
+
+
 def test_git_commit_paths_ignores_missing_untracked_source_path(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(

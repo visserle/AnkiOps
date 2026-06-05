@@ -690,13 +690,13 @@ def run_publish(args) -> None:
     except Exception:
         _cleanup_failed_publish(collection_dir, plan)
         raise
-    _unlink_published_source_files(plan)
     branch = _subtree_split(collection_dir, source)
     if source.github_url:
         _run_git(
             collection_dir,
             ["push", source.github_url, f"{branch}:{COLLAB_BRANCH}"],
         )
+    _unlink_published_source_files(plan)
     logger.info(
         "Published %s to %s. Run 'ankiops ma' to apply scoped note types to Anki.",
         args.deck,
