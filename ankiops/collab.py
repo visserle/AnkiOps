@@ -220,7 +220,41 @@ def _git_commit_publish(
     _run_git(collection_dir, ["commit", "-m", message])
 
 
-def _cleanup_failed_publish(collection_dir: Path, plan: _PublishPlan) -> None:
+def _rollback_publish_commit(
+    collection_dir: Path,
+    *,
+    initial_head: str | None,
+) -> None:
+    current_head = _git_head(collection_dir)
+    if current_head == initial_head or current_head is None:
+        return
+    if initial_head is None:
+        _run_git(collection_dir, ["update-ref", "-d", "HEAD"])
+    else:
+        _run_git(collection_dir, ["reset", "--mixed", initial_head])
+
+
+def _delete_branch_if_exists(collection_dir: Path, branch: str | None) -> None:
+    if branch is None:
+        return
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _cleanup_failed_publish(
+    collection_dir: Path,
+    plan: _PublishPlan,
+    *,
+    initial_head: str | None = None,
+    branch: str | None = None,
+) -> None:
+    _rollback_publish_commit(collection_dir, initial_head=initial_head)
+    _delete_branch_if_exists(collection_dir, branch)
     publish_paths = [
         _source_prefix(collection_dir, plan.source),
         *[
@@ -686,6 +720,8 @@ def run_publish(args) -> None:
         source,
         public=bool(getattr(args, "public", False)),
     )
+    initial_head = _git_head(collection_dir)
+    branch: str | None = None
     try:
         touched = _write_publish_files(collection_dir, plan)
         _git_commit_publish(
@@ -694,15 +730,20 @@ def run_publish(args) -> None:
             touched,
             f"AnkiOps: publish {args.deck} to {source.source_id}",
         )
+        branch = _subtree_split(collection_dir, source)
+        if source.github_url:
+            _run_git(
+                collection_dir,
+                ["push", source.github_url, f"{branch}:{COLLAB_BRANCH}"],
+            )
     except Exception:
-        _cleanup_failed_publish(collection_dir, plan)
-        raise
-    branch = _subtree_split(collection_dir, source)
-    if source.github_url:
-        _run_git(
+        _cleanup_failed_publish(
             collection_dir,
-            ["push", source.github_url, f"{branch}:{COLLAB_BRANCH}"],
+            plan,
+            initial_head=initial_head,
+            branch=branch,
         )
+        raise
     _unlink_published_source_files(plan)
     logger.info(
         "Published %s to %s. Run 'ankiops ma' to apply scoped note types to Anki.",

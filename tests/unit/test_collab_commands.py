@@ -28,6 +28,42 @@ def _setup_collection(tmp_path):
     return tmp_path
 
 
+def _init_git_repo(collection_dir):
+    subprocess.run(["git", "init"], cwd=collection_dir, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=collection_dir,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=collection_dir,
+        check=True,
+    )
+
+
+def _git_head(collection_dir):
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _git_status(collection_dir):
+    result = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
+
+
 def _patch_publish_git(monkeypatch):
     calls = []
 
@@ -281,24 +317,23 @@ def test_publish_dirty_index_blocks_before_file_mutations_and_preserves_stage(
     assert not (collection_dir / "collab").exists()
 
 
-def test_publish_subtree_split_failure_keeps_source_file(tmp_path, monkeypatch):
+def test_publish_subtree_split_failure_rolls_back_publish_commit(
+    tmp_path,
+    monkeypatch,
+):
     collection_dir = _setup_collection(tmp_path)
+    _init_git_repo(collection_dir)
     deck = collection_dir / "Deck.md"
     original = "<!-- note_key: key-1 -->\nQ: local\nA: deck\n"
     deck.write_text(original, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=collection_dir, check=True)
+    subprocess.run(["git", "commit", "-m", "root"], cwd=collection_dir, check=True)
+    initial_head = _git_head(collection_dir)
+
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
-    monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
-    monkeypatch.setattr(
-        "ankiops.collab._ensure_clean_git_index",
-        lambda _collection_dir: None,
-    )
     monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "ankiops.collab._git_commit_publish",
-        lambda *_args: None,
     )
     monkeypatch.setattr(
         "ankiops.collab._subtree_split",
@@ -308,42 +343,66 @@ def test_publish_subtree_split_failure_keeps_source_file(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="split failed"):
         run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
 
+    assert _git_head(collection_dir) == initial_head
+    assert _git_status(collection_dir) == ""
     assert deck.read_text(encoding="utf-8") == original
+    assert not (collection_dir / "collab").exists()
 
 
-def test_publish_push_failure_keeps_source_file(tmp_path, monkeypatch):
+def test_publish_push_failure_rolls_back_publish_commit_and_temp_branch(
+    tmp_path,
+    monkeypatch,
+):
     collection_dir = _setup_collection(tmp_path)
+    _init_git_repo(collection_dir)
     deck = collection_dir / "Deck.md"
     original = "<!-- note_key: key-1 -->\nQ: local\nA: deck\n"
     deck.write_text(original, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=collection_dir, check=True)
+    subprocess.run(["git", "commit", "-m", "root"], cwd=collection_dir, check=True)
+    initial_head = _git_head(collection_dir)
+    branch = "ankiops-test-branch"
+
     monkeypatch.setattr("ankiops.collab.require_collection_dir", lambda: collection_dir)
-    monkeypatch.setattr("ankiops.collab._ensure_git_repo", lambda _collection_dir: None)
-    monkeypatch.setattr(
-        "ankiops.collab._ensure_clean_git_index",
-        lambda _collection_dir: None,
-    )
     monkeypatch.setattr(
         "ankiops.collab._ensure_publish_repo",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        "ankiops.collab._git_commit_publish",
-        lambda *_args: None,
-    )
-    monkeypatch.setattr(
-        "ankiops.collab._subtree_split",
-        lambda *_args: "ankiops-test-branch",
-    )
 
-    def fail_push(_collection_dir, _args):
-        raise ValueError("push failed")
+    def fake_split(split_collection_dir, _source):
+        subprocess.run(["git", "branch", branch], cwd=split_collection_dir, check=True)
+        return branch
 
-    monkeypatch.setattr("ankiops.collab._run_git", fail_push)
+    monkeypatch.setattr("ankiops.collab._subtree_split", fake_split)
+
+    def run_git(collection_dir, args):
+        if args[0] == "push":
+            raise ValueError("push failed")
+        return subprocess.run(
+            ["git", *args],
+            cwd=collection_dir,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    monkeypatch.setattr("ankiops.collab._run_git", run_git)
 
     with pytest.raises(ValueError, match="push failed"):
         run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
 
+    assert _git_head(collection_dir) == initial_head
+    assert _git_status(collection_dir) == ""
     assert deck.read_text(encoding="utf-8") == original
+    assert not (collection_dir / "collab").exists()
+    branches = subprocess.run(
+        ["git", "branch", "--list", branch],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert branches.stdout == ""
 
 
 def test_git_commit_paths_ignores_missing_untracked_source_path(tmp_path):
