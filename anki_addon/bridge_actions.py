@@ -42,8 +42,296 @@ def dispatch_bridge_action(col, action: str, params: dict):
     return handler(col, params)
 
 
-def version_action(_col, _params: dict) -> dict:
-    return {"version": BRIDGE_VERSION}
+def version_action(_col, _params: dict) -> int:
+    return BRIDGE_VERSION
+
+
+def get_active_profile_action(col, _params: dict) -> str:
+    if hasattr(col, "ankiops_bridge_active_profile"):
+        return str(col.ankiops_bridge_active_profile)
+    try:
+        from aqt import mw
+    except Exception:
+        return ""
+    profile_manager = getattr(mw, "pm", None)
+    name = getattr(profile_manager, "name", "")
+    if callable(name):
+        return str(name())
+    return str(name)
+
+
+def deck_names_and_ids_action(col, _params: dict) -> dict[str, int]:
+    decks = col.decks
+    if hasattr(decks, "all_names_and_ids"):
+        return {
+            deck.name: int(deck.id)
+            for deck in decks.all_names_and_ids()
+        }
+    if hasattr(decks, "decks"):
+        return {
+            deck["name"]: int(deck_id)
+            for deck_id, deck in decks.decks.items()
+        }
+    raise BridgeActionError("Cannot read Anki deck names.")
+
+
+def find_notes_action(col, params: dict) -> list[int]:
+    return [int(note_id) for note_id in col.find_notes(params.get("query") or "")]
+
+
+def notes_info_action(col, params: dict) -> list[dict]:
+    results = []
+    for note_id in params.get("notes") or []:
+        note = _get_note_or_none(col, int(note_id))
+        if note is None:
+            continue
+        model = note.note_type() or {}
+        fields = {
+            name: {"value": value, "order": index}
+            for index, (name, value) in enumerate(
+                _note_field_values(note, model).items()
+            )
+        }
+        results.append(
+            {
+                "noteId": int(note_id),
+                "modelName": model.get("name", ""),
+                "fields": fields,
+                "cards": _note_card_ids(col, int(note_id)),
+                "tags": list(getattr(note, "tags", [])),
+            }
+        )
+    return results
+
+
+def cards_info_action(col, params: dict) -> list[dict]:
+    results = []
+    for card_id in params.get("cards") or []:
+        card = _get_card_or_none(col, int(card_id))
+        if card is None:
+            continue
+        note_id = _card_note_id(card)
+        note = _get_note_or_none(col, note_id)
+        results.append(
+            {
+                "cardId": int(card_id),
+                "note": note_id,
+                "deckName": _deck_name(col, _card_deck_id(card)),
+                "modelName": _note_model_name(note) if note is not None else "",
+            }
+        )
+    return results
+
+
+def model_names_action(col, _params: dict) -> list[str]:
+    models = col.models
+    if hasattr(models, "all_names"):
+        return list(models.all_names())
+    if hasattr(models, "all"):
+        return [model.get("name", "") for model in models.all()]
+    raise BridgeActionError("Cannot read Anki note type names.")
+
+
+def model_field_names_action(col, params: dict) -> list[str]:
+    return _field_names(_required_model(col, params.get("modelName") or ""))
+
+
+def model_styling_action(col, params: dict) -> dict[str, str]:
+    model_name = params.get("modelName") or ""
+    model = _required_model(col, model_name)
+    return {"name": model_name, "css": model.get("css", "")}
+
+
+def model_templates_action(col, params: dict) -> dict[str, dict[str, str]]:
+    model = _required_model(col, params.get("modelName") or "")
+    return {
+        template.get("name", ""): {
+            "Front": template.get("qfmt", ""),
+            "Back": template.get("afmt", ""),
+        }
+        for template in model.get("tmpls", [])
+    }
+
+
+def model_field_descriptions_action(col, params: dict) -> list[str]:
+    model = _required_model(col, params.get("modelName") or "")
+    return [field.get("description", "") for field in model.get("flds", [])]
+
+
+def model_field_fonts_action(col, params: dict) -> dict[str, dict[str, int | str]]:
+    model = _required_model(col, params.get("modelName") or "")
+    return {
+        field.get("name", ""): {
+            "font": field.get("font", ""),
+            "size": field.get("size", 0),
+        }
+        for field in model.get("flds", [])
+    }
+
+
+def create_model_action(col, params: dict) -> None:
+    model_name = params.get("modelName") or ""
+    if not model_name:
+        raise BridgeActionError("modelName is required.")
+    if _model_by_name(col.models, model_name) is not None:
+        raise BridgeActionError(f"Note type already exists: {model_name}")
+
+    model = _new_model(col.models, model_name)
+    model["css"] = params.get("css") or ""
+    model["type"] = 1 if params.get("isCloze") else 0
+    for field_name in params.get("inOrderFields") or []:
+        _add_field_to_model(col.models, model, str(field_name))
+    for template in params.get("cardTemplates") or []:
+        _add_template_to_model(col.models, model, template)
+    _add_model(col.models, model)
+    return None
+
+
+def model_field_add_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    _add_field_to_model(col.models, model, params.get("fieldName") or "")
+    _save_model(col.models, model)
+    return None
+
+
+def model_field_remove_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    field = _required_field(model, params.get("fieldName") or "")
+    _remove_field_from_model(col.models, model, field)
+    _save_model(col.models, model)
+    return None
+
+
+def model_field_reposition_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    field = _required_field(model, params.get("fieldName") or "")
+    _move_field_in_model(col.models, model, field, int(params.get("index") or 0))
+    _save_model(col.models, model)
+    return None
+
+
+def model_field_set_description_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    field = _required_field(model, params.get("fieldName") or "")
+    field["description"] = params.get("description") or ""
+    _save_model(col.models, model)
+    return None
+
+
+def model_field_set_font_size_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    field = _required_field(model, params.get("fieldName") or "")
+    field["size"] = int(params.get("fontSize") or 0)
+    _save_model(col.models, model)
+    return None
+
+
+def update_model_styling_action(col, params: dict) -> None:
+    payload = params.get("model") or {}
+    model = _required_model(col, payload.get("name") or "")
+    model["css"] = payload.get("css") or ""
+    _save_model(col.models, model)
+    return None
+
+
+def model_template_rename_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    template = _required_template(model, params.get("oldTemplateName") or "")
+    template["name"] = params.get("newTemplateName") or ""
+    _save_model(col.models, model)
+    return None
+
+
+def model_template_add_action(col, params: dict) -> None:
+    model = _required_model(col, params.get("modelName") or "")
+    _add_template_to_model(col.models, model, params.get("template") or {})
+    _save_model(col.models, model)
+    return None
+
+
+def update_model_templates_action(col, params: dict) -> None:
+    payload = params.get("model") or {}
+    model = _required_model(col, payload.get("name") or "")
+    templates = payload.get("templates") or {}
+    for template_name, template_payload in templates.items():
+        template = _required_template(model, template_name)
+        template["qfmt"] = template_payload.get("Front", "")
+        template["afmt"] = template_payload.get("Back", "")
+    _save_model(col.models, model)
+    return None
+
+
+def create_deck_action(col, params: dict) -> int:
+    return _deck_id(col, params.get("deck") or "", create=True)
+
+
+def change_deck_action(col, params: dict) -> None:
+    card_ids = [int(card_id) for card_id in params.get("cards") or []]
+    deck_id = _deck_id(col, params.get("deck") or "", create=True)
+    sched = getattr(col, "sched", None)
+    if hasattr(sched, "set_deck"):
+        sched.set_deck(card_ids, deck_id)
+        return None
+    for card_id in card_ids:
+        card = _get_card_or_none(col, card_id)
+        if card is None:
+            continue
+        setattr(card, "did", deck_id)
+        _save_card(col, card)
+    return None
+
+
+def update_note_action(col, params: dict) -> None:
+    payload = params.get("note") or {}
+    note = _get_note_or_none(col, int(payload.get("id") or 0))
+    if note is None:
+        raise BridgeActionError(f"Note not found: {payload.get('id')}")
+    for field_name, value in (payload.get("fields") or {}).items():
+        _set_note_field(note, field_name, value)
+    if "tags" in payload:
+        note.tags = list(payload["tags"])
+    _save_note(col, note)
+    return None
+
+
+def delete_notes_action(col, params: dict) -> None:
+    note_ids = [int(note_id) for note_id in params.get("notes") or []]
+    if hasattr(col, "remove_notes"):
+        col.remove_notes(note_ids)
+        return None
+    raise BridgeActionError("Cannot delete Anki notes.")
+
+
+def can_add_notes_with_error_detail_action(col, params: dict) -> list[dict]:
+    results = []
+    for note_payload in params.get("notes") or []:
+        try:
+            _validate_note_payload_for_add(col, note_payload)
+        except Exception as error:
+            results.append({"canAdd": False, "error": str(error)})
+        else:
+            results.append({"canAdd": True})
+    return results
+
+
+def add_notes_action(col, params: dict) -> list[int | str]:
+    results = []
+    for note_payload in params.get("notes") or []:
+        try:
+            results.append(_add_note(col, note_payload))
+        except Exception as error:
+            results.append(str(error))
+    return results
+
+
+def get_media_dir_path_action(col, _params: dict) -> str:
+    media = getattr(col, "media", None)
+    directory = getattr(media, "dir", None)
+    if callable(directory):
+        return str(directory())
+    if directory:
+        return str(directory)
+    raise BridgeActionError("Cannot read Anki media directory.")
 
 
 def change_notes_notetype_action(col, params: dict) -> dict:
@@ -55,9 +343,54 @@ def change_notes_notetype_action(col, params: dict) -> dict:
     )
 
 
+def multi_action(col, params: dict) -> list:
+    results = []
+    for action in params.get("actions") or []:
+        try:
+            results.append(
+                dispatch_bridge_action(
+                    col,
+                    action.get("action") or "",
+                    action.get("params") or {},
+                )
+            )
+        except Exception as error:
+            results.append(str(error))
+    return results
+
+
 BRIDGE_ACTIONS: dict[str, BridgeAction] = {
     "version": version_action,
+    "getActiveProfile": get_active_profile_action,
+    "deckNamesAndIds": deck_names_and_ids_action,
+    "findNotes": find_notes_action,
+    "notesInfo": notes_info_action,
+    "cardsInfo": cards_info_action,
+    "modelNames": model_names_action,
+    "modelFieldNames": model_field_names_action,
+    "modelStyling": model_styling_action,
+    "modelTemplates": model_templates_action,
+    "modelFieldDescriptions": model_field_descriptions_action,
+    "modelFieldFonts": model_field_fonts_action,
+    "createModel": create_model_action,
+    "modelFieldAdd": model_field_add_action,
+    "modelFieldRemove": model_field_remove_action,
+    "modelFieldReposition": model_field_reposition_action,
+    "modelFieldSetDescription": model_field_set_description_action,
+    "modelFieldSetFontSize": model_field_set_font_size_action,
+    "updateModelStyling": update_model_styling_action,
+    "modelTemplateRename": model_template_rename_action,
+    "modelTemplateAdd": model_template_add_action,
+    "updateModelTemplates": update_model_templates_action,
+    "createDeck": create_deck_action,
+    "changeDeck": change_deck_action,
+    "updateNote": update_note_action,
+    "deleteNotes": delete_notes_action,
+    "canAddNotesWithErrorDetail": can_add_notes_with_error_detail_action,
+    "addNotes": add_notes_action,
+    "getMediaDirPath": get_media_dir_path_action,
     "changeNotesNotetype": change_notes_notetype_action,
+    "multi": multi_action,
 }
 
 
@@ -141,6 +474,13 @@ def _model_by_name(models, name: str):
     return models.by_name(name)
 
 
+def _required_model(col, name: str):
+    model = _model_by_name(col.models, name)
+    if model is None:
+        raise BridgeActionError(f"Note type not found: {name}")
+    return model
+
+
 def _model_id(model) -> int:
     try:
         return int(model["id"])
@@ -158,6 +498,95 @@ def _template_names(model) -> list[str]:
 
 def _item_name(item) -> str:
     return item.get("name") or ""
+
+
+def _required_field(model, field_name: str):
+    for field in model.get("flds", []):
+        if _item_name(field) == field_name:
+            return field
+    raise BridgeActionError(f"Field not found: {field_name}")
+
+
+def _required_template(model, template_name: str):
+    for template in model.get("tmpls", []):
+        if _item_name(template) == template_name:
+            return template
+    raise BridgeActionError(f"Template not found: {template_name}")
+
+
+def _new_model(models, model_name: str):
+    if hasattr(models, "new"):
+        return models.new(model_name)
+    return {"name": model_name, "flds": [], "tmpls": [], "css": ""}
+
+
+def _new_field(models, field_name: str):
+    if hasattr(models, "new_field"):
+        return models.new_field(field_name)
+    return {"name": field_name, "description": "", "font": "", "size": 0}
+
+
+def _add_field_to_model(models, model, field_name: str) -> None:
+    if not field_name:
+        raise BridgeActionError("fieldName is required.")
+    field = _new_field(models, field_name)
+    if hasattr(models, "add_field"):
+        models.add_field(model, field)
+    elif hasattr(models, "addField"):
+        models.addField(model, field)
+    else:
+        model.setdefault("flds", []).append(field)
+
+
+def _remove_field_from_model(models, model, field) -> None:
+    if hasattr(models, "remove_field"):
+        models.remove_field(model, field)
+    else:
+        model["flds"] = [item for item in model.get("flds", []) if item is not field]
+
+
+def _move_field_in_model(models, model, field, index: int) -> None:
+    if hasattr(models, "reposition_field"):
+        models.reposition_field(model, field, index)
+    else:
+        fields = model.get("flds", [])
+        fields.remove(field)
+        fields.insert(index, field)
+
+
+def _template_payload_name(template: dict) -> str:
+    return template.get("Name") or template.get("name") or ""
+
+
+def _new_template(models, template_name: str):
+    if hasattr(models, "new_template"):
+        return models.new_template(template_name)
+    return {"name": template_name, "qfmt": "", "afmt": ""}
+
+
+def _add_template_to_model(models, model, template_payload: dict) -> None:
+    template_name = _template_payload_name(template_payload)
+    if not template_name:
+        raise BridgeActionError("template name is required.")
+    template = _new_template(models, template_name)
+    template["qfmt"] = template_payload.get("Front", "")
+    template["afmt"] = template_payload.get("Back", "")
+    if hasattr(models, "add_template"):
+        models.add_template(model, template)
+    else:
+        model.setdefault("tmpls", []).append(template)
+
+
+def _add_model(models, model) -> None:
+    if hasattr(models, "add"):
+        models.add(model)
+    else:
+        _save_model(models, model)
+
+
+def _save_model(models, model) -> None:
+    if hasattr(models, "save"):
+        models.save(model)
 
 
 def _exact_name_map(old_names: list[str], new_names: list[str], kind: str) -> list[int]:
@@ -185,6 +614,8 @@ def _load_notes(col, note_ids: list[int]) -> dict[int, object]:
 
 
 def _note_model_name(note) -> str:
+    if note is None:
+        return ""
     notetype = note.note_type()
     if notetype:
         return notetype.get("name", "")
@@ -219,6 +650,142 @@ def _card_snapshot(col, note_ids: list[int]) -> dict[int, tuple]:
         values = tuple(row)
         snapshot[int(values[0])] = values
     return snapshot
+
+
+def _get_note_or_none(col, note_id: int):
+    try:
+        return col.get_note(note_id)
+    except Exception:
+        return None
+
+
+def _get_card_or_none(col, card_id: int):
+    try:
+        return col.get_card(card_id)
+    except Exception:
+        return None
+
+
+def _note_card_ids(col, note_id: int) -> list[int]:
+    try:
+        return [int(card_id) for card_id in col.find_cards(f"nid:{note_id}")]
+    except Exception:
+        return []
+
+
+def _card_note_id(card) -> int:
+    return int(getattr(card, "nid", getattr(card, "note", 0)))
+
+
+def _card_deck_id(card) -> int:
+    return int(getattr(card, "did", getattr(card, "deck_id", 0)))
+
+
+def _deck_name(col, deck_id: int) -> str:
+    decks = col.decks
+    if hasattr(decks, "name"):
+        return decks.name(deck_id) or ""
+    if hasattr(decks, "name_if_exists"):
+        return decks.name_if_exists(deck_id) or ""
+    return ""
+
+
+def _existing_deck_id(col, deck_name: str) -> int | None:
+    decks = col.decks
+    if hasattr(decks, "all_names_and_ids"):
+        for deck in decks.all_names_and_ids():
+            if deck.name == deck_name:
+                return int(deck.id)
+    if hasattr(decks, "by_name"):
+        deck = decks.by_name(deck_name)
+        if deck:
+            return int(deck["id"])
+    return None
+
+
+def _deck_id(col, deck_name: str, *, create: bool) -> int:
+    if not deck_name:
+        raise BridgeActionError("deck is required.")
+    deck_id = _existing_deck_id(col, deck_name)
+    if deck_id is not None:
+        return deck_id
+    if not create:
+        raise BridgeActionError(f"deck was not found: {deck_name}")
+    decks = col.decks
+    if hasattr(decks, "id"):
+        return int(decks.id(deck_name))
+    raise BridgeActionError(f"Cannot create deck: {deck_name}")
+
+
+def _save_card(col, card) -> None:
+    if hasattr(col, "update_card"):
+        col.update_card(card)
+    elif hasattr(card, "flush"):
+        card.flush()
+
+
+def _validate_note_payload_for_add(col, note_payload: dict) -> None:
+    _required_model(col, note_payload.get("modelName") or "")
+    _deck_id(col, note_payload.get("deckName") or "", create=False)
+
+
+def _new_note(col, model):
+    if hasattr(col, "new_note"):
+        return col.new_note(model)
+    try:
+        from anki.notes import Note
+    except Exception as error:
+        raise BridgeActionError("Cannot create Anki note.") from error
+    return Note(col, model)
+
+
+def _add_note(col, note_payload: dict) -> int:
+    _validate_note_payload_for_add(col, note_payload)
+    model = _required_model(col, note_payload.get("modelName") or "")
+    deck_id = _deck_id(col, note_payload.get("deckName") or "", create=False)
+    note = _new_note(col, model)
+    for field_name, value in (note_payload.get("fields") or {}).items():
+        _set_note_field(note, field_name, value)
+    note.tags = list(note_payload.get("tags") or [])
+
+    if hasattr(col, "add_note"):
+        result = col.add_note(note, deck_id)
+        if isinstance(result, int):
+            return result
+        note_id = getattr(note, "id", 0)
+        if note_id:
+            return int(note_id)
+    raise BridgeActionError("Cannot add Anki note.")
+
+
+def _set_note_field(note, field_name: str, value: str) -> None:
+    try:
+        note[field_name] = value
+        return
+    except Exception:
+        pass
+
+    raw_fields = getattr(note, "fields", None)
+    if isinstance(raw_fields, dict):
+        raw_fields[field_name] = value
+        return
+    if raw_fields is not None:
+        field_names = _field_names(note.note_type() or {})
+        try:
+            raw_fields[field_names.index(field_name)] = value
+            return
+        except ValueError as error:
+            raise BridgeActionError(f"Field not found: {field_name}") from error
+    raise BridgeActionError(f"Cannot update field: {field_name}")
+
+
+def _save_note(col, note) -> None:
+    if hasattr(col, "update_note"):
+        col.update_note(note)
+    elif hasattr(col, "updateNote"):
+        col.updateNote(note)
+    elif hasattr(note, "flush"):
+        note.flush()
 
 
 def _replace_repeated(target, values: list[int]) -> None:

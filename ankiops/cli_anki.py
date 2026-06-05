@@ -8,15 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 def connect_or_exit() -> AnkiAdapter:
-    """Verify AnkiConnect is reachable; exit on failure."""
+    """Verify the AnkiOps add-on bridge is reachable; exit on failure."""
     anki = AnkiAdapter()
     try:
         version = anki.get_version()
-        logger.debug(f"Connected to AnkiConnect (version {version})")
+        logger.debug(f"Connected to AnkiOps add-on bridge (version {version})")
     except Exception as error:
         logger.error(
-            "Error connecting to AnkiConnect. Make sure Anki is running and "
-            "AnkiConnect is installed."
+            "Error connecting to the AnkiOps add-on. Make sure Anki is running and "
+            "the AnkiOps add-on is enabled."
         )
         logger.debug(f"Connection error details: {error}")
         raise SystemExit(1)

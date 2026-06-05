@@ -1,4 +1,4 @@
-"""AnkiConnect Adapter."""
+"""Anki adapter backed by the local AnkiOps add-on bridge."""
 
 import logging
 import shutil
@@ -16,7 +16,7 @@ from ankiops.tags import normalize_tags
 
 logger = logging.getLogger(__name__)
 
-# Editor-side field properties (set via AnkiConnect)
+# Editor-side field properties (set through the AnkiOps add-on bridge)
 FIELD_FONT_SIZES = {
     "Source": 14,
     "AI Notes": 14,
@@ -62,13 +62,13 @@ def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str
 
 
 class AnkiAdapter:
-    """Adapter for AnkiConnect HTTP API."""
+    """Adapter for Anki's local HTTP bridge."""
 
     def __init__(self) -> None:
         self._media_dir: Path | None = None
 
     def get_version(self) -> int:
-        """Get AnkiConnect version."""
+        """Get AnkiOps add-on bridge version."""
         return invoke("version")
 
     def get_active_profile(self) -> str:
