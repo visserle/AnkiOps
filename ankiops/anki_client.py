@@ -1,43 +1,107 @@
-"""HTTP client for the local AnkiOps add-on bridge."""
+"""HTTP client for AnkiOpsConnect with AnkiConnect fallback."""
 
 from typing import Any
 
 import requests
 
-ANKIOPS_BRIDGE_URL = "http://127.0.0.1:8766"
+ANKIOPS_CONNECT_URL = "http://127.0.0.1:8766"
+ANKI_CONNECT_URL = "http://localhost:8765"
+DEFAULT_TIMEOUT_SECONDS = 10
+ANKIOPS_CONNECT_ONLY_ACTIONS = frozenset({"changeNotesNotetype"})
 
 _session = requests.Session()
 
 
-class AnkiConnectError(Exception):
+class AnkiConnectionError(Exception):
     """Raised when Anki returns an error response."""
 
 
-def invoke(action: str, **params) -> Any:
-    """Send a request to the AnkiOps add-on bridge and return the result.
+class _AnkiOpsConnectUnavailable(AnkiConnectionError):
+    pass
 
-    Raises AnkiConnectError when Anki returns an error.
+
+class _AnkiOpsConnectUnsupportedAction(AnkiConnectionError):
+    pass
+
+
+def invoke(action: str, **params) -> Any:
+    """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
+
+    Raises AnkiConnectionError when Anki returns an error.
     """
     try:
+        return _invoke_ankiops_connect(action, params)
+    except (
+        _AnkiOpsConnectUnavailable,
+        _AnkiOpsConnectUnsupportedAction,
+    ) as ankiops_connect_error:
+        if action in ANKIOPS_CONNECT_ONLY_ACTIONS:
+            raise AnkiConnectionError(
+                f"{action} requires AnkiOpsConnect. AnkiConnect is available "
+                "only for standard Anki actions."
+            ) from ankiops_connect_error
+        try:
+            return _invoke_anki_connect(action, params)
+        except AnkiConnectionError as anki_connect_error:
+            raise AnkiConnectionError(
+                "Unable to complete request with AnkiOpsConnect or AnkiConnect. "
+                f"AnkiOpsConnect: {ankiops_connect_error}; "
+                f"AnkiConnect: {anki_connect_error}"
+            ) from anki_connect_error
+
+
+def _invoke_ankiops_connect(action: str, params: dict[str, Any]) -> Any:
+    try:
         response = _session.post(
-            ANKIOPS_BRIDGE_URL,
+            ANKIOPS_CONNECT_URL,
             json={"action": action, "params": params},
-            timeout=10,
+            timeout=DEFAULT_TIMEOUT_SECONDS,
         )
     except requests.RequestException as error:
-        raise AnkiConnectError(
-            f"Unable to reach AnkiOps bridge at {ANKIOPS_BRIDGE_URL}: {error}"
+        raise _AnkiOpsConnectUnavailable(
+            f"Unable to reach AnkiOpsConnect at {ANKIOPS_CONNECT_URL}: {error}"
         ) from error
 
     try:
         result = response.json()
     except ValueError as error:
-        raise AnkiConnectError(
-            "AnkiOps bridge returned a non-JSON response."
+        raise _AnkiOpsConnectUnavailable(
+            "AnkiOpsConnect returned a non-JSON response."
         ) from error
 
     if result.get("error"):
-        raise AnkiConnectError(result["error"])
+        error = str(result["error"])
+        if error.startswith("Unknown AnkiOpsConnect action:"):
+            raise _AnkiOpsConnectUnsupportedAction(error)
+        raise AnkiConnectionError(error)
     if "result" not in result:
-        raise AnkiConnectError("AnkiOps bridge response missing 'result' field.")
+        raise _AnkiOpsConnectUnavailable(
+            "AnkiOpsConnect response missing 'result' field."
+        )
+    return result["result"]
+
+
+def _invoke_anki_connect(action: str, params: dict[str, Any]) -> Any:
+    try:
+        response = _session.post(
+            ANKI_CONNECT_URL,
+            json={"action": action, "version": 6, "params": params},
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as error:
+        raise AnkiConnectionError(
+            f"Unable to reach AnkiConnect at {ANKI_CONNECT_URL}: {error}"
+        ) from error
+
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise AnkiConnectionError(
+            "AnkiConnect returned a non-JSON response."
+        ) from error
+
+    if result.get("error"):
+        raise AnkiConnectionError(result["error"])
+    if "result" not in result:
+        raise AnkiConnectionError("AnkiConnect response missing 'result' field.")
     return result["result"]

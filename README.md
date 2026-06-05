@@ -39,7 +39,7 @@ same for note type:Inference is only for fresh notes that do not yet have metada
 pipx install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with the [AnkiConnect add-on](https://ankiweb.net/shared/info/2055492159) enabled. Initialize AnkiOps in any empty directory of your choosing. The command creates a database file for synchronization, an `llm/` directory for custom LLM tasks, and a `note_types/` directory for the note types AnkiOps will act on (following Infrastructure as Code principles). The additional tutorial flag creates a sample Markdown deck you can experiment with.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. AnkiOps can fall back to AnkiConnect for standard Anki actions, but AnkiOpsConnect is preferred and required for AnkiOps-specific operations. Initialize AnkiOps in any empty directory of your choosing. The command creates a database file for synchronization, an `llm/` directory for custom LLM tasks, and a `note_types/` directory for the note types AnkiOps will act on (following Infrastructure as Code principles). The additional tutorial flag creates a sample Markdown deck you can experiment with.
 
 ```bash
 ankiops init --tutorial

@@ -61,10 +61,6 @@ def run_ankiops(mock_anki):
     with (
         patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
         patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
-        patch(
-            "ankiops.anki.change_notes_notetype",
-            side_effect=mock_anki.change_notes_notetype,
-        ),
     ):
         yield
 

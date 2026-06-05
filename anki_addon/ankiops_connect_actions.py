@@ -1,14 +1,14 @@
-"""AnkiOps bridge actions.
+"""AnkiOpsConnect actions.
 
-This module stays importable without ``aqt`` so bridge behaviour can be tested
-outside Anki.
+This module stays importable without ``aqt`` so AnkiOpsConnect behavior can be
+tested outside Anki.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-BRIDGE_VERSION = 1
+ANKIOPS_CONNECT_VERSION = 1
 ANKIOPS_KEY_FIELD_NAME = "AnkiOps Key"
 CARD_SNAPSHOT_COLUMNS = (
     "id",
@@ -27,28 +27,30 @@ CARD_SNAPSHOT_COLUMNS = (
     "odid",
 )
 
-BridgeAction = Callable[[object, dict], object]
+AnkiOpsConnectAction = Callable[[object, dict], object]
 
 
-class BridgeActionError(Exception):
-    """Raised when a bridge action cannot be completed safely."""
+class AnkiOpsConnectActionError(Exception):
+    """Raised when an AnkiOpsConnect action cannot be completed safely."""
 
 
-def dispatch_bridge_action(col, action: str, params: dict):
+def dispatch_ankiops_connect_action(col, action: str, params: dict):
     try:
-        handler = BRIDGE_ACTIONS[action]
+        handler = ANKIOPS_CONNECT_ACTIONS[action]
     except KeyError as error:
-        raise BridgeActionError(f"Unknown AnkiOps bridge action: {action}") from error
+        raise AnkiOpsConnectActionError(
+            f"Unknown AnkiOpsConnect action: {action}"
+        ) from error
     return handler(col, params)
 
 
 def version_action(_col, _params: dict) -> int:
-    return BRIDGE_VERSION
+    return ANKIOPS_CONNECT_VERSION
 
 
 def get_active_profile_action(col, _params: dict) -> str:
-    if hasattr(col, "ankiops_bridge_active_profile"):
-        return str(col.ankiops_bridge_active_profile)
+    if hasattr(col, "ankiops_connect_active_profile"):
+        return str(col.ankiops_connect_active_profile)
     try:
         from aqt import mw
     except Exception:
@@ -72,7 +74,7 @@ def deck_names_and_ids_action(col, _params: dict) -> dict[str, int]:
             deck["name"]: int(deck_id)
             for deck_id, deck in decks.decks.items()
         }
-    raise BridgeActionError("Cannot read Anki deck names.")
+    raise AnkiOpsConnectActionError("Cannot read Anki deck names.")
 
 
 def find_notes_action(col, params: dict) -> list[int]:
@@ -129,7 +131,7 @@ def model_names_action(col, _params: dict) -> list[str]:
         return list(models.all_names())
     if hasattr(models, "all"):
         return [model.get("name", "") for model in models.all()]
-    raise BridgeActionError("Cannot read Anki note type names.")
+    raise AnkiOpsConnectActionError("Cannot read Anki note type names.")
 
 
 def model_field_names_action(col, params: dict) -> list[str]:
@@ -172,9 +174,9 @@ def model_field_fonts_action(col, params: dict) -> dict[str, dict[str, int | str
 def create_model_action(col, params: dict) -> None:
     model_name = params.get("modelName") or ""
     if not model_name:
-        raise BridgeActionError("modelName is required.")
+        raise AnkiOpsConnectActionError("modelName is required.")
     if _model_by_name(col.models, model_name) is not None:
-        raise BridgeActionError(f"Note type already exists: {model_name}")
+        raise AnkiOpsConnectActionError(f"Note type already exists: {model_name}")
 
     model = _new_model(col.models, model_name)
     model["css"] = params.get("css") or ""
@@ -285,7 +287,7 @@ def update_note_action(col, params: dict) -> None:
     payload = params.get("note") or {}
     note = _get_note_or_none(col, int(payload.get("id") or 0))
     if note is None:
-        raise BridgeActionError(f"Note not found: {payload.get('id')}")
+        raise AnkiOpsConnectActionError(f"Note not found: {payload.get('id')}")
     for field_name, value in (payload.get("fields") or {}).items():
         _set_note_field(note, field_name, value)
     if "tags" in payload:
@@ -299,7 +301,7 @@ def delete_notes_action(col, params: dict) -> None:
     if hasattr(col, "remove_notes"):
         col.remove_notes(note_ids)
         return None
-    raise BridgeActionError("Cannot delete Anki notes.")
+    raise AnkiOpsConnectActionError("Cannot delete Anki notes.")
 
 
 def can_add_notes_with_error_detail_action(col, params: dict) -> list[dict]:
@@ -331,7 +333,7 @@ def get_media_dir_path_action(col, _params: dict) -> str:
         return str(directory())
     if directory:
         return str(directory)
-    raise BridgeActionError("Cannot read Anki media directory.")
+    raise AnkiOpsConnectActionError("Cannot read Anki media directory.")
 
 
 def change_notes_notetype_action(col, params: dict) -> dict:
@@ -348,7 +350,7 @@ def multi_action(col, params: dict) -> list:
     for action in params.get("actions") or []:
         try:
             results.append(
-                dispatch_bridge_action(
+                dispatch_ankiops_connect_action(
                     col,
                     action.get("action") or "",
                     action.get("params") or {},
@@ -359,7 +361,7 @@ def multi_action(col, params: dict) -> list:
     return results
 
 
-BRIDGE_ACTIONS: dict[str, BridgeAction] = {
+ANKIOPS_CONNECT_ACTIONS: dict[str, AnkiOpsConnectAction] = {
     "version": version_action,
     "getActiveProfile": get_active_profile_action,
     "deckNamesAndIds": deck_names_and_ids_action,
@@ -399,21 +401,25 @@ def change_notes_notetype(col, note_ids, old_model: str, new_model: str) -> dict
     if not note_ids:
         return {"changed": 0}
     if not old_model or not new_model:
-        raise BridgeActionError("oldModel and newModel are required.")
+        raise AnkiOpsConnectActionError("oldModel and newModel are required.")
 
     old_notetype = _model_by_name(col.models, old_model)
     new_notetype = _model_by_name(col.models, new_model)
     if old_notetype is None:
-        raise BridgeActionError(f"Old note type not found: {old_model}")
+        raise AnkiOpsConnectActionError(f"Old note type not found: {old_model}")
     if new_notetype is None:
-        raise BridgeActionError(f"New note type not found: {new_model}")
+        raise AnkiOpsConnectActionError(f"New note type not found: {new_model}")
 
     old_fields = _field_names(old_notetype)
     new_fields = _field_names(new_notetype)
     if ANKIOPS_KEY_FIELD_NAME not in old_fields:
-        raise BridgeActionError(f"Old note type lacks {ANKIOPS_KEY_FIELD_NAME}.")
+        raise AnkiOpsConnectActionError(
+            f"Old note type lacks {ANKIOPS_KEY_FIELD_NAME}."
+        )
     if ANKIOPS_KEY_FIELD_NAME not in new_fields:
-        raise BridgeActionError(f"New note type lacks {ANKIOPS_KEY_FIELD_NAME}.")
+        raise AnkiOpsConnectActionError(
+            f"New note type lacks {ANKIOPS_KEY_FIELD_NAME}."
+        )
     field_map = _exact_name_map(old_fields, new_fields, "field")
     template_map = _exact_name_map(
         _template_names(old_notetype),
@@ -425,7 +431,7 @@ def change_notes_notetype(col, note_ids, old_model: str, new_model: str) -> dict
     for note_id, note in notes.items():
         actual_model = _note_model_name(note)
         if actual_model != old_model:
-            raise BridgeActionError(
+            raise AnkiOpsConnectActionError(
                 f"Note {note_id} uses '{actual_model}', expected '{old_model}'."
             )
 
@@ -463,7 +469,7 @@ def change_notes_notetype(col, note_ids, old_model: str, new_model: str) -> dict
         failures.append("card scheduling or identity changed")
 
     if failures:
-        raise BridgeActionError(
+        raise AnkiOpsConnectActionError(
             "Post-conversion verification failed: " + "; ".join(failures)
         )
 
@@ -477,7 +483,7 @@ def _model_by_name(models, name: str):
 def _required_model(col, name: str):
     model = _model_by_name(col.models, name)
     if model is None:
-        raise BridgeActionError(f"Note type not found: {name}")
+        raise AnkiOpsConnectActionError(f"Note type not found: {name}")
     return model
 
 
@@ -485,7 +491,7 @@ def _model_id(model) -> int:
     try:
         return int(model["id"])
     except Exception as error:
-        raise BridgeActionError("Note type is missing an id.") from error
+        raise AnkiOpsConnectActionError("Note type is missing an id.") from error
 
 
 def _field_names(model) -> list[str]:
@@ -504,14 +510,14 @@ def _required_field(model, field_name: str):
     for field in model.get("flds", []):
         if _item_name(field) == field_name:
             return field
-    raise BridgeActionError(f"Field not found: {field_name}")
+    raise AnkiOpsConnectActionError(f"Field not found: {field_name}")
 
 
 def _required_template(model, template_name: str):
     for template in model.get("tmpls", []):
         if _item_name(template) == template_name:
             return template
-    raise BridgeActionError(f"Template not found: {template_name}")
+    raise AnkiOpsConnectActionError(f"Template not found: {template_name}")
 
 
 def _new_model(models, model_name: str):
@@ -528,7 +534,7 @@ def _new_field(models, field_name: str):
 
 def _add_field_to_model(models, model, field_name: str) -> None:
     if not field_name:
-        raise BridgeActionError("fieldName is required.")
+        raise AnkiOpsConnectActionError("fieldName is required.")
     field = _new_field(models, field_name)
     if hasattr(models, "add_field"):
         models.add_field(model, field)
@@ -567,7 +573,7 @@ def _new_template(models, template_name: str):
 def _add_template_to_model(models, model, template_payload: dict) -> None:
     template_name = _template_payload_name(template_payload)
     if not template_name:
-        raise BridgeActionError("template name is required.")
+        raise AnkiOpsConnectActionError("template name is required.")
     template = _new_template(models, template_name)
     template["qfmt"] = template_payload.get("Front", "")
     template["afmt"] = template_payload.get("Back", "")
@@ -591,9 +597,9 @@ def _save_model(models, model) -> None:
 
 def _exact_name_map(old_names: list[str], new_names: list[str], kind: str) -> list[int]:
     if len(set(old_names)) != len(old_names) or len(set(new_names)) != len(new_names):
-        raise BridgeActionError(f"Duplicate {kind} names are not supported.")
+        raise AnkiOpsConnectActionError(f"Duplicate {kind} names are not supported.")
     if set(old_names) != set(new_names):
-        raise BridgeActionError(
+        raise AnkiOpsConnectActionError(
             f"Cannot convert note type: {kind} names differ "
             f"({old_names!r} -> {new_names!r})."
         )
@@ -606,9 +612,9 @@ def _load_notes(col, note_ids: list[int]) -> dict[int, object]:
         try:
             note = col.get_note(note_id)
         except Exception as error:
-            raise BridgeActionError(f"Note not found: {note_id}") from error
+            raise AnkiOpsConnectActionError(f"Note not found: {note_id}") from error
         if note is None:
-            raise BridgeActionError(f"Note not found: {note_id}")
+            raise AnkiOpsConnectActionError(f"Note not found: {note_id}")
         notes[note_id] = note
     return notes
 
@@ -636,8 +642,8 @@ def _note_field_values(note, model) -> dict[str, str]:
 
 
 def _card_snapshot(col, note_ids: list[int]) -> dict[int, tuple]:
-    if hasattr(col, "ankiops_bridge_cards_snapshot"):
-        return col.ankiops_bridge_cards_snapshot(note_ids)
+    if hasattr(col, "ankiops_connect_cards_snapshot"):
+        return col.ankiops_connect_cards_snapshot(note_ids)
 
     placeholders = ",".join("?" for _ in note_ids)
     columns = ", ".join(CARD_SNAPSHOT_COLUMNS)
@@ -705,16 +711,16 @@ def _existing_deck_id(col, deck_name: str) -> int | None:
 
 def _deck_id(col, deck_name: str, *, create: bool) -> int:
     if not deck_name:
-        raise BridgeActionError("deck is required.")
+        raise AnkiOpsConnectActionError("deck is required.")
     deck_id = _existing_deck_id(col, deck_name)
     if deck_id is not None:
         return deck_id
     if not create:
-        raise BridgeActionError(f"deck was not found: {deck_name}")
+        raise AnkiOpsConnectActionError(f"deck was not found: {deck_name}")
     decks = col.decks
     if hasattr(decks, "id"):
         return int(decks.id(deck_name))
-    raise BridgeActionError(f"Cannot create deck: {deck_name}")
+    raise AnkiOpsConnectActionError(f"Cannot create deck: {deck_name}")
 
 
 def _save_card(col, card) -> None:
@@ -735,7 +741,7 @@ def _new_note(col, model):
     try:
         from anki.notes import Note
     except Exception as error:
-        raise BridgeActionError("Cannot create Anki note.") from error
+        raise AnkiOpsConnectActionError("Cannot create Anki note.") from error
     return Note(col, model)
 
 
@@ -755,7 +761,7 @@ def _add_note(col, note_payload: dict) -> int:
         note_id = getattr(note, "id", 0)
         if note_id:
             return int(note_id)
-    raise BridgeActionError("Cannot add Anki note.")
+    raise AnkiOpsConnectActionError("Cannot add Anki note.")
 
 
 def _set_note_field(note, field_name: str, value: str) -> None:
@@ -775,8 +781,8 @@ def _set_note_field(note, field_name: str, value: str) -> None:
             raw_fields[field_names.index(field_name)] = value
             return
         except ValueError as error:
-            raise BridgeActionError(f"Field not found: {field_name}") from error
-    raise BridgeActionError(f"Cannot update field: {field_name}")
+            raise AnkiOpsConnectActionError(f"Field not found: {field_name}") from error
+    raise AnkiOpsConnectActionError(f"Cannot update field: {field_name}")
 
 
 def _save_note(col, note) -> None:

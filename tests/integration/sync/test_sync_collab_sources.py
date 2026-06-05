@@ -113,9 +113,12 @@ def test_import_converts_root_note_to_scoped_collab_type_without_duplicate(world
     ) in world.mock_anki.calls
 
 
-def test_import_bridge_failure_blocks_conversion_without_duplicate(world, monkeypatch):
+def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(
+    world,
+    monkeypatch,
+):
     collab_root = _setup_collab_root(world)
-    note_key = "published-key-bridge-down"
+    note_key = "published-key-ankiops-connect-down"
     world.mock_anki.add_note(
         "CollabDeck",
         "AnkiOpsQA",
@@ -133,10 +136,12 @@ def test_import_bridge_failure_blocks_conversion_without_duplicate(world, monkey
         "Collab A",
         note_key,
     )
-    monkeypatch.setattr(
-        "ankiops.anki.change_notes_notetype",
-        lambda *_args: (_ for _ in ()).throw(RuntimeError("bridge down")),
-    )
+    def fail_change_notetype(action: str, **params):
+        if action == "changeNotesNotetype":
+            raise RuntimeError("AnkiOpsConnect down")
+        return world.mock_anki.invoke(action, **params)
+
+    monkeypatch.setattr("ankiops.anki.invoke", fail_change_notetype)
 
     with world.db_session() as db:
         result = world.sync_import(db)

@@ -1,15 +1,15 @@
-"""Stateful fake AnkiConnect backend used in tests."""
+"""Stateful fake Anki backend used in tests."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from ankiops.anki_client import AnkiConnectError
+from ankiops.anki_client import AnkiConnectionError
 from ankiops.tags import normalize_tags
 
 
 class MockAnki:
-    """Stateful mock of AnkiConnect (unified action dispatcher)."""
+    """Stateful mock of Anki's HTTP action dispatcher."""
 
     def __init__(self):
         self.decks = {"Default": 1}  # Name -> ID
@@ -96,6 +96,13 @@ class MockAnki:
                     results.append(res)
                 return results
 
+            case "changeNotesNotetype":
+                return self.change_notes_notetype(
+                    params["noteIds"],
+                    params["oldModel"],
+                    params["newModel"],
+                )
+
             case "modelNames":
                 return [
                     "AnkiOpsQA",
@@ -177,7 +184,7 @@ class MockAnki:
                 if "deckName" in note_data:
                     deck_name = note_data["deckName"]
                     if deck_name not in self.decks:
-                        raise AnkiConnectError(f"deck was not found: {deck_name}")
+                        raise AnkiConnectionError(f"deck was not found: {deck_name}")
 
                 new_id = self.next_note_id
                 self.next_note_id += 1

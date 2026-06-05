@@ -2,7 +2,6 @@
 
 import json
 import logging
-import subprocess
 from importlib import resources
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from ankiops.config import (
 )
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
+from ankiops.git import CollectionGit
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.model_registry import (
     MODEL_REGISTRY_FILE_NAME,
@@ -85,21 +85,8 @@ def _setup_git(collection_dir: Path):
 
     If it's already part of a repo (e.g. in development mode), this is a no-op.
     """
-    result = subprocess.run(
-        ["git", "rev-parse", "--git-dir"],
-        cwd=collection_dir,
-        capture_output=True,
-    )
-    if result.returncode == 0:
-        return  # already inside a git repo
-
-    subprocess.run(
-        ["git", "init"],
-        cwd=collection_dir,
-        capture_output=True,
-        check=True,
-    )
-    logger.info(f"Initialized git repository in {collection_dir}")
+    if CollectionGit(collection_dir).init_repo():
+        logger.info(f"Initialized git repository in {collection_dir}")
 
 
 def _eject_llm_configs(collection_dir: Path) -> None:

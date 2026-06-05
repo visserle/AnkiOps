@@ -1,11 +1,10 @@
-"""Anki adapter backed by the local AnkiOps add-on bridge."""
+"""Anki adapter backed by AnkiOpsConnect with AnkiConnect fallback."""
 
 import logging
 import shutil
 from pathlib import Path
 
-from ankiops.anki_client import AnkiConnectError, invoke
-from ankiops.ankiops_bridge import change_notes_notetype
+from ankiops.anki_client import AnkiConnectionError, invoke
 from ankiops.models import (
     ANKIOPS_KEY_FIELD,
     AnkiNote,
@@ -16,7 +15,7 @@ from ankiops.tags import normalize_tags
 
 logger = logging.getLogger(__name__)
 
-# Editor-side field properties (set through the AnkiOps add-on bridge)
+# Editor-side field properties (set through AnkiOpsConnect or AnkiConnect)
 FIELD_FONT_SIZES = {
     "Source": 14,
     "AI Notes": 14,
@@ -51,37 +50,29 @@ def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str
         css = styling.get("css")
         if isinstance(css, str):
             return css
-        raise AnkiConnectError(
+        raise AnkiConnectionError(
             "Malformed modelStyling response for "
             f"'{model_name}': expected dict with string 'css'."
         )
-    raise AnkiConnectError(
+    raise AnkiConnectionError(
         "Malformed modelStyling response for "
         f"'{model_name}': expected string or dict with string 'css'."
     )
 
 
 class AnkiAdapter:
-    """Adapter for Anki's local HTTP bridge."""
+    """Adapter for Anki's local HTTP connection."""
 
     def __init__(self) -> None:
         self._media_dir: Path | None = None
 
     def get_version(self) -> int:
-        """Get AnkiOps add-on bridge version."""
+        """Get the active Anki connection version."""
         return invoke("version")
 
     def get_active_profile(self) -> str:
         """Get the currently active Anki profile name."""
         return invoke("getActiveProfile")
-
-    def change_notes_notetype(
-        self,
-        note_ids: list[int],
-        old_model: str,
-        new_model: str,
-    ) -> None:
-        change_notes_notetype(note_ids, old_model, new_model)
 
     def fetch_deck_names_and_ids(self) -> dict[str, int]:
         return invoke("deckNamesAndIds")
@@ -109,7 +100,7 @@ class AnkiAdapter:
         note_ids_by_key = {}
         for note_key, result in zip(keys, results):
             if isinstance(result, str):
-                raise AnkiConnectError(
+                raise AnkiConnectionError(
                     f"Failed to search notes by AnkiOps Key '{note_key}': {result}"
                 )
             note_ids_by_key[note_key] = list(result or [])
@@ -219,7 +210,7 @@ class AnkiAdapter:
             if result is not None and isinstance(result, str)
         ]
         if errors:
-            raise AnkiConnectError(f"Failed to create models: {errors}")
+            raise AnkiConnectionError(f"Failed to create models: {errors}")
 
     def update_models(
         self, models: list[NoteTypeConfig], states: dict[str, dict]
@@ -350,7 +341,7 @@ class AnkiAdapter:
                 if result is not None and isinstance(result, str)
             ]
             if errors:
-                raise AnkiConnectError(f"Failed to update models: {errors}")
+                raise AnkiConnectionError(f"Failed to update models: {errors}")
 
     def apply_note_changes(
         self,
@@ -422,7 +413,7 @@ class AnkiAdapter:
                         if isinstance(action_result, str):
                             errors.append(f"Failed {tag}: {action_result}")
 
-            except AnkiConnectError as error:
+            except AnkiConnectionError as error:
                 errors.append(str(error))
 
         if creates:
@@ -505,17 +496,33 @@ class AnkiAdapter:
             can_add_errors = self._collect_can_add_errors(creates, can_add_results)
             if can_add_errors:
                 return [None] * len(creates), can_add_errors
-        except AnkiConnectError:
+        except AnkiConnectionError:
             pass
 
         try:
             results = invoke("addNotes", notes=notes)
             return self._collect_create_results(creates, results)
-        except AnkiConnectError as error:
+        except AnkiConnectionError as error:
             return [None] * len(creates), [
                 f"Create failed ({create_change.entity_repr}): {error}"
                 for create_change in creates
             ]
+
+    def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
+        return invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
+
+    def change_notes_notetype(
+        self,
+        note_ids: list[int],
+        old_model: str,
+        new_model: str,
+    ) -> None:
+        invoke(
+            "changeNotesNotetype",
+            noteIds=note_ids,
+            oldModel=old_model,
+            newModel=new_model,
+        )
 
     def get_media_dir(self) -> Path:
         """Return Anki's collection.media directory, cached after first call."""
@@ -534,6 +541,3 @@ class AnkiAdapter:
             return False
         shutil.copyfile(source, local_path)
         return True
-
-    def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
-        return invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')

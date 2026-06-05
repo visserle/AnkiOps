@@ -6,20 +6,22 @@ from types import SimpleNamespace
 
 import pytest
 
-_BRIDGE_ACTIONS_PATH = (
-    Path(__file__).resolve().parents[2] / "anki_addon" / "bridge_actions.py"
+_ANKIOPS_CONNECT_ACTIONS_PATH = (
+    Path(__file__).resolve().parents[2] / "anki_addon" / "ankiops_connect_actions.py"
 )
 _SPEC = importlib.util.spec_from_file_location(
-    "ankiops_addon_bridge_actions",
-    _BRIDGE_ACTIONS_PATH,
+    "ankiops_addon_ankiops_connect_actions",
+    _ANKIOPS_CONNECT_ACTIONS_PATH,
 )
-bridge_actions = importlib.util.module_from_spec(_SPEC)
+ankiops_connect_actions = importlib.util.module_from_spec(_SPEC)
 assert _SPEC and _SPEC.loader
-_SPEC.loader.exec_module(bridge_actions)
+_SPEC.loader.exec_module(ankiops_connect_actions)
 
-BridgeActionError = bridge_actions.BridgeActionError
-change_notes_notetype = bridge_actions.change_notes_notetype
-dispatch_bridge_action = bridge_actions.dispatch_bridge_action
+AnkiOpsConnectActionError = ankiops_connect_actions.AnkiOpsConnectActionError
+change_notes_notetype = ankiops_connect_actions.change_notes_notetype
+dispatch_ankiops_connect_action = (
+    ankiops_connect_actions.dispatch_ankiops_connect_action
+)
 
 
 def _model(model_id: int, name: str, fields=None, templates=None):
@@ -175,7 +177,7 @@ class _FakeCollection:
             raise KeyError(note_id)
         return self.notes[note_id]
 
-    def ankiops_bridge_cards_snapshot(self, note_ids):
+    def ankiops_connect_cards_snapshot(self, note_ids):
         return {
             card_id: tuple(card.values())
             for card_id, card in self.cards.items()
@@ -215,7 +217,7 @@ class _FakeCard:
 
 
 class _ReadFakeCollection:
-    ankiops_bridge_active_profile = "TestProfile"
+    ankiops_connect_active_profile = "TestProfile"
 
     def __init__(self):
         self.model = _model(1, "AnkiOpsQA")
@@ -314,7 +316,7 @@ def test_change_notes_notetype_blocks_missing_model():
     col = _FakeCollection()
     col.add_note(101, col.old_model, "key-101")
 
-    with pytest.raises(BridgeActionError, match="New note type not found"):
+    with pytest.raises(AnkiOpsConnectActionError, match="New note type not found"):
         change_notes_notetype(col, [101], "AnkiOpsQA", "missing")
 
 
@@ -322,7 +324,7 @@ def test_change_notes_notetype_blocks_wrong_current_model():
     col = _FakeCollection()
     col.add_note(101, col.new_model, "key-101")
 
-    with pytest.raises(BridgeActionError, match="expected 'AnkiOpsQA'"):
+    with pytest.raises(AnkiOpsConnectActionError, match="expected 'AnkiOpsQA'"):
         change_notes_notetype(
             col,
             [101],
@@ -338,7 +340,7 @@ def test_change_notes_notetype_blocks_missing_ankiops_key_field():
     col.models_by_id[1] = col.old_model
     col.add_note(101, col.old_model, "key-101")
 
-    with pytest.raises(BridgeActionError, match="lacks AnkiOps Key"):
+    with pytest.raises(AnkiOpsConnectActionError, match="lacks AnkiOps Key"):
         change_notes_notetype(
             col,
             [101],
@@ -358,7 +360,7 @@ def test_change_notes_notetype_blocks_mismatched_fields():
     col.models_by_id[2] = col.new_model
     col.add_note(101, col.old_model, "key-101")
 
-    with pytest.raises(BridgeActionError, match="field names differ"):
+    with pytest.raises(AnkiOpsConnectActionError, match="field names differ"):
         change_notes_notetype(
             col,
             [101],
@@ -372,7 +374,10 @@ def test_change_notes_notetype_blocks_post_verification_failures():
     col.add_note(101, col.old_model, "key-101")
     col.mutate_card_due_on_change = True
 
-    with pytest.raises(BridgeActionError, match="Post-conversion verification failed"):
+    with pytest.raises(
+        AnkiOpsConnectActionError,
+        match="Post-conversion verification failed",
+    ):
         change_notes_notetype(
             col,
             [101],
@@ -381,24 +386,24 @@ def test_change_notes_notetype_blocks_post_verification_failures():
         )
 
 
-def test_dispatch_bridge_action_routes_version():
-    assert dispatch_bridge_action(None, "version", {}) == 1
+def test_dispatch_ankiops_connect_action_routes_version():
+    assert dispatch_ankiops_connect_action(None, "version", {}) == 1
 
 
-def test_dispatch_bridge_action_reads_collection_state():
+def test_dispatch_ankiops_connect_action_reads_collection_state():
     col = _ReadFakeCollection()
 
-    assert dispatch_bridge_action(col, "getActiveProfile", {}) == "TestProfile"
-    assert dispatch_bridge_action(col, "deckNamesAndIds", {}) == {
+    assert dispatch_ankiops_connect_action(col, "getActiveProfile", {}) == "TestProfile"
+    assert dispatch_ankiops_connect_action(col, "deckNamesAndIds", {}) == {
         "Default": 1,
         "Deck": 2,
     }
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "findNotes",
         {"query": '"AnkiOps Key:key-101"'},
     ) == [101]
-    assert dispatch_bridge_action(col, "notesInfo", {"notes": [101]}) == [
+    assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [101]}) == [
         {
             "noteId": 101,
             "modelName": "AnkiOpsQA",
@@ -411,7 +416,7 @@ def test_dispatch_bridge_action_reads_collection_state():
             "tags": ["z", "a"],
         }
     ]
-    assert dispatch_bridge_action(col, "cardsInfo", {"cards": [1001]}) == [
+    assert dispatch_ankiops_connect_action(col, "cardsInfo", {"cards": [1001]}) == [
         {
             "cardId": 1001,
             "note": 101,
@@ -421,36 +426,36 @@ def test_dispatch_bridge_action_reads_collection_state():
     ]
 
 
-def test_dispatch_bridge_action_reads_model_state():
+def test_dispatch_ankiops_connect_action_reads_model_state():
     col = _FakeCollection()
     col.old_model["flds"][0]["description"] = "Prompt"
     col.old_model["flds"][0]["size"] = 14
 
-    assert dispatch_bridge_action(col, "modelNames", {}) == [
+    assert dispatch_ankiops_connect_action(col, "modelNames", {}) == [
         "AnkiOpsQA",
         "collab/owner/repo/AnkiOpsQA",
     ]
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldNames",
         {"modelName": "AnkiOpsQA"},
     ) == ["Question", "Answer", "AnkiOps Key"]
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelStyling",
         {"modelName": "AnkiOpsQA"},
     ) == {"name": "AnkiOpsQA", "css": ".card { color: black; }"}
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelTemplates",
         {"modelName": "AnkiOpsQA"},
     ) == {"Card 1": {"Front": "{{Question}}", "Back": "{{Answer}}"}}
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldDescriptions",
         {"modelName": "AnkiOpsQA"},
     ) == ["Prompt", "", ""]
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldFonts",
         {"modelName": "AnkiOpsQA"},
@@ -461,10 +466,10 @@ def test_dispatch_bridge_action_reads_model_state():
     }
 
 
-def test_dispatch_bridge_action_creates_and_updates_model_state():
+def test_dispatch_ankiops_connect_action_creates_and_updates_model_state():
     col = _FakeCollection()
 
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "createModel",
         {
@@ -477,38 +482,38 @@ def test_dispatch_bridge_action_creates_and_updates_model_state():
             ],
         },
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldNames",
         {"modelName": "AnkiOpsNew"},
     ) == ["Question", "Answer"]
 
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldAdd",
         {"modelName": "AnkiOpsNew", "fieldName": "Extra"},
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldReposition",
         {"modelName": "AnkiOpsNew", "fieldName": "Extra", "index": 1},
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldSetDescription",
         {"modelName": "AnkiOpsNew", "fieldName": "Extra", "description": "Details"},
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldSetFontSize",
         {"modelName": "AnkiOpsNew", "fieldName": "Extra", "fontSize": 15},
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "updateModelStyling",
         {"model": {"name": "AnkiOpsNew", "css": ".card { color: blue; }"}},
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelTemplateRename",
         {
@@ -517,7 +522,7 @@ def test_dispatch_bridge_action_creates_and_updates_model_state():
             "newTemplateName": "Review",
         },
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelTemplateAdd",
         {
@@ -525,7 +530,7 @@ def test_dispatch_bridge_action_creates_and_updates_model_state():
             "template": {"Name": "Extra", "Front": "{{Extra}}", "Back": "{{Answer}}"},
         },
     ) is None
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "updateModelTemplates",
         {
@@ -539,27 +544,27 @@ def test_dispatch_bridge_action_creates_and_updates_model_state():
         },
     ) is None
 
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldNames",
         {"modelName": "AnkiOpsNew"},
     ) == ["Question", "Extra", "Answer"]
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldDescriptions",
         {"modelName": "AnkiOpsNew"},
     ) == ["", "Details", ""]
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelFieldFonts",
         {"modelName": "AnkiOpsNew"},
     )["Extra"]["size"] == 15
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelStyling",
         {"modelName": "AnkiOpsNew"},
     )["css"] == ".card { color: blue; }"
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "modelTemplates",
         {"modelName": "AnkiOpsNew"},
@@ -569,10 +574,10 @@ def test_dispatch_bridge_action_creates_and_updates_model_state():
     }
 
 
-def test_dispatch_bridge_action_imports_notes_and_media(tmp_path):
+def test_dispatch_ankiops_connect_action_imports_notes_and_media(tmp_path):
     col = _WriteFakeCollection(tmp_path / "collection.media")
 
-    assert dispatch_bridge_action(col, "createDeck", {"deck": "Imported"}) == 3
+    assert dispatch_ankiops_connect_action(col, "createDeck", {"deck": "Imported"}) == 3
     note_payload = {
         "deckName": "Imported",
         "modelName": "AnkiOpsQA",
@@ -583,20 +588,20 @@ def test_dispatch_bridge_action_imports_notes_and_media(tmp_path):
         },
         "tags": ["z", "a"],
     }
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "canAddNotesWithErrorDetail",
         {"notes": [note_payload]},
     ) == [{"canAdd": True}]
 
-    created_ids = dispatch_bridge_action(
+    created_ids = dispatch_ankiops_connect_action(
         col,
         "addNotes",
         {"notes": [note_payload]},
     )
     note_id = created_ids[0]
 
-    assert dispatch_bridge_action(
+    assert dispatch_ankiops_connect_action(
         col,
         "updateNote",
         {
@@ -607,35 +612,41 @@ def test_dispatch_bridge_action_imports_notes_and_media(tmp_path):
             }
         },
     ) is None
-    assert dispatch_bridge_action(col, "notesInfo", {"notes": [note_id]})[0][
+    assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]})[0][
         "fields"
     ]["Answer"]["value"] == "A2"
-    assert dispatch_bridge_action(col, "notesInfo", {"notes": [note_id]})[0][
+    assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]})[0][
         "tags"
     ] == ["updated"]
 
-    card_id = dispatch_bridge_action(col, "notesInfo", {"notes": [note_id]})[0][
-        "cards"
-    ][0]
-    assert dispatch_bridge_action(col, "createDeck", {"deck": "Moved"}) == 4
-    assert dispatch_bridge_action(
+    note_info = dispatch_ankiops_connect_action(
+        col,
+        "notesInfo",
+        {"notes": [note_id]},
+    )[0]
+    card_id = note_info["cards"][0]
+    assert dispatch_ankiops_connect_action(col, "createDeck", {"deck": "Moved"}) == 4
+    assert dispatch_ankiops_connect_action(
         col,
         "changeDeck",
         {"cards": [card_id], "deck": "Moved"},
     ) is None
-    assert dispatch_bridge_action(col, "cardsInfo", {"cards": [card_id]})[0][
+    assert dispatch_ankiops_connect_action(col, "cardsInfo", {"cards": [card_id]})[0][
         "deckName"
     ] == "Moved"
 
-    assert dispatch_bridge_action(col, "deleteNotes", {"notes": [note_id]}) is None
-    assert dispatch_bridge_action(col, "notesInfo", {"notes": [note_id]}) == []
-    assert dispatch_bridge_action(col, "getMediaDirPath", {}) == str(
+    assert (
+        dispatch_ankiops_connect_action(col, "deleteNotes", {"notes": [note_id]})
+        is None
+    )
+    assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]}) == []
+    assert dispatch_ankiops_connect_action(col, "getMediaDirPath", {}) == str(
         tmp_path / "collection.media"
     )
 
 
-def test_dispatch_bridge_action_multi_collects_results_and_errors():
-    results = dispatch_bridge_action(
+def test_dispatch_ankiops_connect_action_multi_collects_results_and_errors():
+    results = dispatch_ankiops_connect_action(
         None,
         "multi",
         {
@@ -646,9 +657,12 @@ def test_dispatch_bridge_action_multi_collects_results_and_errors():
         },
     )
 
-    assert results == [1, "Unknown AnkiOps bridge action: missing"]
+    assert results == [1, "Unknown AnkiOpsConnect action: missing"]
 
 
-def test_dispatch_bridge_action_blocks_unknown_action():
-    with pytest.raises(BridgeActionError, match="Unknown AnkiOps bridge action"):
-        dispatch_bridge_action(None, "missing", {})
+def test_dispatch_ankiops_connect_action_blocks_unknown_action():
+    with pytest.raises(
+        AnkiOpsConnectActionError,
+        match="Unknown AnkiOpsConnect action",
+    ):
+        dispatch_ankiops_connect_action(None, "missing", {})
