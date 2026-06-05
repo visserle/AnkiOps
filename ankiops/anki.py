@@ -508,9 +508,6 @@ class AnkiAdapter:
                 for create_change in creates
             ]
 
-    def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
-        return invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
-
     def change_notes_notetype(
         self,
         note_ids: list[int],
