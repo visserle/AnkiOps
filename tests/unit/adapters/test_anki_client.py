@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from ankiops.anki_client import AnkiConnectionError, invoke
+from ankiops.anki_client import AnkiConnectionError, _invoke_anki_connect, invoke
 
 
 def test_invoke_posts_to_ankiops_connect_and_returns_result():
@@ -79,11 +79,37 @@ def test_invoke_requires_ankiops_connect_for_custom_actions():
     post.assert_called_once()
 
 
-def test_invoke_rejects_non_json_response_payload():
+def test_anki_connect_rejects_non_json_response_payload():
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.json.side_effect = ValueError("no json")
 
-    with patch("ankiops.anki_client._session.post", return_value=response):
-        with pytest.raises(AnkiConnectionError, match="non-JSON response"):
+    with patch("ankiops.anki_client._session.post", return_value=response) as post:
+        with pytest.raises(
+            AnkiConnectionError,
+            match="AnkiConnect returned a non-JSON response",
+        ):
+            _invoke_anki_connect("version", {})
+
+    post.assert_called_once_with(
+        "http://localhost:8765",
+        json={"action": "version", "version": 6, "params": {}},
+        timeout=10,
+    )
+
+
+def test_invoke_reports_combined_error_when_both_connectors_return_non_json():
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+    response.json.side_effect = ValueError("no json")
+
+    with patch("ankiops.anki_client._session.post", return_value=response) as post:
+        with pytest.raises(
+            AnkiConnectionError,
+            match="Unable to complete request with AnkiOpsConnect or AnkiConnect",
+        ) as error:
             invoke("version")
+
+    assert post.call_count == 2
+    assert "AnkiOpsConnect returned a non-JSON response" in str(error.value)
+    assert "AnkiConnect returned a non-JSON response" in str(error.value)

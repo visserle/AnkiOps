@@ -1,7 +1,9 @@
 """GitHub-native collaboration support for AnkiOps."""
 
 from ankiops.collab.commands import (
-    _parse_slug,
+    _parse_slug as _parse_slug,
+)
+from ankiops.collab.commands import (
     run,
     run_contribute,
     run_publish,
@@ -11,7 +13,6 @@ from ankiops.collab.commands import (
 )
 
 __all__ = [
-    "_parse_slug",
     "run",
     "run_contribute",
     "run_publish",
