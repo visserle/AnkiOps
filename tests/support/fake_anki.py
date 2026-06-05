@@ -20,6 +20,19 @@ class MockAnki:
         self.next_deck_id = 10
         self.calls = []
 
+    def _base_model_name(self, model_name: str | None) -> str | None:
+        if model_name == "RenamedQA":
+            return "AnkiOpsQA"
+        if model_name and model_name.startswith("collab/"):
+            return model_name.split("/")[-1]
+        return model_name
+
+    def _search_value(self, term: str) -> str:
+        value = term.split(":", 1)[1]
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            return value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+        return value
+
     def invoke(self, action: str, **params) -> Any:
         self.calls.append((action, params))
 
@@ -43,13 +56,13 @@ class MockAnki:
                         matches_all_terms = True
                         for term in terms:
                             if term.startswith("note:"):
-                                model = term.split(":", 1)[1]
+                                model = self._search_value(term)
                                 note = self.notes.get(card["note"])
                                 if not note or note["modelName"] != model:
                                     matches_all_terms = False
                                     break
                             elif term.startswith("deck:"):
-                                deck_name = term.split(":", 1)[1]
+                                deck_name = self._search_value(term)
                                 if card["deckName"] != deck_name:
                                     matches_all_terms = False
                                     break
@@ -93,7 +106,7 @@ class MockAnki:
                 ]
 
             case "modelFieldNames":
-                model = params.get("modelName")
+                model = self._base_model_name(params.get("modelName"))
                 if model == "AnkiOpsQA":
                     return [
                         "Question",
@@ -275,13 +288,13 @@ class MockAnki:
                         match_all = True
                         for term in terms:
                             if term.startswith("note:"):
-                                model = term.split(":", 1)[1]
+                                model = self._search_value(term)
                                 if note["modelName"] != model:
                                     match_all = False
                                     break
                             elif term.startswith("deck:"):
                                 deck_match = False
-                                target_deck = term.split(":", 1)[1]
+                                target_deck = self._search_value(term)
                                 for card in self.cards.values():
                                     if (
                                         card["note"] == note_id
@@ -320,3 +333,32 @@ class MockAnki:
                 "tags": list(normalize_tags(tags)),
             },
         )
+
+    def change_notes_notetype(
+        self,
+        note_ids: list[int],
+        old_model: str,
+        new_model: str,
+    ) -> None:
+        self.calls.append(
+            (
+                "changeNotesNotetype",
+                {"noteIds": note_ids, "oldModel": old_model, "newModel": new_model},
+            )
+        )
+        for note_id in note_ids:
+            note = self.notes[note_id]
+            if note["modelName"] != old_model:
+                raise ValueError(
+                    f"note {note_id} has model {note['modelName']}, expected "
+                    f"{old_model}"
+                )
+            old_fields = set(self.invoke("modelFieldNames", modelName=old_model))
+            new_fields = set(self.invoke("modelFieldNames", modelName=new_model))
+            if old_fields != new_fields:
+                raise ValueError(
+                    f"Cannot convert {old_model} to {new_model}: field names differ"
+                )
+            note["modelName"] = new_model
+            for card_id in note["cards"]:
+                self.cards[card_id]["modelName"] = new_model

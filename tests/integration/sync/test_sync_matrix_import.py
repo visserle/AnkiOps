@@ -2,9 +2,42 @@
 
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
+from ankiops.fingerprints import note_fingerprint
 from tests.support.assertions import assert_summary
+
+
+def _copy_qa_note_type(world, new_name: str) -> None:
+    shutil.copytree(
+        world.note_types_dir / "AnkiOpsQA",
+        world.note_types_dir / new_name,
+    )
+
+
+def _write_explicit_qa_deck(world, deck_name: str, note_type: str, note_key: str):
+    world.deck_path(deck_name).write_text(
+        "\n".join(
+            [
+                f"<!-- note_key: {note_key} -->",
+                f"<!-- note_type: {note_type} -->",
+                "Q: Path changed Q",
+                "A: Path changed A",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _ankiops_key_find_note_queries(world) -> list[str]:
+    return [
+        params.get("query", "")
+        for action, params in world.mock_anki.calls
+        if action == "findNotes" and "AnkiOps Key:" in params.get("query", "")
+    ]
 
 
 def test_imp_fresh_create_001_creates_note_and_writes_key(world):
@@ -74,6 +107,7 @@ def test_imp_run_update_001_updates_existing_note(world):
         assert (
             world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Updated A"
         )
+        assert _ankiops_key_find_note_queries(world) == []
 
 
 def test_imp_run_update_003_tag_only_edit_updates_existing_note(world):
@@ -288,6 +322,116 @@ def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
             world.sync_import(db)
 
 
+def test_imp_run_conflict_002_local_note_type_path_change_does_not_duplicate_key(
+    world,
+):
+    """A renamed compatible local note type converts the existing keyed Anki note."""
+    note_key = "local-path-change-key"
+    _copy_qa_note_type(world, "RenamedQA")
+    shutil.rmtree(world.note_types_dir / "AnkiOpsQA")
+    old_note_id = world.add_qa_note(
+        deck_name="PathChangeDeck",
+        question="Path changed Q",
+        answer="Path changed A",
+        note_key=note_key,
+    )
+    _write_explicit_qa_deck(world, "PathChangeDeck", "RenamedQA", note_key)
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, old_note_id)])
+        result = world.sync_import(db)
+
+    sync_result = result.results[0]
+    assert sync_result.errors == []
+    assert_summary(
+        sync_result.summary,
+        created=0,
+        updated=0,
+        converted=1,
+        moved=0,
+        deleted=0,
+    )
+    assert len(world.mock_anki.notes) == 1
+    assert world.mock_anki.notes[old_note_id]["modelName"] == "RenamedQA"
+    assert _ankiops_key_find_note_queries(world) == []
+
+
+def test_imp_run_conflict_003_duplicate_ankiops_key_across_local_note_types_blocks(
+    world,
+):
+    """If a previous path edit already duplicated a key, import must stop."""
+    note_key = "local-duplicate-key"
+    _copy_qa_note_type(world, "RenamedQA")
+    shutil.rmtree(world.note_types_dir / "AnkiOpsQA")
+    old_note_id = world.add_qa_note(
+        deck_name="PathChangeDeck",
+        question="Old Q",
+        answer="Old A",
+        note_key=note_key,
+    )
+    world.mock_anki.add_note(
+        "PathChangeDeck",
+        "RenamedQA",
+        {
+            "Question": "New Q",
+            "Answer": "New A",
+            "AnkiOps Key": note_key,
+        },
+    )
+    new_note_id = max(world.mock_anki.notes.keys())
+    _write_explicit_qa_deck(world, "PathChangeDeck", "RenamedQA", note_key)
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, old_note_id)])
+        with pytest.raises(ValueError, match=f"Duplicate AnkiOps Key '{note_key}'"):
+            world.sync_import(db)
+
+    assert old_note_id in world.mock_anki.notes
+    assert new_note_id in world.mock_anki.notes
+
+
+def test_imp_run_update_002_cached_same_type_skip_avoids_markdown_render(
+    world,
+    monkeypatch,
+):
+    """Cached unchanged keyed notes should skip before Markdown-to-HTML rendering."""
+    note_key = "cached-fast-path-key"
+    note_id = world.add_qa_note(
+        deck_name="CachedFastPathDeck",
+        question="Cached Q",
+        answer="Cached A",
+        note_key=note_key,
+    )
+    world.write_qa_deck("CachedFastPathDeck", [("Cached Q", "Cached A", note_key)])
+    md_hash = note_fingerprint(
+        "AnkiOpsQA",
+        {"Question": "Cached Q", "Answer": "Cached A"},
+    )
+    anki_hash = note_fingerprint(
+        "AnkiOpsQA",
+        {
+            "Question": "Cached Q",
+            "Answer": "Cached A",
+            "AnkiOps Key": note_key,
+        },
+    )
+
+    def fail_to_html(*_args, **_kwargs):
+        raise AssertionError("unexpected Markdown render on cached skip")
+
+    monkeypatch.setattr("ankiops.import_notes._to_html", fail_to_html)
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+        db.upsert_import_hashes([(note_key, md_hash, anki_hash)])
+        result = world.sync_import(db)
+
+    sync_result = result.results[0]
+    assert sync_result.errors == []
+    assert sync_result.summary.skipped == 1
+    assert_summary(sync_result.summary, created=0, updated=0, moved=0, deleted=0)
+
+
 def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(world):
     """IMP-RUN-UPDATE-002."""
     note_key = "imp-run-type-mismatch-001"
@@ -307,9 +451,8 @@ def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(wo
         assert len(result.results) == 1
         sync_res = result.results[0]
         assert len(sync_res.errors) == 1
-        assert "Note type mismatch" in sync_res.errors[0]
-        assert "Remove this note's key comment" in sync_res.errors[0]
-        assert f"<!-- note_key: {note_key} -->" in sync_res.errors[0]
+        assert "Failed note type conversion" in sync_res.errors[0]
+        assert "field names differ" in sync_res.errors[0]
         assert_summary(sync_res.summary, created=0, updated=0, moved=0, deleted=0)
         assert world.mock_anki.notes[note_id]["modelName"] == "AnkiOpsCloze"
 

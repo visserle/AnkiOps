@@ -10,7 +10,11 @@ from blake3 import blake3
 
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.db import SQLiteDbAdapter
-from ankiops.sync_media import _extract_media_references, sync_media_to_anki
+from ankiops.sync_media import (
+    _extract_media_references,
+    sync_all_media_to_anki,
+    sync_media_to_anki,
+)
 
 
 class _FakeMediaAnki:
@@ -146,6 +150,49 @@ class TestMediaDirectory:
 
 
 class TestMediaSyncIncremental:
+    def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(
+        self, fs, tmp_path
+    ):
+        root_media = tmp_path / LOCAL_MEDIA_DIR
+        root_media.mkdir()
+        (root_media / "image.png").write_bytes(b"root image")
+        (tmp_path / "RootDeck.md").write_text(
+            "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
+        )
+
+        collab_root = tmp_path / "collab" / "owner" / "repo"
+        collab_media = collab_root / LOCAL_MEDIA_DIR
+        collab_media.mkdir(parents=True)
+        (collab_media / "image.png").write_bytes(b"collab image")
+        (collab_root / "CollabDeck.md").write_text(
+            "Q: Collab\nA: ![img](media/image.png)", encoding="utf-8"
+        )
+
+        anki_media_dir = tmp_path / "anki_media"
+        anki_media_dir.mkdir()
+        anki = _FakeMediaAnki(anki_media_dir)
+
+        db = SQLiteDbAdapter.open(tmp_path)
+        try:
+            result = sync_all_media_to_anki(anki, fs, tmp_path, db)
+        finally:
+            db.close()
+
+        root_names = sorted(path.name for path in root_media.glob("image_*.png"))
+        collab_names = sorted(path.name for path in collab_media.glob("image_*.png"))
+        assert len(root_names) == 1
+        assert len(collab_names) == 1
+        assert root_names != collab_names
+        assert result.summary.synced == 2
+        assert (anki_media_dir / root_names[0]).exists()
+        assert (anki_media_dir / collab_names[0]).exists()
+        assert f"media/{root_names[0]}" in (tmp_path / "RootDeck.md").read_text(
+            encoding="utf-8"
+        )
+        assert f"media/{collab_names[0]}" in (
+            collab_root / "CollabDeck.md"
+        ).read_text(encoding="utf-8")
+
     def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(self, fs, tmp_path):
         media_dir = tmp_path / LOCAL_MEDIA_DIR
         media_dir.mkdir()

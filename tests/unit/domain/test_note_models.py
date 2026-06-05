@@ -415,11 +415,11 @@ class TestParseQABlock:
         ):
             fs.read_markdown_file(md)
 
-    def test_qa_with_note_type_metadata(self, fs, tmp_path):
+    def test_qa_with_note_type_metadata_uses_explicit_type(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- note_key: key-1 -->\n"
-            "<!-- note_type: StaleType -->\n"
+            "<!-- note_type: AnkiOpsQA -->\n"
             "Q: What?\n"
             "A: Answer"
         )
@@ -427,6 +427,18 @@ class TestParseQABlock:
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsQA"
+
+    def test_unknown_note_type_metadata_fails(self, fs, tmp_path):
+        md = tmp_path / "deck.md"
+        md.write_text(
+            "<!-- note_key: key-1 -->\n"
+            "<!-- note_type: StaleType -->\n"
+            "Q: What?\n"
+            "A: Answer"
+        )
+
+        with pytest.raises(ValueError, match="Unknown note type 'StaleType'"):
+            fs.read_markdown_file(md)
 
     def test_qa_with_tags_metadata(self, fs, tmp_path):
         md = tmp_path / "deck.md"

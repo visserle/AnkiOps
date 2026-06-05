@@ -30,6 +30,13 @@ from ankiops.models import (
     ProtectedNoteGroup,
     SyncResult,
 )
+from ankiops.note_identity import assert_unique_export_note_keys
+from ankiops.sources import (
+    SyncSource,
+    discover_sync_sources,
+    load_configs_for_sources,
+    markdown_files_for_source,
+)
 from ankiops.tags import format_tags_comment
 
 logger = logging.getLogger(__name__)
@@ -41,10 +48,21 @@ _ResolvedDeckNote = tuple[str, int, Note]
 _SYNC_ORDER = (
     ChangeType.DELETE,
     ChangeType.CREATE,
+    ChangeType.CONVERT,
     ChangeType.UPDATE,
     ChangeType.SKIP,
     ChangeType.MOVE,
 )
+
+
+def _format_pending_note_type_conversion_error(
+    *, note_key: str, markdown_note_type: str, anki_note_type: str
+) -> str:
+    return (
+        f"Pending note type conversion for note_key {note_key}: Markdown uses "
+        f"'{markdown_note_type}' but Anki has '{anki_note_type}'. Run "
+        "'ankiops ma' before exporting with 'ankiops am'."
+    )
 
 
 def _from_html(
@@ -150,6 +168,15 @@ def _resolve_deck_notes(
 
         local_match = local_notes_by_note_key.get(note_key) if note_key else None
         if note_key and local_match:
+            if local_match.note_type != anki_note.note_type:
+                errors.append(
+                    _format_pending_note_type_conversion_error(
+                        note_key=note_key,
+                        markdown_note_type=local_match.note_type,
+                        anki_note_type=anki_note.note_type,
+                    )
+                )
+                continue
             local_md_hash = note_fingerprint(
                 local_match.note_type,
                 local_match.fields,
@@ -453,6 +480,9 @@ def _sync_deck(
         local_notes_by_content=local_notes_by_content,
     )
     result.errors.extend(resolve_errors)
+    if resolve_errors:
+        result.order_changes(order=_SYNC_ORDER)
+        return result
 
     final_notes, protected_keyless_count = _order_resolved_notes(
         resolved_notes=resolved_notes,
@@ -529,14 +559,26 @@ def export_collection(
     collection_dir: Path,
     note_types_dir: Path,
 ) -> CollectionResult:
-    configs = fs_port.load_note_type_configs(note_types_dir)
+    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    local_source = sources[0]
+    source_configs = load_configs_for_sources(sources)
+    configs = [
+        config
+        for source_config in source_configs
+        for config in source_config.configs
+    ]
     config_by_name = {config.name: config for config in configs}
+    fs_port.set_configs(configs)
     with db_port.write_tx():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
 
         all_note_ids = anki_port.fetch_all_note_ids([config.name for config in configs])
         anki_notes = anki_port.fetch_notes_info(all_note_ids)
         note_keys_by_id = db_port.resolve_note_keys(all_note_ids)
+        assert_unique_export_note_keys(
+            anki_notes=anki_notes,
+            note_keys_by_id=note_keys_by_id,
+        )
         pending_note_mappings: list[tuple[str, int]] = []
         note_key_candidates = set(note_keys_by_id.values())
         for anki_note in anki_notes.values():
@@ -566,10 +608,29 @@ def export_collection(
             deck_name = primary_card_info.get("deckName")
             notes_by_deck.setdefault(deck_name, []).append(anki_note)
 
-        md_files = fs_port.find_markdown_files(collection_dir)
-        file_map_by_name = {}
-        for md_file in md_files:
-            file_map_by_name[md_file.stem] = md_file
+        md_files: list[Path] = []
+        source_by_file: dict[Path, SyncSource] = {}
+        file_map_by_deck_name: dict[str, tuple[SyncSource, Path]] = {}
+        deck_conflicts: list[str] = []
+        for source in sources:
+            for md_file in markdown_files_for_source(source):
+                md_files.append(md_file)
+                source_by_file[md_file] = source
+                deck_name = file_stem_to_deck_name(md_file.stem)
+                previous = file_map_by_deck_name.get(deck_name)
+                if previous is not None:
+                    deck_conflicts.append(
+                        f"Deck '{deck_name}' is defined by both "
+                        f"{previous[0].display_name}:{previous[1].name} and "
+                        f"{source.display_name}:{md_file.name}"
+                    )
+                    continue
+                file_map_by_deck_name[deck_name] = (source, md_file)
+        if deck_conflicts:
+            raise ValueError(
+                "Aborting export: deck ownership conflicts found: "
+                + "; ".join(deck_conflicts)
+            )
 
         results = []
         protected_note_groups: list[ProtectedNoteGroup] = []
@@ -584,23 +645,28 @@ def export_collection(
             old_name = db_port.resolve_deck_name(deck_id)
             safe_name = deck_name_to_file_stem(deck_name)
             if old_name and old_name != deck_name:
-                old_safe = deck_name_to_file_stem(old_name)
-                if old_safe in file_map_by_name:
-                    old_path = file_map_by_name[old_safe]
+                old_entry = file_map_by_deck_name.get(old_name)
+                if old_entry is not None:
+                    old_source, old_path = old_entry
                     new_path = old_path.parent / f"{safe_name}.md"
                     old_path.rename(new_path)
-                    file_map_by_name[safe_name] = new_path
-                    del file_map_by_name[old_safe]
+                    source_by_file.pop(old_path, None)
+                    source_by_file[new_path] = old_source
+                    file_map_by_deck_name[deck_name] = (old_source, new_path)
+                    del file_map_by_deck_name[old_name]
                     logger.info(f"Deck renamed: '{old_name}' → '{deck_name}'")
 
-            target_file = file_map_by_name.get(safe_name)
+            target_source, target_file = file_map_by_deck_name.get(
+                deck_name,
+                (local_source, None),
+            )
 
             sync_result = _sync_deck(
                 deck_name,
                 notes,
                 config_by_name,
                 target_file,
-                collection_dir,
+                target_source.root,
                 fs_port,
                 db_port,
                 note_keys_by_id,
@@ -636,9 +702,10 @@ def export_collection(
                 continue
             if md_file not in active_files:
                 deck_name = file_stem_to_deck_name(md_file.stem)
+                source = source_by_file.get(md_file, local_source)
                 orphan_split = _split_orphan_file_notes(
                     md_file=md_file,
-                    collection_dir=collection_dir,
+                    collection_dir=source.root,
                     fs_port=fs_port,
                 )
                 if orphan_split is None:

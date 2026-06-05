@@ -295,6 +295,7 @@ class AnkiNote:
 class ChangeType(Enum):
     CREATE = ("created", True, 4, True, True, True)
     UPDATE = ("updated", True, 3, True, True, False)
+    CONVERT = ("converted", True, 3, True, False, False)
     DELETE = ("deleted", False, 6, True, True, True)
     MOVE = ("moved", True, 5, True, True, True)
     SKIP = ("skipped", True, 0, True, True, False)
@@ -344,6 +345,7 @@ _NOTE_REPORTED_CHANGE_TYPES = ChangeType.note_reported()
 _MEDIA_REPORTED_CHANGE_TYPES = ChangeType.media_reported()
 _NOTE_CHANGE_ORDER: tuple[ChangeType, ...] = (
     ChangeType.CREATE,
+    ChangeType.CONVERT,
     ChangeType.UPDATE,
     ChangeType.DELETE,
     ChangeType.SKIP,
@@ -434,6 +436,7 @@ class SyncSummary:
     total: int = 0
     created: int = 0
     updated: int = 0
+    converted: int = 0
     deleted: int = 0
     moved: int = 0
     skipped: int = 0
@@ -443,6 +446,7 @@ class SyncSummary:
     _FORMAT_ORDER = (
         "created",
         "updated",
+        "converted",
         "deleted",
         "moved",
         "errors",

@@ -14,11 +14,11 @@ from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.html_converter import HTMLToMarkdown
 from ankiops.markdown_converter import MarkdownToHTML
 from ankiops.markdown_format import (
-    NOTE_SEPARATOR,
     FIELD_LABEL_CANDIDATE_RE,
+    NOTE_SEPARATOR,
     is_code_fence_line,
-    is_note_type_comment,
     parse_note_key_comment,
+    parse_note_type_comment,
 )
 from ankiops.models import (
     ANKIOPS_KEY_FIELD,
@@ -112,6 +112,7 @@ class FileSystemAdapter:
 
             lines = stripped_block.split("\n")
             note_key: str | None = None
+            explicit_note_type: str | None = None
             tags: tuple[str, ...] = ()
             fields: dict[str, str] = {}
             current_field: str | None = None
@@ -140,7 +141,9 @@ class FileSystemAdapter:
                     note_key = parsed_note_key
                     continue
 
-                if is_note_type_comment(line):
+                parsed_note_type = parse_note_type_comment(line)
+                if parsed_note_type is not None:
+                    explicit_note_type = parsed_note_type
                     continue
 
                 tag_values = parse_tags_comment(line)
@@ -211,17 +214,27 @@ class FileSystemAdapter:
                     )
                 )
 
-            # Infer Note Type
-            try:
-                note_type = self._infer_note_type(fields, labels=seen_labels)
-            except ValueError as error:
-                raise ValueError(
-                    self._with_parse_error_context(
-                        str(error),
-                        display_path=display_path,
-                        line_number=first_field_line or note_start_line,
+            if explicit_note_type is not None:
+                note_type = explicit_note_type
+                if note_type not in config_by_name:
+                    raise ValueError(
+                        self._with_parse_error_context(
+                            f"Unknown note type '{note_type}'.",
+                            display_path=display_path,
+                            line_number=first_field_line or note_start_line,
+                        )
                     )
-                ) from error
+            else:
+                try:
+                    note_type = self._infer_note_type(fields, labels=seen_labels)
+                except ValueError as error:
+                    raise ValueError(
+                        self._with_parse_error_context(
+                            str(error),
+                            display_path=display_path,
+                            line_number=first_field_line or note_start_line,
+                        )
+                    ) from error
             note = Note(
                 note_key=note_key,
                 note_type=note_type,

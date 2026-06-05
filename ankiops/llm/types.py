@@ -130,6 +130,7 @@ class DiscoveryCounts:
 @dataclass(frozen=True)
 class DiscoveryItem:
     ordinal: int
+    source: str
     deck_name: str
     note_key: str | None
     note_type: str | None
@@ -150,6 +151,7 @@ class DiscoverySnapshot:
 @dataclass(frozen=True)
 class EligibleCandidate:
     item_id: int
+    source: str
     deck_name: str
     payload: NotePayload
     note_type_config: NoteTypeConfig
@@ -229,6 +231,7 @@ class LlmJobResult:
 
 @dataclass(frozen=True)
 class PlanFieldSurface:
+    source: str
     note_type: str
     candidate_notes: int
     editable_fields: list[str]

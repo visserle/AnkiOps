@@ -9,6 +9,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -20,10 +21,10 @@ from openai.types.responses import (
 )
 
 from ankiops.config import NOTE_TYPES_DIR
-from ankiops.fs import FileSystemAdapter
 from ankiops.git import git_snapshot
 from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 from ankiops.serializer import deserialize, serialize
+from ankiops.sources import discover_sync_sources, load_configs_for_sources
 from ankiops.tags import normalize_tags
 
 from .config_loader import is_task_config_file, load_llm_task_catalog
@@ -599,6 +600,7 @@ def _materialize_task_context(
         task=task,
         note_type_configs=note_type_configs,
     )
+    _validate_note_type_patterns_match_scope(task, discovery_snapshot)
     return MaterializedTaskContext(
         task=task,
         note_type_configs=note_type_configs,
@@ -612,8 +614,15 @@ def _load_task(
     collection_dir: Path,
     task_name: str,
 ) -> tuple[TaskConfig, dict[str, NoteTypeConfig]]:
-    fs = FileSystemAdapter()
-    note_type_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
+    sources = discover_sync_sources(
+        collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    note_type_configs = [
+        config
+        for source_config in load_configs_for_sources(sources)
+        for config in source_config.configs
+    ]
     catalog = load_llm_task_catalog(
         collection_dir,
         note_type_configs=note_type_configs,
@@ -661,10 +670,13 @@ def _discover_candidates(
     for deck in decks:
         if not isinstance(deck, dict):
             continue
+        source = deck.get("source")
         deck_name = deck.get("name")
         notes = deck.get("notes")
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("Serialized deck is missing source")
         if not isinstance(deck_name, str) or not isinstance(notes, list):
-            continue
+            raise ValueError(f"Serialized deck in source '{source}' is malformed")
         decks_seen += 1
         notes_seen += len(notes)
         if not task.decks.matches(deck_name):
@@ -678,6 +690,7 @@ def _discover_candidates(
             items.append(
                 _discover_note(
                     task=task,
+                    source=source,
                     deck_name=deck_name,
                     ordinal=ordinal,
                     note=note,
@@ -698,6 +711,7 @@ def _discover_candidates(
 def _discover_note(
     *,
     task: TaskConfig,
+    source: str,
     deck_name: str,
     ordinal: int,
     note: dict[str, Any],
@@ -711,6 +725,7 @@ def _discover_note(
 
     if not isinstance(note_key, str) or not isinstance(note_type_name, str):
         return _invalid_discovery_item(
+            source=source,
             deck_name=deck_name,
             ordinal=ordinal,
             note_key=note_key_value,
@@ -720,6 +735,7 @@ def _discover_note(
         )
     if not isinstance(fields, dict):
         return _invalid_discovery_item(
+            source=source,
             deck_name=deck_name,
             ordinal=ordinal,
             note_key=note_key,
@@ -731,6 +747,7 @@ def _discover_note(
     note_type_config = note_type_configs.get(note_type_name)
     if note_type_config is None:
         return _invalid_discovery_item(
+            source=source,
             deck_name=deck_name,
             ordinal=ordinal,
             note_key=note_key,
@@ -752,6 +769,7 @@ def _discover_note(
             raw_value = ""
         if not isinstance(raw_value, str):
             return _invalid_discovery_item(
+                source=source,
                 deck_name=deck_name,
                 ordinal=ordinal,
                 note_key=note_key,
@@ -778,6 +796,7 @@ def _discover_note(
         )
         return DiscoveryItem(
             ordinal=ordinal,
+            source=source,
             deck_name=deck_name,
             note_key=note_key,
             note_type=note_type_name,
@@ -791,6 +810,7 @@ def _discover_note(
 
     return DiscoveryItem(
         ordinal=ordinal,
+        source=source,
         deck_name=deck_name,
         note_key=note_key,
         note_type=note_type_name,
@@ -812,6 +832,7 @@ def _discover_note(
 
 def _invalid_discovery_item(
     *,
+    source: str,
     deck_name: str,
     ordinal: int,
     note_key: str | None,
@@ -821,6 +842,7 @@ def _invalid_discovery_item(
 ) -> DiscoveryItem:
     return DiscoveryItem(
         ordinal=ordinal,
+        source=source,
         deck_name=deck_name,
         note_key=note_key,
         note_type=note_type,
@@ -831,6 +853,33 @@ def _invalid_discovery_item(
         note_type_config=None,
         serialized_note=serialized_note,
     )
+
+
+def _validate_note_type_patterns_match_scope(
+    task: TaskConfig,
+    snapshot: DiscoverySnapshot,
+) -> None:
+    observed_note_types = {
+        item.note_type
+        for item in snapshot.items
+        if item.note_type is not None and item.note_type_config is not None
+    }
+    missing_patterns: list[str] = []
+    for rule in task.field_rules:
+        for pattern in rule.note_types:
+            if pattern == "*":
+                continue
+            if not any(
+                fnmatchcase(note_type, pattern) for note_type in observed_note_types
+            ):
+                missing_patterns.append(pattern)
+
+    if missing_patterns:
+        missing = ", ".join(sorted(set(missing_patterns)))
+        raise ValueError(
+            "LLM note type pattern(s) matched no notes after deck filtering: "
+            f"{missing}"
+        )
 
 
 def _record_discovery_snapshot(
@@ -864,6 +913,7 @@ def _record_discovery_item(
         db.insert_job_item(
             job_id=job_id,
             ordinal=item.ordinal,
+            source=item.source,
             deck_name=item.deck_name,
             note_key=item.note_key,
             note_type=item.note_type,
@@ -884,6 +934,7 @@ def _record_discovery_item(
         db.insert_job_item(
             job_id=job_id,
             ordinal=item.ordinal,
+            source=item.source,
             deck_name=item.deck_name,
             note_key=item.note_key,
             note_type=item.note_type,
@@ -902,6 +953,7 @@ def _record_discovery_item(
     item_id = db.insert_job_item(
         job_id=job_id,
         ordinal=item.ordinal,
+        source=item.source,
         deck_name=item.deck_name,
         note_key=item.payload.note_key,
         note_type=item.payload.note_type,
@@ -910,6 +962,7 @@ def _record_discovery_item(
     )
     return EligibleCandidate(
         item_id=item_id,
+        source=item.source,
         deck_name=item.deck_name,
         payload=item.payload,
         note_type_config=item.note_type_config,
@@ -1405,13 +1458,16 @@ def _build_plan_field_surface(
     note_type_configs: dict[str, NoteTypeConfig],
     snapshot_items: list[DiscoveryItem],
 ) -> list[PlanFieldSurface]:
-    observed_note_types = {
-        item.note_type
+    observed = {
+        (item.source, item.note_type)
         for item in snapshot_items
         if item.note_type is not None and item.note_type_config is not None
     }
     surface: list[PlanFieldSurface] = []
-    for note_type in sorted(observed_note_types):
+    for source, note_type in sorted(
+        observed,
+        key=lambda item: (0 if item[0] == "local" else 1, item[0], item[1]),
+    ):
         config = note_type_configs.get(note_type)
         if config is None:
             continue
@@ -1431,10 +1487,13 @@ def _build_plan_field_surface(
         candidate_notes = sum(
             1
             for item in snapshot_items
-            if item.item_status is LlmItemStatus.QUEUED and item.note_type == note_type
+            if item.item_status is LlmItemStatus.QUEUED
+            and item.source == source
+            and item.note_type == note_type
         )
         surface.append(
             PlanFieldSurface(
+                source=source,
                 note_type=note_type,
                 candidate_notes=candidate_notes,
                 editable_fields=editable_fields,

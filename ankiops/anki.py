@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 
 from ankiops.anki_client import AnkiConnectError, invoke
+from ankiops.ankiops_bridge import change_notes_notetype
 from ankiops.models import (
     ANKIOPS_KEY_FIELD,
     AnkiNote,
@@ -29,6 +30,17 @@ FIELD_DESCRIPTIONS = {
 
 def _action(action_str: str, **params) -> dict:
     return {"action": action_str, "params": params}
+
+
+def _quote_search_value(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _quote_field_exact_search(field_name: str, value: str) -> str:
+    escaped_field = field_name.replace("\\", "\\\\").replace('"', '\\"')
+    escaped_value = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped_field}:{escaped_value}"'
 
 
 def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str:
@@ -63,14 +75,45 @@ class AnkiAdapter:
         """Get the currently active Anki profile name."""
         return invoke("getActiveProfile")
 
+    def change_notes_notetype(
+        self,
+        note_ids: list[int],
+        old_model: str,
+        new_model: str,
+    ) -> None:
+        change_notes_notetype(note_ids, old_model, new_model)
+
     def fetch_deck_names_and_ids(self) -> dict[str, int]:
         return invoke("deckNamesAndIds")
 
     def fetch_all_note_ids(self, required_types: list[str]) -> list[int]:
         if not required_types:
             return []
-        query = " OR ".join(f"note:{model_name}" for model_name in required_types)
+        query = " OR ".join(
+            f"note:{_quote_search_value(model_name)}" for model_name in required_types
+        )
         return invoke("findNotes", query=query)
+
+    def fetch_note_ids_by_note_keys(self, note_keys: set[str]) -> dict[str, list[int]]:
+        if not note_keys:
+            return {}
+        keys = sorted(note_keys)
+        actions = [
+            _action(
+                "findNotes",
+                query=_quote_field_exact_search(ANKIOPS_KEY_FIELD.name, note_key),
+            )
+            for note_key in keys
+        ]
+        results = invoke("multi", actions=actions)
+        note_ids_by_key = {}
+        for note_key, result in zip(keys, results):
+            if isinstance(result, str):
+                raise AnkiConnectError(
+                    f"Failed to search notes by AnkiOps Key '{note_key}': {result}"
+                )
+            note_ids_by_key[note_key] = list(result or [])
+        return note_ids_by_key
 
     def fetch_cards_info(self, card_ids: list[int]) -> dict[int, dict]:
         if not card_ids:

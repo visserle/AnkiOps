@@ -28,6 +28,7 @@ def _parsed_response(*updates, tag_updates=()):
 def _candidate(llm_qa_config) -> EligibleCandidate:
     return EligibleCandidate(
         item_id=1,
+        source="local",
         deck_name="Deck",
         payload=NotePayload(
             note_key="nk-1",
@@ -59,6 +60,7 @@ def _tag_candidate(
     current_tags = ["old"] if tags is None else tags
     return EligibleCandidate(
         item_id=1,
+        source="local",
         deck_name="Deck",
         payload=NotePayload(
             note_key="nk-1",

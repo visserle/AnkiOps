@@ -59,8 +59,18 @@ def sync_note_types(
     Returns a human-readable summary string, or None if nothing happened.
     """
     configs = fs_port.load_note_type_configs(note_types_dir)
+    return sync_note_type_configs(anki_port, configs, db_port=db_port)
+
+
+def sync_note_type_configs(
+    anki_port: AnkiAdapter,
+    configs,
+    *,
+    db_port: SQLiteDbAdapter | None = None,
+) -> str | None:
+    """Ensure the provided note type configs exist in Anki."""
     if not configs:
-        logger.debug(f"No note types found in {note_types_dir}")
+        logger.debug("No note types provided")
         return None
 
     existing = set(anki_port.fetch_model_names())

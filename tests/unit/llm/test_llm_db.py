@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
+from ankiops.config import LLM_DB_FILENAME, LLM_DIR
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.types import LlmItemStatus
 
@@ -26,6 +29,36 @@ def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
         db.close()
 
 
+def test_open_rejects_old_job_item_schema_without_source(tmp_path):
+    llm_dir = tmp_path / LLM_DIR
+    llm_dir.mkdir()
+    db_path = llm_dir / LLM_DB_FILENAME
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE llm_job_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL,
+                note_key TEXT,
+                deck_name TEXT NOT NULL,
+                note_type TEXT,
+                item_status TEXT NOT NULL,
+                skip_reason TEXT,
+                error_message TEXT,
+                changed_fields_json TEXT NOT NULL,
+                applied_to_markdown INTEGER NOT NULL DEFAULT 0
+            );
+            """
+        )
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match=r"Delete '.*\.llm\.db'"):
+        LlmDb.open(tmp_path)
+
+
 def test_write_tx_rolls_back_request(tmp_path):
     db = LlmDb.open(tmp_path)
     try:
@@ -33,6 +66,7 @@ def test_write_tx_rolls_back_request(tmp_path):
         item_id = db.insert_job_item(
             job_id=job_id,
             ordinal=1,
+            source="local",
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
@@ -75,6 +109,7 @@ def test_get_job_detail_reports_usage_at_request_level(tmp_path):
         first_id = db.insert_job_item(
             job_id=job_id,
             ordinal=1,
+            source="local",
             deck_name="Deck",
             note_key="nk-1",
             note_type="AnkiOpsQA",
@@ -85,6 +120,7 @@ def test_get_job_detail_reports_usage_at_request_level(tmp_path):
         second_id = db.insert_job_item(
             job_id=job_id,
             ordinal=2,
+            source="local",
             deck_name="Deck",
             note_key="nk-2",
             note_type="AnkiOpsQA",
@@ -115,6 +151,7 @@ def test_get_job_detail_reports_usage_at_request_level(tmp_path):
     ]
     assert not hasattr(detail.items[0], "input_tokens")
     assert not hasattr(detail.items[0], "latency_ms")
+    assert detail.items[0].source == "local"
     assert detail.summary.requests == 1
     assert detail.summary.input_tokens == 5
     assert detail.summary.output_tokens == 2
@@ -139,6 +176,7 @@ def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
         queued_id = db.insert_job_item(
             job_id=job_id,
             ordinal=1,
+            source="local",
             deck_name="Deck",
             note_key="nk-queued",
             note_type="AnkiOpsQA",
@@ -148,6 +186,7 @@ def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
         skipped_id = db.insert_job_item(
             job_id=job_id,
             ordinal=2,
+            source="local",
             deck_name="Deck",
             note_key="nk-skipped",
             note_type="AnkiOpsQA",
@@ -157,6 +196,7 @@ def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
         settled_id = db.insert_job_item(
             job_id=job_id,
             ordinal=3,
+            source="local",
             deck_name="Deck",
             note_key="nk-settled",
             note_type="AnkiOpsQA",

@@ -73,6 +73,7 @@ Create a new Markdown file in your initialized AnkiOps folder. For the first imp
 
 ```markdown
 <!-- note_key: 123487556abc -->
+<!-- note_type: AnkiOpsQA -->
 <!-- tags: AnkiOps -->
 Q: Question text here
 A: Answer text here
@@ -82,6 +83,7 @@ M: Content behind a "more" button (optional)
 ---
 
 <!-- note_key: 123474567def -->
+<!-- note_type: AnkiOpsCloze -->
 T: Text with the {{c1::first}} cloze.
 Text with the {{c1::second}} cloze.
 E: Some *formatted* extra info.
@@ -116,7 +118,7 @@ For the last option specifically, the recommended workflow is:
 
 ### How does it work?
 
-AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
+AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps also manages a derived `note_type` tag (e.g., `<!-- note_type: AnkiOpsQA -->`) so the resolved type is visible in the file. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
 
 ### What is the recommended workflow?
 

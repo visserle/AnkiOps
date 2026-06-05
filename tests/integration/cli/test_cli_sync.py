@@ -8,7 +8,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ankiops.anki_client import AnkiConnectError
-from ankiops.cli import main, run_am, run_fix_image_widths, run_ma, run_serialize
+from ankiops.cli import (
+    main,
+    run_am,
+    run_deserialize,
+    run_fix_image_widths,
+    run_ma,
+    run_serialize,
+)
 from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
 from ankiops.image_widths import ImageWidthFixResult
 from ankiops.models import (
@@ -114,11 +121,8 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
         file_path=tmp_path / "Rhetorik.md",
     )
     sync_result.errors.append(
-        "Note type mismatch for note_key: nk-1: markdown uses 'AnkiOpsQA' "
-        "but Anki has 'AnkiOpsCloze'. Anki cannot convert existing notes "
-        "between note types. Remove this note's key comment "
-        "(<!-- note_key: nk-1 -->) to force creating a new note with the "
-        "new type on the next import."
+        "Failed note type conversion: Cannot convert AnkiOpsCloze to "
+        "AnkiOpsQA: field names differ"
     )
     summary = CollectionResult.for_import(results=[sync_result], untracked_decks=[])
 
@@ -126,7 +130,7 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
 
     assert "Import errors:" in caplog.text
     assert "Rhetorik" in caplog.text
-    assert "Remove this note's key comment" in caplog.text
+    assert "field names differ" in caplog.text
     assert "Review and resolve errors above" in caplog.text
 
 
@@ -269,6 +273,26 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
+def test_cli_collab_publish_accepts_public_visibility_flag():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli.run_collab_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            ["ankiops", "collab", "publish", "Deck", "owner/repo", "--public"],
+        ),
+    ):
+        main()
+
+    assert captured[0].deck == "Deck"
+    assert captured[0].repo == "owner/repo"
+    assert captured[0].public is True
+
+
 def test_cli_init_exits_cleanly_on_anki_connect_error(caplog):
     fake_anki = MagicMock()
     fake_anki.get_active_profile.side_effect = AnkiConnectError(
@@ -367,6 +391,54 @@ def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
     assert exc.value.code == 2
 
 
+def test_run_deserialize_snapshots_by_default(tmp_path):
+    json_file = tmp_path / "in.json"
+    json_file.write_text('{"decks": []}', encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=True,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_called_once_with(tmp_path, "deserialize")
+    deserialize_mock.assert_called_once_with(
+        json_file,
+        overwrite=True,
+        collection_dir=tmp_path,
+    )
+
+
+def test_run_deserialize_can_skip_snapshot(tmp_path):
+    json_file = tmp_path / "in.json"
+    json_file.write_text('{"decks": []}', encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=False,
+        no_auto_commit=True,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_not_called()
+    deserialize_mock.assert_called_once_with(
+        json_file,
+        overwrite=False,
+        collection_dir=tmp_path,
+    )
+
+
 def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
     args = SimpleNamespace(
         deck="Parent",
@@ -425,7 +497,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
         run_fix_image_widths(args)
 
     snapshot_mock.assert_not_called()
-    assert "Only local Markdown files were edited" in caplog.text
+    assert "Only Markdown files were edited" in caplog.text
     assert "ankiops ma" in caplog.text
 
 

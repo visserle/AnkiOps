@@ -11,6 +11,7 @@ def assert_summary(
     *,
     created: int | None = None,
     updated: int | None = None,
+    converted: int | None = None,
     moved: int | None = None,
     deleted: int | None = None,
     errors: int | None = None,
@@ -21,6 +22,8 @@ def assert_summary(
         assert summary.created == created
     if updated is not None:
         assert summary.updated == updated
+    if converted is not None:
+        assert summary.converted == converted
     if moved is not None:
         assert summary.moved == moved
     if deleted is not None:

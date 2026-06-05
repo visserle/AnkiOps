@@ -1,12 +1,15 @@
 import argparse
 import logging
+import subprocess
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from types import SimpleNamespace
 
 from rich.markup import escape as rich_escape
 
 from ankiops.anki_client import AnkiConnectError
 from ankiops.cli_anki import connect_or_exit
+from ankiops.collab import run as run_collab_impl
 from ankiops.config import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
@@ -31,14 +34,28 @@ from ankiops.serializer import (
     deserialize_from_file,
     serialize_to_file,
 )
+from ankiops.sources import discover_sync_sources, load_configs_for_sources
 from ankiops.sync_media import (
     format_media_status,
-    sync_media_from_anki,
-    sync_media_to_anki,
+    sync_all_media_from_anki,
+    sync_all_media_to_anki,
 )
-from ankiops.sync_note_types import sync_note_types
+from ankiops.sync_note_types import sync_note_type_configs
 
 logger = logging.getLogger(__name__)
+
+sync_media_from_anki = sync_all_media_from_anki
+sync_media_to_anki = sync_all_media_to_anki
+
+
+def sync_note_types(anki_port, fs_port, collection_dir, note_types_dir, db_port):
+    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    configs = [
+        config
+        for source_config in load_configs_for_sources(sources)
+        for config in source_config.configs
+    ]
+    return sync_note_type_configs(anki_port, configs, db_port=db_port)
 
 
 def _positive_int(value: str) -> int:
@@ -183,7 +200,7 @@ def run_ma(args):
         logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
-    nt_summary = sync_note_types(anki, fs, note_types_dir, db)
+    nt_summary = sync_note_types(anki, fs, collection_dir, note_types_dir, db)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
@@ -283,9 +300,17 @@ def run_deserialize(args):
         logger.error(f"Serialized file not found: {serialized_file}")
         raise SystemExit(1)
 
+    collection_dir = require_collection_dir()
+    if not args.no_auto_commit:
+        logger.debug("Creating pre-deserialize git snapshot")
+        git_snapshot(collection_dir, "deserialize")
+    else:
+        logger.debug("Auto-commit disabled (--no-auto-commit)")
+
     deserialize_from_file(
         serialized_file,
         overwrite=args.overwrite,
+        collection_dir=collection_dir,
     )
 
 
@@ -328,7 +353,7 @@ def run_fix_image_widths(args):
         f"{result.images_changed} images changed"
     )
     if result.changed:
-        logger.info("Only local Markdown files were edited. Run 'ankiops ma' to sync.")
+        logger.info("Only Markdown files were edited. Run 'ankiops ma' to sync.")
 
 
 def run_llm(args):
@@ -337,9 +362,16 @@ def run_llm(args):
         args,
         require_collection_dir_fn=require_collection_dir,
         load_note_type_configs_fn=(
-            lambda note_types_dir: FileSystemAdapter().load_note_type_configs(
-                note_types_dir
-            )
+            lambda note_types_dir: [
+                config
+                for source_config in load_configs_for_sources(
+                    discover_sync_sources(
+                        note_types_dir.parent,
+                        note_types_dir=note_types_dir,
+                    )
+                )
+                for config in source_config.configs
+            ]
         ),
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
@@ -347,6 +379,22 @@ def run_llm(args):
         list_jobs_fn=list_llm_jobs,
         show_job_fn=show_job,
     )
+
+
+def run_collab(args):
+    try:
+        if getattr(args, "collab_command", None) == "contribute" and args.from_anki:
+            run_am(SimpleNamespace(no_auto_commit=False))
+        run_collab_impl(args)
+        if getattr(args, "collab_command", None) == "pull" and args.to_anki:
+            run_ma(SimpleNamespace(no_auto_commit=False))
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+    except subprocess.CalledProcessError as error:
+        output = ((error.stdout or "") + (error.stderr or "")).strip()
+        logger.error(output or f"git command failed with exit {error.returncode}")
+        raise SystemExit(1) from error
 
 
 def _get_cli_version() -> str:
@@ -441,7 +489,7 @@ def main():
     # Deserialize parser
     deserialize_parser = subparsers.add_parser(
         "deserialize",
-        help="Import markdown from JSON (run 'init' after to set up)",
+        help="Import markdown from JSON into an initialized collection",
     )
     deserialize_parser.add_argument(
         "--input",
@@ -452,6 +500,12 @@ def main():
         "--overwrite",
         action="store_true",
         help="Overwrite existing markdown files",
+    )
+    deserialize_parser.add_argument(
+        "--no-auto-commit",
+        "-n",
+        action="store_true",
+        help="Skip the automatic git commit for this operation",
     )
     deserialize_parser.set_defaults(handler=run_deserialize)
 
@@ -489,6 +543,86 @@ def main():
     fix_widths_parser.set_defaults(handler=run_fix_image_widths)
 
     configure_llm_parser(subparsers, handler=run_llm)
+
+    collab_parser = subparsers.add_parser(
+        "collab",
+        help="Publish, subscribe to, update, and contribute GitHub collab decks",
+    )
+    collab_subparsers = collab_parser.add_subparsers(
+        dest="collab_command",
+        required=True,
+    )
+
+    collab_publish = collab_subparsers.add_parser(
+        "publish",
+        help="Publish a local deck tree to a GitHub collab source",
+    )
+    collab_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
+    collab_publish.add_argument(
+        "repo",
+        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+    )
+    publish_visibility = collab_publish.add_mutually_exclusive_group()
+    publish_visibility.add_argument(
+        "--public",
+        action="store_true",
+        help="Create the GitHub repo as public when it does not exist",
+    )
+    publish_visibility.add_argument(
+        "--private",
+        action="store_false",
+        dest="public",
+        help="Create the GitHub repo as private when it does not exist (default)",
+    )
+    collab_publish.set_defaults(public=False)
+    collab_publish.set_defaults(handler=run_collab)
+
+    collab_subscribe = collab_subparsers.add_parser(
+        "subscribe",
+        help="Add a GitHub collab source to this collection",
+    )
+    collab_subscribe.add_argument(
+        "repo",
+        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+    )
+    collab_subscribe.set_defaults(handler=run_collab)
+
+    collab_pull = collab_subparsers.add_parser(
+        "pull",
+        help="Pull one or all collab sources from GitHub",
+    )
+    collab_pull.add_argument(
+        "repo",
+        nargs="?",
+        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+    )
+    collab_pull.add_argument(
+        "--to-anki",
+        action="store_true",
+        help="Run Markdown -> Anki after pulling files",
+    )
+    collab_pull.set_defaults(handler=run_collab)
+
+    collab_contribute = collab_subparsers.add_parser(
+        "contribute",
+        help="Prepare a GitHub PR from local collab source edits",
+    )
+    collab_contribute.add_argument(
+        "repo",
+        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+    )
+    collab_contribute.add_argument(
+        "--from-anki",
+        action="store_true",
+        help="Run Anki -> Markdown before preparing the contribution",
+    )
+    collab_contribute.set_defaults(handler=run_collab)
+
+    collab_status = collab_subparsers.add_parser(
+        "status",
+        help="Show known collab sources",
+    )
+    collab_status.set_defaults(handler=run_collab)
 
     note_types_parser = subparsers.add_parser(
         "note-types",
