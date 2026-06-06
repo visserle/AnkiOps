@@ -1,5 +1,3 @@
-import pytest
-
 from ankiops.config import deck_name_to_file_stem
 from ankiops.db import SQLiteDbAdapter
 from ankiops.fs import FileSystemAdapter
@@ -112,16 +110,22 @@ def test_fix_image_widths_collection_rewrites_collab_deck(tmp_path):
     assert "{width=404}" not in collab_file.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_fails_on_missing_note_key(tmp_path):
+def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path):
     note_types_dir = _make_collection(tmp_path)
-    (tmp_path / "Broken.md").write_text(
+    deck_file = tmp_path / "Broken.md"
+    deck_file.write_text(
         "Q: Question\nA: ![a](a.png){width=400}",
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="missing a note_key"):
-        fix_image_widths_collection(
-            tmp_path,
-            tolerance=5,
-            note_types_dir=note_types_dir,
-        )
+    result = fix_image_widths_collection(
+        tmp_path,
+        width=500,
+        tolerance=5,
+        note_types_dir=note_types_dir,
+    )
+
+    assert result.images_changed == 1
+    content = deck_file.read_text(encoding="utf-8")
+    assert "<!-- note_key:" not in content
+    assert "{width=500}" in content

@@ -113,8 +113,7 @@ def _duplicate_errors(
 
 def _duplicate_key_errors(note_ids_by_key: dict[str, set[int]]) -> list[str]:
     return [
-        f"Duplicate AnkiOps Key '{note_key}' found on Anki note IDs "
-        f"{sorted(note_ids)}"
+        f"Duplicate AnkiOps Key '{note_key}' found on Anki note IDs {sorted(note_ids)}"
         for note_key, note_ids in sorted(note_ids_by_key.items())
         if len(note_ids) > 1
     ]

@@ -128,6 +128,50 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     assert not (llm_collection / "llm" / LLM_DB_FILENAME).exists()
 
 
+def test_plan_task_rejects_missing_note_key_before_discovery(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: Fix grammar.
+        request:
+          max_notes_per_request: 4
+        fields:
+          default_access: editable
+        """,
+    )
+
+    def fake_serialize(collection_dir, *, deck=None, no_subdecks=False, note_types_dir):
+        return {
+            "decks": [
+                {
+                    "source": "local",
+                    "name": "Deck",
+                    "notes": [
+                        {
+                            "note_key": None,
+                            "note_type": "AnkiOpsQA",
+                            "fields": {"Question": "draft", "Answer": "answer"},
+                        }
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr("ankiops.llm.runner.serialize", fake_serialize)
+
+    with pytest.raises(ValueError, match="LLM tasks require note_key metadata"):
+        plan_task(collection_dir=llm_collection, task_name="grammar")
+
+    assert not (llm_collection / "llm" / LLM_DB_FILENAME).exists()
+
+
 def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes(
     llm_collection,
     write_file,

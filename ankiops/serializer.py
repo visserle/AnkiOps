@@ -177,25 +177,21 @@ def _validate_parsed_decks(parsed_decks: list[_ParsedDeck]) -> None:
             deck_by_name[parsed_deck.deck_name] = parsed_deck
 
         for index, note in enumerate(parsed_deck.parsed.notes, start=1):
-            if not isinstance(note.note_key, str) or not note.note_key.strip():
-                errors.append(
-                    f"{parsed_deck.source_name}:{parsed_deck.path.name} note {index} "
-                    "is missing a note_key. Run 'ankiops ma' first to assign keys."
-                )
-                continue
-            previous_note = note_key_by_value.get(note.note_key)
-            if previous_note is not None:
-                previous_deck, previous_index = previous_note
-                errors.append(
-                    "Duplicate note_key "
-                    f"'{note.note_key}' in "
-                    f"{previous_deck.source_name}:{previous_deck.path.name} "
-                    f"note {previous_index} and "
-                    f"{parsed_deck.source_name}:{parsed_deck.path.name} "
-                    f"note {index}."
-                )
-            else:
-                note_key_by_value[note.note_key] = (parsed_deck, index)
+            note_key = note.note_key
+            if note_key is not None:
+                previous_note = note_key_by_value.get(note_key)
+                if previous_note is not None:
+                    previous_deck, previous_index = previous_note
+                    errors.append(
+                        "Duplicate note_key "
+                        f"'{note_key}' in "
+                        f"{previous_deck.source_name}:{previous_deck.path.name} "
+                        f"note {previous_index} and "
+                        f"{parsed_deck.source_name}:{parsed_deck.path.name} "
+                        f"note {index}."
+                    )
+                else:
+                    note_key_by_value[note_key] = (parsed_deck, index)
 
     if errors:
         raise ValueError("Cannot serialize collection:\n- " + "\n- ".join(errors))
@@ -299,13 +295,14 @@ def deserialize(
         written_notes = 0
 
         for note in deck.notes:
-            note_key = str(note["note_key"])
+            note_key = note["note_key"]
             note_type = str(note["note_type"])
             fields = note["fields"]
             tags = normalize_tags(note["tags"])
             config = deck.configs_by_name[note_type]
 
-            lines.append(format_note_key_comment(note_key))
+            if note_key is not None:
+                lines.append(format_note_key_comment(note_key))
             lines.append(format_note_type_comment(note_type))
             tag_comment = format_tags_comment(tags)
             if tag_comment:
@@ -439,14 +436,19 @@ def _validate_serialized_data(
                 errors.append(f"{context} must be an object.")
                 continue
 
-            note_key = raw_note.get("note_key")
+            raw_note_key = raw_note.get("note_key")
             note_type = raw_note.get("note_type")
             fields = raw_note.get("fields")
             tags = raw_note.get("tags")
+            note_errors_start = len(errors)
 
-            if not isinstance(note_key, str) or not note_key.strip():
-                errors.append(f"{context} is missing required note_key.")
-            else:
+            note_key: str | None = None
+            if "note_key" not in raw_note:
+                errors.append(f"{context} is missing required note_key field.")
+            elif raw_note_key is None:
+                pass
+            elif isinstance(raw_note_key, str) and raw_note_key.strip():
+                note_key = raw_note_key
                 previous = seen_note_keys.get(note_key)
                 if previous is not None:
                     previous_deck, previous_deck_index, previous_note_index = previous
@@ -458,6 +460,10 @@ def _validate_serialized_data(
                     )
                 else:
                     seen_note_keys[note_key] = (deck_name, deck_index, note_index)
+            else:
+                errors.append(
+                    f"{context} note_key must be a non-empty string or null."
+                )
 
             if not isinstance(note_type, str) or not note_type.strip():
                 errors.append(f"{context} is missing required note_type.")
@@ -489,21 +495,7 @@ def _validate_serialized_data(
                     if not isinstance(tag, str):
                         errors.append(f"{context} tags must contain only strings.")
 
-            if (
-                isinstance(note_key, str)
-                and note_key.strip()
-                and isinstance(note_type, str)
-                and note_type.strip()
-                and isinstance(fields, dict)
-                and all(
-                    isinstance(field_name, str)
-                    and field_name.strip()
-                    and isinstance(field_value, str)
-                    for field_name, field_value in fields.items()
-                )
-                and isinstance(tags, list)
-                and all(isinstance(tag, str) for tag in tags)
-            ):
+            if len(errors) == note_errors_start:
                 notes.append(
                     {
                         "note_key": note_key,

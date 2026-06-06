@@ -199,7 +199,7 @@ def test_serialize_global_validation_rejects_duplicate_note_keys(
         serialize(collection)
 
 
-def test_serialize_global_validation_rejects_missing_note_keys(
+def test_serialize_global_validation_allows_missing_note_keys(
     collection, monkeypatch
 ):
     _set_collection_paths(monkeypatch, collection)
@@ -208,8 +208,12 @@ def test_serialize_global_validation_rejects_missing_note_keys(
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="Run 'ankiops ma' first"):
-        serialize(collection)
+    result = serialize(collection)
+
+    missing_deck = next(
+        deck for deck in result["decks"] if deck["name"] == "MissingKey"
+    )
+    assert missing_deck["notes"][0]["note_key"] is None
 
 
 def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypatch):
@@ -415,7 +419,25 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
         ),
         (
             {"decks": [_serialized_deck(note_key="")]},
-            "missing required note_key",
+            "note_key must be a non-empty string or null",
+        ),
+        (
+            {
+                "decks": [
+                    {
+                        "source": "local",
+                        "name": "Deck",
+                        "notes": [
+                            {
+                                "note_type": "AnkiOpsQA",
+                                "fields": {"Question": "Q", "Answer": "A"},
+                                "tags": [],
+                            }
+                        ],
+                    }
+                ]
+            },
+            "missing required note_key field",
         ),
         (
             {
@@ -467,6 +489,22 @@ def test_deserialize_rejects_invalid_data_before_writes(
         )
 
     assert not list(tmp_path.glob("*.md"))
+
+
+def test_deserialize_accepts_null_note_key(tmp_path, fs):
+    note_types_dir = _init_collection(tmp_path, fs)
+
+    deserialize(
+        {"decks": [_serialized_deck(name="DraftDeck", note_key=None)]},
+        collection_dir=tmp_path,
+        note_types_dir=note_types_dir,
+        overwrite=True,
+    )
+
+    content = (tmp_path / "DraftDeck.md").read_text(encoding="utf-8")
+    assert "<!-- note_key:" not in content
+    assert "<!-- note_type: AnkiOpsQA -->" in content
+    assert "Q: Q" in content
 
 
 def test_deserialize_rejects_collab_source_with_missing_note_types(tmp_path, fs):

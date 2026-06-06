@@ -683,9 +683,15 @@ def _discover_candidates(
             continue
         decks_matched += 1
 
-        for note in notes:
+        for note_index, note in enumerate(notes, start=1):
             if not isinstance(note, dict):
                 continue
+            note_key = note.get("note_key")
+            if not isinstance(note_key, str) or not note_key.strip():
+                raise ValueError(
+                    "LLM tasks require note_key metadata: "
+                    f"{source}:{deck_name} note {note_index}"
+                )
             ordinal += 1
             items.append(
                 _discover_note(
