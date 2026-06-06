@@ -37,10 +37,6 @@ def invoke(action: str, **params) -> Any:
     """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
 
     Raises AnkiConnectionError when Anki returns an error.
-def invoke(action: str, **params) -> Any:
-    """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
-
-    Raises AnkiConnectionError when Anki returns an error.
     """
     ankiops_url, is_custom = _ankiops_connect_url()
     try:
@@ -66,8 +62,11 @@ def invoke(action: str, **params) -> Any:
             ) from anki_connect_error
 
 
-def _invoke_ankiops_connect(action: str, params: dict[str, Any]) -> Any:
-    ankiops_connect_url, _ = _ankiops_connect_url()
+def _invoke_ankiops_connect(
+    action: str,
+    params: dict[str, Any],
+    ankiops_connect_url: str,
+) -> Any:
     try:
         response = _session.post(
             ankiops_connect_url,
