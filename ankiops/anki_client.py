@@ -37,14 +37,19 @@ def invoke(action: str, **params) -> Any:
     """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
 
     Raises AnkiConnectionError when Anki returns an error.
+def invoke(action: str, **params) -> Any:
+    """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
+
+    Raises AnkiConnectionError when Anki returns an error.
     """
+    ankiops_url, is_custom = _ankiops_connect_url()
     try:
-        return _invoke_ankiops_connect(action, params)
+        return _invoke_ankiops_connect(action, params, ankiops_url)
     except (
         _AnkiOpsConnectUnavailable,
         _AnkiOpsConnectUnsupportedAction,
     ) as ankiops_connect_error:
-        if _ankiops_connect_url()[1]:
+        if is_custom:
             raise
         if action in ANKIOPS_CONNECT_ONLY_ACTIONS:
             raise AnkiConnectionError(
