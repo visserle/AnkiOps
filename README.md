@@ -10,10 +10,10 @@ AnkiOps is a bidirectional Anki ↔ Markdown bridge where each deck becomes a Ma
 - **Markdown-first**: Edit in your favourite editor and render Markdown features in Anki (including syntax highlighting)
 - **Simple CLI interface** for importing and exporting between Anki and the filesystem
 - **LLM-integration**: Run programmable tasks such as content review, grammar fixes, or translations on your collection
-- **Git-based**: Share your decks and collaborate via fully-synchronized Github repositories (nyi)
+- **GitHub collaboration**: Publish deck trees to GitHub, subscribe to shared decks, pull updates, and contribute changes through PRs (experimental)
 
 > [!NOTE]
-> AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using `ankiops note-types --add <name>`.
+> AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using various methods described below.
 
 <!-- ## Example
 
@@ -33,25 +33,27 @@ same for note type:Inference is only for fresh notes that do not yet have metada
 ## Installation
 
 
-1. **Install AnkiOps via [pipx](https://github.com/pypa/pipx)**: Pipx will make AnkiOps globally available in your terminal.
+1. **Install AnkiOps via [pipx](https://github.com/pypa/pipx)**: Pipx makes AnkiOps available in your terminal.
 
 ```bash
 pipx install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. AnkiOps can fall back to AnkiConnect for standard Anki actions, but AnkiOpsConnect is preferred and required for AnkiOps-specific operations. Initialize AnkiOps in any empty directory of your choosing. The command creates a database file for synchronization, an `llm/` directory for custom LLM tasks, and a `note_types/` directory for the note types AnkiOps will act on (following Infrastructure as Code principles). The additional tutorial flag creates a sample Markdown deck you can experiment with.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. (For collab operations, the AnkiOps addon must be manually installed which is currently experimental.) Run `ankiops init` in an empty collection directory. AnkiOps creates `.ankiops.db`, `llm/`, and `note_types/`. The tutorial flag also creates a sample Markdown deck.
 
 ```bash
 ankiops init --tutorial
 ```
 
-3. **Execute AnkiOps**: Import the tutorial deck into Anki using:
+
+
+3. **Import Markdown into Anki**: Import the current collection of Markdown decks into Anki.
 
 ```bash
 ankiops ma # alias for markdown-to-anki (import)
 ```
 
-4. **Keep everything in sync**: When editing your Markdown files, sync Markdown → Anki (and vice versa), as each sync makes one side match the other. After reviewing and editing your cards in Anki, you can sync Anki → Markdown using the following command:
+4. **Sync Anki back to Markdown**: After you review or edit cards in Anki, export those changes. Each sync makes one side match the other.
 
 ```bash
 ankiops am # alias for anki-to-markdown (export)
@@ -61,7 +63,7 @@ ankiops am # alias for anki-to-markdown (export)
 
 ### How is this different from other Markdown tools?
 
-Most available tools are one-way importers: you write in Markdown and push to Anki, but edits in Anki don't sync back. AnkiOps is bidirectional: you can edit in either Anki or Markdown and sync in both directions. It uses a one-file-per-deck structure, making your collection easier to navigate than approaches that use one file per card. Further, custom note types are supported while maintaining a clear working environment. This essentially lets you manage your entire Anki collection from your favorite text editor.
+Most Markdown-to-Anki tools import one way: you write Markdown and push it to Anki. AnkiOps lets you edit in either place and sync back. It stores each deck as one Markdown file, so you browse decks instead of hundreds of per-card files. It also keeps custom note type definitions beside your decks, which lets you edit both card content and card structure from your editor.
 
 ### Is it safe to use?
 
@@ -69,7 +71,7 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized AnkiOps folder. For the first import, the file name acts as the deck name. Subdecks use `__` (for example, `Anatomy::Heart` --> `Anatomy__Heart.md`). Notes must be separated by a new line, three dashes `---`, and another new line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. On the first import, AnkiOps uses the file name as the deck name. Subdecks use `__` (for example, `Anatomy::Heart` maps to `Anatomy__Heart.md`). Separate notes with a blank line, three dashes `---`, and another blank line. You can add new notes anywhere in an existing file.
 
 ```markdown
 <!-- note_key: 123487556abc -->
@@ -95,11 +97,11 @@ E: Some *formatted* extra info.
 Q: What is this?
 C1: A multiple choice note
 C2: with
-C3: automatically randomized answers.
+C3: randomized answers.
 A: 1, 3
 ```
 
-In this example, the last note is a new note which will get a `note_key` comment assigned on the next import.
+On the next import, AnkiOps assigns a `note_key` and `note_type` comment to the last note.
 
 ### How are different note types handled?
 
@@ -107,34 +109,70 @@ AnkiOps reads note types exclusively from your local `note_types/` directory. `a
 
 ### How can I migrate my existing notes into AnkiOps?
 
-There are three ways to migrate your existing collection.
-You can create new note types configuration files in the `note_types/` folder that match your existing note types in Anki by hand, use the `ankiops note-types --add <name>` command to copy note types from Anki, or convert your existing notes to the default AnkiOps note types using `Change Note Type…` in the Anki browser.
+You can migrate existing notes in three ways: write matching note type files in `note_types/`, copy note types from Anki with `ankiops note-types --add <name>`, or convert notes to the default AnkiOps note types with `Change Note Type…` in the Anki browser.
 
-For the last option specifically, the recommended workflow is:
+For Anki browser conversion, use this workflow:
 
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
 2. Export your notes from Anki to Markdown using `ankiops am`.
-3. In the first re-import, some formatting may change because the original HTML from Anki may not follow the CommonMark standard. Formatting of your cards can be done automatically at a low cost using the included JSON serializer and AI tooling.
+3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting. Formatting issues can be fixed by hand or via LLM tasks.
 
 ### How does it work?
 
-AnkiOps assigns a stable `note_key` to each managed note. It is represented by a single-line HTML tag (e.g., `<!-- note_key: a1b2c3d4e5f6 -->`) above a note in the Markdown. AnkiOps also manages a derived `note_type` tag (e.g., `<!-- note_type: AnkiOpsQA -->`) so the resolved type is visible in the file. AnkiOps note keys are profile-independent, in contrast to Anki's note IDs. The `.ankiops.db`database stores the mapping between Anki's note IDs and AnkiOps note keys, along with other metadata. When syncing, AnkiOps uses these note keys to determine which notes to create, update, or delete in either Anki or Markdown. Media files are stored in a `media/` folder with hashed file names to avoid conflicts.
+AnkiOps assigns a stable `note_key` to each managed note. In Markdown, it writes the key as a single-line HTML comment above the note, such as `<!-- note_key: a1b2c3d4e5f6 -->`. AnkiOps also writes a derived `note_type` comment, such as `<!-- note_type: AnkiOpsQA -->`, so you can see the resolved type in the file. Note types are inferred by sets of identifying fields (e.g. `Q:`, `A:`), defined in the note type folder. AnkiOps note keys do not depend on Anki's note IDs. The `.ankiops.db` database maps Anki note IDs to AnkiOps note keys and stores sync metadata. During sync, AnkiOps uses note keys to decide which notes to create, update, or delete. It stores media in `media/` with hashed file names to avoid name conflicts.
 
 ### What is the recommended workflow?
 
-We recommend using VS Code. It has excellent AI integration, a native Markdown previewer, and supports image pasting from the clipboard directly into the `/media` folder (automatically set up).
+We recommend VS Code because it previews Markdown and can paste clipboard images into the `media/` folder that AnkiOps creates during init.
 
-### How can I share my AnkiOps collection?
+### How can I share my AnkiOps collection? (experimental)
 
-TODO
+Use `ankiops collab` from a Git-backed collection. AnkiOps stores each collab source at `collab/<owner>/<repo>` and pulls from `https://github.com/<owner>/<repo>.git` on the `main` branch. AnkiOps scopes note types from that source as `collab/<owner>/<repo>/<note_type>`, so two shared decks can use the same local note type names without colliding.
+
+To publish one of your decks:
+
+```bash
+ankiops collab publish "Deck Name" owner/repo
+```
+
+`publish` requires a clean Git index and `note_key` metadata on every selected note. It includes the selected deck and its subdecks, copies referenced media and used note types into the collab source, commits the move, and pushes the subtree to GitHub. If the GitHub repository does not exist and the `gh` CLI is available, AnkiOps creates a private repo by default. Pass `--public` to create a public repo.
+
+To use a shared deck:
+
+```bash
+ankiops collab subscribe owner/repo
+ankiops collab pull owner/repo --to-anki
+```
+
+`subscribe` adds the GitHub repository as a subtree. `pull` updates one source, or all sources when you omit `owner/repo`. `--to-anki` runs Markdown-to-Anki after the pull.
+
+To contribute local edits back:
+
+```bash
+ankiops collab contribute owner/repo --from-anki
+```
+
+`--from-anki` exports Anki edits to Markdown first. `contribute` then commits the collab source, creates a subtree branch, and opens a pull request with `gh` when possible. Without `gh`, AnkiOps leaves you with the branch name and GitHub remote so you can push and open the PR yourself.
 
 ### How do I upgrade AnkiOps to the latest version?
 
-Use `pipx upgrade ankiops` to upgrade AnkiOps to the latest version. Delete all local AnkiOps files (except for your Markdown decks), re-initialize AnkiOps in the same folder using `ankiops init`, and sync from Anki via `ankiops am`. Since all files are git-tracked, you can easily spot any changes and roll back if needed.
+AnkiOps is in early development, so breaking changes are expected. Use `pipx upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. If your collection is in Git, inspect the diff before you continue syncing.
+
+### What is the Add-on for?
+
+The Add-on has two main purposes. First, it adds `am` and `ma` buttons to the Anki toolbar for quick sync. Second, it implements AnkiOpsConnect, an extension of AnkiConnect that enables operations for the collaboration features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
+
+Advanced: the CLI sends AnkiOpsConnect requests to `http://127.0.0.1:8766` by default. For connection to a different host, set `ANKIOPS_CONNECT_URL` :
+
+```bash
+ANKIOPS_CONNECT_URL=http://host.docker.internal:8766 ankiops ma
+```
+
+When this variable is set, AnkiOps does not fall back to AnkiConnect; connection problems fail fast. This changes only where the CLI connects, not where the Anki add-on listens.
 
 ### How can I develop AnkiOps locally?
 
-Fork this repository and initialize the tutorial in your root folder (make sure Anki is running). This will create a folder called `collection` with the sample Markdown in it. Paths will adapt automatically to the development environment. You can run AnkiOps locally using the main script.
+Fork this repository and initialize the tutorial from the repository root while Anki is running. The commands below create `collection/` with the sample Markdown deck and run the CLI from source.
 
 ```bash
 git clone https://github.com/visserle/ankiops.git
@@ -146,7 +184,7 @@ uv run python -m main ma
 
 ### Are Pull Requests welcome?
 
-Yes! We welcome contributions of all kinds, including bug fixes, new features, documentation improvements, and more. Please open an issue or submit a pull request if you'd like to contribute.
+Yes. Bug fixes, feature work, and documentation PRs are welcome. Open an issue first for behavior changes.
 
 ### What commands and flags are available in the CLI?
 
@@ -189,3 +227,10 @@ Yes! We welcome contributions of all kinds, including bug fixes, new features, d
 - `ankiops llm <task_name> [--model <model>] [--deck <deck_name>]` - Plan one configured task
 - `ankiops llm <task_name> --run [--model <model>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
+
+**`collab`:**
+- `ankiops collab publish <deck> <owner>/<repo> [--public|--private]` - Publish a local deck tree as a GitHub collab source
+- `ankiops collab subscribe <owner>/<repo>` - Add a GitHub collab source to the collection
+- `ankiops collab pull [owner/repo] [--to-anki]` - Pull one collab source, or all sources when omitted
+- `ankiops collab contribute <owner>/<repo> [--from-anki]` - Prepare a contribution branch and PR for local collab edits
+- `ankiops collab status` - Show known collab sources
