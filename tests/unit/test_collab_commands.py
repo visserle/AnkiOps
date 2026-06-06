@@ -660,7 +660,12 @@ def test_subtree_commands_use_collab_prefix_and_github_url(tmp_path, monkeypatch
     branch = repo.subtree_split(source)
 
     assert branch.startswith("ankiops-collab-owner-repo-")
-    assert calls[:2] == [
+    assert calls[:4] == [
+        (
+            tmp_path,
+            ["update-index", "-q", "--refresh"],
+            False,
+        ),
         (
             tmp_path,
             [
@@ -675,6 +680,11 @@ def test_subtree_commands_use_collab_prefix_and_github_url(tmp_path, monkeypatch
         ),
         (
             tmp_path,
+            ["update-index", "-q", "--refresh"],
+            False,
+        ),
+        (
+            tmp_path,
             [
                 "subtree",
                 "pull",
@@ -686,7 +696,7 @@ def test_subtree_commands_use_collab_prefix_and_github_url(tmp_path, monkeypatch
             True,
         ),
     ]
-    assert calls[2] == (
+    assert calls[4] == (
         tmp_path,
         [
             "subtree",
