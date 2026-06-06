@@ -65,6 +65,9 @@ class CollectionGit:
             result.check_returncode()
         return result.returncode == 1
 
+    def refresh_index(self) -> None:
+        self.run(["update-index", "-q", "--refresh"], check=False)
+
     def tracked(self, rel_path: str) -> bool:
         return (
             self.run(
@@ -180,6 +183,7 @@ class CollectionGit:
     def _run_subtree(self, source: SyncSource, action: str) -> None:
         if source.github_url is None:
             raise ValueError(f"Cannot derive GitHub URL for {source.display_name}")
+        self.refresh_index()
         self.run(
             [
                 "subtree",
