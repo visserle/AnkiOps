@@ -8,6 +8,11 @@ import requests
 from ankiops.anki_client import AnkiConnectionError, _invoke_anki_connect, invoke
 
 
+@pytest.fixture(autouse=True)
+def clear_ankiops_connect_url(monkeypatch):
+    monkeypatch.delenv("ANKIOPS_CONNECT_URL", raising=False)
+
+
 def test_invoke_posts_to_ankiops_connect_and_returns_result():
     response = MagicMock()
     response.json.return_value = {"result": 1, "error": None}
@@ -17,6 +22,21 @@ def test_invoke_posts_to_ankiops_connect_and_returns_result():
 
     post.assert_called_once_with(
         "http://127.0.0.1:8766",
+        json={"action": "version", "params": {}},
+        timeout=10,
+    )
+
+
+def test_invoke_uses_ankiops_connect_url_env_override(monkeypatch):
+    monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
+    response = MagicMock()
+    response.json.return_value = {"result": 1, "error": None}
+
+    with patch("ankiops.anki_client._session.post", return_value=response) as post:
+        assert invoke("version") == 1
+
+    post.assert_called_once_with(
+        "http://anki.example:8766",
         json={"action": "version", "params": {}},
         timeout=10,
     )
@@ -61,6 +81,44 @@ def test_invoke_falls_back_when_ankiops_connect_lacks_standard_action():
 
     assert post.call_args_list[0].args == ("http://127.0.0.1:8766",)
     assert post.call_args_list[1].args == ("http://localhost:8765",)
+
+
+def test_invoke_env_override_disables_anki_connect_fallback(monkeypatch):
+    monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
+
+    with patch(
+        "ankiops.anki_client._session.post",
+        side_effect=requests.ConnectionError("no route"),
+    ) as post:
+        with pytest.raises(
+            AnkiConnectionError,
+            match="Unable to reach AnkiOpsConnect",
+        ) as error:
+            invoke("version")
+
+    assert "http://anki.example:8766" in str(error.value)
+    post.assert_called_once()
+
+
+def test_invoke_env_override_disables_unsupported_action_fallback(monkeypatch):
+    monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
+    ankiops_connect_response = MagicMock()
+    ankiops_connect_response.json.return_value = {
+        "result": None,
+        "error": "Unknown AnkiOpsConnect action: getActiveProfile",
+    }
+
+    with patch(
+        "ankiops.anki_client._session.post",
+        return_value=ankiops_connect_response,
+    ) as post:
+        with pytest.raises(
+            AnkiConnectionError,
+            match="Unknown AnkiOpsConnect action",
+        ):
+            invoke("getActiveProfile")
+
+    post.assert_called_once()
 
 
 def test_invoke_requires_ankiops_connect_for_custom_actions():

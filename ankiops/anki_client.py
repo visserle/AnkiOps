@@ -1,10 +1,12 @@
 """HTTP client for AnkiOpsConnect with AnkiConnect fallback."""
 
+import os
 from typing import Any
 
 import requests
 
-ANKIOPS_CONNECT_URL = "http://127.0.0.1:8766"
+DEFAULT_ANKIOPS_CONNECT_URL = "http://127.0.0.1:8766"
+ANKIOPS_CONNECT_URL_ENV = "ANKIOPS_CONNECT_URL"
 ANKI_CONNECT_URL = "http://localhost:8765"
 DEFAULT_TIMEOUT_SECONDS = 10
 ANKIOPS_CONNECT_ONLY_ACTIONS = frozenset({"changeNotesNotetype"})
@@ -24,6 +26,13 @@ class _AnkiOpsConnectUnsupportedAction(AnkiConnectionError):
     pass
 
 
+def _ankiops_connect_url() -> tuple[str, bool]:
+    url = os.environ.get(ANKIOPS_CONNECT_URL_ENV)
+    if url is None:
+        return DEFAULT_ANKIOPS_CONNECT_URL, False
+    return url, True
+
+
 def invoke(action: str, **params) -> Any:
     """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
 
@@ -35,6 +44,8 @@ def invoke(action: str, **params) -> Any:
         _AnkiOpsConnectUnavailable,
         _AnkiOpsConnectUnsupportedAction,
     ) as ankiops_connect_error:
+        if _ankiops_connect_url()[1]:
+            raise
         if action in ANKIOPS_CONNECT_ONLY_ACTIONS:
             raise AnkiConnectionError(
                 f"{action} requires AnkiOpsConnect. AnkiConnect is available "
@@ -51,15 +62,16 @@ def invoke(action: str, **params) -> Any:
 
 
 def _invoke_ankiops_connect(action: str, params: dict[str, Any]) -> Any:
+    ankiops_connect_url, _ = _ankiops_connect_url()
     try:
         response = _session.post(
-            ANKIOPS_CONNECT_URL,
+            ankiops_connect_url,
             json={"action": action, "params": params},
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
     except requests.RequestException as error:
         raise _AnkiOpsConnectUnavailable(
-            f"Unable to reach AnkiOpsConnect at {ANKIOPS_CONNECT_URL}: {error}"
+            f"Unable to reach AnkiOpsConnect at {ankiops_connect_url}: {error}"
         ) from error
 
     try:
