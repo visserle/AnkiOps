@@ -1,4 +1,4 @@
-"""HTTP host for the AnkiOps bridge."""
+"""HTTP host for AnkiOpsConnect."""
 
 from __future__ import annotations
 
@@ -8,30 +8,33 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .bridge_actions import dispatch_bridge_action
+from .ankiops_connect_actions import dispatch_ankiops_connect_action
 
-BRIDGE_HOST = "127.0.0.1"
-BRIDGE_PORT = 8766
-BRIDGE_BODY_LIMIT = 1024 * 1024
-BRIDGE_MAIN_THREAD_TIMEOUT_SECONDS = 30
+ANKIOPS_CONNECT_HOST = "127.0.0.1"
+ANKIOPS_CONNECT_PORT = 8766
+ANKIOPS_CONNECT_BODY_LIMIT = 1024 * 1024
+ANKIOPS_CONNECT_MAIN_THREAD_TIMEOUT_SECONDS = 30
 
 
-class _BridgeServer(ThreadingHTTPServer):
+class _AnkiOpsConnectServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
 
-class AnkiOpsBridgeHost:
+class AnkiOpsConnectHost:
     def __init__(
         self,
         *,
         get_collection: Callable[[], object | None],
         run_on_main: Callable[[Callable[[], None]], None],
-        dispatch_action: Callable[[object, str, dict], object] = dispatch_bridge_action,
-        host: str = BRIDGE_HOST,
-        port: int = BRIDGE_PORT,
-        body_limit: int = BRIDGE_BODY_LIMIT,
-        timeout_seconds: int = BRIDGE_MAIN_THREAD_TIMEOUT_SECONDS,
+        dispatch_action: Callable[
+            [object, str, dict],
+            object,
+        ] = dispatch_ankiops_connect_action,
+        host: str = ANKIOPS_CONNECT_HOST,
+        port: int = ANKIOPS_CONNECT_PORT,
+        body_limit: int = ANKIOPS_CONNECT_BODY_LIMIT,
+        timeout_seconds: int = ANKIOPS_CONNECT_MAIN_THREAD_TIMEOUT_SECONDS,
     ) -> None:
         self._get_collection = get_collection
         self._run_on_main = run_on_main
@@ -46,13 +49,16 @@ class AnkiOpsBridgeHost:
         if self._server is not None:
             return True
         try:
-            server = _BridgeServer((self._host, self._port), self._handler_class())
+            server = _AnkiOpsConnectServer(
+                (self._host, self._port),
+                self._handler_class(),
+            )
         except OSError as error:
-            print(f"AnkiOps bridge could not start: {error}")
+            print(f"AnkiOpsConnect could not start: {error}")
             return False
         thread = threading.Thread(
             target=server.serve_forever,
-            name="AnkiOpsBridge",
+            name="AnkiOpsConnect",
             daemon=True,
         )
         thread.start()
@@ -70,13 +76,13 @@ class AnkiOpsBridgeHost:
         action = payload.get("action")
         params = payload.get("params", {})
         if not isinstance(action, str) or not isinstance(params, dict):
-            raise ValueError("Bridge requests require action and params.")
+            raise ValueError("AnkiOpsConnect requests require action and params.")
         return self._run_action_on_main(action, params)
 
     def read_payload(self, handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         content_type = handler.headers.get("Content-Type", "").split(";")[0]
         if content_type != "application/json":
-            raise ValueError("Bridge requests must use application/json.")
+            raise ValueError("AnkiOpsConnect requests must use application/json.")
         raw_length = handler.headers.get("Content-Length")
         if raw_length is None:
             raise ValueError("Missing Content-Length.")
@@ -85,11 +91,11 @@ class AnkiOpsBridgeHost:
         except ValueError as error:
             raise ValueError("Invalid Content-Length header.") from error
         if length > self._body_limit:
-            raise ValueError("Bridge request body is too large.")
+            raise ValueError("AnkiOpsConnect request body is too large.")
         raw = handler.rfile.read(length)
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
-            raise ValueError("Bridge request body must be a JSON object.")
+            raise ValueError("AnkiOpsConnect request body must be a JSON object.")
         return payload
 
     def _run_action_on_main(self, action: str, params: dict[str, Any]):
@@ -115,13 +121,13 @@ class AnkiOpsBridgeHost:
         return box.get("result")
 
     def _handler_class(self):
-        bridge_host = self
+        ankiops_connect_host = self
 
-        class _BridgeHandler(BaseHTTPRequestHandler):
+        class _AnkiOpsConnectHandler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
                 try:
-                    payload = bridge_host.read_payload(self)
-                    response = bridge_host.handle_payload(payload)
+                    payload = ankiops_connect_host.read_payload(self)
+                    response = ankiops_connect_host.handle_payload(payload)
                 except Exception as error:
                     response = {"result": None, "error": str(error)}
                 self._send_json(response)
@@ -137,4 +143,4 @@ class AnkiOpsBridgeHost:
                 self.end_headers()
                 self.wfile.write(body)
 
-        return _BridgeHandler
+        return _AnkiOpsConnectHandler

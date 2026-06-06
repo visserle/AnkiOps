@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from ankiops.anki import AnkiAdapter
-from ankiops.anki_client import AnkiConnectError
+from ankiops.anki_client import AnkiConnectionError
 from ankiops.models import Change, ChangeType, Note
 
 
@@ -71,10 +71,10 @@ def test_apply_note_changes_collects_partial_errors():
     assert any("Failed delete" in error for error in errors)
 
 
-def test_apply_note_changes_surfaces_ankiconnect_exception():
+def test_apply_note_changes_surfaces_connection_exception():
     adapter = AnkiAdapter()
 
-    with patch("ankiops.anki.invoke", side_effect=AnkiConnectError("boom")):
+    with patch("ankiops.anki.invoke", side_effect=AnkiConnectionError("boom")):
         created_ids, errors = adapter.apply_note_changes(
             deck_name="DeckY",
             needs_create_deck=False,
@@ -125,7 +125,7 @@ def test_apply_note_changes_bulk_create_exception_keeps_create_context():
         "ankiops.anki.invoke",
         side_effect=[
             [{"canAdd": True}],
-            AnkiConnectError("cannot create note because it is a duplicate"),
+            AnkiConnectionError("cannot create note because it is a duplicate"),
         ],
     ):
         created_ids, errors = adapter.apply_note_changes(
@@ -166,16 +166,17 @@ def test_fetch_notes_info_maps_tags():
     assert notes[101].tags == ("a", "z")
 
 
-def test_change_notes_notetype_calls_ankiops_bridge():
+def test_change_notes_notetype_calls_ankiops_connect_action():
     adapter = AnkiAdapter()
 
-    with patch("ankiops.anki.change_notes_notetype") as mock_bridge:
+    with patch("ankiops.anki.invoke") as mock_invoke:
         adapter.change_notes_notetype([101, 102], "AnkiOpsQA", "collab/o/r/AnkiOpsQA")
 
-    mock_bridge.assert_called_once_with(
-        [101, 102],
-        "AnkiOpsQA",
-        "collab/o/r/AnkiOpsQA",
+    mock_invoke.assert_called_once_with(
+        "changeNotesNotetype",
+        noteIds=[101, 102],
+        oldModel="AnkiOpsQA",
+        newModel="collab/o/r/AnkiOpsQA",
     )
 
 
@@ -316,5 +317,8 @@ def test_fetch_model_states_raises_on_malformed_styling_payload():
             {},
         ],
     ):
-        with pytest.raises(AnkiConnectError, match="Malformed modelStyling response"):
+        with pytest.raises(
+            AnkiConnectionError,
+            match="Malformed modelStyling response",
+        ):
             adapter.fetch_model_states(["MyType"])

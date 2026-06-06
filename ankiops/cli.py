@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from rich.markup import escape as rich_escape
 
-from ankiops.anki_client import AnkiConnectError
+from ankiops.anki_client import AnkiConnectionError
 from ankiops.cli_anki import connect_or_exit
 from ankiops.collab import run as run_collab_impl
 from ankiops.config import (
@@ -648,12 +648,12 @@ def main():
     if hasattr(args, "handler"):
         try:
             args.handler(args)
-        except AnkiConnectError as error:
+        except AnkiConnectionError as error:
             logger.error(
-                "Error communicating with AnkiConnect. Make sure Anki is running and "
-                "AnkiConnect is installed."
+                "Error communicating with Anki. Make sure Anki is running and "
+                "either AnkiOpsConnect or AnkiConnect is enabled."
             )
-            logger.debug(f"AnkiConnect error details: {error}")
+            logger.debug(f"Anki connection error details: {error}")
             raise SystemExit(1) from error
     else:
         # Show welcome screen when no command is provided

@@ -1,7 +1,7 @@
 """Core Domain Models for AnkiOps.
 
 These classes are pure data representations with no dependencies on
-external systems (AnkiConnect, file system, SQLite).
+external systems (Anki, file system, SQLite).
 """
 
 from __future__ import annotations

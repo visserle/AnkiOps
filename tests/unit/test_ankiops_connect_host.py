@@ -9,7 +9,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 
-def _load_bridge_host_module():
+def _load_ankiops_connect_host_module():
     addon_dir = Path(__file__).resolve().parents[2] / "anki_addon"
     package = sys.modules.get("anki_addon")
     if package is None:
@@ -17,8 +17,8 @@ def _load_bridge_host_module():
         package.__path__ = [str(addon_dir)]
         sys.modules["anki_addon"] = package
     spec = importlib.util.spec_from_file_location(
-        "anki_addon.bridge_host",
-        addon_dir / "bridge_host.py",
+        "anki_addon.ankiops_connect_host",
+        addon_dir / "ankiops_connect_host.py",
     )
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
@@ -26,11 +26,11 @@ def _load_bridge_host_module():
     return module
 
 
-bridge_host = _load_bridge_host_module()
-AnkiOpsBridgeHost = bridge_host.AnkiOpsBridgeHost
+ankiops_connect_host = _load_ankiops_connect_host_module()
+AnkiOpsConnectHost = ankiops_connect_host.AnkiOpsConnectHost
 
 
-def test_bridge_host_dispatches_on_main_thread():
+def test_ankiops_connect_host_dispatches_on_main_thread():
     collection = object()
     ran_on_main = []
     calls = []
@@ -43,7 +43,7 @@ def test_bridge_host_dispatches_on_main_thread():
         calls.append((col, action, params))
         return {"ok": True}
 
-    host = AnkiOpsBridgeHost(
+    host = AnkiOpsConnectHost(
         get_collection=lambda: collection,
         run_on_main=run_on_main,
         dispatch_action=dispatch_action,
@@ -56,8 +56,8 @@ def test_bridge_host_dispatches_on_main_thread():
     assert calls == [(collection, "version", {"x": 1})]
 
 
-def test_bridge_host_returns_structured_errors():
-    host = AnkiOpsBridgeHost(
+def test_ankiops_connect_host_returns_structured_errors():
+    host = AnkiOpsConnectHost(
         get_collection=lambda: None,
         run_on_main=lambda work: work(),
     )
@@ -68,20 +68,20 @@ def test_bridge_host_returns_structured_errors():
     }
 
 
-def test_bridge_host_validates_payload_shape():
-    host = AnkiOpsBridgeHost(
+def test_ankiops_connect_host_validates_payload_shape():
+    host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
     )
 
     assert host.handle_payload({"action": "version", "params": []}) == {
         "result": None,
-        "error": "Bridge requests require action and params.",
+        "error": "AnkiOpsConnect requests require action and params.",
     }
 
 
-def test_bridge_host_reads_json_request_body():
-    host = AnkiOpsBridgeHost(
+def test_ankiops_connect_host_reads_json_request_body():
+    host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
     )
@@ -97,8 +97,8 @@ def test_bridge_host_reads_json_request_body():
     assert host.read_payload(handler) == {"action": "version", "params": {}}
 
 
-def test_bridge_host_rejects_invalid_content_length():
-    host = AnkiOpsBridgeHost(
+def test_ankiops_connect_host_rejects_invalid_content_length():
+    host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
     )

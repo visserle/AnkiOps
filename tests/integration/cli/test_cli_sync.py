@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ankiops.anki_client import AnkiConnectError
+from ankiops.anki_client import AnkiConnectionError
 from ankiops.cli import (
     main,
     run_am,
@@ -293,9 +293,9 @@ def test_cli_collab_publish_accepts_public_visibility_flag():
     assert captured[0].public is True
 
 
-def test_cli_init_exits_cleanly_on_anki_connect_error(caplog):
+def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
     fake_anki = MagicMock()
-    fake_anki.get_active_profile.side_effect = AnkiConnectError(
+    fake_anki.get_active_profile.side_effect = AnkiConnectionError(
         "Connection reset by peer"
     )
 
@@ -309,7 +309,7 @@ def test_cli_init_exits_cleanly_on_anki_connect_error(caplog):
             main()
 
     assert exc.value.code == 1
-    assert "Error communicating with AnkiConnect" in caplog.text
+    assert "Error communicating with Anki" in caplog.text
 
 
 def test_cli_welcome_mentions_version_and_version_flag(capsys):
