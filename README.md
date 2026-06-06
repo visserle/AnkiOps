@@ -115,7 +115,7 @@ For Anki browser conversion, use this workflow:
 
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
 2. Export your notes from Anki to Markdown using `ankiops am`.
-3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting. Formuatting issues can be fixed with by hand or via LLM tasks at a low cost.
+3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting. Formatting issues can be fixed by hand or via LLM tasks at a low cost.
 ### How does it work?
 
 AnkiOps assigns a stable `note_key` to each managed note. In Markdown, it writes the key as a single-line HTML comment above the note, such as `<!-- note_key: a1b2c3d4e5f6 -->`. AnkiOps also writes a derived `note_type` comment, such as `<!-- note_type: AnkiOpsQA -->`, so you can see the resolved type in the file. Note types are infered by sets of identifying fields (e.g. `Q:`, `A:`), defined in the note type folder. AnkiOps note keys do not depend on Anki's note IDs. The `.ankiops.db` database maps Anki note IDs to AnkiOps note keys and stores sync metadata. During sync, AnkiOps uses note keys to decide which notes to create, update, or delete. It stores media in `media/` with hashed file names to avoid name conflicts.
