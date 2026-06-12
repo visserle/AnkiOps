@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -26,6 +27,40 @@ def _init_collection(collection_dir) -> None:
     finally:
         db.close()
     FileSystemAdapter().eject_builtin_note_types(collection_dir / "note_types")
+
+
+def _init_git_repo(collection_dir) -> None:
+    subprocess.run(["git", "init"], cwd=collection_dir, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=collection_dir,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=collection_dir,
+        check=True,
+    )
+
+
+def _commit_all(collection_dir, message="root") -> None:
+    subprocess.run(["git", "add", "-A", "."], cwd=collection_dir, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=collection_dir,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _head_name_status(collection_dir) -> str:
+    return subprocess.run(
+        ["git", "show", "--name-status", "--format=", "HEAD"],
+        cwd=collection_dir,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
 
 
 def _parsed_response(*updates, tag_updates=()):
@@ -145,6 +180,153 @@ def test_executor_persists_successful_field_updates(
     assert "Q: Already good" in content
 
 
+def test_executor_snapshots_only_queued_local_deck_paths(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Original
+        A: Existing answer
+        """,
+    )
+    write_file(llm_collection / "Other.txt", "unrelated\n")
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        request:
+          max_notes_per_request: 2
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
+    _init_git_repo(llm_collection)
+    _commit_all(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Broken before snapshot
+        A: Existing answer
+        """,
+    )
+    write_file(llm_collection / "Other.txt", "changed\n")
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        assert [candidate.payload.note_key for candidate in batch.candidates] == [
+            "nk-1"
+        ]
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+
+    result = run_task(
+        collection_dir=llm_collection,
+        task_name="grammar",
+        no_auto_commit=False,
+    )
+
+    committed = subprocess.run(
+        ["git", "show", "HEAD:Deck.md"],
+        cwd=llm_collection,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    working = (llm_collection / "Deck.md").read_text(encoding="utf-8")
+    show = _head_name_status(llm_collection)
+
+    assert result.persisted
+    assert "M\tDeck.md" in show
+    assert "Other.txt" not in show
+    assert "Q: Broken before snapshot" in committed
+    assert "Q: Fixed question" in working
+
+
+def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    _init_collection(llm_collection)
+    FileSystemAdapter().eject_builtin_note_types(
+        llm_collection / "collab" / "owner" / "repo" / "note_types"
+    )
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Original
+        A: Existing answer
+        """,
+    )
+    write_file(llm_collection / "Other.txt", "unrelated\n")
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        request:
+          max_notes_per_request: 2
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
+    _init_git_repo(llm_collection)
+    _commit_all(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Broken before broad snapshot
+        A: Existing answer
+        """,
+    )
+    write_file(llm_collection / "Other.txt", "also changed\n")
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+
+    result = run_task(
+        collection_dir=llm_collection,
+        task_name="grammar",
+        no_auto_commit=False,
+    )
+
+    show = _head_name_status(llm_collection)
+    assert result.persisted
+    assert "M\tDeck.md" in show
+    assert "M\tOther.txt" in show
+    assert ".llm.db" not in show
+    assert (llm_collection / "llm" / ".llm.db").exists()
+
+
 def test_executor_persists_successful_tag_updates(
     llm_collection,
     write_file,
@@ -207,7 +389,9 @@ def test_executor_cancels_queued_items_after_fatal_error(
     monkeypatch,
 ):
     _init_collection(llm_collection)
-    original = """
+    write_file(
+        llm_collection / "Deck.md",
+        """
         <!-- note_key: nk-1 -->
         Q: Broken
         A: Existing answer
@@ -217,8 +401,8 @@ def test_executor_cancels_queued_items_after_fatal_error(
         <!-- note_key: nk-2 -->
         Q: Already good
         A: Existing answer
-        """
-    write_file(llm_collection / "Deck.md", original)
+        """,
+    )
     write_file(
         llm_collection / "llm/_models.yaml",
         """

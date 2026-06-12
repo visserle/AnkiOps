@@ -1,5 +1,6 @@
 """CLI sync behavior tests."""
 
+import json
 import logging
 import subprocess
 from types import SimpleNamespace
@@ -8,7 +9,9 @@ from unittest.mock import patch
 import pytest
 
 from ankiops.anki_client import AnkiConnectionError
-from ankiops.cli import main, run_fix_image_widths, run_serialize
+from ankiops.cli import main, run_deserialize, run_fix_image_widths, run_serialize
+from ankiops.fs import FileSystemAdapter
+from ankiops.image_widths import ImageWidthFixResult
 
 
 class _FailingProfileAnki:
@@ -101,9 +104,9 @@ def test_run_ma_logs_import_errors_with_actionable_details(world, caplog):
 def test_run_ma_auto_commit_snapshots_declared_state_before_sync_mutates_media(
     world,
 ):
+    world.init_git()
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
-    world.init_git()
 
     world.run_ma(no_auto_commit=False)
 
@@ -120,6 +123,38 @@ def test_run_ma_auto_commit_snapshots_declared_state_before_sync_mutates_media(
     assert "<!-- note_key:" not in committed
     assert "media/img_" in working
     assert "<!-- note_key:" in working
+
+
+def test_run_am_auto_commit_snapshots_markdown_before_export_updates(world):
+    world.write_deck(
+        "ExportDeck",
+        "<!-- note_key: key-1 -->\nQ: prompt\nA: committed answer",
+    )
+    note_id = world.add_anki_note(
+        deck_name="ExportDeck",
+        fields={"Question": "prompt", "Answer": "Anki answer"},
+        note_key="key-1",
+    )
+    world.seed_db_link("key-1", note_id)
+    world.init_git()
+    world.write_deck(
+        "ExportDeck",
+        "<!-- note_key: key-1 -->\nQ: prompt\nA: local draft",
+    )
+
+    world.run_am(no_auto_commit=False)
+
+    committed = subprocess.run(
+        ["git", "show", "HEAD:ExportDeck.md"],
+        cwd=world.root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    working = world.read_deck("ExportDeck")
+
+    assert "A: local draft" in committed
+    assert "A: Anki answer" in working
 
 
 def test_run_ma_logs_real_media_status(world, caplog):
@@ -233,6 +268,169 @@ def test_run_serialize_rejects_no_subdecks_without_deck():
         run_serialize(args)
 
     assert exc.value.code == 2
+
+
+def test_run_deserialize_snapshots_by_default(tmp_path):
+    FileSystemAdapter().eject_builtin_note_types(tmp_path / "note_types")
+    json_file = tmp_path / "in.json"
+    payload = {
+        "decks": [
+            {
+                "source": "local",
+                "name": "Target",
+                "notes": [],
+            }
+        ]
+    }
+    json_file.write_text(json.dumps(payload), encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=True,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="deserializing",
+        paths=[tmp_path / "Target.md"],
+    )
+    plan = deserialize_mock.call_args.args[0]
+    assert plan.target_paths == (tmp_path / "Target.md",)
+    deserialize_mock.assert_called_once_with(
+        plan,
+        overwrite=True,
+        collection_dir=tmp_path,
+    )
+
+
+def test_run_deserialize_can_skip_snapshot(tmp_path):
+    json_file = tmp_path / "in.json"
+    json_file.write_text('{"decks": []}', encoding="utf-8")
+    args = SimpleNamespace(
+        input=str(json_file),
+        overwrite=False,
+        no_auto_commit=True,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
+    ):
+        run_deserialize(args)
+
+    snapshot_mock.assert_not_called()
+    plan = deserialize_mock.call_args.args[0]
+    assert plan.target_paths == ()
+    deserialize_mock.assert_called_once_with(
+        plan,
+        overwrite=False,
+        collection_dir=tmp_path,
+    )
+
+
+def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
+    (tmp_path / "Parent.md").write_text("Q: old\nA: old\n", encoding="utf-8")
+    (tmp_path / "Parent__Child.md").write_text("Q: child\nA: child\n", encoding="utf-8")
+    (tmp_path / "Other.md").write_text("Q: other\nA: other\n", encoding="utf-8")
+    args = SimpleNamespace(
+        deck="Parent",
+        no_subdecks=True,
+        tolerance=7,
+        width=None,
+        no_auto_commit=False,
+    )
+    result = ImageWidthFixResult(
+        decks_checked=1,
+        notes_checked=2,
+        images_checked=3,
+        decks_changed=1,
+        notes_changed=1,
+        images_changed=1,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch(
+            "ankiops.cli.fix_image_widths_collection",
+            return_value=result,
+        ) as fix_mock,
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="fixing image widths",
+        paths=[tmp_path / "Parent.md"],
+    )
+    fix_mock.assert_called_once_with(
+        tmp_path,
+        deck="Parent",
+        no_subdecks=True,
+        tolerance=7,
+        width=None,
+    )
+
+
+def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
+    tmp_path, caplog
+):
+    args = SimpleNamespace(
+        deck=None,
+        no_subdecks=False,
+        tolerance=5,
+        width=320,
+        no_auto_commit=True,
+    )
+    result = ImageWidthFixResult(images_changed=2)
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli.fix_image_widths_collection", return_value=result),
+        caplog.at_level(logging.INFO),
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_not_called()
+    assert "Only Markdown files were edited" in caplog.text
+    assert "ankiops ma" in caplog.text
+
+
+def test_run_fix_image_widths_uses_broad_snapshot_with_collab_sources(tmp_path):
+    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
+    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
+    args = SimpleNamespace(
+        deck=None,
+        no_subdecks=False,
+        tolerance=5,
+        width=None,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch(
+            "ankiops.cli.fix_image_widths_collection",
+            return_value=ImageWidthFixResult(),
+        ),
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="fixing image widths",
+        paths=[tmp_path],
+    )
 
 
 def test_run_fix_image_widths_rejects_no_subdecks_without_deck():

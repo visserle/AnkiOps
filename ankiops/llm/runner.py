@@ -20,7 +20,7 @@ from openai.types.responses import (
     ResponseOutputRefusal,
 )
 
-from ankiops.config import NOTE_TYPES_DIR
+from ankiops.config import NOTE_TYPES_DIR, deck_name_to_file_stem
 from ankiops.git import git_snapshot
 from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
 from ankiops.serializer import deserialize, serialize
@@ -186,6 +186,26 @@ class LlmTaskExecutor:
     async def execute(self) -> LlmJobResult:
         task_context = self.materialized_context
         task = task_context.task
+        logger.debug(
+            "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
+            task.name,
+            task.model,
+            self.collection_dir,
+            _format_deck_scope(task),
+        )
+        if not self.no_auto_commit:
+            logger.debug("Creating pre-LLM git snapshot")
+            git_snapshot(
+                self.collection_dir,
+                action=f"LLM task {task.name}",
+                paths=_llm_snapshot_paths(
+                    self.collection_dir,
+                    task_context,
+                ),
+            )
+        else:
+            logger.debug("Auto-commit disabled (--no-auto-commit)")
+
         db = LlmDb.open(self.collection_dir)
         try:
             job_id = db.start_job(
@@ -193,19 +213,6 @@ class LlmTaskExecutor:
                 model=task.model.model,
                 model_id=task.model.model_id,
             )
-            logger.debug(
-                "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
-                task.name,
-                task.model,
-                self.collection_dir,
-                _format_deck_scope(task),
-            )
-            if not self.no_auto_commit:
-                logger.debug("Creating pre-LLM git snapshot")
-                git_snapshot(self.collection_dir, f"llm:{task.name}")
-            else:
-                logger.debug("Auto-commit disabled (--no-auto-commit)")
-
             progress_state = _build_progress_state(
                 job_id=job_id,
                 task_name=task.name,
@@ -649,6 +656,34 @@ def _load_task(
             )
         raise ValueError(f"Unknown task '{task_name}'")
     return task, {config.name: config for config in note_type_configs}
+
+
+def _llm_snapshot_paths(
+    collection_dir: Path,
+    task_context: MaterializedTaskContext,
+) -> list[Path]:
+    sources = discover_sync_sources(
+        collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    if any(source.is_collab for source in sources):
+        return [collection_dir]
+
+    if any(
+        item.item_status is LlmItemStatus.QUEUED and item.source != "local"
+        for item in task_context.discovery_snapshot.items
+    ):
+        return [collection_dir]
+
+    deck_names = {
+        item.deck_name
+        for item in task_context.discovery_snapshot.items
+        if item.item_status is LlmItemStatus.QUEUED and item.source == "local"
+    }
+    return [
+        collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
+        for deck_name in sorted(deck_names)
+    ]
 
 
 def _discover_candidates(
