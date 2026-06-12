@@ -518,7 +518,8 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM markdown_media_cache WHERE md_path IN ({placeholders})",
+                    "DELETE FROM markdown_media_cache "
+                    f"WHERE md_path IN ({placeholders})",
                     tuple(chunk),
                 )
             )
@@ -655,7 +656,8 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"UPDATE media_state SET pushed_digest = NULL WHERE name IN ({placeholders})",
+                    "UPDATE media_state SET pushed_digest = NULL "
+                    f"WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )
             )

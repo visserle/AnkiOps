@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from ankiops.anki_client import AnkiConnectionError
@@ -19,6 +20,8 @@ class MockAnki:
         self.next_card_id = 1000
         self.next_deck_id = 10
         self.calls = []
+        self.active_profile = "TestProfile"
+        self.media_dir: Path | None = None
 
     def _base_model_name(self, model_name: str | None) -> str | None:
         if model_name == "RenamedQA":
@@ -37,6 +40,18 @@ class MockAnki:
         self.calls.append((action, params))
 
         match action:
+            case "getActiveProfile":
+                return self.active_profile
+
+            case "version":
+                return 6
+
+            case "getMediaDirPath":
+                if self.media_dir is None:
+                    raise AnkiConnectionError("media dir not configured")
+                self.media_dir.mkdir(parents=True, exist_ok=True)
+                return str(self.media_dir)
+
             case "deckNamesAndIds":
                 return self.decks
 
@@ -171,6 +186,23 @@ class MockAnki:
                         "AnkiOps Key",
                     ]
                 return []
+
+            case "modelStyling":
+                return ""
+
+            case "modelTemplates":
+                return {}
+
+            case "modelFieldDescriptions":
+                return [
+                    ""
+                    for _field in self.invoke(
+                        "modelFieldNames", modelName=params.get("modelName")
+                    )
+                ]
+
+            case "modelFieldFonts":
+                return {}
 
             case "createDeck":
                 name = params["deck"]

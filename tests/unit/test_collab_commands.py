@@ -57,77 +57,14 @@ def _git_status(collection_dir):
     return result.stdout
 
 
-def _patch_collection_git(monkeypatch, target="ankiops.collab.commands.CollectionGit"):
-    calls = []
-
-    class FakeGit:
-        def __init__(self, collection_dir):
-            self.collection_dir = collection_dir
-
-        def ensure_repo(self, message):
-            calls.append(("ensure_git_repo", self.collection_dir, message))
-
-        def ensure_clean_index(self, message):
-            calls.append(("ensure_clean_index", self.collection_dir, message))
-
-        def head(self):
-            calls.append(("head", self.collection_dir))
-            return "initial-head"
-
-        def commit_publish_move(self, *, touched_paths, source_paths, message):
-            calls.append(
-                (
-                    "commit_publish_move",
-                    self.collection_dir,
-                    touched_paths,
-                    source_paths,
-                    message,
-                )
-            )
-
-        def subtree_split(self, source):
-            calls.append(("subtree_split", self.collection_dir, source))
-            return "ankiops-test-branch"
-
-        def push_ref(self, url, source_ref, target_ref, *, check=True):
-            calls.append(
-                ("push_ref", self.collection_dir, url, source_ref, target_ref, check)
-            )
-
-        def rollback_to(self, initial_head):
-            calls.append(("rollback_to", self.collection_dir, initial_head))
-
-        def delete_branch_if_exists(self, branch):
-            calls.append(("delete_branch", self.collection_dir, branch))
-
-        def unstage_or_untrack(self, paths):
-            calls.append(("unstage_or_untrack", self.collection_dir, paths))
-
-        def commit_paths(self, paths, message):
-            calls.append(("commit_paths", self.collection_dir, paths, message))
-
-        def subtree_add(self, source):
-            calls.append(("subtree_add", self.collection_dir, source))
-
-        def subtree_pull(self, source):
-            calls.append(("subtree_pull", self.collection_dir, source))
-
-    monkeypatch.setattr(target, FakeGit)
-    return calls
-
-
-def _patch_publish_git(monkeypatch):
-    calls = _patch_collection_git(
-        monkeypatch,
-        "ankiops.collab.publish.CollectionGit",
+def _commit_all(collection_dir, message="root"):
+    subprocess.run(["git", "add", "-A", "."], cwd=collection_dir, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=collection_dir,
+        check=True,
+        capture_output=True,
     )
-    monkeypatch.setattr(
-        "ankiops.collab.publish.ensure_publish_repo",
-        lambda repo, source, *, public: calls.append(
-            ("ensure_publish_repo", repo.collection_dir, source, public)
-        ),
-    )
-    return calls
 
 
 @pytest.mark.parametrize(
@@ -166,7 +103,19 @@ def test_publish_unsynced_deck_moves_files_media_and_note_types(tmp_path, monkey
         encoding="utf-8",
     )
     (collection_dir / "media" / "pic.png").write_bytes(b"img")
-    git_calls = _patch_publish_git(monkeypatch)
+    _init_git_repo(collection_dir)
+    _commit_all(collection_dir)
+    pushed = []
+    monkeypatch.setattr(
+        "ankiops.collab.publish.ensure_publish_repo",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "ankiops.git.CollectionGit.push_ref",
+        lambda repo, url, source_ref, target_ref, *, check=True: pushed.append(
+            (repo.collection_dir, url, source_ref, target_ref, check)
+        ),
+    )
     monkeypatch.setattr(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
@@ -184,10 +133,9 @@ def test_publish_unsynced_deck_moves_files_media_and_note_types(tmp_path, monkey
     assert (collab_root / "note_types" / "AnkiOpsStyling.css").exists()
     assert (collab_root / "note_types" / "SyntaxHighlighting.css").exists()
     FileSystemAdapter().load_note_type_configs(collab_root / "note_types")
-    assert any(
-        call[0] == "ensure_publish_repo" and call[3] is False for call in git_calls
-    )
-    assert any(call[0] == "commit_publish_move" for call in git_calls)
+    assert _git_status(collection_dir) == ""
+    assert pushed[0][1] == "https://github.com/owner/repo.git"
+    assert pushed[0][3] == "main"
 
 
 def test_publish_missing_repo_blocks_before_anki_or_file_mutations(
@@ -201,7 +149,7 @@ def test_publish_missing_repo_blocks_before_anki_or_file_mutations(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
     )
-    _patch_collection_git(monkeypatch, "ankiops.collab.publish.CollectionGit")
+    _init_git_repo(collection_dir)
     monkeypatch.setattr(
         "ankiops.collab.publish.ensure_publish_repo",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -248,7 +196,7 @@ def test_publish_missing_referenced_media_blocks_before_file_mutations(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
     )
-    _patch_collection_git(monkeypatch, "ankiops.collab.publish.CollectionGit")
+    _init_git_repo(collection_dir)
 
     with pytest.raises(ValueError, match="referenced media file\\(s\\) missing"):
         run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
@@ -268,7 +216,7 @@ def test_publish_rejects_missing_note_keys_before_file_mutations(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
     )
-    _patch_collection_git(monkeypatch, "ankiops.collab.publish.CollectionGit")
+    _init_git_repo(collection_dir)
 
     with pytest.raises(ValueError, match="missing note_key metadata"):
         run_publish(SimpleNamespace(deck="Deck", repo="owner/repo"))
@@ -608,7 +556,7 @@ def test_publish_rejects_duplicate_note_keys(tmp_path, monkeypatch):
         + "\n",
         encoding="utf-8",
     )
-    _patch_publish_git(monkeypatch)
+    _init_git_repo(collection_dir)
     monkeypatch.setattr(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
@@ -631,17 +579,18 @@ def test_contribute_rejects_keyless_notes_without_mutating_files(
     deck = collab_root / "Deck.md"
     original = "<!-- note_type: collab/owner/repo/AnkiOpsQA -->\nQ: local\nA: deck\n"
     deck.write_text(original, encoding="utf-8")
+    _init_git_repo(collection_dir)
+    _commit_all(collection_dir)
     monkeypatch.setattr(
         "ankiops.collab.commands.require_collection_dir",
         lambda: collection_dir,
     )
-    git_calls = _patch_collection_git(monkeypatch)
 
     with pytest.raises(ValueError, match="missing note_key metadata"):
         run_contribute(SimpleNamespace(repo="owner/repo"))
 
     assert deck.read_text(encoding="utf-8") == original
-    assert not any(call[0] in {"commit_paths", "subtree_split"} for call in git_calls)
+    assert _git_status(collection_dir) == ""
 
 
 def test_subtree_commands_use_collab_prefix_and_github_url(tmp_path, monkeypatch):

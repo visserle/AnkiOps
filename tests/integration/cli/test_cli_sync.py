@@ -2,133 +2,99 @@
 
 import json
 import logging
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from ankiops.anki_client import AnkiConnectionError
-from ankiops.cli import (
-    main,
-    run_am,
-    run_deserialize,
-    run_fix_image_widths,
-    run_ma,
-    run_serialize,
-)
-from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
+from ankiops.cli import main, run_deserialize, run_fix_image_widths, run_serialize
 from ankiops.fs import FileSystemAdapter
 from ankiops.image_widths import ImageWidthFixResult
-from ankiops.models import (
-    Change,
-    ChangeType,
-    CollectionResult,
-    ProtectedNoteGroup,
-    SyncResult,
-    UntrackedDeck,
-)
 
 
-def _run_ma_with_summary(tmp_path, caplog, summary: CollectionResult):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=True)
-
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.sync_media_to_anki"),
-        patch("ankiops.cli.sync_note_types", return_value=""),
-        patch("ankiops.cli.import_collection", return_value=summary),
-        caplog.at_level(logging.WARNING),
-    ):
-        run_ma(args)
+class _FailingProfileAnki:
+    def get_active_profile(self):
+        raise AnkiConnectionError("Connection reset by peer")
 
 
-def _run_am_with_summary(tmp_path, caplog, summary: CollectionResult):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=True)
-    media_result = SyncResult.for_media()
-
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch("ankiops.cli.export_collection", return_value=summary),
-        patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
-        caplog.at_level(logging.WARNING),
-    ):
-        run_am(args)
-
-
-def test_run_ma_warns_for_untracked_decks(tmp_path, caplog):
-    summary = CollectionResult.for_import(
-        results=[],
-        untracked_decks=[UntrackedDeck("AnkiOnlyDeck", 99, [101, 102])],
+def test_run_ma_warns_for_untracked_anki_decks(world, caplog):
+    world.add_anki_note(
+        deck_name="AnkiOnlyDeck",
+        fields={"Question": "remote", "Answer": "remote"},
+        note_key="remote-key",
     )
-    _run_ma_with_summary(tmp_path, caplog, summary)
+
+    with caplog.at_level(logging.WARNING):
+        world.run_ma()
 
     assert "untracked Anki deck(s)" in caplog.text
     assert "AnkiOnlyDeck" in caplog.text
+    world.assert_anki_note(deck_name="AnkiOnlyDeck", note_key="remote-key")
 
 
-def test_run_ma_has_no_untracked_warning_when_none(tmp_path, caplog):
-    summary = CollectionResult.for_import(results=[], untracked_decks=[])
-    _run_ma_with_summary(tmp_path, caplog, summary)
+def test_run_ma_has_no_untracked_warning_for_declared_collection(world, caplog):
+    world.write_deck("DeclaredDeck", "Q: local\nA: answer")
+
+    with caplog.at_level(logging.WARNING):
+        world.run_ma()
 
     assert "untracked Anki deck(s)" not in caplog.text
-
-
-def test_run_ma_warns_for_protected_keyless_anki_notes(tmp_path, caplog):
-    summary = CollectionResult.for_import(
-        results=[],
-        untracked_decks=[],
-        protected_note_groups=[ProtectedNoteGroup("ProtectDeck", 1)],
+    world.assert_anki_note(
+        deck_name="DeclaredDeck",
+        question="local",
+        answer="answer",
     )
-    _run_ma_with_summary(tmp_path, caplog, summary)
+    assert world.extract_note_keys("DeclaredDeck")
+
+
+def test_run_ma_warns_for_keyless_anki_notes_it_protects(world, caplog):
+    world.write_qa_deck("ProtectDeck", [("managed", "local", "managed-key")])
+    keyless_id = world.add_anki_note(
+        deck_name="ProtectDeck",
+        fields={"Question": "draft", "Answer": "keep me"},
+    )
+
+    with caplog.at_level(logging.WARNING):
+        world.run_ma()
 
     assert "Protected 1 keyless Anki note(s) during import." in caplog.text
-    assert "Affected deck(s): 1" in caplog.text
     assert "ProtectDeck" in caplog.text
+    assert keyless_id in world.mock_anki.notes
 
 
-def test_run_am_warns_for_protected_keyless_notes(tmp_path, caplog):
-    summary = CollectionResult.for_export(
-        results=[],
-        extra_changes=[],
-        protected_note_groups=[ProtectedNoteGroup("DraftDeck", 2)],
-    )
+def test_run_am_warns_for_keyless_markdown_notes_it_protects(world, caplog):
+    world.write_deck("DraftDeck", "Q: draft\nA: keep me")
 
-    _run_am_with_summary(tmp_path, caplog, summary)
+    with caplog.at_level(logging.WARNING):
+        world.run_am()
 
-    assert "Protected 2 local markdown note(s)" in caplog.text
-    assert "Affected deck file(s): 1" in caplog.text
+    assert "Protected 1 local markdown note(s)" in caplog.text
     assert "DraftDeck" in caplog.text
     assert "Use 'ankiops ma'" in caplog.text
+    world.assert_deck_contains("DraftDeck", "Q: draft")
 
 
-def test_run_am_has_no_protection_warning_when_none(tmp_path, caplog):
-    summary = CollectionResult.for_export(results=[], extra_changes=[])
-
-    _run_am_with_summary(tmp_path, caplog, summary)
-
-    assert "Protected " not in caplog.text
-
-
-def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
-    sync_result = SyncResult.for_notes(
-        name="Rhetorik",
-        file_path=tmp_path / "Rhetorik.md",
+def test_run_ma_logs_import_errors_with_actionable_details(world, caplog):
+    world.write_deck(
+        "Rhetorik",
+        (
+            "<!-- note_key: shared-key -->\n"
+            "<!-- note_type: AnkiOpsQA -->\n"
+            "Q: local question\n"
+            "A: local answer"
+        ),
     )
-    sync_result.errors.append(
-        "Failed note type conversion: Cannot convert AnkiOpsCloze to "
-        "AnkiOpsQA: field names differ"
+    world.add_anki_note(
+        deck_name="Rhetorik",
+        note_type="AnkiOpsCloze",
+        fields={"Text": "{{c1::remote}}", "AnkiOps Key": "shared-key"},
     )
-    summary = CollectionResult.for_import(results=[sync_result], untracked_decks=[])
 
-    _run_ma_with_summary(tmp_path, caplog, summary)
+    with caplog.at_level(logging.ERROR):
+        world.run_ma()
 
     assert "Import errors:" in caplog.text
     assert "Rhetorik" in caplog.text
@@ -136,155 +102,91 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
     assert "Review and resolve errors above" in caplog.text
 
 
-def test_run_ma_auto_commit_runs_before_media_sync(tmp_path):
-    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=False)
-    order: list[str] = []
+def test_run_ma_auto_commit_snapshots_declared_state_before_sync_mutates_media(
+    world,
+):
+    world.init_git()
+    world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
+    world.write_media("img.png", b"image-content")
 
-    def _record_git(collection_dir, *, action, paths):
-        assert collection_dir == tmp_path
-        assert action == "import"
-        assert paths == [
-            tmp_path / "Deck.md",
-            tmp_path / "media",
-            tmp_path / "note_types",
-        ]
-        order.append("git")
-        return True
+    world.run_ma(no_auto_commit=False)
 
-    def _record_media(*_args, **_kwargs):
-        order.append("media")
-        result = SyncResult.for_media()
-        result.checked = 1
-        return result
+    committed = subprocess.run(
+        ["git", "show", "HEAD:MediaDeck.md"],
+        cwd=world.root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    working = world.read_deck("MediaDeck")
 
-    def _record_note_types(*_args, **_kwargs):
-        order.append("note_types")
-        return ""
-
-    def _record_import(*_args, **_kwargs):
-        order.append("import")
-        return CollectionResult.for_import(results=[], untracked_decks=[])
-
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch("ankiops.cli.git_snapshot", side_effect=_record_git),
-        patch("ankiops.cli.sync_media_to_anki", side_effect=_record_media),
-        patch("ankiops.cli.sync_note_types", side_effect=_record_note_types),
-        patch("ankiops.cli.import_collection", side_effect=_record_import),
-    ):
-        run_ma(args)
-
-    assert order == ["git", "media", "note_types", "import"]
+    assert "media/img.png" in committed
+    assert "<!-- note_key:" not in committed
+    assert "media/img_" in working
+    assert "<!-- note_key:" in working
 
 
-def test_run_am_auto_commit_scopes_markdown_and_media(tmp_path):
-    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=False)
-    media_result = SyncResult.for_media()
-
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch(
-            "ankiops.cli.export_collection",
-            return_value=CollectionResult.for_export(results=[], extra_changes=[]),
-        ),
-        patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
-    ):
-        run_am(args)
-
-    snapshot_mock.assert_called_once_with(
-        tmp_path,
-        action="export",
-        paths=[tmp_path / "Deck.md", tmp_path / "media"],
+def test_run_am_auto_commit_snapshots_markdown_before_export_updates(world):
+    world.write_deck(
+        "ExportDeck",
+        "<!-- note_key: key-1 -->\nQ: prompt\nA: committed answer",
+    )
+    note_id = world.add_anki_note(
+        deck_name="ExportDeck",
+        fields={"Question": "prompt", "Answer": "Anki answer"},
+        note_key="key-1",
+    )
+    world.seed_db_link("key-1", note_id)
+    world.init_git()
+    world.write_deck(
+        "ExportDeck",
+        "<!-- note_key: key-1 -->\nQ: prompt\nA: local draft",
     )
 
+    world.run_am(no_auto_commit=False)
 
-def test_run_ma_logs_media_status_in_normal_mode(tmp_path, caplog):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=True)
-    media_result = SyncResult.for_media()
-    media_result.checked = 12
-    media_result.unchanged = 12
+    committed = subprocess.run(
+        ["git", "show", "HEAD:ExportDeck.md"],
+        cwd=world.root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    working = world.read_deck("ExportDeck")
 
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch("ankiops.cli.sync_media_to_anki", return_value=media_result),
-        patch("ankiops.cli.sync_note_types", return_value=""),
-        patch(
-            "ankiops.cli.import_collection",
-            return_value=CollectionResult.for_import(results=[], untracked_decks=[]),
-        ),
-        caplog.at_level(logging.INFO),
-    ):
-        run_ma(args)
-
-    assert "Media: 12 files checked — no changes" in caplog.text
+    assert "A: local draft" in committed
+    assert "A: Anki answer" in working
 
 
-def test_run_am_logs_missing_media_summary(tmp_path, caplog):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=True)
-    media_result = SyncResult.for_media()
-    media_result.changes = [Change(ChangeType.SYNC, "a.png", "a.png")]
-    media_result.checked = 5
-    media_result.missing = 2
+def test_run_ma_logs_real_media_status(world, caplog):
+    world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
+    world.write_media("img.png", b"image-content")
 
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch(
-            "ankiops.cli.export_collection",
-            return_value=CollectionResult.for_export(results=[], extra_changes=[]),
-        ),
-        patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
-        caplog.at_level(logging.INFO),
-    ):
-        run_am(args)
+    with caplog.at_level(logging.INFO):
+        world.run_ma()
 
-    assert "Media: 5 files checked" in caplog.text
-    assert "1 pulled, 2 missing in Anki" in caplog.text
+    assert "Media: 1 files checked" in caplog.text
+    assert "1 hashed" in caplog.text
+    assert "1 synced" in caplog.text
 
 
-def test_run_ma_logs_missing_local_media_summary(tmp_path, caplog):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    args = SimpleNamespace(no_auto_commit=True)
-    media_result = SyncResult.for_media()
-    media_result.changes = [Change(ChangeType.SYNC, "a.png", "a.png")]
-    media_result.checked = 5
-    media_result.missing = 2
+def test_run_am_logs_missing_anki_media_summary(world, caplog):
+    world.write_deck(
+        "MediaDeck",
+        "<!-- note_key: key-1 -->\nQ: prompt\nA: ![missing](media/missing.png)",
+    )
+    note_id = world.add_anki_note(
+        deck_name="MediaDeck",
+        fields={"Question": "prompt", "Answer": "![missing](media/missing.png)"},
+        note_key="key-1",
+    )
+    world.seed_db_link("key-1", note_id)
 
-    with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
-        patch("ankiops.cli.sync_media_to_anki", return_value=media_result),
-        patch("ankiops.cli.sync_note_types", return_value=""),
-        patch(
-            "ankiops.cli.import_collection",
-            return_value=CollectionResult.for_import(results=[], untracked_decks=[]),
-        ),
-        caplog.at_level(logging.INFO),
-    ):
-        run_ma(args)
+    with caplog.at_level(logging.INFO):
+        world.run_am()
 
-    assert "Media: 5 files checked" in caplog.text
-    assert "1 synced, 2 missing locally" in caplog.text
+    assert "Media: 1 files checked" in caplog.text
+    assert "0 pulled, 1 missing in Anki" in caplog.text
 
 
 def test_cli_version_flag_prints_package_version(capsys):
@@ -331,13 +233,8 @@ def test_cli_collab_publish_accepts_public_visibility_flag():
 
 
 def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.side_effect = AnkiConnectionError(
-        "Connection reset by peer"
-    )
-
     with (
-        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.cli.connect_or_exit", return_value=_FailingProfileAnki()),
         patch("ankiops.cli.configure_logging"),
         patch("sys.argv", ["ankiops", "init"]),
         caplog.at_level(logging.ERROR),
@@ -361,76 +258,64 @@ def test_cli_welcome_mentions_version_and_version_flag(capsys):
     assert "ankiops --version" in captured.out
 
 
-def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
-    db_path = tmp_path / ANKIOPS_DB
-    db_path.write_text("", encoding="utf-8")
-
-    args = SimpleNamespace(
-        output=str(tmp_path / "out.json"),
-        deck="Parent",
-        no_subdecks=True,
-    )
-
-    with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.serialize_to_file") as serialize_mock,
-    ):
-        run_serialize(args)
-
-    serialize_mock.assert_called_once_with(
-        tmp_path,
-        tmp_path / "out.json",
-        deck="Parent",
-        no_subdecks=True,
-    )
-
-
-def test_run_serialize_defaults_output_to_deck_name(tmp_path):
-    db_path = tmp_path / ANKIOPS_DB
-    db_path.write_text("", encoding="utf-8")
-
-    deck_name = "Parent::Child"
-    args = SimpleNamespace(
-        output=None,
-        deck=deck_name,
-        no_subdecks=False,
-    )
-
-    with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.serialize_to_file") as serialize_mock,
-    ):
-        run_serialize(args)
-
-    expected_output = Path(f"{deck_name_to_file_stem(deck_name)}.json")
-    serialize_mock.assert_called_once_with(
-        tmp_path,
-        expected_output,
-        deck=deck_name,
-        no_subdecks=False,
-    )
-
-
-def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
-    db_path = tmp_path / ANKIOPS_DB
-    db_path.write_text("", encoding="utf-8")
-
+def test_run_serialize_rejects_no_subdecks_without_deck():
     args = SimpleNamespace(
         output=None,
         deck=None,
         no_subdecks=True,
     )
 
-    with patch("ankiops.cli.require_collection_dir", return_value=tmp_path):
-        with pytest.raises(SystemExit) as exc:
-            run_serialize(args)
+    with pytest.raises(SystemExit) as exc:
+        run_serialize(args)
 
     assert exc.value.code == 2
 
 
+def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
+    output = tmp_path / "deck.json"
+    args = SimpleNamespace(
+        output=str(output),
+        deck="Parent::Child",
+        no_subdecks=True,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        output,
+        deck="Parent::Child",
+        no_subdecks=True,
+    )
+
+
+def test_run_serialize_defaults_output_to_deck_name(tmp_path):
+    args = SimpleNamespace(
+        output=None,
+        deck="Parent::Child",
+        no_subdecks=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        Path("Parent__Child.json"),
+        deck="Parent::Child",
+        no_subdecks=False,
+    )
+
+
 def test_run_deserialize_snapshots_by_default(tmp_path):
     FileSystemAdapter().eject_builtin_note_types(tmp_path / "note_types")
-    (tmp_path / "Other.md").write_text("unrelated\n", encoding="utf-8")
     json_file = tmp_path / "in.json"
     payload = {
         "decks": [
@@ -592,7 +477,7 @@ def test_run_fix_image_widths_uses_broad_snapshot_with_collab_sources(tmp_path):
     )
 
 
-def test_run_fix_image_widths_rejects_no_subdecks_without_deck(tmp_path):
+def test_run_fix_image_widths_rejects_no_subdecks_without_deck():
     args = SimpleNamespace(
         deck=None,
         no_subdecks=True,
@@ -601,8 +486,7 @@ def test_run_fix_image_widths_rejects_no_subdecks_without_deck(tmp_path):
         no_auto_commit=True,
     )
 
-    with patch("ankiops.cli.require_collection_dir", return_value=tmp_path):
-        with pytest.raises(SystemExit) as exc:
-            run_fix_image_widths(args)
+    with pytest.raises(SystemExit) as exc:
+        run_fix_image_widths(args)
 
     assert exc.value.code == 2

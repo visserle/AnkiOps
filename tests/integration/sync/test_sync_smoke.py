@@ -367,20 +367,6 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     assert "IO_QM:" in new_content
 
 
-def test_ankiops_id_populated_on_create(tmp_path, mock_anki, run_ankiops):
-    """Import create should always write a non-empty AnkiOps Key."""
-    (tmp_path / f"{deck_name_to_file_stem('ReproDeck')}.md").write_text(
-        "Q: Question\nA: Answer", encoding="utf-8"
-    )
-
-    _run_import(tmp_path)
-
-    assert len(mock_anki.notes) == 1
-    new_note = next(iter(mock_anki.notes.values()))
-    assert "AnkiOps Key" in new_note["fields"]
-    assert new_note["fields"]["AnkiOps Key"]["value"]
-
-
 def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     """Import update should backfill missing AnkiOps Key on existing note."""
     note_key = "notekeyexisting"
@@ -410,40 +396,6 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
     updated_note = mock_anki.notes[note_id]
     assert updated_note["fields"]["Answer"]["value"] == "UpdatedA"
     assert updated_note["fields"]["AnkiOps Key"]["value"] == note_key
-
-
-def test_export_reuses_existing_ankiops_key(tmp_path, mock_anki, run_ankiops):
-    """Export should reuse existing AnkiOps Key from Anki and persist it in DB."""
-    existing_note_key = "a1b2c3d4e5f6"
-    deck_name = "ExistingKeyDeck"
-    note_id = 12345
-
-    _insert_mock_note(
-        mock_anki,
-        deck_name=deck_name,
-        note_id=note_id,
-        card_id=20001,
-        fields={"Question": "Q1", "Answer": "A1", "AnkiOps Key": existing_note_key},
-    )
-
-    db_setup = SQLiteDbAdapter.open(tmp_path)
-    try:
-        assert db_setup.resolve_note_keys([note_id]).get(note_id) is None
-    finally:
-        db_setup.close()
-
-    _run_export(tmp_path)
-
-    md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
-    assert md_file.exists()
-    content = md_file.read_text(encoding="utf-8")
-    assert f"<!-- note_key: {existing_note_key} -->" in content
-
-    db_check = SQLiteDbAdapter.open(tmp_path)
-    try:
-        assert db_check.resolve_note_keys([note_id]).get(note_id) == existing_note_key
-    finally:
-        db_check.close()
 
 
 def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankiops):

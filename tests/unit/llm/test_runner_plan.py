@@ -19,12 +19,44 @@ def _init_collection_db(collection_dir):
         db.close()
 
 
+def _eject_note_types(collection_dir):
+    _init_collection_db(collection_dir)
+    FileSystemAdapter().eject_builtin_note_types(collection_dir / "note_types")
+
+
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     llm_collection,
     write_file,
-    monkeypatch,
 ):
-    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    _eject_note_types(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: broken question
+        A: answer
+        S: book
+        AI: private
+
+        ---
+
+        <!-- note_key: nk-2 -->
+        <!-- note_type: AnkiOpsChoice -->
+        Q: pick one
+        C1: yes
+        C2: no
+        A: 1
+        AI: private
+
+        ---
+
+        <!-- note_key: nk-3 -->
+        Q: another broken question
+        A: another answer
+        S: article
+        AI: private
+        """,
+    )
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -43,69 +75,9 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
             "*": ["AI Notes"]
         """,
     )
-    captured_scope = {}
-
-    def fake_serialize(collection_dir, *, deck=None, no_subdecks=False, note_types_dir):
-        captured_scope.update(
-            {
-                "collection_dir": collection_dir,
-                "deck": deck,
-                "no_subdecks": no_subdecks,
-                "note_types_dir": note_types_dir,
-            }
-        )
-        return {
-            "decks": [
-                {
-                    "source": "local",
-                    "name": "Deck",
-                    "notes": [
-                        {
-                            "note_key": "nk-1",
-                            "note_type": "AnkiOpsQA",
-                            "fields": {
-                                "Question": "broken question",
-                                "Answer": "answer",
-                                "Source": "book",
-                                "AI Notes": "private",
-                            },
-                        },
-                        {
-                            "note_key": "nk-2",
-                            "note_type": "AnkiOpsChoice",
-                            "fields": {
-                                "Question": "pick one",
-                                "Choice 1": "yes",
-                                "Choice 2": "no",
-                                "Answer": "1",
-                                "AI Notes": "private",
-                            },
-                        },
-                        {
-                            "note_key": "nk-3",
-                            "note_type": "AnkiOpsQA",
-                            "fields": {
-                                "Question": "another broken question",
-                                "Answer": "another answer",
-                                "Source": "article",
-                                "AI Notes": "private",
-                            },
-                        },
-                    ],
-                }
-            ]
-        }
-
-    monkeypatch.setattr("ankiops.llm.runner.serialize", fake_serialize)
 
     plan = plan_task(collection_dir=llm_collection, task_name="grammar")
 
-    assert captured_scope == {
-        "collection_dir": llm_collection,
-        "deck": None,
-        "no_subdecks": False,
-        "note_types_dir": llm_collection / "note_types",
-    }
     assert plan.task_name == "grammar"
     assert plan.summary.decks_seen == 1
     assert plan.summary.decks_matched == 1
@@ -131,9 +103,15 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
 def test_plan_task_rejects_missing_note_key_before_discovery(
     llm_collection,
     write_file,
-    monkeypatch,
 ):
-    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    _eject_note_types(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        Q: draft
+        A: answer
+        """,
+    )
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -147,25 +125,6 @@ def test_plan_task_rejects_missing_note_key_before_discovery(
         """,
     )
 
-    def fake_serialize(collection_dir, *, deck=None, no_subdecks=False, note_types_dir):
-        return {
-            "decks": [
-                {
-                    "source": "local",
-                    "name": "Deck",
-                    "notes": [
-                        {
-                            "note_key": None,
-                            "note_type": "AnkiOpsQA",
-                            "fields": {"Question": "draft", "Answer": "answer"},
-                        }
-                    ],
-                }
-            ]
-        }
-
-    monkeypatch.setattr("ankiops.llm.runner.serialize", fake_serialize)
-
     with pytest.raises(ValueError, match="LLM tasks require note_key metadata"):
         plan_task(collection_dir=llm_collection, task_name="grammar")
 
@@ -175,9 +134,33 @@ def test_plan_task_rejects_missing_note_key_before_discovery(
 def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes(
     llm_collection,
     write_file,
-    monkeypatch,
 ):
-    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    _eject_note_types(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: qa-1 -->
+        <!-- tags: old -->
+        Q: What?
+        A: That.
+        S: book
+
+        ---
+
+        <!-- note_key: cloze-1 -->
+        <!-- note_type: AnkiOpsCloze -->
+        T: {{c1::Cloze}} text
+        S: article
+
+        ---
+
+        <!-- note_key: rev-1 -->
+        <!-- note_type: AnkiOpsReversed -->
+        <!-- tags: old -->
+        F: front
+        B: back
+        """,
+    )
     write_file(
         llm_collection / "llm/autotagger.yaml",
         """
@@ -193,48 +176,6 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
           max_notes_per_request: 4
         """,
     )
-
-    def fake_serialize(collection_dir, *, deck=None, no_subdecks=False, note_types_dir):
-        return {
-            "decks": [
-                {
-                    "source": "local",
-                    "name": "Deck",
-                    "notes": [
-                        {
-                            "note_key": "qa-1",
-                            "note_type": "AnkiOpsQA",
-                            "tags": ["old"],
-                            "fields": {
-                                "Question": "What?",
-                                "Answer": "That.",
-                                "Source": "book",
-                            },
-                        },
-                        {
-                            "note_key": "cloze-1",
-                            "note_type": "AnkiOpsCloze",
-                            "tags": [],
-                            "fields": {
-                                "Text": "{{c1::Cloze}} text",
-                                "Source": "article",
-                            },
-                        },
-                        {
-                            "note_key": "rev-1",
-                            "note_type": "AnkiOpsReversed",
-                            "tags": ["old"],
-                            "fields": {
-                                "Front": "front",
-                                "Back": "back",
-                            },
-                        },
-                    ],
-                }
-            ]
-        }
-
-    monkeypatch.setattr("ankiops.llm.runner.serialize", fake_serialize)
 
     plan = plan_task(collection_dir=llm_collection, task_name="autotagger")
 
@@ -290,10 +231,7 @@ def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_fil
 
     plan = plan_task(collection_dir=llm_collection, task_name="grammar")
 
-    surface = {
-        (item.source, item.note_type): item
-        for item in plan.field_surface
-    }
+    surface = {(item.source, item.note_type): item for item in plan.field_surface}
     assert ("local", "AnkiOpsQA") in surface
     assert ("collab/owner/repo", "collab/owner/repo/AnkiOpsQA") in surface
     assert surface[("local", "AnkiOpsQA")].candidate_notes == 1
@@ -307,7 +245,7 @@ def test_plan_task_rejects_explicit_note_type_pattern_after_deck_filter(
     write_file,
 ):
     _init_collection_db(llm_collection)
-    FileSystemAdapter().eject_builtin_note_types(llm_collection / "note_types")
+    _eject_note_types(llm_collection)
     write_file(
         llm_collection / "Deck.md",
         """
