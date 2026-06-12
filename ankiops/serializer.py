@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,13 @@ class _ValidatedDeck:
     name: str
     notes: list[dict[str, Any]]
     configs_by_name: dict[str, NoteTypeConfig]
+
+
+@dataclass(frozen=True)
+class DeserializationPlan:
+    decks: tuple[_ValidatedDeck, ...]
+    target_paths: tuple[Path, ...]
+    has_collab_sources: bool
 
 
 def _source_name(source: SyncSource) -> str:
@@ -284,12 +292,48 @@ def deserialize(
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
     )
+    _write_validated_decks(
+        decks,
+        collection_dir=collection_dir,
+        overwrite=overwrite,
+        quiet=quiet,
+    )
 
+
+def apply_deserialization_plan(
+    plan: DeserializationPlan,
+    *,
+    collection_dir: Path,
+    overwrite: bool = False,
+    quiet: bool = False,
+) -> None:
+    """Write a previously validated deserialization plan."""
+    logger.debug(f"Target directory: {collection_dir}")
+
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
+        raise ValueError(f"Not an initialized AnkiOps collection: {collection_dir}")
+
+    _write_validated_decks(
+        plan.decks,
+        collection_dir=collection_dir,
+        overwrite=overwrite,
+        quiet=quiet,
+    )
+
+
+def _write_validated_decks(
+    decks: Sequence[_ValidatedDeck],
+    *,
+    collection_dir: Path,
+    overwrite: bool,
+    quiet: bool,
+) -> None:
     total_decks = 0
     total_notes = 0
 
     for deck in decks:
-        output_path = deck.source.root / (deck_name_to_file_stem(deck.name) + ".md")
+        output_path = _deserialize_target_path(deck)
 
         lines = []
         written_notes = 0
@@ -352,6 +396,10 @@ def deserialize(
         logger.debug(summary_message)
     else:
         logger.info(summary_message)
+
+
+def _deserialize_target_path(deck: _ValidatedDeck) -> Path:
+    return deck.source.root / (deck_name_to_file_stem(deck.name) + ".md")
 
 
 def _validate_serialized_data(
@@ -526,6 +574,28 @@ def _validate_serialized_data(
     return validated
 
 
+def plan_deserialize_from_file(
+    json_file: Path,
+    *,
+    collection_dir: Path,
+    note_types_dir: Path,
+) -> DeserializationPlan:
+    with json_file.open("r", encoding="utf-8") as input_handle:
+        data = json.load(input_handle)
+
+    logger.debug(f"Importing serialized data from: {json_file}")
+    decks = _validate_serialized_data(
+        data,
+        collection_dir=collection_dir,
+        note_types_dir=note_types_dir,
+    )
+    return DeserializationPlan(
+        decks=tuple(decks),
+        target_paths=tuple(_deserialize_target_path(deck) for deck in decks),
+        has_collab_sources=any(deck.source.is_collab for deck in decks),
+    )
+
+
 def deserialize_from_file(
     json_file: Path,
     overwrite: bool = False,
@@ -542,15 +612,15 @@ def deserialize_from_file(
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
     """
-    with json_file.open("r", encoding="utf-8") as input_handle:
-        data = json.load(input_handle)
-
-    logger.debug(f"Importing serialized data from: {json_file}")
     collection_dir = collection_dir or get_collection_dir()
     resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
-    deserialize(
-        data,
+    plan = plan_deserialize_from_file(
+        json_file,
         collection_dir=collection_dir,
         note_types_dir=resolved_note_types_dir,
+    )
+    apply_deserialization_plan(
+        plan,
+        collection_dir=collection_dir,
         overwrite=overwrite,
     )

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -196,8 +196,13 @@ class CollectionGit:
         )
 
 
-def git_snapshot(collection_dir: Path, label: str) -> bool:
-    """Commit all pending changes in the collection directory.
+def git_snapshot(
+    collection_dir: Path,
+    *,
+    action: str,
+    paths: Sequence[Path],
+) -> bool:
+    """Commit pending changes for the supplied collection paths.
 
     Returns True if a commit was created, False otherwise.
     Never raises; logs warnings on failure so sync can proceed.
@@ -208,14 +213,26 @@ def git_snapshot(collection_dir: Path, label: str) -> bool:
             logger.debug("Not a git repository, skipping auto-commit")
             return False
 
-        repo.run(["add", "-A", "."])
-        if not repo.cached_diff_exists():
+        rel_paths = repo._tracked_or_existing_paths(list(paths))
+        if not rel_paths:
+            logger.debug("No scoped paths found, skipping auto-commit")
+            return False
+
+        repo.run(["add", "-A", "--", *rel_paths])
+        if not repo.cached_diff_exists(rel_paths):
             logger.debug("Working tree clean, skipping auto-commit")
             return False
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        repo.run(["commit", "-m", f"AnkiOps: pre-{label} snapshot ({timestamp})"])
-        logger.info(f"Auto-committed snapshot before {label}")
+        repo.run(
+            [
+                "commit",
+                "-m",
+                f"AnkiOps: snapshot before {action}",
+                "--",
+                *rel_paths,
+            ]
+        )
+        logger.info(f"Auto-committed snapshot before {action}")
         return True
 
     except subprocess.CalledProcessError as error:
