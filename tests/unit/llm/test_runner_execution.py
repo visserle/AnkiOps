@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
-from ankiops.llm.model_registry import ModelSpec
-from ankiops.llm.runner import (
-    LlmTaskExecutor,
-    MaterializedTaskContext,
-    OpenAIResult,
-    _validate_cloze_text_fields,
-)
-from ankiops.llm.types import (
-    DiscoveryCounts,
-    DiscoveryItem,
-    DiscoverySnapshot,
-    FieldAccess,
-    LlmItemStatus,
-    NotePayload,
-    TaskConfig,
-    TaskRequestOptions,
-)
+from ankiops.db import SQLiteDbAdapter
+from ankiops.fs import FileSystemAdapter
+from ankiops.llm.runner import OpenAIResult, _validate_cloze_text_fields, run_task
 from ankiops.models import Note
 
 
@@ -32,6 +17,15 @@ class _FakeAsyncOpenAI:
 
     async def close(self) -> None:
         pass
+
+
+def _init_collection(collection_dir) -> None:
+    db = SQLiteDbAdapter.open(collection_dir)
+    try:
+        db.set_profile_name("test")
+    finally:
+        db.close()
+    FileSystemAdapter().eject_builtin_note_types(collection_dir / "note_types")
 
 
 def _parsed_response(*updates, tag_updates=()):
@@ -77,87 +71,45 @@ def _fatal_error() -> OpenAIResult:
     )
 
 
-def _context(
-    llm_qa_config,
-    *,
-    max_notes_per_request: int = 2,
-    concurrency: int = 2,
-) -> MaterializedTaskContext:
-    task = TaskConfig(
-        name="grammar",
-        model=ModelSpec(
-            model="test",
-            model_id="gpt-test",
-            base_url="https://api.openai.com/v1",
-            api_key="$OPENAI_API_KEY",
-            concurrency=concurrency,
-        ),
-        system_prompt="system",
-        user_prompt="user",
-        request=TaskRequestOptions(max_notes_per_request=max_notes_per_request),
-    )
-    notes = [
-        {
-            "note_key": "nk-1",
-            "note_type": "AnkiOpsQA",
-            "tags": ["keep-me"],
-            "fields": {
-                "Question": "Broken",
-                "Answer": "Existing answer",
-                "Source": "Book",
-            },
-        },
-        {
-            "note_key": "nk-2",
-            "note_type": "AnkiOpsQA",
-            "fields": {
-                "Question": "Already good",
-                "Answer": "Existing answer",
-                "Source": "Book",
-            },
-        },
-    ]
-    items = [
-        DiscoveryItem(
-            ordinal=index,
-            source="local",
-            deck_name="Deck",
-            note_key=note["note_key"],
-            note_type="AnkiOpsQA",
-            item_status=LlmItemStatus.QUEUED,
-            skip_reason=None,
-            error_message=None,
-            payload=NotePayload(
-                note_key=note["note_key"],
-                note_type="AnkiOpsQA",
-                editable_fields={"Question": note["fields"]["Question"]},
-                read_only_fields={"Source": note["fields"]["Source"]},
-            ),
-            note_type_config=llm_qa_config,
-            serialized_note=note,
-        )
-        for index, note in enumerate(notes, start=1)
-    ]
-    return MaterializedTaskContext(
-        task=task,
-        note_type_configs={"AnkiOpsQA": llm_qa_config},
-        serialized_data={
-            "decks": [{"source": "local", "name": "Deck", "notes": notes}]
-        },
-        discovery_snapshot=DiscoverySnapshot(
-            counts=DiscoveryCounts(decks_seen=1, decks_matched=1, notes_seen=2),
-            items=items,
-        ),
-    )
-
-
-def test_executor_persists_successful_updates(
-    tmp_path,
+def test_executor_persists_successful_field_updates(
+    llm_collection,
+    write_file,
     monkeypatch,
-    llm_qa_config,
 ):
-    context = _context(llm_qa_config)
-    persisted = {}
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        <!-- tags: keep-me -->
+        Q: Broken
+        A: Existing answer
+        S: Book
+
+        ---
+
+        <!-- note_key: nk-2 -->
+        Q: Already good
+        A: Existing answer
+        S: Book
+        """,
+    )
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        request:
+          max_notes_per_request: 2
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+          read_only:
+            "AnkiOpsQA": ["Source"]
+        """,
+    )
 
     async def fake_call_openai(*, batch, **_kwargs):
         assert [candidate.payload.note_key for candidate in batch.candidates] == [
@@ -170,22 +122,17 @@ def test_executor_persists_successful_updates(
             output_tokens=6,
         )
 
-    def fake_deserialize(data, **_kwargs):
-        persisted["data"] = data
-
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
     monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
-    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
 
-    result = asyncio.run(
-        LlmTaskExecutor(
-            collection_dir=tmp_path,
-            materialized_context=context,
-            no_auto_commit=True,
-        ).execute()
+    result = run_task(
+        collection_dir=llm_collection,
+        task_name="grammar",
+        no_auto_commit=True,
     )
 
+    content = (llm_collection / "Deck.md").read_text(encoding="utf-8")
     assert not result.failed
     assert result.persisted
     assert result.summary.updated == 1
@@ -193,71 +140,41 @@ def test_executor_persists_successful_updates(
     assert result.summary.requests == 1
     assert result.summary.input_tokens == 12
     assert result.summary.output_tokens == 6
-    assert persisted["data"]["decks"][0]["notes"][0]["fields"]["Question"] == (
-        "Fixed question"
-    )
-    assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["keep-me"]
+    assert "Q: Fixed question" in content
+    assert "<!-- tags: keep-me -->" in content
+    assert "Q: Already good" in content
 
 
 def test_executor_persists_successful_tag_updates(
-    tmp_path,
+    llm_collection,
+    write_file,
     monkeypatch,
-    llm_qa_config,
 ):
-    task = TaskConfig(
-        name="autotagger",
-        model=ModelSpec(
-            model="test",
-            model_id="gpt-test",
-            base_url="https://api.openai.com/v1",
-            api_key="$OPENAI_API_KEY",
-            concurrency=1,
-        ),
-        system_prompt="system",
-        user_prompt="user",
-        tag_access=FieldAccess.EDITABLE,
-        request=TaskRequestOptions(max_notes_per_request=1),
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        <!-- tags: old -->
+        Q: Question
+        A: Answer
+        """,
     )
-    note = {
-        "note_key": "nk-1",
-        "note_type": "AnkiOpsQA",
-        "tags": ["old"],
-        "fields": {
-            "Question": "Question",
-            "Answer": "Answer",
-        },
-    }
-    item = DiscoveryItem(
-        ordinal=1,
-        source="local",
-        deck_name="Deck",
-        note_key="nk-1",
-        note_type="AnkiOpsQA",
-        item_status=LlmItemStatus.QUEUED,
-        skip_reason=None,
-        error_message=None,
-        payload=NotePayload(
-            note_key="nk-1",
-            note_type="AnkiOpsQA",
-            editable_fields={},
-            read_only_fields={"Question": "Question", "Answer": "Answer"},
-            editable_tags=("old",),
-        ),
-        note_type_config=llm_qa_config,
-        serialized_note=note,
+    write_file(
+        llm_collection / "llm/autotagger.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        tags: editable
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+          read_only:
+            "AnkiOpsQA": ["Question", "Answer"]
+        """,
     )
-    context = MaterializedTaskContext(
-        task=task,
-        note_type_configs={"AnkiOpsQA": llm_qa_config},
-        serialized_data={
-            "decks": [{"source": "local", "name": "Deck", "notes": [note]}]
-        },
-        discovery_snapshot=DiscoverySnapshot(
-            counts=DiscoveryCounts(decks_seen=1, decks_matched=1, notes_seen=1),
-            items=[item],
-        ),
-    )
-    persisted = {}
 
     async def fake_call_openai(*, batch, **_kwargs):
         assert batch.candidates[0].payload.editable_tags == ("old",)
@@ -267,34 +184,65 @@ def test_executor_persists_successful_tag_updates(
             output_tokens=4,
         )
 
-    def fake_deserialize(data, **_kwargs):
-        persisted["data"] = data
-
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
     monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
-    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
 
-    result = asyncio.run(
-        LlmTaskExecutor(
-            collection_dir=tmp_path,
-            materialized_context=context,
-            no_auto_commit=True,
-        ).execute()
+    result = run_task(
+        collection_dir=llm_collection,
+        task_name="autotagger",
+        no_auto_commit=True,
     )
 
+    content = (llm_collection / "Deck.md").read_text(encoding="utf-8")
     assert not result.failed
     assert result.persisted
     assert result.summary.updated == 1
-    assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["new", "old"]
+    assert "<!-- tags: new old -->" in content
 
 
 def test_executor_cancels_queued_items_after_fatal_error(
-    tmp_path,
+    llm_collection,
+    write_file,
     monkeypatch,
-    llm_qa_config,
 ):
-    context = _context(llm_qa_config, max_notes_per_request=1, concurrency=1)
+    _init_collection(llm_collection)
+    original = """
+        <!-- note_key: nk-1 -->
+        Q: Broken
+        A: Existing answer
+
+        ---
+
+        <!-- note_key: nk-2 -->
+        Q: Already good
+        A: Existing answer
+        """
+    write_file(llm_collection / "Deck.md", original)
+    write_file(
+        llm_collection / "llm/_models.yaml",
+        """
+        - model: test
+          model_id: gpt-test
+          base_url: https://api.openai.com/v1
+          api_key: $OPENAI_API_KEY
+          concurrency: 1
+        """,
+    )
+    write_file(
+        llm_collection / "llm/grammar.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
 
     async def fake_call_openai(**_kwargs):
         return _fatal_error()
@@ -303,18 +251,17 @@ def test_executor_cancels_queued_items_after_fatal_error(
     monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
     monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
 
-    result = asyncio.run(
-        LlmTaskExecutor(
-            collection_dir=tmp_path,
-            materialized_context=context,
-            no_auto_commit=True,
-        ).execute()
+    result = run_task(
+        collection_dir=llm_collection,
+        task_name="grammar",
+        no_auto_commit=True,
     )
 
     assert result.failed
     assert not result.persisted
     assert result.summary.errors == 1
     assert result.summary.canceled == 1
+    assert "Q: Broken" in (llm_collection / "Deck.md").read_text(encoding="utf-8")
 
 
 def test_validate_cloze_text_fields_uses_template_cloze_sources(llm_qa_config):

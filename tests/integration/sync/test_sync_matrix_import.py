@@ -84,6 +84,28 @@ def test_imp_fresh_create_002_creates_note_with_tags(world):
         assert content.index("<!-- note_type:") < content.index("<!-- tags:")
 
 
+def test_imp_fresh_create_004_assigns_keys_to_duplicate_first_line_notes(world):
+    """Import should key repeated prompts without merging their note blocks."""
+    world.write_qa_deck(
+        "DuplicateFirstLineDeck",
+        [
+            ("Same prompt", "First answer", None),
+            ("Same prompt", "Second answer", None),
+        ],
+    )
+
+    with world.db_session() as db:
+        result = world.sync_import(db)
+
+    assert_summary(result.summary, created=2, updated=0, moved=0, deleted=0, errors=0)
+    content = world.read_deck("DuplicateFirstLineDeck")
+    assert content.count("<!-- note_key:") == 2
+    assert content.count("<!-- note_type: AnkiOpsQA -->") == 2
+    assert "A: First answer" in content
+    assert "A: Second answer" in content
+    assert len(world.mock_anki.notes) == 2
+
+
 def test_imp_run_update_001_updates_existing_note(world):
     """IMP-RUN-UPDATE-001."""
     note_key = "imp-run-update-001"

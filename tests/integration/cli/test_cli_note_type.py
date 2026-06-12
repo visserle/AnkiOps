@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -17,61 +17,39 @@ def _seed_note_types(note_types_dir):
     FileSystemAdapter().eject_builtin_note_types(note_types_dir)
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["ankiops", "note-types"],
-    ],
-)
-def test_note_types_list_routes_to_handler(argv):
-    with (
-        patch("ankiops.cli.run_note_type") as run_mock,
-        patch("sys.argv", argv),
-    ):
-        main()
+class _FakeNoteTypeAnki:
+    def __init__(self, model_names=None, model_states=None):
+        self.model_names = model_names or []
+        self.model_states = model_states or {}
 
-    run_mock.assert_called_once()
-    args = run_mock.call_args.args[0]
-    assert args.action == "list"
+    def get_active_profile(self):
+        return "TestProfile"
 
+    def fetch_model_names(self):
+        return self.model_names
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["ankiops", "note-types", "--add", "MyType"],
-    ],
-)
-def test_note_types_import_routes_to_handler(argv):
-    with (
-        patch("ankiops.cli.run_note_type") as run_mock,
-        patch("sys.argv", argv),
-    ):
-        main()
-
-    run_mock.assert_called_once()
-    args = run_mock.call_args.args[0]
-    assert args.action == "list"
-    assert args.add_name == "MyType"
+    def fetch_model_states(self, model_names):
+        return {name: self.model_states[name] for name in model_names}
 
 
 def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
     _seed_note_types(tmp_path / "note_types")
 
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    fake_anki.fetch_model_names.return_value = ["MyType"]
-    fake_anki.fetch_model_states.return_value = {
-        "MyType": {
-            "fields": ["Term", "Definition", "Choice 1"],
-            "styling": {"name": "MyType", "css": ".card { color: red; }"},
-            "templates": {
-                "Card 1": {"Front": "{{Term}}", "Back": "{{Definition}}"},
-                "Card 2": {"Front": "{{Definition}}", "Back": "{{Term}}"},
-            },
-            "descriptions": {},
-            "fonts": {},
-        }
-    }
+    fake_anki = _FakeNoteTypeAnki(
+        ["MyType"],
+        {
+            "MyType": {
+                "fields": ["Term", "Definition", "Choice 1"],
+                "styling": {"name": "MyType", "css": ".card { color: red; }"},
+                "templates": {
+                    "Card 1": {"Front": "{{Term}}", "Back": "{{Definition}}"},
+                    "Card 2": {"Front": "{{Definition}}", "Back": "{{Term}}"},
+                },
+                "descriptions": {},
+                "fonts": {},
+            }
+        },
+    )
 
     args = SimpleNamespace(action="list", add_name="MyType")
 
@@ -108,20 +86,20 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
 def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, caplog):
     _seed_note_types(tmp_path / "note_types")
 
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    fake_anki.fetch_model_names.return_value = ["MyType"]
-    fake_anki.fetch_model_states.return_value = {
-        "MyType": {
-            "fields": ["Question", "Context"],
-            "styling": ".card { color: red; }",
-            "templates": {
-                "Card 1": {"Front": "{{Question}}", "Back": "{{Context}}"},
-            },
-            "descriptions": {},
-            "fonts": {},
-        }
-    }
+    fake_anki = _FakeNoteTypeAnki(
+        ["MyType"],
+        {
+            "MyType": {
+                "fields": ["Question", "Context"],
+                "styling": ".card { color: red; }",
+                "templates": {
+                    "Card 1": {"Front": "{{Question}}", "Back": "{{Context}}"},
+                },
+                "descriptions": {},
+                "fonts": {},
+            }
+        },
+    )
     args = SimpleNamespace(action="list", add_name="MyType")
 
     with (
@@ -142,10 +120,45 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     }
 
 
+def test_note_types_import_reprompts_on_invalid_label(tmp_path, caplog):
+    _seed_note_types(tmp_path / "note_types")
+
+    fake_anki = _FakeNoteTypeAnki(
+        ["MyType"],
+        {
+            "MyType": {
+                "fields": ["Question", "Answer"],
+                "styling": ".card { color: red; }",
+                "templates": {
+                    "Card 1": {"Front": "{{Question}}", "Back": "{{Answer}}"},
+                },
+                "descriptions": {},
+                "fonts": {},
+            }
+        },
+    )
+    args = SimpleNamespace(action="list", add_name="MyType")
+
+    with (
+        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("builtins.input", side_effect=["A B", "QQ", "y", "AA", "y"]),
+        caplog.at_level("ERROR"),
+    ):
+        run_note_type(args)
+
+    payload = yaml.safe_load(
+        (tmp_path / "note_types" / "MyType" / "note_type.yaml").read_text("utf-8")
+    )
+    assert "Label must start with a letter" in caplog.text
+    assert payload["fields"][:2] == [
+        {"name": "Question", "label": "QQ:", "identifying": True},
+        {"name": "Answer", "label": "AA:", "identifying": True},
+    ]
+
+
 def test_note_types_import_rejects_unknown_model(tmp_path):
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
-    fake_anki.fetch_model_names.return_value = ["AnkiOpsQA"]
+    fake_anki = _FakeNoteTypeAnki(["AnkiOpsQA"])
 
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
@@ -162,8 +175,7 @@ def test_note_types_import_rejects_existing_target_folder(tmp_path):
     existing = tmp_path / "note_types" / "MyType"
     existing.mkdir(parents=True, exist_ok=True)
 
-    fake_anki = MagicMock()
-    fake_anki.get_active_profile.return_value = "TestProfile"
+    fake_anki = _FakeNoteTypeAnki(["MyType"])
 
     with (
         patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),

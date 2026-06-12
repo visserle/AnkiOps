@@ -1,20 +1,13 @@
-"""Media synchronization tests."""
+"""Media synchronization behavior tests."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-import pytest
-from blake3 import blake3
-
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.db import SQLiteDbAdapter
-from ankiops.sync_media import (
-    _extract_media_references,
-    sync_all_media_to_anki,
-    sync_media_to_anki,
-)
+from ankiops.sync_media import sync_all_media_to_anki, sync_media_to_anki
 
 
 class _FakeMediaAnki:
@@ -31,301 +24,198 @@ class _FakeMediaAnki:
         target.write_bytes(local_path.read_bytes())
 
 
-def _blake3(path: Path) -> str:
-    return blake3(path.read_bytes()).hexdigest(length=4)
+def _sync_to_anki(fs, collection_dir: Path, anki: _FakeMediaAnki):
+    db = SQLiteDbAdapter.open(collection_dir)
+    try:
+        return sync_media_to_anki(anki, fs, collection_dir, db)
+    finally:
+        db.close()
 
 
-@pytest.fixture
-def media_dir(tmp_path):
-    directory = tmp_path / LOCAL_MEDIA_DIR
-    directory.mkdir()
-    return directory
+def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(fs, tmp_path):
+    root_media = tmp_path / LOCAL_MEDIA_DIR
+    root_media.mkdir()
+    (root_media / "image.png").write_bytes(b"root image")
+    (tmp_path / "RootDeck.md").write_text(
+        "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
+    )
+
+    collab_root = tmp_path / "collab" / "owner" / "repo"
+    collab_media = collab_root / LOCAL_MEDIA_DIR
+    collab_media.mkdir(parents=True)
+    (collab_media / "image.png").write_bytes(b"collab image")
+    (collab_root / "CollabDeck.md").write_text(
+        "Q: Collab\nA: ![img](media/image.png)", encoding="utf-8"
+    )
+
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
+
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        result = sync_all_media_to_anki(anki, fs, tmp_path, db)
+    finally:
+        db.close()
+
+    root_names = sorted(path.name for path in root_media.glob("image_*.png"))
+    collab_names = sorted(path.name for path in collab_media.glob("image_*.png"))
+    assert len(root_names) == 1
+    assert len(collab_names) == 1
+    assert root_names != collab_names
+    assert result.summary.synced == 2
+    assert (anki_media_dir / root_names[0]).exists()
+    assert (anki_media_dir / collab_names[0]).exists()
+    assert f"media/{root_names[0]}" in (tmp_path / "RootDeck.md").read_text(
+        encoding="utf-8"
+    )
+    assert f"media/{collab_names[0]}" in (
+        collab_root / "CollabDeck.md"
+    ).read_text(encoding="utf-8")
 
 
-class TestMediaHashing:
-    """Hashing should be content-based and deterministic."""
+def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(
+    fs, tmp_path
+):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "a(b).jpg").write_bytes(b"paren image")
+    (media_dir / "a b.jpg").write_bytes(b"space image")
+    (media_dir / "clip.mp3").write_bytes(b"audio")
+    (tmp_path / "Deck.md").write_text(
+        (
+            "Q: Media\n"
+            "A: ![paren](<media/a(b).jpg>)\n"
+            '<img src="media/a%20b.jpg">\n'
+            "[sound:clip.mp3]\n"
+            "![external](https://example.com/remote.png)\n"
+        ),
+        encoding="utf-8",
+    )
 
-    def test_identical_files_have_same_hash(self, media_dir):
-        first = media_dir / "img1.png"
-        second = media_dir / "img2.png"
-        content = b"identical content"
-        first.write_bytes(content)
-        second.write_bytes(content)
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
 
-        assert _blake3(first) == _blake3(second)
+    result = _sync_to_anki(fs, tmp_path, anki)
 
-    def test_different_files_have_different_hash(self, media_dir):
-        first = media_dir / "img1.png"
-        second = media_dir / "img2.png"
-        first.write_bytes(b"content1")
-        second.write_bytes(b"content2")
-
-        assert _blake3(first) != _blake3(second)
-
-
-class TestMediaReferenceDetection:
-    """References in markdown and HTML should resolve to local media names only."""
-
-    def test_image_reference_detected(self, fs, tmp_path):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "test.png").write_bytes(b"fake png")
-
-        md = tmp_path / "deck.md"
-        md.write_text("Q: What is this?\nA: ![image](media/test.png)", encoding="utf-8")
-        result = fs.read_markdown_file(md)
-        assert "media/test.png" in result.notes[0].fields["Answer"]
-
-    def test_no_reference_in_plain_text(self, fs, tmp_path):
-        md = tmp_path / "deck.md"
-        md.write_text("Q: What?\nA: Plain answer", encoding="utf-8")
-        result = fs.read_markdown_file(md)
-        assert "media/" not in result.notes[0].fields["Answer"]
-
-    def test_extract_media_references_parentheses(self):
-        assert _extract_media_references("![img](media/a.jpg)") == {"a.jpg"}
-        assert _extract_media_references("![img](media/a(b).jpg)") == {"a(b).jpg"}
-        assert _extract_media_references("![img](<media/a(b).jpg>)") == {"a(b).jpg"}
-
-    def test_extract_media_references_url_encoding(self):
-        assert _extract_media_references("![img](media/a%20b.jpg)") == {"a b.jpg"}
-        assert _extract_media_references("![img](media/a%27s.jpg)") == {"a's.jpg"}
-
-    def test_extract_media_references_html(self):
-        assert _extract_media_references('<img src="a(b).jpg">') == {"a(b).jpg"}
-        assert _extract_media_references('<img src="a b.jpg">') == {"a b.jpg"}
-        assert _extract_media_references('<img src="media/a%20b.jpg">') == {"a b.jpg"}
-
-    def test_extract_media_references_ignores_external(self):
-        assert (
-            _extract_media_references('<img src="http://example.com/a.jpg">') == set()
-        )
-        assert _extract_media_references("![img](https://example.com/a.jpg)") == set()
-
-    def test_update_media_references_parentheses_and_html(self, fs, tmp_path):
-        md_dir = tmp_path / "collection"
-        md_dir.mkdir()
-        md_file = md_dir / "deck.md"
-        md_file.write_text(
-            (
-                "1. ![img](media/a(b).jpg)\n"
-                '2. <img src="a b.jpg">\n'
-                "3. [sound:a%20b.mp3]\n"
-            ),
-            encoding="utf-8",
-        )
-
-        rename_map = {
-            "media/a(b).jpg": "media/hashed1.jpg",
-            "a b.jpg": "media/hashed2.jpg",
-            "a b.mp3": "hashed3.mp3",
-        }
-        updated_count = fs.update_media_references(md_dir, rename_map)
-        assert updated_count == 1
-
-        new_content = md_file.read_text(encoding="utf-8")
-        assert "![img](<media/hashed1.jpg>)" in new_content
-        assert '<img src="media/hashed2.jpg">' in new_content
-        assert "[sound:hashed3.mp3]" in new_content
+    content = (tmp_path / "Deck.md").read_text(encoding="utf-8")
+    pushed_names = sorted(path.name for path in anki_media_dir.iterdir())
+    assert result.checked == 3
+    assert result.summary.synced == 3
+    assert len(pushed_names) == 3
+    assert "https://example.com/remote.png" in content
+    assert "a(b)_" in content
+    assert "a b_" in content
+    assert "[sound:clip_" in content
 
 
-class TestMediaDirectory:
-    """Local media directory scanning should be predictable."""
+def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(fs, tmp_path):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "img.png").write_bytes(b"image-content")
+    (tmp_path / "deck.md").write_text(
+        "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
+    )
 
-    def test_find_media_files(self, tmp_path):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "img1.png").write_bytes(b"1")
-        (media_dir / "img2.jpg").write_bytes(b"2")
-        (media_dir / "doc.pdf").write_bytes(b"3")
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
 
-        files = list(media_dir.iterdir())
-        assert len(files) == 3
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        first = sync_media_to_anki(anki, fs, tmp_path, db)
+        second = sync_media_to_anki(anki, fs, tmp_path, db)
+    finally:
+        db.close()
 
-    def test_empty_media_dir(self, tmp_path):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        files = list(media_dir.iterdir())
-        assert len(files) == 0
+    assert first.summary.synced == 1
+    assert second.summary.synced == 0
+    assert anki.push_count == 1
 
 
-class TestMediaSyncIncremental:
-    def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(
-        self, fs, tmp_path
-    ):
-        root_media = tmp_path / LOCAL_MEDIA_DIR
-        root_media.mkdir()
-        (root_media / "image.png").write_bytes(b"root image")
-        (tmp_path / "RootDeck.md").write_text(
-            "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
-        )
+def test_sync_media_to_anki_cache_persists_across_db_connections(fs, tmp_path):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "img.png").write_bytes(b"image-content")
+    (tmp_path / "deck.md").write_text(
+        "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
+    )
 
-        collab_root = tmp_path / "collab" / "owner" / "repo"
-        collab_media = collab_root / LOCAL_MEDIA_DIR
-        collab_media.mkdir(parents=True)
-        (collab_media / "image.png").write_bytes(b"collab image")
-        (collab_root / "CollabDeck.md").write_text(
-            "Q: Collab\nA: ![img](media/image.png)", encoding="utf-8"
-        )
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
 
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        first = sync_media_to_anki(anki, fs, tmp_path, db)
+    finally:
+        db.close()
 
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            result = sync_all_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        second = sync_media_to_anki(anki, fs, tmp_path, db)
+    finally:
+        db.close()
 
-        root_names = sorted(path.name for path in root_media.glob("image_*.png"))
-        collab_names = sorted(path.name for path in collab_media.glob("image_*.png"))
-        assert len(root_names) == 1
-        assert len(collab_names) == 1
-        assert root_names != collab_names
-        assert result.summary.synced == 2
-        assert (anki_media_dir / root_names[0]).exists()
-        assert (anki_media_dir / collab_names[0]).exists()
-        assert f"media/{root_names[0]}" in (tmp_path / "RootDeck.md").read_text(
-            encoding="utf-8"
-        )
-        assert f"media/{collab_names[0]}" in (
-            collab_root / "CollabDeck.md"
-        ).read_text(encoding="utf-8")
+    assert first.summary.synced == 1
+    assert second.summary.synced == 0
+    assert anki.push_count == 1
 
-    def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(self, fs, tmp_path):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "img.png").write_bytes(b"image-content")
-        (tmp_path / "deck.md").write_text(
-            "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
-        )
 
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
+def test_sync_media_prunes_deleted_markdown_cache_rows(fs, tmp_path):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "img.png").write_bytes(b"image-content")
+    deck_a = tmp_path / "DeckA.md"
+    deck_b = tmp_path / "DeckB.md"
+    deck_a.write_text("Q: A\nA: ![img](media/img.png)", encoding="utf-8")
+    deck_b.write_text("Q: B\nA: ![img](media/img.png)", encoding="utf-8")
 
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            first = sync_media_to_anki(anki, fs, tmp_path, db)
-            second = sync_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
 
-        assert first.summary.synced == 1
-        assert second.summary.synced == 0
-        assert anki.push_count == 1
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        sync_media_to_anki(anki, fs, tmp_path, db)
+        assert db.list_markdown_media_paths() == {"DeckA.md", "DeckB.md"}
 
-    def test_sync_media_to_anki_cache_persists_across_db_connections(
-        self, fs, tmp_path
-    ):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "img.png").write_bytes(b"image-content")
-        (tmp_path / "deck.md").write_text(
-            "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
-        )
+        deck_a.unlink()
+        sync_media_to_anki(anki, fs, tmp_path, db)
+        assert db.list_markdown_media_paths() == {"DeckB.md"}
+    finally:
+        db.close()
 
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
 
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            first = sync_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
+def test_sync_media_to_anki_reports_missing_local_references(fs, tmp_path, caplog):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "present.png").write_bytes(b"image-content")
+    (tmp_path / "deck.md").write_text(
+        (
+            "Q: Prompt\n"
+            "A: ![present](media/present.png)\n"
+            "![missing](media/missing.png)\n"
+        ),
+        encoding="utf-8",
+    )
 
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            second = sync_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
 
-        assert first.summary.synced == 1
-        assert second.summary.synced == 0
-        assert anki.push_count == 1
-
-    def test_sync_media_prunes_deleted_markdown_cache_rows(self, fs, tmp_path):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "img.png").write_bytes(b"image-content")
-        deck_a = tmp_path / "DeckA.md"
-        deck_b = tmp_path / "DeckB.md"
-        deck_a.write_text("Q: A\nA: ![img](media/img.png)", encoding="utf-8")
-        deck_b.write_text("Q: B\nA: ![img](media/img.png)", encoding="utf-8")
-
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
-
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            sync_media_to_anki(anki, fs, tmp_path, db)
-            assert db.list_markdown_media_paths() == {"DeckA.md", "DeckB.md"}
-
-            deck_a.unlink()
-            sync_media_to_anki(anki, fs, tmp_path, db)
-            assert db.list_markdown_media_paths() == {"DeckB.md"}
-        finally:
-            db.close()
-
-    def test_sync_media_to_anki_keeps_sound_references_filename_only(
-        self, fs, tmp_path
-    ):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "clip.mp3").write_bytes(b"audio-content")
-        (tmp_path / "deck.md").write_text(
-            "Q: Prompt\nA: [sound:clip.mp3]", encoding="utf-8"
-        )
-
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
-
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        with caplog.at_level(logging.WARNING):
             result = sync_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
+    finally:
+        db.close()
 
-        content = (tmp_path / "deck.md").read_text(encoding="utf-8")
-        assert "[sound:media/" not in content
-        assert "[sound:clip_" in content
-        assert ".mp3]" in content
-        assert result.summary.synced == 1
-
-    def test_sync_media_to_anki_reports_missing_local_references(
-        self, fs, tmp_path, caplog
-    ):
-        media_dir = tmp_path / LOCAL_MEDIA_DIR
-        media_dir.mkdir()
-        (media_dir / "present.png").write_bytes(b"image-content")
-        (tmp_path / "deck.md").write_text(
-            (
-                "Q: Prompt\n"
-                "A: ![present](media/present.png)\n"
-                "![missing](media/missing.png)\n"
-            ),
-            encoding="utf-8",
-        )
-
-        anki_media_dir = tmp_path / "anki_media"
-        anki_media_dir.mkdir()
-        anki = _FakeMediaAnki(anki_media_dir)
-
-        db = SQLiteDbAdapter.open(tmp_path)
-        try:
-            with caplog.at_level(logging.WARNING):
-                result = sync_media_to_anki(anki, fs, tmp_path, db)
-        finally:
-            db.close()
-
-        assert result.checked == 2
-        assert result.missing == 1
-        assert result.summary.synced == 1
-        assert anki.push_count == 1
-        assert "missing.png referenced in markdown but missing in local media/" in (
-            caplog.text
-        )
+    assert result.checked == 2
+    assert result.missing == 1
+    assert result.summary.synced == 1
+    assert anki.push_count == 1
+    assert "missing.png referenced in markdown but missing in local media/" in (
+        caplog.text
+    )

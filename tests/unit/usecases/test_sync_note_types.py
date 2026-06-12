@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from ankiops.db import SQLiteDbAdapter
 from ankiops.models import Field, NoteTypeConfig
 from ankiops.sync_note_types import sync_note_types
@@ -21,42 +19,66 @@ def _qa_config(*, css: str) -> NoteTypeConfig:
     )
 
 
-def test_sync_note_types_uses_cache_when_unchanged(tmp_path):
-    fs = MagicMock()
-    fs.load_note_type_configs.return_value = [_qa_config(css=".card { color: black; }")]
+class _FakeFs:
+    def __init__(self, *config_sets):
+        self._config_sets = list(config_sets)
+        self.load_count = 0
 
-    anki = MagicMock()
-    anki.fetch_model_names.return_value = ["AnkiOpsQA"]
-    anki.fetch_model_states.return_value = {"AnkiOpsQA": {}}
+    def load_note_type_configs(self, _note_types_dir):
+        self.load_count += 1
+        if len(self._config_sets) == 1:
+            return self._config_sets[0]
+        return self._config_sets.pop(0)
+
+
+class _FakeAnkiModels:
+    def __init__(self):
+        self.state_fetches: list[list[str]] = []
+        self.updated: list[list[str]] = []
+        self.created: list[list[str]] = []
+
+    def fetch_model_names(self):
+        return ["AnkiOpsQA"]
+
+    def fetch_model_states(self, model_names):
+        self.state_fetches.append(list(model_names))
+        return {name: {} for name in model_names}
+
+    def update_models(self, models, _states):
+        self.updated.append([model.name for model in models])
+
+    def create_models(self, models):
+        self.created.append([model.name for model in models])
+
+
+def test_sync_note_types_uses_cache_when_unchanged(tmp_path):
+    fs = _FakeFs([_qa_config(css=".card { color: black; }")])
+    anki = _FakeAnkiModels()
 
     db = SQLiteDbAdapter.open(tmp_path)
     try:
         first = sync_note_types(anki, fs, tmp_path, db)
         assert first == "1 synced"
-        assert anki.fetch_model_states.call_count == 1
-        assert anki.update_models.call_count == 1
+        assert anki.state_fetches == [["AnkiOpsQA"]]
+        assert anki.updated == [["AnkiOpsQA"]]
 
-        anki.fetch_model_states.reset_mock()
-        anki.update_models.reset_mock()
+        anki.state_fetches.clear()
+        anki.updated.clear()
 
         second = sync_note_types(anki, fs, tmp_path, db)
         assert second == "1 up to date (cached)"
-        anki.fetch_model_states.assert_not_called()
-        anki.update_models.assert_not_called()
+        assert anki.state_fetches == []
+        assert anki.updated == []
     finally:
         db.close()
 
 
 def test_sync_note_types_cache_invalidates_on_local_change(tmp_path):
-    fs = MagicMock()
-    fs.load_note_type_configs.side_effect = [
+    fs = _FakeFs(
         [_qa_config(css=".card { color: black; }")],
         [_qa_config(css=".card { color: blue; }")],
-    ]
-
-    anki = MagicMock()
-    anki.fetch_model_names.return_value = ["AnkiOpsQA"]
-    anki.fetch_model_states.return_value = {"AnkiOpsQA": {}}
+    )
+    anki = _FakeAnkiModels()
 
     db = SQLiteDbAdapter.open(tmp_path)
     try:
@@ -67,18 +89,14 @@ def test_sync_note_types_cache_invalidates_on_local_change(tmp_path):
 
     assert first == "1 synced"
     assert second == "1 synced"
-    assert anki.fetch_model_states.call_count == 2
+    assert anki.state_fetches == [["AnkiOpsQA"], ["AnkiOpsQA"]]
 
 
 def test_sync_note_types_without_db_does_not_cache(tmp_path):
-    fs = MagicMock()
-    fs.load_note_type_configs.return_value = [_qa_config(css=".card { color: black; }")]
-
-    anki = MagicMock()
-    anki.fetch_model_names.return_value = ["AnkiOpsQA"]
-    anki.fetch_model_states.return_value = {"AnkiOpsQA": {}}
+    fs = _FakeFs([_qa_config(css=".card { color: black; }")])
+    anki = _FakeAnkiModels()
 
     sync_note_types(anki, fs, tmp_path, None)
     sync_note_types(anki, fs, tmp_path, None)
 
-    assert anki.fetch_model_states.call_count == 2
+    assert anki.state_fetches == [["AnkiOpsQA"], ["AnkiOpsQA"]]

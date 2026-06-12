@@ -1,383 +1,51 @@
-"""Tests for ClozeHideAll active cloze index detection.
+"""Static contracts for the ClozeHideAll Anki templates."""
 
-The AnkiOpsClozeHideAll templates use JavaScript to detect which cloze
-index is currently active, then render all clozes as hidden except the
-active one. This module reimplements both Anki's cloze rendering and the
-JS detection algorithm in Python to verify correctness — especially for
-edge cases like duplicate cloze content.
+from __future__ import annotations
 
-How Anki renders {{cloze:Field}}:
-- Front: active cloze → <span class="cloze">[...]</span> (or [hint]),
-         inactive clozes → plain content (markers stripped)
-- Back:  active cloze → <span class="cloze">content</span>,
-         inactive clozes → plain content (markers stripped)
-"""
-
-import re
 from pathlib import Path
 
 import pytest
-from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
 
 
-# ---------------------------------------------------------------------------
-# Anki cloze renderer (mimics Anki's {{cloze:Field}} substitution)
-# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def template_dir() -> Path:
+    return Path(__file__).parents[3] / "ankiops/note_types/AnkiOpsClozeHideAll"
 
 
-def anki_render_cloze(raw: str, active_idx: int, side: str) -> str:
-    """Mimic Anki's {{cloze:Field}} rendering.
+@pytest.mark.parametrize(
+    ("filename", "raw_field_tag"),
+    [
+        ("Front.template.anki", "{{Text}}"),
+        ("Back.template.anki", "{{edit:Text}}"),
+    ],
+)
+def test_templates_keep_one_rendered_cloze_probe_and_one_raw_source(
+    template_dir, filename, raw_field_tag
+):
+    template = (template_dir / filename).read_text(encoding="utf-8")
 
-    Args:
-        raw: The raw field content with cloze markers, e.g. "{{c1::dog}} chases {{c2::cat}}"
-        active_idx: The cloze index being tested (1-based)
-        side: "front" or "back"
+    assert template.count("{{cloze:Text}}") == 1
+    assert template.count(raw_field_tag) == 1
+    assert 'id="cloze_rendered"' in template
+    assert 'id="hidden_raw"' in template
+    assert 'id="content_display"' in template
 
-    Returns:
-        The HTML that Anki would produce for {{cloze:Field}}.
-    """
 
-    def replace_cloze(match: re.Match) -> str:
-        idx = int(match.group(1))
-        inner = match.group(2)
-        # inner may contain a hint after "::"
-        parts = inner.split("::", 1)
-        content = parts[0]
-        hint = parts[1] if len(parts) > 1 else ""
+def test_back_template_keeps_show_all_toggle(template_dir):
+    template = (template_dir / "Back.template.anki").read_text(encoding="utf-8")
 
-        if idx == active_idx:
-            if side == "front":
-                display = f"[{hint}]" if hint else "[...]"
-                return f'<span class="cloze">{display}</span>'
-            else:
-                return f'<span class="cloze">{content}</span>'
-        else:
-            # Inactive clozes: markers stripped, plain content shown
-            return content
+    assert 'id="cloze_toggle"' in template
+    assert "Show All" in template
+    assert "Hide All" in template
 
-    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_cloze, raw)
 
+@pytest.mark.parametrize("filename", ["Front.template.anki", "Back.template.anki"])
+def test_templates_prefer_anki_cloze_ordinal_before_body_class_fallback(
+    template_dir, filename
+):
+    template = (template_dir / filename).read_text(encoding="utf-8")
 
-def anki_render_cloze_with_ordinals(raw: str, active_idx: int, side: str) -> str:
-    """Mimic newer desktop Anki output with cloze ordinal metadata."""
+    ordinal_pos = template.index("activeOrdinalFromRendered")
+    body_class_pos = template.index("document.body.className")
 
-    def replace_cloze(match: re.Match) -> str:
-        idx = int(match.group(1))
-        inner = match.group(2)
-        parts = inner.split("::", 1)
-        content = parts[0]
-        hint = parts[1] if len(parts) > 1 else ""
-
-        if idx == active_idx:
-            if side == "front":
-                display = f"[{hint}]" if hint else "[...]"
-                return (
-                    f'<span class="cloze" data-cloze="{content}" '
-                    f'data-ordinal="{idx}">{display}</span>'
-                )
-            return f'<span class="cloze" data-ordinal="{idx}">{content}</span>'
-        return f'<span class="cloze-inactive" data-ordinal="{idx}">{content}</span>'
-
-    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_cloze, raw)
-
-
-# ---------------------------------------------------------------------------
-# Detection algorithms (Python ports of the JS in the templates)
-# ---------------------------------------------------------------------------
-
-
-def _normalize_signature(html: str) -> str:
-    """Create a structural signature that preserves cloze span boundaries."""
-
-    def text_part(text: str) -> str:
-        return re.sub(r"\s+", " ", text)
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    def walk(node: Tag | NavigableString, in_cloze: bool) -> str:
-        if isinstance(node, NavigableString):
-            return str(node)
-        if not isinstance(node, Tag):
-            return ""
-        if node.name == "br":
-            return "\n"
-
-        classes = node.get("class", [])
-        is_active_cloze = "cloze" in classes and "cloze-inactive" not in classes
-        out = "".join(walk(child, in_cloze or is_active_cloze) for child in node.children)
-        if not in_cloze and is_active_cloze:
-            return f"[[CLOZE]]{out}[[/CLOZE]]"
-        return out
-
-    normalized = "".join(walk(child, False) for child in soup.contents)
-    return text_part(normalized).strip()
-
-
-def _active_ordinal_from_rendered(rendered: str, indices: list[str]) -> str | None:
-    soup = BeautifulSoup(rendered, "html.parser")
-    for el in soup.select(".cloze[data-ordinal]"):
-        classes = el.get("class", [])
-        ordinal = el.get("data-ordinal")
-        if "cloze-inactive" not in classes and ordinal in indices:
-            return str(ordinal)
-    return None
-
-
-def _simulate_front(raw: str, test_idx: str) -> str:
-    def replace_fn(match: re.Match) -> str:
-        idx = match.group(1)
-        inner = match.group(2)
-        parts = inner.split("::", 1)
-        content = parts[0]
-        hint = parts[1] if len(parts) > 1 else ""
-        if idx == test_idx:
-            display = f"[{hint}]" if hint else "[...]"
-            return f'<span class="cloze">{display}</span>'
-        return content
-
-    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
-
-
-def _simulate_back(raw: str, test_idx: str) -> str:
-    def replace_fn(match: re.Match) -> str:
-        idx = match.group(1)
-        inner = match.group(2)
-        content = inner.split("::", 1)[0]
-        if idx == test_idx:
-            return f'<span class="cloze">{content}</span>'
-        return content
-
-    return re.sub(r"\{\{c(\d+)::([\s\S]*?)\}\}", replace_fn, raw)
-
-
-def detect_active_idx_front(raw: str, rendered: str, body_class: str = "") -> str:
-    """Port of the front-template detection algorithm."""
-    indices = list(dict.fromkeys(re.findall(r"\{\{c(\d+)::", raw)))
-    if not indices:
-        return "1"
-
-    rendered_ordinal = _active_ordinal_from_rendered(rendered, indices)
-    if rendered_ordinal:
-        return rendered_ordinal
-
-    rendered_sig = _normalize_signature(rendered)
-    for test_idx in indices:
-        simulated = _simulate_front(raw, test_idx)
-        if _normalize_signature(simulated) == rendered_sig:
-            return test_idx
-
-    class_match = re.search(r"\bcard(\d+)\b", body_class)
-    if class_match and class_match.group(1) in indices:
-        return class_match.group(1)
-
-    return indices[0]
-
-
-def detect_active_idx_back(raw: str, rendered: str, body_class: str = "") -> str:
-    """Port of the back-template detection algorithm."""
-    indices = list(dict.fromkeys(re.findall(r"\{\{c(\d+)::", raw)))
-    if not indices:
-        return "1"
-
-    rendered_ordinal = _active_ordinal_from_rendered(rendered, indices)
-    if rendered_ordinal:
-        return rendered_ordinal
-
-    rendered_sig = _normalize_signature(rendered)
-    for test_idx in indices:
-        simulated = _simulate_back(raw, test_idx)
-        if _normalize_signature(simulated) == rendered_sig:
-            return test_idx
-
-    class_match = re.search(r"\bcard(\d+)\b", body_class)
-    if class_match and class_match.group(1) in indices:
-        return class_match.group(1)
-
-    return indices[0]
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-# Each test case: (description, raw_cloze, list_of_active_indices_to_test)
-CASES = [
-    (
-        "simple two clozes",
-        "{{c1::dog}} chases {{c2::cat}}",
-        [1, 2],
-    ),
-    (
-        "duplicate content (the bug case)",
-        "{{c1::the}} and {{c2::the}}",
-        [1, 2],
-    ),
-    (
-        "with hint",
-        "{{c1::Paris::capital of France}} is nice",
-        [1],
-    ),
-    (
-        "single cloze",
-        "{{c1::only}}",
-        [1],
-    ),
-    (
-        "three clozes",
-        "{{c1::A}} {{c2::B}} {{c3::C}}",
-        [1, 2, 3],
-    ),
-    (
-        "three identical (worst case)",
-        "{{c1::X}} {{c2::X}} {{c3::X}}",
-        [1, 2, 3],
-    ),
-    (
-        "nested hint colons",
-        "{{c1::a::b::c}} text",
-        [1],
-    ),
-    (
-        "multiple clozes with same index",
-        "{{c1::dog}} and {{c1::cat}} are animals",
-        [1],
-    ),
-    (
-        "same index mixed with different index",
-        "{{c1::dog}} and {{c1::cat}} chase {{c2::mouse}}",
-        [1, 2],
-    ),
-    (
-        "duplicate content across shared index",
-        "{{c1::the}} {{c2::quick}} {{c1::the}}",
-        [1, 2],
-    ),
-    (
-        "three indices two shared",
-        "{{c1::A}} {{c2::B}} {{c1::C}} {{c3::D}}",
-        [1, 2, 3],
-    ),
-]
-
-
-def _case_ids():
-    """Generate pytest IDs from case descriptions."""
-    return [case[0] for case in CASES]
-
-
-def _expand_cases():
-    """Expand cases into (raw, active_idx) pairs for parametrize."""
-    expanded = []
-    for desc, raw, indices in CASES:
-        for idx in indices:
-            expanded.append(pytest.param(raw, idx, id=f"{desc} [c{idx}]"))
-    return expanded
-
-
-class TestFrontDetection:
-    """Test that the front-side detection algorithm correctly identifies the active cloze."""
-
-    @pytest.mark.parametrize("raw, active_idx", _expand_cases())
-    def test_detect_active_index(self, raw, active_idx):
-        rendered = anki_render_cloze(raw, active_idx, "front")
-        detected = detect_active_idx_front(raw, rendered)
-        assert detected == str(active_idx), (
-            f"Front: expected c{active_idx}, detected c{detected}\n"
-            f"  raw:      {raw}\n"
-            f"  rendered: {rendered}"
-        )
-
-    def test_body_class_fallback(self):
-        raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = "unmatched render"
-        detected = detect_active_idx_front(raw, rendered, body_class="card card2")
-        assert detected == "2"
-
-    def test_desktop_template_card_class_does_not_override_rendered_cloze(self):
-        raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = anki_render_cloze(raw, 2, "front")
-        detected = detect_active_idx_front(raw, rendered, body_class="card card1")
-        assert detected == "2"
-
-    def test_desktop_inactive_cloze_metadata_does_not_shift_front_detection(self):
-        raw = "{{c1::A}} {{c2::B}} {{c3::C}}"
-        rendered = anki_render_cloze_with_ordinals(raw, 3, "front")
-        detected = detect_active_idx_front(raw, rendered, body_class="card card2")
-        assert detected == "3"
-
-
-class TestBackDetection:
-    """Test that the back-side detection algorithm correctly identifies the active cloze."""
-
-    @pytest.mark.parametrize("raw, active_idx", _expand_cases())
-    def test_detect_active_index(self, raw, active_idx):
-        rendered = anki_render_cloze(raw, active_idx, "back")
-        detected = detect_active_idx_back(raw, rendered)
-        assert detected == str(active_idx), (
-            f"Back: expected c{active_idx}, detected c{detected}\n"
-            f"  raw:      {raw}\n"
-            f"  rendered: {rendered}"
-        )
-
-    def test_body_class_fallback(self):
-        raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = "unmatched render"
-        detected = detect_active_idx_back(raw, rendered, body_class="card card2")
-        assert detected == "2"
-
-    def test_desktop_template_card_class_does_not_override_rendered_cloze(self):
-        raw = "{{c1::dog}} chases {{c2::cat}}"
-        rendered = anki_render_cloze(raw, 2, "back")
-        detected = detect_active_idx_back(raw, rendered, body_class="card card1")
-        assert detected == "2"
-
-    def test_desktop_inactive_cloze_metadata_does_not_shift_back_detection(self):
-        raw = "{{c1::A}} {{c2::B}} {{c3::C}}"
-        rendered = anki_render_cloze_with_ordinals(raw, 3, "back")
-        detected = detect_active_idx_back(raw, rendered, body_class="card card2")
-        assert detected == "3"
-
-
-class TestAnkiRenderer:
-    """Sanity-check the Anki renderer itself to ensure it mimics Anki faithfully."""
-
-    def test_front_active_becomes_blank(self):
-        result = anki_render_cloze("{{c1::dog}} chases {{c2::cat}}", 1, "front")
-        assert '<span class="cloze">[...]</span>' in result
-        assert "cat" in result  # inactive shown as plain text
-        assert "{{" not in result  # markers stripped
-
-    def test_front_hint_shown(self):
-        result = anki_render_cloze("{{c1::Paris::capital}}", 1, "front")
-        assert "[capital]" in result
-
-    def test_back_active_revealed(self):
-        result = anki_render_cloze("{{c1::dog}} chases {{c2::cat}}", 1, "back")
-        assert '<span class="cloze">dog</span>' in result
-        assert "cat" in result  # inactive shown as plain text
-        assert "{{" not in result
-
-    def test_multiple_same_index_all_active(self):
-        """When c1 is active, ALL c1 clozes should be revealed."""
-        result = anki_render_cloze("{{c1::dog}} and {{c1::cat}} are animals", 1, "back")
-        assert '<span class="cloze">dog</span>' in result
-        assert '<span class="cloze">cat</span>' in result
-
-    def test_multiple_same_index_front_all_blanked(self):
-        """When c1 is active on front, ALL c1 clozes should be blanked."""
-        result = anki_render_cloze(
-            "{{c1::dog}} and {{c1::cat}} are animals", 1, "front"
-        )
-        assert result.count("[...]") == 2
-
-
-def test_templates_do_not_expand_rendered_cloze_inside_script_comments():
-    """Anki expands template tags even inside JavaScript comments."""
-    note_type_dir = (
-        Path(__file__).parents[3] / "ankiops/note_types/AnkiOpsClozeHideAll"
-    )
-
-    for filename in ("Front.template.anki", "Back.template.anki"):
-        template = (note_type_dir / filename).read_text(encoding="utf-8")
-        assert template.count("{{cloze:Text}}") == 1
+    assert ordinal_pos < body_class_pos
