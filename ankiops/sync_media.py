@@ -118,10 +118,11 @@ def _collect_referenced_media(
 
     if updates:
         db_port.upsert_markdown_media_cache(updates)
-    logger.debug(
-        f"Media refs cache: {cache_hits} hits, {cache_misses} misses "
-        f"across {len(md_files)} markdown files"
-    )
+    if md_files:
+        logger.debug(
+            f"Media refs cache: {cache_hits} hits, {cache_misses} misses "
+            f"across {len(md_files)} markdown files"
+        )
     return referenced
 
 
@@ -238,10 +239,11 @@ def hash_and_update_references(
     if fingerprint_removals:
         db_port.delete_media_state(fingerprint_removals)
 
-    logger.debug(
-        f"Media hash cache: {hash_cache_hits} hits, {hash_cache_misses} misses "
-        f"across {len(cache_candidates)} candidate files"
-    )
+    if cache_candidates:
+        logger.debug(
+            f"Media hash cache: {hash_cache_hits} hits, {hash_cache_misses} misses "
+            f"across {len(cache_candidates)} candidate files"
+        )
 
     # 3. Update Markdown files in bulk
     if rename_map:
@@ -395,7 +397,12 @@ def sync_media_to_anki(
     if removed_names:
         db_port.delete_media_state(removed_names)
 
-    logger.debug(f"Skipped {skipped_pushes} unchanged media pushes")
+    if skipped_pushes:
+        noun = "file" if skipped_pushes == 1 else "files"
+        logger.debug(
+            f"Media push cache: {skipped_pushes} unchanged media {noun} "
+            "already present in Anki"
+        )
     return result
 
 

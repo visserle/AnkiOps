@@ -7,13 +7,18 @@ from pathlib import Path
 
 from ankiops.config import LOCAL_MEDIA_DIR
 from ankiops.db import SQLiteDbAdapter
-from ankiops.sync_media import sync_all_media_to_anki, sync_media_to_anki
+from ankiops.sync_media import (
+    sync_all_media_from_anki,
+    sync_all_media_to_anki,
+    sync_media_to_anki,
+)
 
 
 class _FakeMediaAnki:
     def __init__(self, media_dir: Path):
         self._media_dir = media_dir
         self.push_count = 0
+        self.pull_count = 0
 
     def get_media_dir(self) -> Path:
         return self._media_dir
@@ -22,6 +27,15 @@ class _FakeMediaAnki:
         self.push_count += 1
         target = self._media_dir / remote_filename
         target.write_bytes(local_path.read_bytes())
+
+    def pull_media(self, remote_filename: str, local_path: Path) -> bool:
+        source = self._media_dir / remote_filename
+        if not source.exists():
+            return False
+        self.pull_count += 1
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(source.read_bytes())
+        return True
 
 
 def _sync_to_anki(fs, collection_dir: Path, anki: _FakeMediaAnki):
@@ -74,6 +88,32 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(fs, tmp_p
     )
 
 
+def test_sync_all_media_suppresses_empty_source_cache_debug(fs, tmp_path, caplog):
+    root_media = tmp_path / LOCAL_MEDIA_DIR
+    root_media.mkdir()
+    (root_media / "image.png").write_bytes(b"root image")
+    (tmp_path / "RootDeck.md").write_text(
+        "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
+    )
+    (tmp_path / "shared" / "owner" / "repo" / LOCAL_MEDIA_DIR).mkdir(parents=True)
+
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
+
+    db = SQLiteDbAdapter.open(tmp_path)
+    try:
+        with caplog.at_level(logging.DEBUG, logger="ankiops.sync_media"):
+            sync_all_media_to_anki(anki, fs, tmp_path, db)
+            sync_all_media_from_anki(anki, fs, tmp_path, db)
+    finally:
+        db.close()
+
+    assert "across 0 markdown files" not in caplog.text
+    assert "across 0 candidate files" not in caplog.text
+    assert "Skipped 0 unchanged media pushes" not in caplog.text
+
+
 def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(fs, tmp_path):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
@@ -108,7 +148,7 @@ def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(fs, tm
     assert "[sound:clip_" in content
 
 
-def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(fs, tmp_path):
+def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(fs, tmp_path, caplog):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "img.png").write_bytes(b"image-content")
@@ -123,13 +163,18 @@ def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(fs, tmp_path):
     db = SQLiteDbAdapter.open(tmp_path)
     try:
         first = sync_media_to_anki(anki, fs, tmp_path, db)
-        second = sync_media_to_anki(anki, fs, tmp_path, db)
+        with caplog.at_level(logging.DEBUG, logger="ankiops.sync_media"):
+            second = sync_media_to_anki(anki, fs, tmp_path, db)
     finally:
         db.close()
 
     assert first.summary.synced == 1
     assert second.summary.synced == 0
     assert anki.push_count == 1
+    assert "Media push cache: 1 unchanged media file already present in Anki" in (
+        caplog.text
+    )
+    assert "Skipped 1 unchanged media pushes" not in caplog.text
 
 
 def test_sync_media_to_anki_cache_persists_across_db_connections(fs, tmp_path):
