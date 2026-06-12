@@ -11,8 +11,10 @@ from ankiops.anki_client import AnkiConnectionError
 from ankiops.cli_anki import connect_or_exit
 from ankiops.collab import run as run_collab_impl
 from ankiops.config import (
+    LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
+    file_stem_to_deck_name,
     require_collection_dir,
 )
 from ankiops.db import SQLiteDbAdapter
@@ -31,7 +33,8 @@ from ankiops.log import clickable_path, configure_logging
 from ankiops.models import CollectionResult
 from ankiops.note_type_cli import run as run_note_type
 from ankiops.serializer import (
-    deserialize_from_file,
+    deserialize,
+    plan_deserialize_from_file,
     serialize_to_file,
 )
 from ankiops.sources import discover_sync_sources, load_configs_for_sources
@@ -72,6 +75,64 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
+def _has_collab_sources(collection_dir: Path) -> bool:
+    sources = discover_sync_sources(
+        collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    return any(source.is_collab for source in sources)
+
+
+def _snapshot_paths(
+    collection_dir: Path,
+    scoped_paths: list[Path],
+    *,
+    has_collab_scope: bool = False,
+) -> list[Path]:
+    if has_collab_scope or _has_collab_sources(collection_dir):
+        return [collection_dir]
+    return scoped_paths
+
+
+def _local_markdown_paths(collection_dir: Path) -> list[Path]:
+    return sorted(collection_dir.glob("*.md"))
+
+
+def _sync_export_snapshot_paths(collection_dir: Path) -> list[Path]:
+    paths = [*_local_markdown_paths(collection_dir), collection_dir / LOCAL_MEDIA_DIR]
+    return _snapshot_paths(collection_dir, paths)
+
+
+def _sync_import_snapshot_paths(collection_dir: Path) -> list[Path]:
+    paths = [
+        *_local_markdown_paths(collection_dir),
+        collection_dir / LOCAL_MEDIA_DIR,
+        collection_dir / NOTE_TYPES_DIR,
+    ]
+    return _snapshot_paths(collection_dir, paths)
+
+
+def _selected_local_markdown_paths(
+    collection_dir: Path,
+    *,
+    deck: str | None,
+    no_subdecks: bool,
+) -> list[Path]:
+    if not deck:
+        return _local_markdown_paths(collection_dir)
+
+    deck_filter = deck.strip()
+    subdeck_scope = f"{deck_filter}::"
+    selected = []
+    for md_file in _local_markdown_paths(collection_dir):
+        deck_name = file_stem_to_deck_name(md_file.stem)
+        if deck_name == deck_filter:
+            selected.append(md_file)
+        elif not no_subdecks and deck_name.startswith(subdeck_scope):
+            selected.append(md_file)
+    return selected
+
+
 def run_init(args):
     """Initialize the current directory as an AnkiOps collection."""
     anki = connect_or_exit()
@@ -98,7 +159,11 @@ def run_am(args):
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-export git snapshot")
-        git_snapshot(collection_dir, "export")
+        git_snapshot(
+            collection_dir,
+            action="export",
+            paths=_sync_export_snapshot_paths(collection_dir),
+        )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     fs = FileSystemAdapter()
@@ -184,7 +249,11 @@ def run_ma(args):
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-import git snapshot")
-        git_snapshot(collection_dir, "import")
+        git_snapshot(
+            collection_dir,
+            action="import",
+            paths=_sync_import_snapshot_paths(collection_dir),
+        )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
@@ -301,16 +370,30 @@ def run_deserialize(args):
         raise SystemExit(1)
 
     collection_dir = require_collection_dir()
+    deserialize_plan = plan_deserialize_from_file(
+        serialized_file,
+        collection_dir=collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
     if not args.no_auto_commit:
         logger.debug("Creating pre-deserialize git snapshot")
-        git_snapshot(collection_dir, "deserialize")
+        git_snapshot(
+            collection_dir,
+            action="deserializing",
+            paths=_snapshot_paths(
+                collection_dir,
+                deserialize_plan.target_paths,
+                has_collab_scope=deserialize_plan.has_collab_sources,
+            ),
+        )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-    deserialize_from_file(
-        serialized_file,
+    deserialize(
+        deserialize_plan.data,
         overwrite=args.overwrite,
         collection_dir=collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
 
 
@@ -324,7 +407,18 @@ def run_fix_image_widths(args):
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-image-width-fix git snapshot")
-        git_snapshot(collection_dir, "fix-image-widths")
+        git_snapshot(
+            collection_dir,
+            action="fixing image widths",
+            paths=_snapshot_paths(
+                collection_dir,
+                _selected_local_markdown_paths(
+                    collection_dir,
+                    deck=args.deck,
+                    no_subdecks=args.no_subdecks,
+                ),
+            ),
+        )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 

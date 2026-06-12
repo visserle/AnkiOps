@@ -1,5 +1,6 @@
 """CLI sync behavior tests."""
 
+import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from ankiops.cli import (
     run_serialize,
 )
 from ankiops.config import ANKIOPS_DB, deck_name_to_file_stem
+from ankiops.fs import FileSystemAdapter
 from ankiops.image_widths import ImageWidthFixResult
 from ankiops.models import (
     Change,
@@ -135,12 +137,20 @@ def test_run_ma_logs_import_errors_with_actionable_details(tmp_path, caplog):
 
 
 def test_run_ma_auto_commit_runs_before_media_sync(tmp_path):
+    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
     fake_anki = MagicMock()
     fake_anki.get_active_profile.return_value = "TestProfile"
     args = SimpleNamespace(no_auto_commit=False)
     order: list[str] = []
 
-    def _record_git(*_args, **_kwargs):
+    def _record_git(collection_dir, *, action, paths):
+        assert collection_dir == tmp_path
+        assert action == "import"
+        assert paths == [
+            tmp_path / "Deck.md",
+            tmp_path / "media",
+            tmp_path / "note_types",
+        ]
         order.append("git")
         return True
 
@@ -170,6 +180,33 @@ def test_run_ma_auto_commit_runs_before_media_sync(tmp_path):
         run_ma(args)
 
     assert order == ["git", "media", "note_types", "import"]
+
+
+def test_run_am_auto_commit_scopes_markdown_and_media(tmp_path):
+    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
+    fake_anki = MagicMock()
+    fake_anki.get_active_profile.return_value = "TestProfile"
+    args = SimpleNamespace(no_auto_commit=False)
+    media_result = SyncResult.for_media()
+
+    with (
+        patch("ankiops.cli.connect_or_exit", return_value=fake_anki),
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.SQLiteDbAdapter.open", return_value=MagicMock()),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch(
+            "ankiops.cli.export_collection",
+            return_value=CollectionResult.for_export(results=[], extra_changes=[]),
+        ),
+        patch("ankiops.cli.sync_media_from_anki", return_value=media_result),
+    ):
+        run_am(args)
+
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="export",
+        paths=[tmp_path / "Deck.md", tmp_path / "media"],
+    )
 
 
 def test_run_ma_logs_media_status_in_normal_mode(tmp_path, caplog):
@@ -392,8 +429,19 @@ def test_run_serialize_rejects_no_subdecks_without_deck(tmp_path):
 
 
 def test_run_deserialize_snapshots_by_default(tmp_path):
+    FileSystemAdapter().eject_builtin_note_types(tmp_path / "note_types")
+    (tmp_path / "Other.md").write_text("unrelated\n", encoding="utf-8")
     json_file = tmp_path / "in.json"
-    json_file.write_text('{"decks": []}', encoding="utf-8")
+    payload = {
+        "decks": [
+            {
+                "source": "local",
+                "name": "Target",
+                "notes": [],
+            }
+        ]
+    }
+    json_file.write_text(json.dumps(payload), encoding="utf-8")
     args = SimpleNamespace(
         input=str(json_file),
         overwrite=True,
@@ -403,15 +451,20 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     with (
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+        patch("ankiops.cli.deserialize") as deserialize_mock,
     ):
         run_deserialize(args)
 
-    snapshot_mock.assert_called_once_with(tmp_path, "deserialize")
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="deserializing",
+        paths=[tmp_path / "Target.md"],
+    )
     deserialize_mock.assert_called_once_with(
-        json_file,
+        payload,
         overwrite=True,
         collection_dir=tmp_path,
+        note_types_dir=tmp_path / "note_types",
     )
 
 
@@ -427,19 +480,23 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     with (
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.deserialize_from_file") as deserialize_mock,
+        patch("ankiops.cli.deserialize") as deserialize_mock,
     ):
         run_deserialize(args)
 
     snapshot_mock.assert_not_called()
     deserialize_mock.assert_called_once_with(
-        json_file,
+        {"decks": []},
         overwrite=False,
         collection_dir=tmp_path,
+        note_types_dir=tmp_path / "note_types",
     )
 
 
 def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
+    (tmp_path / "Parent.md").write_text("Q: old\nA: old\n", encoding="utf-8")
+    (tmp_path / "Parent__Child.md").write_text("Q: child\nA: child\n", encoding="utf-8")
+    (tmp_path / "Other.md").write_text("Q: other\nA: other\n", encoding="utf-8")
     args = SimpleNamespace(
         deck="Parent",
         no_subdecks=True,
@@ -466,7 +523,11 @@ def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
     ):
         run_fix_image_widths(args)
 
-    snapshot_mock.assert_called_once_with(tmp_path, "fix-image-widths")
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="fixing image widths",
+        paths=[tmp_path / "Parent.md"],
+    )
     fix_mock.assert_called_once_with(
         tmp_path,
         deck="Parent",
@@ -499,6 +560,34 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     snapshot_mock.assert_not_called()
     assert "Only Markdown files were edited" in caplog.text
     assert "ankiops ma" in caplog.text
+
+
+def test_run_fix_image_widths_uses_broad_snapshot_with_collab_sources(tmp_path):
+    (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
+    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
+    args = SimpleNamespace(
+        deck=None,
+        no_subdecks=False,
+        tolerance=5,
+        width=None,
+        no_auto_commit=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch(
+            "ankiops.cli.fix_image_widths_collection",
+            return_value=ImageWidthFixResult(),
+        ),
+    ):
+        run_fix_image_widths(args)
+
+    snapshot_mock.assert_called_once_with(
+        tmp_path,
+        action="fixing image widths",
+        paths=[tmp_path],
+    )
 
 
 def test_run_fix_image_widths_rejects_no_subdecks_without_deck(tmp_path):

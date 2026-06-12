@@ -49,6 +49,13 @@ class _ValidatedDeck:
     configs_by_name: dict[str, NoteTypeConfig]
 
 
+@dataclass(frozen=True)
+class DeserializationPlan:
+    data: dict[str, Any]
+    target_paths: list[Path]
+    has_collab_sources: bool
+
+
 def _source_name(source: SyncSource) -> str:
     return source.source_id or LOCAL_SOURCE_NAME
 
@@ -289,7 +296,7 @@ def deserialize(
     total_notes = 0
 
     for deck in decks:
-        output_path = deck.source.root / (deck_name_to_file_stem(deck.name) + ".md")
+        output_path = _deserialize_target_path(deck)
 
         lines = []
         written_notes = 0
@@ -352,6 +359,10 @@ def deserialize(
         logger.debug(summary_message)
     else:
         logger.info(summary_message)
+
+
+def _deserialize_target_path(deck: _ValidatedDeck) -> Path:
+    return deck.source.root / (deck_name_to_file_stem(deck.name) + ".md")
 
 
 def _validate_serialized_data(
@@ -526,6 +537,28 @@ def _validate_serialized_data(
     return validated
 
 
+def plan_deserialize_from_file(
+    json_file: Path,
+    *,
+    collection_dir: Path,
+    note_types_dir: Path,
+) -> DeserializationPlan:
+    with json_file.open("r", encoding="utf-8") as input_handle:
+        data = json.load(input_handle)
+
+    logger.debug(f"Importing serialized data from: {json_file}")
+    decks = _validate_serialized_data(
+        data,
+        collection_dir=collection_dir,
+        note_types_dir=note_types_dir,
+    )
+    return DeserializationPlan(
+        data=data,
+        target_paths=[_deserialize_target_path(deck) for deck in decks],
+        has_collab_sources=any(deck.source.is_collab for deck in decks),
+    )
+
+
 def deserialize_from_file(
     json_file: Path,
     overwrite: bool = False,
@@ -542,14 +575,15 @@ def deserialize_from_file(
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
     """
-    with json_file.open("r", encoding="utf-8") as input_handle:
-        data = json.load(input_handle)
-
-    logger.debug(f"Importing serialized data from: {json_file}")
     collection_dir = collection_dir or get_collection_dir()
     resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
+    plan = plan_deserialize_from_file(
+        json_file,
+        collection_dir=collection_dir,
+        note_types_dir=resolved_note_types_dir,
+    )
     deserialize(
-        data,
+        plan.data,
         collection_dir=collection_dir,
         note_types_dir=resolved_note_types_dir,
         overwrite=overwrite,

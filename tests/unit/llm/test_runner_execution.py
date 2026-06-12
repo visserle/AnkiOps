@@ -199,6 +199,91 @@ def test_executor_persists_successful_updates(
     assert persisted["data"]["decks"][0]["notes"][0]["tags"] == ["keep-me"]
 
 
+def test_executor_snapshots_queued_deck_paths(
+    tmp_path,
+    monkeypatch,
+    llm_qa_config,
+):
+    context = _context(llm_qa_config)
+    snapshot_calls = []
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
+
+    def fake_deserialize(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot",
+        lambda collection_dir, *, action, paths: snapshot_calls.append(
+            (collection_dir, action, paths)
+        )
+        or True,
+    )
+
+    asyncio.run(
+        LlmTaskExecutor(
+            collection_dir=tmp_path,
+            materialized_context=context,
+            no_auto_commit=False,
+        ).execute()
+    )
+
+    assert snapshot_calls == [
+        (tmp_path, "LLM task grammar", [tmp_path / "Deck.md"])
+    ]
+
+
+def test_executor_uses_broad_snapshot_when_collab_source_exists(
+    tmp_path,
+    monkeypatch,
+    llm_qa_config,
+):
+    context = _context(llm_qa_config)
+    snapshot_calls = []
+    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
+
+    def fake_deserialize(*_args, **_kwargs):
+        pass
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot",
+        lambda collection_dir, *, action, paths: snapshot_calls.append(
+            (collection_dir, action, paths)
+        )
+        or True,
+    )
+
+    asyncio.run(
+        LlmTaskExecutor(
+            collection_dir=tmp_path,
+            materialized_context=context,
+            no_auto_commit=False,
+        ).execute()
+    )
+
+    assert snapshot_calls == [(tmp_path, "LLM task grammar", [tmp_path])]
+
+
 def test_executor_persists_successful_tag_updates(
     tmp_path,
     monkeypatch,
