@@ -36,8 +36,42 @@ def test_corr_db_002_import_continues_after_db_recovery(world):
         assert len(world.mock_anki.notes) == 1
 
 
-def test_corr_db_003_schema_corruption_is_auto_recovered(tmp_path):
+def test_corr_db_003_import_rebuilds_mapping_from_embedded_key(world):
     """CORR-DB-003."""
+    note_key = "corr-import-rebind"
+    note_id = world.add_qa_note(
+        deck_name="RecoveredImportDeck",
+        question="Recover Q",
+        answer="Old A",
+        note_key=note_key,
+    )
+    world.write_qa_deck("RecoveredImportDeck", [("Recover Q", "New A", note_key)])
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, note_id)])
+
+    world.corrupt_db()
+
+    with world.db_session() as recovered:
+        assert recovered.resolve_note_ids([note_key]).get(note_key) is None
+
+        result = world.sync_import(recovered)
+
+        assert_summary(
+            result.summary, created=0, updated=1, moved=0, deleted=0, errors=0
+        )
+        assert len(world.mock_anki.notes) == 1
+        assert note_id in world.mock_anki.notes
+        assert (
+            world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "New A"
+        )
+        assert recovered.resolve_note_ids([note_key]).get(note_key) == note_id
+
+    assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
+
+
+def test_corr_db_004_schema_corruption_is_auto_recovered(tmp_path):
+    """CORR-DB-004."""
     db_path = tmp_path / ANKIOPS_DB
 
     conn = sqlite3.connect(db_path)

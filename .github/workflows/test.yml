@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,9 +28,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.10.7"
-
-      - name: Sync dependencies
-        run: uv sync --frozen
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
 
       - name: Run tests
-        run: uv run pytest tests/ -v
+        run: uv run --frozen pytest tests/ -v
