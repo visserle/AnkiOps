@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
-from ankiops.collab import run_contribute, run_publish
+from ankiops.collab import run_contribute, run_publish, run_status
 from ankiops.collab.commands import _parse_slug
 from ankiops.collab.hosting import ensure_publish_repo
 from ankiops.collab.publish import _unlink_published_source_files
@@ -93,6 +94,24 @@ def test_parse_slug_accepts_safe_owner_repo(slug, expected):
 def test_parse_slug_rejects_unsafe_owner_repo(slug):
     with pytest.raises(ValueError, match="Invalid GitHub repo slug"):
         _parse_slug(slug)
+
+
+def test_status_logs_clickable_paths_as_rich_markup(tmp_path, monkeypatch, caplog):
+    collab_root = tmp_path / "collab" / "[owner]" / "repo"
+    collab_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        "ankiops.collab.commands.require_collection_dir",
+        lambda: tmp_path,
+    )
+
+    with caplog.at_level(logging.INFO, logger="ankiops.collab.commands"):
+        run_status(SimpleNamespace())
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert getattr(record, "markup") is True
+    assert "collab/\\[owner]/repo" in record.getMessage()
+    assert f"[link={collab_root.resolve().as_uri()}]repo[/link]" in record.getMessage()
 
 
 def test_publish_unsynced_deck_moves_files_media_and_note_types(tmp_path, monkeypatch):
