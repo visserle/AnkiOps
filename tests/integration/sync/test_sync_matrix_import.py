@@ -6,7 +6,7 @@ import shutil
 
 import pytest
 
-from ankiops.fingerprints import note_fingerprint
+from ankiops.notes import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
@@ -441,7 +441,7 @@ def test_imp_run_update_002_cached_same_type_skip_avoids_markdown_render(
     def fail_to_html(*_args, **_kwargs):
         raise AssertionError("unexpected Markdown render on cached skip")
 
-    monkeypatch.setattr("ankiops.import_notes._to_html", fail_to_html)
+    monkeypatch.setattr("ankiops.sync.to_anki_deck._to_html", fail_to_html)
 
     with world.db_session() as db:
         db.upsert_note_links([(note_key, note_id)])

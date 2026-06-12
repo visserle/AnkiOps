@@ -6,13 +6,13 @@ import sqlite3
 
 import pytest
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.db import SQLiteDbAdapter
+from ankiops.collection import ANKIOPS_DB
+from ankiops.sync.state import SyncState
 
 
 @pytest.fixture
 def db(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         yield adapter
     finally:
@@ -36,7 +36,7 @@ def test_load_empty(db):
 
 
 def test_persistence(tmp_path):
-    db1 = SQLiteDbAdapter.open(tmp_path)
+    db1 = SyncState.open(tmp_path)
     try:
         db1.upsert_deck("TestDeck", 100)
         db1.upsert_note_links([("note-1", 200)])
@@ -45,7 +45,7 @@ def test_persistence(tmp_path):
     finally:
         db1.close()
 
-    db2 = SQLiteDbAdapter.open(tmp_path)
+    db2 = SyncState.open(tmp_path)
     try:
         assert db2.resolve_deck_id("TestDeck") == 100
         assert db2.resolve_deck_name(100) == "TestDeck"
@@ -118,7 +118,7 @@ def test_generate_note_key(db):
 
 
 def test_corruption_recovery(tmp_path):
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.upsert_note_links([("n1", 100)])
     finally:
@@ -128,7 +128,7 @@ def test_corruption_recovery(tmp_path):
     assert db_path.exists()
     db_path.write_text("corrupt data", encoding="utf-8")
 
-    recovered = SQLiteDbAdapter.open(tmp_path)
+    recovered = SyncState.open(tmp_path)
     try:
         assert recovered.resolve_note_ids(["n1"]).get("n1") is None
         assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
@@ -137,7 +137,7 @@ def test_corruption_recovery(tmp_path):
 
 
 def test_remove_note_by_id(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         assert adapter.resolve_note_ids(["k1"]).get("k1") == 101
@@ -151,7 +151,7 @@ def test_remove_note_by_id(tmp_path):
 
 
 def test_delete_deck(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_deck("Deck::Sub", 42)
         assert adapter.resolve_deck_id("Deck::Sub") == 42
@@ -165,7 +165,7 @@ def test_delete_deck(tmp_path):
 
 
 def test_same_id_reassignment_replaces_old_key(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("old-key", 500)])
         adapter.upsert_note_links([("new-key", 500)])
@@ -178,7 +178,7 @@ def test_same_id_reassignment_replaces_old_key(tmp_path):
 
 
 def test_bulk_note_mapping_roundtrip(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102), ("k3", 103)])
 
@@ -195,7 +195,7 @@ def test_bulk_note_mapping_roundtrip(tmp_path):
 
 
 def test_bulk_note_mapping_last_write_wins(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links(
             [
@@ -217,7 +217,7 @@ def test_bulk_note_mapping_last_write_wins(tmp_path):
 
 
 def test_transaction_rolls_back_on_error(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(RuntimeError):
             with adapter.write_tx():
@@ -230,7 +230,7 @@ def test_transaction_rolls_back_on_error(tmp_path):
 
 
 def test_bulk_import_note_fingerprints_roundtrip(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102)])
         adapter.upsert_import_hashes(
@@ -248,7 +248,7 @@ def test_bulk_import_note_fingerprints_roundtrip(tmp_path):
 
 
 def test_bulk_export_note_fingerprints_roundtrip(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102)])
         adapter.upsert_export_hashes(
@@ -266,7 +266,7 @@ def test_bulk_export_note_fingerprints_roundtrip(tmp_path):
 
 
 def test_import_note_fingerprints_last_write_wins(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         adapter.upsert_import_hashes(
@@ -281,7 +281,7 @@ def test_import_note_fingerprints_last_write_wins(tmp_path):
 
 
 def test_export_note_fingerprints_last_write_wins(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         adapter.upsert_export_hashes(
@@ -296,7 +296,7 @@ def test_export_note_fingerprints_last_write_wins(tmp_path):
 
 
 def test_remove_note_by_note_key_removes_directional_fingerprints(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         adapter.upsert_import_hashes([("k1", "imd", "ia")])
@@ -311,7 +311,7 @@ def test_remove_note_by_note_key_removes_directional_fingerprints(tmp_path):
 
 
 def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
             adapter.upsert_import_hashes([("stale", "md2", "a2")])
@@ -320,7 +320,7 @@ def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path):
 
 
 def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
             adapter.upsert_export_hashes([("stale", "md2", "a2")])
@@ -329,7 +329,7 @@ def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
 
 
 def test_clear_import_hashes_does_not_clear_export_hashes(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
@@ -344,7 +344,7 @@ def test_clear_import_hashes_does_not_clear_export_hashes(tmp_path):
 
 
 def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
         adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
@@ -359,7 +359,7 @@ def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
 
 
 def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_markdown_media_cache([("Deck.md", 10, 200, {"a.png", "b.png"})])
         assert adapter.resolve_markdown_media_cache(["Deck.md"]) == {
@@ -378,7 +378,7 @@ def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
 
 
 def test_prune_markdown_media_cache_removes_stale_paths(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_markdown_media_cache(
             [
@@ -398,7 +398,7 @@ def test_prune_markdown_media_cache_removes_stale_paths(tmp_path):
 
 
 def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_media_fingerprints(
             [
@@ -413,7 +413,7 @@ def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
             "b.png": (300, 1002, "d3", "b_d3.png"),
         }
 
-        adapter.delete_media_state(["a.png"])
+        adapter.delete_media_files(["a.png"])
         assert adapter.resolve_media_fingerprints(["a.png", "b.png"]) == {
             "b.png": (300, 1002, "d3", "b_d3.png")
         }
@@ -422,7 +422,7 @@ def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
 
 
 def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
-    adapter = SQLiteDbAdapter.open(tmp_path)
+    adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_media_fingerprints(
             [

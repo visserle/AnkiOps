@@ -2,11 +2,11 @@
 
 import pytest
 
-from ankiops.models import Note
+from ankiops.notes import Note
 
 
 class TestParseChoiceBlock:
-    """Test FileSystemAdapter.read_markdown_file with AnkiOpsChoice blocks."""
+    """Test DeckFileHarness.read_deck_file with AnkiOpsChoice blocks."""
 
     def test_choice_with_note_id(self, fs, tmp_path):
         md = tmp_path / "deck.md"
@@ -17,7 +17,7 @@ class TestParseChoiceBlock:
             "C2: Paris\n"
             "A: 1"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsChoice"
@@ -29,7 +29,7 @@ class TestParseChoiceBlock:
     def test_choice_without_id_detected_from_label(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nC1: A\nC2: B\nA: 2")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_type == "AnkiOpsChoice"
 
@@ -41,7 +41,7 @@ class TestParseChoiceBlock:
             "A: 3\n"
             "E: Extra info"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_type == "AnkiOpsChoice"
         assert (
@@ -279,19 +279,19 @@ class TestParseChoiceEdgeCases:
         """Multiline questions should be parsed correctly."""
         md = tmp_path / "deck.md"
         md.write_text("Q: First line\nSecond line\nC1: A\nC2: B\nA: 1")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert "First line" in note.fields["Question"]
         assert "Second line" in note.fields["Question"]
 
 
 class TestParseClozeBlock:
-    """Test FileSystemAdapter.read_markdown_file with AnkiOpsCloze blocks."""
+    """Test DeckFileHarness.read_deck_file with AnkiOpsCloze blocks."""
 
     def test_cloze_with_note_id(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("<!-- note_key: key-1 -->\nT: This is a {{c1::cloze}} deletion")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsCloze"
@@ -300,19 +300,19 @@ class TestParseClozeBlock:
     def test_cloze_without_id_detected_from_label(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("T: This is {{c1::a test}}")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         assert result.notes[0].note_type == "AnkiOpsCloze"
 
     def test_cloze_with_hint(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("T: The {{c1::sun::star}} is bright")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         assert "{{c1::sun::star}}" in result.notes[0].fields["Text"]
 
     def test_cloze_all_fields(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("T: {{c1::text}}\nE: extra info")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.fields["Text"] == "{{c1::text}}"
         assert note.fields["Extra"] == "extra info"
@@ -324,7 +324,7 @@ class TestParseClozeBlock:
             ValueError,
             match=r"Unknown field label 'RANDOMLABEL:'.* \(file: deck\.md, line: 1\)",
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
     def test_duplicate_field_reports_exact_line(self, fs, tmp_path):
         md = tmp_path / "deck.md"
@@ -333,16 +333,16 @@ class TestParseClozeBlock:
             ValueError,
             match=r"Duplicate field 'Q:'.* \(file: deck\.md, line: 2\)",
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
 
 class TestParseQABlock:
-    """Test FileSystemAdapter.read_markdown_file with AnkiOpsQA blocks."""
+    """Test DeckFileHarness.read_deck_file with AnkiOpsQA blocks."""
 
     def test_qa_with_note_id(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("<!-- note_key: key-1 -->\nQ: What is 2+2?\nA: 4")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsQA"
@@ -352,7 +352,7 @@ class TestParseQABlock:
     def test_qa_without_id(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nA: Answer")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key is None
         assert note.note_type == "AnkiOpsQA"
@@ -360,7 +360,7 @@ class TestParseQABlock:
     def test_qa_with_extra(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: Question\nA: Answer\nE: Extra notes")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.fields["Extra"] == "Extra notes"
 
@@ -371,7 +371,7 @@ class TestParseQABlock:
             ValueError,
             match=r"AnkiOpsQA note must not contain cloze syntax",
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
     def test_note_type_inference_error_uses_basename_without_context_root(
         self, fs, tmp_path
@@ -385,7 +385,7 @@ class TestParseQABlock:
                 r"\(file: broken-note\.md, line: 1\)"
             ),
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
     def test_note_type_inference_error_uses_relative_path_with_context_root(
         self, fs, tmp_path
@@ -401,7 +401,7 @@ class TestParseQABlock:
                 r"\(file: nested/broken-note\.md, line: 1\)"
             ),
         ):
-            fs.read_markdown_file(md, context_root=tmp_path)
+            fs.read_deck_file(md, context_root=tmp_path)
 
     def test_note_type_inference_line_ignores_note_key_comment(self, fs, tmp_path):
         md = tmp_path / "broken-note.md"
@@ -413,7 +413,7 @@ class TestParseQABlock:
                 r"\(file: broken-note\.md, line: 2\)"
             ),
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
     def test_qa_with_note_type_metadata_uses_explicit_type(self, fs, tmp_path):
         md = tmp_path / "deck.md"
@@ -423,7 +423,7 @@ class TestParseQABlock:
             "Q: What?\n"
             "A: Answer"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsQA"
@@ -438,7 +438,7 @@ class TestParseQABlock:
         )
 
         with pytest.raises(ValueError, match="Unknown note type 'StaleType'"):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
     def test_qa_with_tags_metadata(self, fs, tmp_path):
         md = tmp_path / "deck.md"
@@ -448,7 +448,7 @@ class TestParseQABlock:
             "Q: What?\n"
             "A: Answer"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.tags == ("high-yield", "topic::subtopic", "z")
@@ -458,7 +458,7 @@ class TestParseQABlock:
         md.write_text(
             "<!-- tags: anatomy -->\n<!-- note_key: key-1 -->\nQ: What?\nA: Answer"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_key == "key-1"
         assert note.tags == ("anatomy",)
@@ -473,14 +473,14 @@ class TestParseQABlock:
             "Q: Without tags\n"
             "A: Answer"
         )
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         assert result.notes[0].tags == ()
         assert result.notes[1].tags == ()
 
     def test_tags_comment_inside_code_block_is_field_content(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nA:\n```\n<!-- tags: not-metadata -->\n```")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.tags == ()
         assert "<!-- tags: not-metadata -->" in note.fields["Answer"]
@@ -492,7 +492,7 @@ class TestMultiNoteFile:
     def test_two_notes(self, fs, tmp_path):
         md = tmp_path / "deck.md"
         md.write_text("Q: Q1\nA: A1\n\n---\n\nQ: Q2\nA: A2")
-        result = fs.read_markdown_file(md)
+        result = fs.read_deck_file(md)
         assert len(result.notes) == 2
         assert result.notes[0].fields["Question"] == "Q1"
         assert result.notes[1].fields["Question"] == "Q2"
@@ -507,7 +507,7 @@ class TestMultiNoteFile:
                 r"\(file: deck\.md, line: 6\)"
             ),
         ):
-            fs.read_markdown_file(md)
+            fs.read_deck_file(md)
 
 
 class TestNoteInference:

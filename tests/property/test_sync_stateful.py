@@ -11,13 +11,13 @@ from unittest.mock import patch
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from ankiops.anki import AnkiAdapter
-from ankiops.config import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
-from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import export_collection
-from ankiops.fs import FileSystemAdapter
-from ankiops.import_notes import import_collection
+from ankiops.anki import Anki
+from ankiops.collection import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.sync.from_anki import sync_collection_from_anki
+from ankiops.sync.state import SyncState
+from ankiops.sync.to_anki import sync_collection_to_anki
 from tests.support.assertions import assert_unique
+from tests.support.deck_files import DeckFileHarness
 from tests.support.fake_anki import MockAnki
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
@@ -63,9 +63,8 @@ def _assert_db_bijection(db_path: Path) -> None:
 
 def _sync_import(anki, fs, db, collection_dir: Path):
     note_types_dir = collection_dir / NOTE_TYPES_DIR
-    return import_collection(
+    return sync_collection_to_anki(
         anki_port=anki,
-        fs_port=fs,
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
@@ -74,9 +73,8 @@ def _sync_import(anki, fs, db, collection_dir: Path):
 
 def _sync_export(anki, fs, db, collection_dir: Path):
     note_types_dir = collection_dir / NOTE_TYPES_DIR
-    return export_collection(
+    return sync_collection_from_anki(
         anki_port=anki,
-        fs_port=fs,
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
@@ -108,19 +106,19 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
         deck_file = collection_dir / f"{deck_name_to_file_stem('StatefulDeck')}.md"
 
         mock_anki = MockAnki()
-        anki = AnkiAdapter()
-        fs = FileSystemAdapter()
+        anki = Anki()
+        fs = DeckFileHarness()
         note_types_dir = collection_dir / NOTE_TYPES_DIR
         if not note_types_dir.exists():
-            fs.eject_builtin_note_types(note_types_dir)
-        fs.set_configs(fs.load_note_type_configs(note_types_dir))
-        db = SQLiteDbAdapter.open(collection_dir)
+            fs.eject_default_note_types(note_types_dir)
+        fs.set_note_types(fs.load_note_types(note_types_dir))
+        db = SyncState.open(collection_dir)
 
         question_idx = 0
 
         try:
             with (
-                patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
+                patch("ankiops.anki_rpc.invoke", side_effect=mock_anki.invoke),
                 patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
             ):
                 for step, op in enumerate(ops):

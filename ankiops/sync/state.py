@@ -1,4 +1,4 @@
-"""SQLite DB adapter for AnkiOps state and cache metadata."""
+"""Persistent state remembered between sync runs."""
 
 import json
 import logging
@@ -8,8 +8,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.db_schema import DB_SCHEMA
+from ankiops.collection import ANKIOPS_DB
+from ankiops.sync.state_schema import DB_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,8 @@ def _normalize_sql(sql: str) -> str:
     return " ".join(sql.split()).lower()
 
 
-class SQLiteDbAdapter:
-    """SQLite adapter for note/deck identity, sync cache, and media cache state."""
+class SyncState:
+    """Persistent note/deck identity, sync cache, and media cache state."""
 
     def __init__(self, conn: sqlite3.Connection, db_path: Path):
         self._conn = conn
@@ -27,7 +27,7 @@ class SQLiteDbAdapter:
         self._tx_depth = 0
 
     @classmethod
-    def open(cls, collection_dir: Path) -> "SQLiteDbAdapter":
+    def open(cls, collection_dir: Path) -> "SyncState":
         db_path = collection_dir / ANKIOPS_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -94,7 +94,7 @@ class SQLiteDbAdapter:
                 )
                 conn.execute(
                     "SELECT name, mtime_ns, size, digest, hashed_name, pushed_digest "
-                    "FROM media_state LIMIT 0"
+                    "FROM media_files LIMIT 0"
                 )
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
@@ -537,7 +537,7 @@ class SQLiteDbAdapter:
         self.delete_markdown_media_cache(stale)
         return len(stale)
 
-    # -- Media state --------------------------------------------------------
+    # -- Media files --------------------------------------------------------
 
     def resolve_media_fingerprints(
         self, names: Iterable[str]
@@ -551,7 +551,7 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT name, mtime_ns, size, digest, hashed_name "
-                f"FROM media_state WHERE name IN ({placeholders})",
+                f"FROM media_files WHERE name IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
             out.update(
@@ -579,7 +579,7 @@ class SQLiteDbAdapter:
         deduped.reverse()
 
         self._executemany(
-            "INSERT INTO media_state "
+            "INSERT INTO media_files "
             "(name, mtime_ns, size, digest, hashed_name, pushed_digest) "
             "VALUES (?, ?, ?, ?, ?, NULL) "
             "ON CONFLICT(name) DO UPDATE SET "
@@ -590,7 +590,7 @@ class SQLiteDbAdapter:
             deduped,
         )
 
-    def delete_media_state(self, names: Iterable[str]) -> None:
+    def delete_media_files(self, names: Iterable[str]) -> None:
         name_list = list(names)
         if not name_list:
             return
@@ -599,7 +599,7 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    f"DELETE FROM media_state WHERE name IN ({placeholders})",
+                    f"DELETE FROM media_files WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )
             )
@@ -615,7 +615,7 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT name, pushed_digest "
-                f"FROM media_state WHERE name IN ({placeholders}) "
+                f"FROM media_files WHERE name IN ({placeholders}) "
                 "AND pushed_digest IS NOT NULL",
                 tuple(chunk),
             ).fetchall()
@@ -639,7 +639,7 @@ class SQLiteDbAdapter:
         with self.write_tx():
             for name, digest in deduped:
                 cursor = self._conn.execute(
-                    "UPDATE media_state SET pushed_digest = ? WHERE name = ?",
+                    "UPDATE media_files SET pushed_digest = ? WHERE name = ?",
                     (digest, name),
                 )
                 if cursor.rowcount == 0:
@@ -656,7 +656,7 @@ class SQLiteDbAdapter:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    "UPDATE media_state SET pushed_digest = NULL "
+                    "UPDATE media_files SET pushed_digest = NULL "
                     f"WHERE name IN ({placeholders})",
                     tuple(chunk),
                 )

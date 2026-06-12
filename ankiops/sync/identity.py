@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from ankiops.models import ANKIOPS_KEY_FIELD, AnkiNote
+from ankiops.note_types import ANKIOPS_KEY_FIELD
+from ankiops.notes import AnkiNote
 
 
 class AnkiIdentityPort(Protocol):

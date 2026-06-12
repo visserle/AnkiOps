@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.fs import FileSystemAdapter
-from ankiops.markdown_format import NOTE_SEPARATOR
+from ankiops.markdown import NOTE_SEPARATOR
+from tests.support.deck_files import DeckFileHarness
 
 
 def _setup_shared_root(world):
     shared_root = world.root / "shared" / "owner" / "repo"
-    FileSystemAdapter().eject_builtin_note_types(shared_root / "note_types")
+    DeckFileHarness().eject_default_note_types(shared_root / "note_types")
     shared_root.mkdir(parents=True, exist_ok=True)
     return shared_root
 

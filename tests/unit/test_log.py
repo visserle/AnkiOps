@@ -2,7 +2,7 @@ import io
 import logging
 import sys
 
-from ankiops.log import clickable_path, configure_logging
+from ankiops.console import clickable_path, configure_logging
 
 
 def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):

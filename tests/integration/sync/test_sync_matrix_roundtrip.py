@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.fingerprints import note_fingerprint
+from ankiops.collection import ANKIOPS_DB
+from ankiops.notes import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
@@ -107,7 +107,7 @@ def test_rt_run_update_003_directional_cache_isolation(world):
 
         # Export should ignore import cache and use only export cache.
         world.set_note_answer(note_id, "Iso A1")
-        local_md_note = world.fs.read_markdown_file(deck_path).notes[0]
+        local_md_note = world.fs.read_deck_file(deck_path).notes[0]
         local_md_hash = note_fingerprint(local_md_note.note_type, local_md_note.fields)
         observed_anki_fields = {
             name: field_data["value"]
@@ -126,7 +126,7 @@ def test_rt_run_update_003_directional_cache_isolation(world):
         # Import should ignore export cache and use only import cache.
         updated_md = world.read_deck("RoundTripCacheIso").replace("Iso A1", "Iso A2")
         deck_path.write_text(updated_md, encoding="utf-8")
-        edited_md_note = world.fs.read_markdown_file(deck_path).notes[0]
+        edited_md_note = world.fs.read_deck_file(deck_path).notes[0]
         edited_md_hash = note_fingerprint(
             edited_md_note.note_type, edited_md_note.fields
         )

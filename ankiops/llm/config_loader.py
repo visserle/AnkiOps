@@ -9,8 +9,8 @@ from typing import Any
 import yaml
 from yaml.nodes import ScalarNode
 
-from ankiops.config import LLM_DIR
-from ankiops.models import NoteTypeConfig
+from ankiops.collection import LLM_DIR
+from ankiops.note_types import NoteType
 
 from .model_registry import (
     MODEL_REGISTRY_FILE_NAME,
@@ -98,7 +98,7 @@ def is_task_config_file(path: Path) -> bool:
 def load_llm_task_catalog(
     collection_dir: Path,
     *,
-    note_type_configs: list[NoteTypeConfig],
+    note_type_configs: list[NoteType],
 ) -> TaskCatalog:
     llm_dir = collection_dir / LLM_DIR
     tasks_by_name: dict[str, TaskConfig] = {}
@@ -144,7 +144,7 @@ def load_llm_task_catalog(
 def _parse_task(
     path: Path,
     *,
-    note_type_configs: list[NoteTypeConfig],
+    note_type_configs: list[NoteType],
     llm_dir: Path,
     model_registry: ModelRegistry,
 ) -> TaskConfig:
@@ -269,7 +269,7 @@ def _resolve_relative_file(
 def _parse_field_rules(
     value: Any,
     *,
-    note_type_configs: list[NoteTypeConfig],
+    note_type_configs: list[NoteType],
     path: Path,
 ) -> tuple[FieldAccess, list[FieldAccessRule]]:
     if value is None:

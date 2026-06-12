@@ -20,12 +20,12 @@ from openai.types.responses import (
     ResponseOutputRefusal,
 )
 
-from ankiops.config import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
 from ankiops.git import git_snapshot
-from ankiops.models import ANKIOPS_KEY_FIELD, Note, NoteTypeConfig
-from ankiops.serializer import deserialize, serialize
-from ankiops.sources import discover_sync_sources, load_configs_for_sources
-from ankiops.tags import normalize_tags
+from ankiops.interchange import deserialize, serialize
+from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
+from ankiops.notes import Note, normalize_tags
 
 from .config_loader import is_task_config_file, load_llm_task_catalog
 from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
@@ -65,7 +65,7 @@ class ProgressReporter(Protocol):
 @dataclass(frozen=True)
 class MaterializedTaskContext:
     task: TaskConfig
-    note_type_configs: dict[str, NoteTypeConfig]
+    note_type_configs: dict[str, NoteType]
     serialized_data: dict[str, Any]
     discovery_snapshot: DiscoverySnapshot
 
@@ -87,7 +87,7 @@ class OpenAIResult:
 @dataclass(frozen=True)
 class EligibleBatch:
     note_type: str
-    note_type_config: NoteTypeConfig
+    note_type_config: NoteType
     candidates: tuple[EligibleCandidate, ...]
 
     @property
@@ -620,15 +620,15 @@ def _load_task(
     *,
     collection_dir: Path,
     task_name: str,
-) -> tuple[TaskConfig, dict[str, NoteTypeConfig]]:
-    sources = discover_sync_sources(
+) -> tuple[TaskConfig, dict[str, NoteType]]:
+    sources = discover_deck_sources(
         collection_dir,
         note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
     note_type_configs = [
         config
-        for source_config in load_configs_for_sources(sources)
-        for config in source_config.configs
+        for source_config in load_note_types_for_sources(sources)
+        for config in source_config.note_types
     ]
     catalog = load_llm_task_catalog(
         collection_dir,
@@ -662,7 +662,7 @@ def _llm_snapshot_paths(
     collection_dir: Path,
     task_context: MaterializedTaskContext,
 ) -> list[Path]:
-    sources = discover_sync_sources(
+    sources = discover_deck_sources(
         collection_dir,
         note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
@@ -690,7 +690,7 @@ def _discover_candidates(
     *,
     data: dict[str, Any],
     task: TaskConfig,
-    note_type_configs: dict[str, NoteTypeConfig],
+    note_type_configs: dict[str, NoteType],
 ) -> DiscoverySnapshot:
     decks = data.get("decks")
     if not isinstance(decks, list):
@@ -756,7 +756,7 @@ def _discover_note(
     deck_name: str,
     ordinal: int,
     note: dict[str, Any],
-    note_type_configs: dict[str, NoteTypeConfig],
+    note_type_configs: dict[str, NoteType],
 ) -> DiscoveryItem:
     note_key = note.get("note_key")
     note_type_name = note.get("note_type")
@@ -1346,7 +1346,7 @@ def _apply_candidate_updates(
 
 def _validate_cloze_text_fields(
     note: Note,
-    config: NoteTypeConfig,
+    config: NoteType,
 ) -> list[str]:
     if not config.is_cloze:
         return []
@@ -1362,7 +1362,7 @@ def _validate_cloze_text_fields(
     return errors
 
 
-def _cloze_template_field_names(config: NoteTypeConfig) -> set[str]:
+def _cloze_template_field_names(config: NoteType) -> set[str]:
     """Find the actualname of the cloze field used in the cloze template."""
     cloze_template_field_pattern = re.compile(
         r"\{\{\s*(?:[A-Za-z]+:)*cloze:([^}]+?)\s*\}\}",
@@ -1427,7 +1427,7 @@ def _build_progress_state(
 def _build_task_plan_result(
     *,
     task: TaskConfig,
-    note_type_configs: dict[str, NoteTypeConfig],
+    note_type_configs: dict[str, NoteType],
     snapshot: DiscoverySnapshot,
 ) -> TaskPlanResult:
     eligible_items = [
@@ -1495,7 +1495,7 @@ def _build_task_plan_result(
 def _build_plan_field_surface(
     *,
     task: TaskConfig,
-    note_type_configs: dict[str, NoteTypeConfig],
+    note_type_configs: dict[str, NoteType],
     snapshot_items: list[DiscoveryItem],
 ) -> list[PlanFieldSurface]:
     observed = {

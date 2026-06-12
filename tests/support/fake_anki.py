@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ankiops.anki_client import AnkiConnectionError
-from ankiops.tags import normalize_tags
+from ankiops.anki_rpc import AnkiConnectionError
+from ankiops.notes import normalize_tags
 
 
 class MockAnki:

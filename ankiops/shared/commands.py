@@ -8,18 +8,18 @@ from pathlib import Path
 
 from rich.markup import escape as rich_escape
 
-from ankiops.config import require_collection_dir
-from ankiops.fs import FileSystemAdapter
+from ankiops.collection import require_collection_dir
+from ankiops.console import clickable_path
+from ankiops.deck_sources import (
+    DeckSource,
+    deck_files_for_source,
+    discover_deck_sources,
+    load_note_types_for_source,
+)
 from ankiops.git import CollectionGit
-from ankiops.log import clickable_path
+from ankiops.markdown import read_deck_file
 from ankiops.shared.create import create_shared_deck
 from ankiops.shared.hosting import open_pr_if_possible
-from ankiops.sources import (
-    SyncSource,
-    discover_sync_sources,
-    load_configs_for_source,
-    markdown_files_for_source,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -64,19 +64,17 @@ def _validate_slug_part(
         )
 
 
-def _source_for_slug(collection_dir: Path, slug: str) -> SyncSource:
+def _source_for_slug(collection_dir: Path, slug: str) -> DeckSource:
     owner, repo = _parse_slug(slug)
-    return SyncSource.shared(collection_dir, owner, repo)
+    return DeckSource.shared(collection_dir, owner, repo)
 
 
-def _ensure_submittable_note_keys(source: SyncSource) -> None:
-    configs = load_configs_for_source(source)
-    parser = FileSystemAdapter()
-    parser.set_configs(configs)
+def _ensure_submittable_note_keys(source: DeckSource) -> None:
+    configs = load_note_types_for_source(source)
     missing: list[str] = []
 
-    for md_file in markdown_files_for_source(source):
-        parsed = parser.read_markdown_file(md_file, context_root=source.root)
+    for md_file in deck_files_for_source(source):
+        parsed = read_deck_file(md_file, note_types=configs, context_root=source.root)
         for index, note in enumerate(parsed.notes, start=1):
             if not note.note_key:
                 missing.append(f"{md_file.relative_to(source.root)} note {index}")
@@ -129,7 +127,7 @@ def run_update(args) -> None:
     if args.repo:
         requested_source = _source_for_slug(collection_dir, args.repo)
     repo.ensure_repo("Shared commands require a git-backed collection.")
-    sources = discover_sync_sources(collection_dir)
+    sources = discover_deck_sources(collection_dir)
     if requested_source is not None:
         if not requested_source.root.exists():
             raise ValueError(f"Unknown shared source: {requested_source.source_id}")
@@ -163,7 +161,7 @@ def run_submit(args) -> None:
 def run_list(args) -> None:
     collection_dir = require_collection_dir()
     sources = [
-        source for source in discover_sync_sources(collection_dir) if source.is_shared
+        source for source in discover_deck_sources(collection_dir) if source.is_shared
     ]
     if not sources:
         logger.info("No shared sources found.")

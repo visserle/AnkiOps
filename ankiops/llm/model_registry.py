@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from ankiops.config import LLM_DIR
+from ankiops.collection import LLM_DIR
 
 SYSTEM_PROMPT_FILE_NAME = "_system_prompt.md"
 MODEL_REGISTRY_FILE_NAME = "_models.yaml"

@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.config import NOTE_TYPES_DIR, get_collection_dir
-from ankiops.fs import FileSystemAdapter
+from ankiops.collection import NOTE_TYPES_DIR, get_collection_dir
+from tests.support.deck_files import DeckFileHarness
 from tests.support.fake_anki import MockAnki
 from tests.support.sync_world import SyncWorld
 
@@ -30,24 +30,22 @@ def ensure_default_note_types_dir():
     """Bootstrap note type configs for tests in clean checkouts (e.g. CI)."""
     note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
     if not note_types_dir.exists():
-        FileSystemAdapter().eject_builtin_note_types(note_types_dir)
+        DeckFileHarness().eject_default_note_types(note_types_dir)
 
 
 @pytest.fixture(scope="session")
 def fs():
-    """FileSystemAdapter pre-loaded with built-in note types (shared across tests)."""
-    adapter = FileSystemAdapter()
+    """DeckFileHarness pre-loaded with built-in note types (shared across tests)."""
+    adapter = DeckFileHarness()
     note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
-    adapter.set_configs(adapter.load_note_type_configs(note_types_dir))
+    adapter.set_note_types(adapter.load_note_types(note_types_dir))
     return adapter
 
 
 @pytest.fixture(scope="session")
 def choice_config(fs):
     """AnkiOpsChoice config for validation tests."""
-    return next(
-        config for config in fs._note_type_configs if config.name == "AnkiOpsChoice"
-    )
+    return next(config for config in fs._note_types if config.name == "AnkiOpsChoice")
 
 
 @pytest.fixture
@@ -59,7 +57,7 @@ def mock_anki() -> MockAnki:
 def run_ankiops(mock_anki):
     """Patch both Anki invoke entry points with the stateful fake backend."""
     with (
-        patch("ankiops.anki_client.invoke", side_effect=mock_anki.invoke),
+        patch("ankiops.anki_rpc.invoke", side_effect=mock_anki.invoke),
         patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
     ):
         yield

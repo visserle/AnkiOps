@@ -5,27 +5,27 @@ from __future__ import annotations
 import re
 from contextlib import contextmanager
 
-from ankiops.anki import AnkiAdapter
-from ankiops.config import NOTE_TYPES_DIR, deck_name_to_file_stem
-from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import export_collection
-from ankiops.fs import FileSystemAdapter
-from ankiops.import_notes import import_collection
+from ankiops.anki import Anki
+from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.sync.from_anki import sync_collection_from_anki
+from ankiops.sync.state import SyncState
+from ankiops.sync.to_anki import sync_collection_to_anki
 from tests.support.assertions import assert_summary
+from tests.support.deck_files import DeckFileHarness
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
 
 @contextmanager
 def _ports(collection_dir, *, preload_configs: bool):
-    anki = AnkiAdapter()
-    fs = FileSystemAdapter()
+    anki = Anki()
+    fs = DeckFileHarness()
     note_types_dir = collection_dir / NOTE_TYPES_DIR
     if not note_types_dir.exists():
-        fs.eject_builtin_note_types(note_types_dir)
+        fs.eject_default_note_types(note_types_dir)
     if preload_configs:
-        fs.set_configs(fs.load_note_type_configs(note_types_dir))
-    db = SQLiteDbAdapter.open(collection_dir)
+        fs.set_note_types(fs.load_note_types(note_types_dir))
+    db = SyncState.open(collection_dir)
     try:
         yield anki, fs, db, note_types_dir
     finally:
@@ -39,9 +39,8 @@ def _run_import(collection_dir, *, preload_configs: bool = True):
         db,
         note_types_dir,
     ):
-        return import_collection(
+        return sync_collection_to_anki(
             anki_port=anki,
-            fs_port=fs,
             db_port=db,
             collection_dir=collection_dir,
             note_types_dir=note_types_dir,
@@ -55,9 +54,8 @@ def _run_export(collection_dir, *, preload_configs: bool = False):
         db,
         note_types_dir,
     ):
-        return export_collection(
+        return sync_collection_from_anki(
             anki_port=anki,
-            fs_port=fs,
             db_port=db,
             collection_dir=collection_dir,
             note_types_dir=note_types_dir,
@@ -196,7 +194,7 @@ def test_export_existing_keeps_markdown_order(tmp_path, mock_anki, run_ankiops):
         encoding="utf-8",
     )
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.upsert_note_links([("run-k-1", 1001)])
         db.upsert_note_links([("run-k-2", 1002)])
@@ -267,7 +265,7 @@ def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_a
         encoding="utf-8",
     )
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.upsert_note_links([("append-k-1", 1001)])
         db.upsert_note_links([("append-k-2", 1002)])
@@ -380,7 +378,7 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
         fields={"Question": "OldQ", "Answer": "OldA", "AnkiOps Key": ""},
     )
 
-    db_setup = SQLiteDbAdapter.open(tmp_path)
+    db_setup = SyncState.open(tmp_path)
     try:
         db_setup.upsert_note_links([(note_key, note_id)])
     finally:

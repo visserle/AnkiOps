@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.models import AnkiNote
-from ankiops.note_identity import (
+from ankiops.notes import AnkiNote
+from ankiops.sync.identity import (
     assert_unique_export_note_keys,
     resolve_import_note_identity,
 )
@@ -31,8 +31,7 @@ class FakeAnkiIdentity:
     ) -> dict[str, list[int]]:
         self.key_field_lookup_calls.append(set(note_keys))
         return {
-            note_key: self.note_ids_by_key.get(note_key, [])
-            for note_key in note_keys
+            note_key: self.note_ids_by_key.get(note_key, []) for note_key in note_keys
         }
 
     def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]:

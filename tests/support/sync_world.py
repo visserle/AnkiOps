@@ -9,21 +9,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ankiops.anki import AnkiAdapter
-from ankiops.cli import run_am as run_cli_am
-from ankiops.cli import run_ma as run_cli_ma
-from ankiops.config import (
+from ankiops.anki import Anki
+from ankiops.cli_commands import run_am as run_cli_am
+from ankiops.cli_commands import run_ma as run_cli_ma
+from ankiops.collection import (
     ANKIOPS_DB,
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
 )
-from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import export_collection
-from ankiops.fs import FileSystemAdapter
-from ankiops.import_notes import import_collection
-from ankiops.markdown_format import NOTE_SEPARATOR
-from ankiops.tags import format_tags_comment
+from ankiops.markdown import NOTE_SEPARATOR, format_tags_comment
+from ankiops.sync.from_anki import sync_collection_from_anki
+from ankiops.sync.state import SyncState
+from ankiops.sync.to_anki import sync_collection_to_anki
+from tests.support.deck_files import DeckFileHarness
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
@@ -34,19 +33,19 @@ class SyncWorld:
     def __init__(self, root: Path, mock_anki):
         self.root = root
         self.mock_anki = mock_anki
-        self.anki = AnkiAdapter()
+        self.anki = Anki()
         self.note_types_dir = self.root / NOTE_TYPES_DIR
         self.mock_anki.media_dir = self.root / "anki_media"
         self.mock_anki.media_dir.mkdir(parents=True, exist_ok=True)
 
-        fs = FileSystemAdapter()
+        fs = DeckFileHarness()
         if not self.note_types_dir.exists():
-            fs.eject_builtin_note_types(self.note_types_dir)
-        fs.set_configs(fs.load_note_type_configs(self.note_types_dir))
+            fs.eject_default_note_types(self.note_types_dir)
+        fs.set_note_types(fs.load_note_types(self.note_types_dir))
         self.fs = fs
 
-    def open_db(self) -> SQLiteDbAdapter:
-        return SQLiteDbAdapter.open(self.root)
+    def open_db(self) -> SyncState:
+        return SyncState.open(self.root)
 
     def db_for_state(
         self,
@@ -54,7 +53,7 @@ class SyncWorld:
         *,
         note_map: dict[str, int] | None = None,
         deck_map: dict[str, int] | None = None,
-    ) -> SQLiteDbAdapter:
+    ) -> SyncState:
         db = self.open_db()
 
         if state in {"RUN", "CORR"}:
@@ -85,47 +84,51 @@ class SyncWorld:
         finally:
             db.close()
 
-    def sync_import(self, db: SQLiteDbAdapter):
-        return import_collection(
+    def sync_import(self, db: SyncState):
+        return sync_collection_to_anki(
             anki_port=self.anki,
-            fs_port=self.fs,
             db_port=db,
             collection_dir=self.root,
             note_types_dir=self.note_types_dir,
         )
 
-    def sync_export(self, db: SQLiteDbAdapter):
-        return export_collection(
+    def sync_export(self, db: SyncState):
+        return sync_collection_from_anki(
             anki_port=self.anki,
-            fs_port=self.fs,
             db_port=db,
             collection_dir=self.root,
             note_types_dir=self.note_types_dir,
         )
 
-    def sync_media_to_anki(self, db: SQLiteDbAdapter):
-        from ankiops.sync_media import sync_all_media_to_anki
+    def sync_media_to_anki(self, db: SyncState):
+        from ankiops.media import sync_all_media_to_anki
 
-        return sync_all_media_to_anki(self.anki, self.fs, self.root, db)
+        return sync_all_media_to_anki(self.anki, self.root, db)
 
-    def sync_media_from_anki(self, db: SQLiteDbAdapter):
-        from ankiops.sync_media import sync_all_media_from_anki
+    def sync_media_from_anki(self, db: SyncState):
+        from ankiops.media import sync_all_media_from_anki
 
-        return sync_all_media_from_anki(self.anki, self.fs, self.root, db)
+        return sync_all_media_from_anki(self.anki, self.root, db)
 
     def run_ma(self, *, no_auto_commit: bool = True) -> None:
         args = SimpleNamespace(no_auto_commit=no_auto_commit)
         with (
-            patch("ankiops.cli.connect_or_exit", return_value=self.anki),
-            patch("ankiops.cli.require_collection_dir", return_value=self.root),
+            patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
+            patch(
+                "ankiops.cli_commands.require_collection_dir",
+                return_value=self.root,
+            ),
         ):
             run_cli_ma(args)
 
     def run_am(self, *, no_auto_commit: bool = True) -> None:
         args = SimpleNamespace(no_auto_commit=no_auto_commit)
         with (
-            patch("ankiops.cli.connect_or_exit", return_value=self.anki),
-            patch("ankiops.cli.require_collection_dir", return_value=self.root),
+            patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
+            patch(
+                "ankiops.cli_commands.require_collection_dir",
+                return_value=self.root,
+            ),
         ):
             run_cli_am(args)
 
@@ -153,7 +156,7 @@ class SyncWorld:
         source_root = self.root / "shared" / owner / repo
         source_note_types = source_root / NOTE_TYPES_DIR
         if not source_note_types.exists():
-            FileSystemAdapter().eject_builtin_note_types(source_note_types)
+            DeckFileHarness().eject_default_note_types(source_note_types)
         path = source_root / f"{deck_name_to_file_stem(deck_name)}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         suffix = "\n" if content and not content.endswith("\n") else ""

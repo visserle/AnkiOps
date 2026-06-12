@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.html_converter import HTMLToMarkdown
-from ankiops.markdown_converter import MarkdownToHTML
+from ankiops.html_to_markdown import HTMLToMarkdown
+from ankiops.markdown_to_html import MarkdownToHTML
 
 
 @pytest.fixture

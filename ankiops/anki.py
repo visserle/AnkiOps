@@ -4,14 +4,10 @@ import logging
 import shutil
 from pathlib import Path
 
-from ankiops.anki_client import AnkiConnectionError, invoke
-from ankiops.models import (
-    ANKIOPS_KEY_FIELD,
-    AnkiNote,
-    Change,
-    NoteTypeConfig,
-)
-from ankiops.tags import normalize_tags
+from ankiops.anki_rpc import AnkiConnectionError, invoke
+from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
+from ankiops.notes import AnkiNote, normalize_tags
+from ankiops.sync.report import Change
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +56,7 @@ def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str
     )
 
 
-class AnkiAdapter:
+class Anki:
     """Adapter for Anki's local HTTP connection."""
 
     def __init__(self) -> None:
@@ -131,14 +127,14 @@ class AnkiAdapter:
         return notes_by_id
 
     # Models are Anki's note types
-    def fetch_model_names(self) -> list[str]:
+    def fetch_note_type_names(self) -> list[str]:
         return invoke("modelNames")
 
-    def fetch_model_states(self, model_names: list[str]) -> dict[str, dict]:
-        if not model_names:
+    def fetch_note_type_states(self, note_type_names: list[str]) -> dict[str, dict]:
+        if not note_type_names:
             return {}
         read_actions = []
-        for name in model_names:
+        for name in note_type_names:
             read_actions.append(_action("modelFieldNames", modelName=name))
             read_actions.append(_action("modelStyling", modelName=name))
             read_actions.append(_action("modelTemplates", modelName=name))
@@ -147,7 +143,7 @@ class AnkiAdapter:
 
         read_results = invoke("multi", actions=read_actions)
         states = {}
-        for model_index, name in enumerate(model_names):
+        for model_index, name in enumerate(note_type_names):
             base = model_index * 5
             field_names = read_results[base]
             styling = _normalize_model_styling_payload(
@@ -165,11 +161,11 @@ class AnkiAdapter:
             }
         return states
 
-    def create_models(self, models: list[NoteTypeConfig]) -> None:
-        if not models:
+    def create_note_types(self, note_types: list[NoteType]) -> None:
+        if not note_types:
             return
         actions = []
-        for model_config in models:
+        for model_config in note_types:
             fields = [field.name for field in model_config.fields]
             actions.append(
                 _action(
@@ -212,13 +208,13 @@ class AnkiAdapter:
         if errors:
             raise AnkiConnectionError(f"Failed to create models: {errors}")
 
-    def update_models(
-        self, models: list[NoteTypeConfig], states: dict[str, dict]
+    def update_note_types(
+        self, note_types: list[NoteType], states: dict[str, dict]
     ) -> None:
-        if not models:
+        if not note_types:
             return
         actions = []
-        for model_config in models:
+        for model_config in note_types:
             state = states[model_config.name]
             expected_fields = [field.name for field in model_config.fields]
             current_fields = state["fields"]

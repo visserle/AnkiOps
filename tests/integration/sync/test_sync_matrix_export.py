@@ -6,9 +6,9 @@ import logging
 
 import pytest
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fingerprints import note_fingerprint
+from ankiops.collection import ANKIOPS_DB
+from ankiops.notes import note_fingerprint
+from ankiops.sync.state import SyncState
 from tests.support.assertions import assert_summary
 
 
@@ -158,9 +158,9 @@ def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(world):
     )
     world.write_qa_deck("MetadataBackfillDeck", [("Q0", "A0", note_key)])
 
-    local_note = world.fs.read_markdown_file(
-        world.deck_path("MetadataBackfillDeck")
-    ).notes[0]
+    local_note = world.fs.read_deck_file(world.deck_path("MetadataBackfillDeck")).notes[
+        0
+    ]
     local_md_hash = note_fingerprint(
         local_note.note_type,
         local_note.fields,
@@ -370,7 +370,7 @@ def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_dele
     assert orphan_file.exists()
 
     with world.db_session() as db:
-        with caplog.at_level(logging.DEBUG, logger="ankiops.export_notes"):
+        with caplog.at_level(logging.DEBUG, logger="ankiops.sync.from_anki"):
             result = world.sync_export(db)
 
     assert not orphan_file.exists()
@@ -528,7 +528,7 @@ def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
         note_key="embedded-good-key",
     )
 
-    db = SQLiteDbAdapter.open(world.root)
+    db = SyncState.open(world.root)
     try:
         db.upsert_note_links([("stale-wrong-key", note_id)])
 

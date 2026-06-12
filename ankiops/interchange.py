@@ -8,24 +8,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ankiops.config import (
+from ankiops.collection import (
     ANKIOPS_DB,
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
     get_collection_dir,
 )
-from ankiops.fs import FileSystemAdapter
-from ankiops.log import clickable_path
-from ankiops.markdown_format import format_note_key_comment, format_note_type_comment
-from ankiops.models import MarkdownFile, NoteTypeConfig
-from ankiops.sources import (
-    SyncSource,
-    discover_sync_sources,
-    load_configs_for_source,
-    markdown_files_for_source,
+from ankiops.console import clickable_path
+from ankiops.deck_sources import (
+    DeckSource,
+    deck_files_for_source,
+    discover_deck_sources,
+    load_note_types_for_source,
 )
-from ankiops.tags import format_tags_comment, normalize_tags
+from ankiops.markdown import (
+    DeckFile,
+    format_note_key_comment,
+    format_note_type_comment,
+    format_tags_comment,
+    read_deck_file,
+)
+from ankiops.note_types import NoteType
+from ankiops.notes import normalize_tags
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +39,20 @@ LOCAL_SOURCE_NAME = "local"
 
 @dataclass(frozen=True)
 class _ParsedDeck:
-    source: SyncSource
+    source: DeckSource
     source_name: str
     path: Path
     deck_name: str
-    parsed: MarkdownFile
+    parsed: DeckFile
 
 
 @dataclass(frozen=True)
 class _ValidatedDeck:
-    source: SyncSource
+    source: DeckSource
     source_name: str
     name: str
     notes: list[dict[str, Any]]
-    configs_by_name: dict[str, NoteTypeConfig]
+    note_types_by_name: dict[str, NoteType]
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,7 @@ class DeserializationPlan:
     has_shared_sources: bool
 
 
-def _source_name(source: SyncSource) -> str:
+def _source_name(source: DeckSource) -> str:
     return source.source_id or LOCAL_SOURCE_NAME
 
 
@@ -73,7 +78,7 @@ def serialize(
     if not db_path.exists():
         raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
 
-    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
     parsed_decks = _parse_sources(collection_dir, sources)
     _validate_parsed_decks(parsed_decks)
 
@@ -135,16 +140,18 @@ def serialize(
 
 def _parse_sources(
     collection_dir: Path,
-    sources: list[SyncSource],
+    sources: list[DeckSource],
 ) -> list[_ParsedDeck]:
     parsed_decks: list[_ParsedDeck] = []
     for source in sources:
-        fs = FileSystemAdapter()
-        configs = load_configs_for_source(source)
-        fs.set_configs(configs)
-        for md_file in markdown_files_for_source(source):
+        configs = load_note_types_for_source(source)
+        for md_file in deck_files_for_source(source):
             try:
-                parsed = fs.read_markdown_file(md_file, context_root=source.root)
+                parsed = read_deck_file(
+                    md_file,
+                    note_types=configs,
+                    context_root=source.root,
+                )
             except Exception as error:
                 display = _display_source_path(collection_dir, source, md_file)
                 raise ValueError(f"Error parsing {display}: {error}") from error
@@ -205,7 +212,7 @@ def _validate_parsed_decks(parsed_decks: list[_ParsedDeck]) -> None:
         raise ValueError("Cannot serialize collection:\n- " + "\n- ".join(errors))
 
 
-def _display_source_path(collection_dir: Path, source: SyncSource, path: Path) -> str:
+def _display_source_path(collection_dir: Path, source: DeckSource, path: Path) -> str:
     try:
         relative = path.resolve().relative_to(source.root.resolve())
     except ValueError:
@@ -343,7 +350,7 @@ def _write_validated_decks(
             note_type = str(note["note_type"])
             fields = note["fields"]
             tags = normalize_tags(note["tags"])
-            config = deck.configs_by_name[note_type]
+            config = deck.note_types_by_name[note_type]
 
             if note_key is not None:
                 lines.append(format_note_key_comment(note_key))
@@ -416,9 +423,9 @@ def _validate_serialized_data(
     if not isinstance(raw_decks, list):
         raise ValueError("Serialized data must contain a top-level 'decks' list")
 
-    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
     source_by_name = {_source_name(source): source for source in sources}
-    configs_by_source: dict[str, dict[str, NoteTypeConfig]] = {}
+    configs_by_source: dict[str, dict[str, NoteType]] = {}
     referenced_sources = {
         deck.get("source")
         for deck in raw_decks
@@ -429,7 +436,7 @@ def _validate_serialized_data(
         if source is None:
             continue
         try:
-            configs = load_configs_for_source(source)
+            configs = load_note_types_for_source(source)
         except Exception as error:
             errors.append(
                 f"Source '{source_name}' note_types/ cannot be loaded: {error}"
@@ -563,7 +570,7 @@ def _validate_serialized_data(
                     source_name=source_name,
                     name=deck_name,
                     notes=notes,
-                    configs_by_name=configs,
+                    note_types_by_name=configs,
                 )
             )
 

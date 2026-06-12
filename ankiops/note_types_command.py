@@ -8,12 +8,10 @@ import yaml
 from rich import get_console as rich_get_console
 from rich.table import Table
 
-from ankiops.cli_anki import connect_or_exit
-from ankiops.config import NOTE_TYPES_DIR, require_collection_dir
-from ankiops.fs import FileSystemAdapter
-from ankiops.log import clickable_path
-from ankiops.markdown_format import FIELD_LABEL_NAME_RE
-from ankiops.models import Field, NoteTypeConfig
+from ankiops.collection import NOTE_TYPES_DIR, require_collection_dir
+from ankiops.console import clickable_path, connect_or_exit
+from ankiops.markdown import FIELD_LABEL_NAME_RE
+from ankiops.note_types import NoteField, NoteType, load_note_types
 
 logger = logging.getLogger(__name__)
 _TABLE_MAX_WIDTH = 120
@@ -85,7 +83,7 @@ def _new_table(headers: list[str], rows: list[list[str]]) -> Table:
 
 
 def _build_global_label_constraints(
-    note_type_configs: list[NoteTypeConfig],
+    note_type_configs: list[NoteType],
 ) -> tuple[dict[str, str], dict[str, bool]]:
     label_to_field_name: dict[str, str] = {}
     label_to_identifying: dict[str, bool] = {}
@@ -120,7 +118,7 @@ def _validate_global_label_reuse(
         )
 
 
-def _log_note_type_label_info(note_type_configs: list[NoteTypeConfig]) -> None:
+def _log_note_type_label_info(note_type_configs: list[NoteType]) -> None:
     console = rich_get_console()
     sorted_configs = sorted(note_type_configs, key=lambda config_item: config_item.name)
 
@@ -256,9 +254,8 @@ def run(args) -> None:
     if action == "list":
         collection_dir = require_collection_dir()
         note_types_dir = collection_dir / NOTE_TYPES_DIR
-        fs = FileSystemAdapter()
         try:
-            note_type_configs = fs.load_note_type_configs(note_types_dir)
+            note_type_configs = load_note_types(note_types_dir)
         except ValueError as error:
             logger.error(str(error))
             raise SystemExit(1) from error
@@ -275,7 +272,6 @@ def run(args) -> None:
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
     note_types_dir = collection_dir / NOTE_TYPES_DIR
-    fs = FileSystemAdapter()
 
     destination_dir = note_types_dir / note_type_name
     if destination_dir.exists():
@@ -285,7 +281,7 @@ def run(args) -> None:
         )
         raise SystemExit(1)
 
-    model_names = set(anki.fetch_model_names())
+    model_names = set(anki.fetch_note_type_names())
     if note_type_name not in model_names:
         available = ", ".join(sorted(model_names)) or "(none)"
         logger.error(
@@ -293,7 +289,7 @@ def run(args) -> None:
         )
         raise SystemExit(1)
 
-    state = anki.fetch_model_states([note_type_name]).get(note_type_name)
+    state = anki.fetch_note_type_states([note_type_name]).get(note_type_name)
     if state is None:
         logger.error(f"Could not fetch note type state for '{note_type_name}'.")
         raise SystemExit(1)
@@ -307,7 +303,7 @@ def run(args) -> None:
         raise SystemExit(1) from error
 
     try:
-        existing_configs = fs.load_note_type_configs(note_types_dir)
+        existing_configs = load_note_types(note_types_dir)
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error
@@ -337,7 +333,9 @@ def run(args) -> None:
             used_labels.add(label)
             label_to_field_name[label] = field_name
             label_to_identifying[label] = identifying
-            fields.append(Field(name=field_name, label=label, identifying=identifying))
+            fields.append(
+                NoteField(name=field_name, label=label, identifying=identifying)
+            )
             break
 
     templates = state["templates"]
@@ -347,7 +345,7 @@ def run(args) -> None:
         for template_data in templates.values()
         for template_side in ("Front", "Back")
     )
-    candidate_config = NoteTypeConfig(
+    candidate_config = NoteType(
         name=note_type_name,
         fields=fields,
         css=styling_css,
@@ -364,7 +362,7 @@ def run(args) -> None:
     )
 
     try:
-        NoteTypeConfig.validate_configs([*existing_configs, candidate_config])
+        NoteType.validate_configs([*existing_configs, candidate_config])
     except ValueError as error:
         logger.error(f"Invalid note type configuration: {error}")
         raise SystemExit(1) from error

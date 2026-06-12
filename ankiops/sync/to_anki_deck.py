@@ -1,57 +1,42 @@
-"""Use Case: Import Markdown Notes into Anki."""
+"""Per-deck Markdown-to-Anki sync engine."""
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
-from ankiops.anki import AnkiAdapter
-from ankiops.config import file_stem_to_deck_name
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fingerprints import note_fingerprint
-from ankiops.fs import FileSystemAdapter
-from ankiops.markdown_format import (
+from ankiops.anki import Anki
+from ankiops.collection import file_stem_to_deck_name
+from ankiops.markdown import (
     NOTE_SEPARATOR,
+    DeckFile,
     format_note_key_comment,
     format_note_type_comment,
     is_code_fence_line,
     is_note_type_comment,
     parse_note_key_comment,
+    parse_tags_comment,
+    write_deck_file,
 )
-from ankiops.models import (
-    ANKIOPS_KEY_FIELD,
+from ankiops.markdown_to_html import MarkdownToHTML
+from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
+from ankiops.notes import (
     AnkiNote,
+    Note,
+    note_fingerprint,
+)
+from ankiops.sync.report import (
     Change,
     ChangeType,
-    CollectionResult,
-    MarkdownFile,
-    Note,
-    NoteTypeConfig,
-    ProtectedNoteGroup,
-    SyncResult,
-    UntrackedDeck,
+    SyncReport,
 )
-from ankiops.note_identity import resolve_import_note_identity
-from ankiops.sources import (
-    SyncSource,
-    discover_sync_sources,
-    load_configs_for_sources,
-    markdown_files_for_source,
-)
-from ankiops.tags import parse_tags_comment
+from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _PendingWrite:
-    file_state: MarkdownFile
+class PendingDeckWrite:
+    file_state: DeckFile
     note_key_assignments: list[tuple[Note, str]]
-
-
-@dataclass(frozen=True)
-class _SourceMarkdownFile:
-    source: SyncSource
-    file_state: MarkdownFile
 
 
 @dataclass(frozen=True)
@@ -169,7 +154,7 @@ def _upsert_note_metadata_in_block(block: str, note: Note, note_key: str | None)
     return "\n".join(content_lines)
 
 
-def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> None:
+def flush_deck_metadata_writes(writes: list[PendingDeckWrite]) -> None:
     for pending_write in writes:
         note_key_by_note = {
             id(note): note_key for note, note_key in pending_write.note_key_assignments
@@ -204,18 +189,14 @@ def _flush_writes(fs_port: FileSystemAdapter, writes: list[_PendingWrite]) -> No
             )
 
         if changed:
-            fs_port.write_markdown_file(
-                pending_write.file_state.file_path, NOTE_SEPARATOR.join(out_blocks)
+            write_deck_file(
+                pending_write.file_state.file_path,
+                NOTE_SEPARATOR.join(out_blocks),
             )
 
 
-def _to_html(
-    note: Note, config: NoteTypeConfig, converter: FileSystemAdapter
-) -> dict[str, str]:
-    html = {
-        name: converter.convert_to_html(content)
-        for name, content in note.fields.items()
-    }
+def _to_html(note: Note, config: NoteType, converter: MarkdownToHTML) -> dict[str, str]:
+    html = {name: converter.convert(content) for name, content in note.fields.items()}
     for field_config in config.fields:
         if field_config.label is None:
             continue
@@ -236,7 +217,7 @@ def _anki_note_match(
     return _html_match(html, anki) and anki.tags == tags
 
 
-def _group_note_ids_by_deck_name(anki_cards: dict[int, dict]) -> dict[str, set[int]]:
+def group_note_ids_by_deck_name(anki_cards: dict[int, dict]) -> dict[str, set[int]]:
     note_ids_by_deck_name: dict[str, set[int]] = {}
     for card_info in anki_cards.values():
         deck_name = card_info.get("deckName")
@@ -263,7 +244,7 @@ def _remove_note_ids_from_deck_membership(
         note_ids_by_deck_name.pop(deck_name, None)
 
 
-def _collect_membership_affected_note_ids(results: list[SyncResult]) -> set[int]:
+def collect_membership_affected_note_ids(results: list[SyncReport]) -> set[int]:
     affected_note_ids: set[int] = set()
     for sync_result in results:
         for change in sync_result.changes:
@@ -274,10 +255,10 @@ def _collect_membership_affected_note_ids(results: list[SyncResult]) -> set[int]
     return affected_note_ids
 
 
-def _refresh_membership_for_affected_notes(
+def refresh_membership_for_affected_notes(
     *,
     affected_note_ids: set[int],
-    anki_port: AnkiAdapter,
+    anki_port: Anki,
     note_ids_by_deck_name: dict[str, set[int]],
 ) -> None:
     if not affected_note_ids:
@@ -292,7 +273,7 @@ def _refresh_membership_for_affected_notes(
         refreshed_card_ids.extend(refreshed_note.card_ids)
 
     refreshed_cards = anki_port.fetch_cards_info(refreshed_card_ids)
-    refreshed_grouped = _group_note_ids_by_deck_name(refreshed_cards)
+    refreshed_grouped = group_note_ids_by_deck_name(refreshed_cards)
     for deck_name, note_ids in refreshed_grouped.items():
         note_ids_by_deck_name.setdefault(deck_name, set()).update(note_ids)
 
@@ -304,9 +285,9 @@ class _DeckContext:
 
 
 def _resolve_deck_context(
-    fs: MarkdownFile,
+    fs: DeckFile,
     deck_ids_by_name: dict[str, int],
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
 ) -> _DeckContext:
     deck_name = file_stem_to_deck_name(fs.file_path.stem)
     resolved_id = deck_ids_by_name.get(deck_name)
@@ -320,15 +301,15 @@ def _resolve_deck_context(
 def _sync_keyed_note(
     *,
     parsed_note: Note,
-    cfg: NoteTypeConfig,
+    cfg: NoteType,
     md_hash: str,
     deck_name: str,
-    fs_port: FileSystemAdapter,
+    markdown_to_html: MarkdownToHTML,
     anki_notes: dict[int, AnkiNote],
     anki_cards: dict[int, dict],
     note_ids_by_note_key: dict[str, int],
     note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
-    result: SyncResult,
+    result: SyncReport,
     cards_to_move: list[int],
     moved_from_decks: set[str],
     note_type_conversions: list[_NoteTypeConversion],
@@ -360,7 +341,7 @@ def _sync_keyed_note(
             anki_note = None
 
     if not anki_note:
-        html_fields = _to_html(parsed_note, cfg, fs_port)
+        html_fields = _to_html(parsed_note, cfg, markdown_to_html)
         html_fields[ANKIOPS_KEY_FIELD.name] = note_key
         result.add_change(
             Change(
@@ -418,7 +399,7 @@ def _sync_keyed_note(
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
-    html_fields = _to_html(parsed_note, cfg, fs_port)
+    html_fields = _to_html(parsed_note, cfg, markdown_to_html)
     if anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "") != note_key:
         html_fields[ANKIOPS_KEY_FIELD.name] = note_key
     target_anki_hash = note_fingerprint(
@@ -501,14 +482,14 @@ def _sync_keyed_note(
 def _sync_new_note(
     *,
     parsed_note: Note,
-    cfg: NoteTypeConfig,
+    cfg: NoteType,
     md_hash: str,
-    db_port: SQLiteDbAdapter,
-    fs_port: FileSystemAdapter,
-    result: SyncResult,
+    db_port: SyncState,
+    markdown_to_html: MarkdownToHTML,
+    result: SyncReport,
 ) -> None:
     new_note_key = db_port.generate_note_key()
-    html_fields = _to_html(parsed_note, cfg, fs_port)
+    html_fields = _to_html(parsed_note, cfg, markdown_to_html)
     html_fields[ANKIOPS_KEY_FIELD.name] = new_note_key
     result.add_change(
         Change(
@@ -542,8 +523,8 @@ def _collect_orphan_deletes(
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
     anki_notes: dict[int, AnkiNote],
-    db_port: SQLiteDbAdapter,
-    result: SyncResult,
+    db_port: SyncState,
+    result: SyncReport,
 ) -> None:
     md_anki_ids = set()
     for parsed_note in fs_notes:
@@ -609,7 +590,7 @@ def _collect_orphan_deletes(
 
 def _apply_note_type_conversions(
     *,
-    anki_port: AnkiAdapter,
+    anki_port: Anki,
     conversions: list[_NoteTypeConversion],
     queue_import_fingerprint,
 ) -> list[str]:
@@ -646,9 +627,9 @@ def _apply_note_type_conversions(
 def _apply_changes_and_update_state(
     *,
     deck_context: _DeckContext,
-    anki_port: AnkiAdapter,
-    db_port: SQLiteDbAdapter,
-    result: SyncResult,
+    anki_port: Anki,
+    db_port: SyncState,
+    result: SyncReport,
     cards_to_move: list[int],
     note_type_conversions: list[_NoteTypeConversion],
     note_ids_by_note_key: dict[str, int],
@@ -732,10 +713,10 @@ def _apply_changes_and_update_state(
 def _recover_created_deck_mapping(
     *,
     deck_context: _DeckContext,
-    anki_port: AnkiAdapter,
+    anki_port: Anki,
     deck_ids_by_name: dict[str, int],
     deck_names_by_id: dict[int, str],
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
 ) -> None:
     if not deck_context.needs_create_deck or not deck_context.deck_name:
         return
@@ -748,12 +729,12 @@ def _recover_created_deck_mapping(
         db_port.upsert_deck(deck_context.deck_name, new_id)
 
 
-def _sync_file(
-    fs: MarkdownFile,
-    config_by_name: dict[str, NoteTypeConfig],
-    anki_port: AnkiAdapter,
-    db_port: SQLiteDbAdapter,
-    fs_port: FileSystemAdapter,
+def sync_deck_to_anki(
+    fs: DeckFile,
+    config_by_name: dict[str, NoteType],
+    anki_port: Anki,
+    db_port: SyncState,
+    markdown_to_html: MarkdownToHTML,
     deck_names_by_id: dict[int, str],
     deck_ids_by_name: dict[str, int],
     anki_notes: dict[int, AnkiNote],
@@ -765,9 +746,9 @@ def _sync_file(
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
-) -> tuple[SyncResult, _PendingWrite, set[str]]:
+) -> tuple[SyncReport, PendingDeckWrite, set[str]]:
     deck_context = _resolve_deck_context(fs, deck_ids_by_name, db_port)
-    result = SyncResult.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
+    result = SyncReport.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
     cards_to_move: list[int] = []
     moved_from_decks: set[str] = set()
     note_type_conversions: list[_NoteTypeConversion] = []
@@ -813,7 +794,7 @@ def _sync_file(
                 cfg=cfg,
                 md_hash=md_hash,
                 deck_name=deck_context.deck_name,
-                fs_port=fs_port,
+                markdown_to_html=markdown_to_html,
                 anki_notes=anki_notes,
                 anki_cards=anki_cards,
                 note_ids_by_note_key=note_ids_by_note_key,
@@ -832,7 +813,7 @@ def _sync_file(
                 cfg=cfg,
                 md_hash=md_hash,
                 db_port=db_port,
-                fs_port=fs_port,
+                markdown_to_html=markdown_to_html,
                 result=result,
             )
 
@@ -870,217 +851,5 @@ def _sync_file(
     )
 
     result.order_changes()
-    pending = _PendingWrite(fs, note_key_assignments)
+    pending = PendingDeckWrite(fs, note_key_assignments)
     return result, pending, moved_from_decks
-
-
-def import_collection(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
-    collection_dir: Path,
-    note_types_dir: Path,
-) -> CollectionResult:
-    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
-    source_configs = load_configs_for_sources(sources)
-    configs = [
-        config for source_config in source_configs for config in source_config.configs
-    ]
-    required_note_types = [config.name for config in configs]
-    config_by_name = {config.name: config for config in configs}
-    fs_port.set_configs(configs)
-    source_docs: list[_SourceMarkdownFile] = []
-    for source_config in source_configs:
-        source_fs = FileSystemAdapter()
-        source_fs.set_configs(source_config.configs)
-        for md_file in markdown_files_for_source(source_config.source):
-            source_docs.append(
-                _SourceMarkdownFile(
-                    source=source_config.source,
-                    file_state=source_fs.read_markdown_file(
-                        md_file,
-                        context_root=source_config.source.root,
-                    ),
-                )
-            )
-    fs_docs = [source_doc.file_state for source_doc in source_docs]
-
-    deck_sources: dict[str, str] = {}
-    deck_duplicates: list[str] = []
-    for source_doc in source_docs:
-        deck_name = file_stem_to_deck_name(source_doc.file_state.file_path.stem)
-        previous = deck_sources.get(deck_name)
-        current = (
-            f"{source_doc.source.display_name}:{source_doc.file_state.file_path.name}"
-        )
-        if previous is not None:
-            deck_duplicates.append(
-                f"Deck '{deck_name}' is defined by both {previous} and {current}"
-            )
-            continue
-        deck_sources[deck_name] = current
-    if deck_duplicates:
-        raise ValueError(
-            "Aborting import: deck ownership conflicts found: "
-            + "; ".join(deck_duplicates)
-        )
-
-    global_note_keys = set()
-    note_key_sources = {}
-    duplicates = []
-
-    for markdown_file in fs_docs:
-        for note in markdown_file.notes:
-            if note.note_key:
-                if note.note_key in note_key_sources:
-                    duplicates.append(f"Duplicate note_key {note.note_key}")
-                else:
-                    note_key_sources[note.note_key] = str(
-                        markdown_file.file_path.relative_to(collection_dir)
-                    )
-                global_note_keys.add(note.note_key)
-
-    if duplicates:
-        raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
-    note_import_fingerprints_by_note_key = db_port.resolve_import_hashes(
-        global_note_keys
-    )
-    pending_import_fingerprints: list[tuple[str, str, str]] = []
-
-    with db_port.write_tx():
-        deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
-        initial_deck_names = set(deck_ids_by_name)
-        deck_names_by_id = {
-            deck_id: deck_name for deck_name, deck_id in deck_ids_by_name.items()
-        }
-
-        identity = resolve_import_note_identity(
-            anki_port=anki_port,
-            db_port=db_port,
-            note_keys=global_note_keys,
-            required_note_types=required_note_types,
-        )
-        anki_notes = identity.anki_notes
-        note_ids_by_note_key = identity.note_ids_by_note_key
-        pending_note_mappings = list(identity.pending_note_mappings)
-
-        global_mapped_note_ids = {
-            note_id
-            for note_key, note_id in note_ids_by_note_key.items()
-            if note_key in global_note_keys and note_id
-        }
-
-        # We need to compute anki_cards and group note_ids by deck.
-        # A single bulk cardsInfo fetch is faster than many smaller calls.
-        all_card_ids = []
-        for anki_note in anki_notes.values():
-            all_card_ids.extend(anki_note.card_ids)
-        anki_cards = anki_port.fetch_cards_info(all_card_ids)
-
-        note_ids_by_deck_name = _group_note_ids_by_deck_name(anki_cards)
-
-        results = []
-        pending = []
-        md_deck_ids = set()
-        markdown_deck_names = {
-            file_stem_to_deck_name(markdown_file.file_path.stem)
-            for markdown_file in fs_docs
-        }
-        rename_candidates: set[tuple[str, str]] = set()
-
-        for source_doc in source_docs:
-            markdown_file = source_doc.file_state
-            # Determine actual anki_deck_note_ids for this specific file
-            # We find what the deck name maps to...
-            deck_name = file_stem_to_deck_name(markdown_file.file_path.stem)
-
-            file_anki_note_ids = note_ids_by_deck_name.get(deck_name, set())
-
-            sync_result, pending_write, moved_from_decks = _sync_file(
-                markdown_file,
-                config_by_name,
-                anki_port,
-                db_port,
-                fs_port,
-                deck_names_by_id,
-                deck_ids_by_name,
-                anki_notes,
-                anki_cards,
-                note_ids_by_note_key,
-                pending_note_mappings,
-                note_import_fingerprints_by_note_key,
-                pending_import_fingerprints,
-                global_note_keys,
-                global_mapped_note_ids,
-                file_anki_note_ids,
-            )
-
-            # Track filename-based deck rename candidates, but defer applying
-            # mapping cleanup until deck membership is refreshed.
-            if (
-                sync_result.name
-                and sync_result.name not in initial_deck_names
-                and len(moved_from_decks) == 1
-            ):
-                source_deck = next(iter(moved_from_decks))
-                if (
-                    source_deck != sync_result.name
-                    and source_deck not in markdown_deck_names
-                ):
-                    rename_candidates.add((source_deck, sync_result.name))
-
-            if sync_result.name and sync_result.name in deck_ids_by_name:
-                md_deck_ids.add(deck_ids_by_name[sync_result.name])
-
-            results.append(sync_result)
-            pending.append(pending_write)
-            summary = sync_result.summary
-            if summary.format() != "no changes":
-                logger.debug(
-                    f"File '{markdown_file.file_path.name}': {summary.format()}"
-                )
-
-        if pending_note_mappings:
-            db_port.upsert_note_links(pending_note_mappings)
-        if pending_import_fingerprints:
-            db_port.upsert_import_hashes(pending_import_fingerprints)
-
-        _flush_writes(fs_port, pending)
-
-        # Keep membership in sync with applied structural changes without a
-        # full collection refresh.
-        affected_note_ids = _collect_membership_affected_note_ids(results)
-        _refresh_membership_for_affected_notes(
-            affected_note_ids=affected_note_ids,
-            anki_port=anki_port,
-            note_ids_by_deck_name=note_ids_by_deck_name,
-        )
-
-        # Finalize deferred rename candidates only when the source deck is
-        # fully drained after moves/deletes.
-        for source_deck, target_deck in sorted(rename_candidates):
-            if source_deck in note_ids_by_deck_name:
-                continue
-            db_port.delete_deck(source_deck)
-            logger.info(
-                f"Deck renamed from markdown file: '{source_deck}' -> '{target_deck}'"
-            )
-
-        untracked = []
-        for deck_name, note_ids in note_ids_by_deck_name.items():
-            deck_id = deck_ids_by_name.get(deck_name)
-            if deck_id is None or deck_id in md_deck_ids:
-                continue
-            untracked.append(UntrackedDeck(deck_name, deck_id, list(note_ids)))
-
-    protected_note_groups = [
-        ProtectedNoteGroup(sync_result.name or "", sync_result.protected_keyless_notes)
-        for sync_result in results
-        if sync_result.protected_keyless_notes and sync_result.name
-    ]
-
-    return CollectionResult.for_import(
-        results=results,
-        untracked_decks=untracked,
-        protected_note_groups=protected_note_groups,
-    )

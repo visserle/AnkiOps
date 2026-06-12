@@ -8,14 +8,13 @@ from pathlib import Path
 
 import yaml
 
-from ankiops.config import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
-from ankiops.export_notes import _render_notes_to_markdown
-from ankiops.fs import FileSystemAdapter
+from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
+from ankiops.deck_sources import SHARED_BRANCH, DeckSource
 from ankiops.git import CollectionGit
-from ankiops.models import MarkdownFile, NoteTypeConfig
+from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
+from ankiops.media import extract_media_references
+from ankiops.note_types import NoteType, load_note_types
 from ankiops.shared.hosting import ensure_create_repo
-from ankiops.sources import SHARED_BRANCH, SyncSource
-from ankiops.sync_media import _extract_media_references
 
 
 @dataclass(frozen=True)
@@ -27,7 +26,7 @@ class _RenderedCreateFile:
 
 @dataclass(frozen=True)
 class _CreatePlan:
-    source: SyncSource
+    source: DeckSource
     files: list[_RenderedCreateFile]
     note_types_used: set[str]
     media_used: set[str]
@@ -36,7 +35,7 @@ class _CreatePlan:
 def create_shared_deck(
     collection_dir: Path,
     deck: str,
-    source: SyncSource,
+    source: DeckSource,
     *,
     public: bool,
 ) -> None:
@@ -112,9 +111,9 @@ def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
 
 
 def _scoped_configs(
-    source: SyncSource,
-    configs: list[NoteTypeConfig],
-) -> list[NoteTypeConfig]:
+    source: DeckSource,
+    configs: list[NoteType],
+) -> list[NoteType]:
     return [
         replace(config, name=source.scope_note_type_name(config.name))
         for config in configs
@@ -124,23 +123,24 @@ def _scoped_configs(
 def _prepare_create_plan(
     collection_dir: Path,
     deck: str,
-    source: SyncSource,
+    source: DeckSource,
 ) -> _CreatePlan:
-    fs = FileSystemAdapter()
-    root_configs = fs.load_note_type_configs(collection_dir / NOTE_TYPES_DIR)
+    root_configs = load_note_types(collection_dir / NOTE_TYPES_DIR)
     root_config_by_name = {config.name: config for config in root_configs}
-    parser = FileSystemAdapter()
-    parser.set_configs(root_configs)
 
     selected_files = _selected_deck_files(collection_dir, deck)
-    parsed_files: list[tuple[Path, MarkdownFile]] = []
+    parsed_files: list[tuple[Path, DeckFile]] = []
     note_types_used: set[str] = set()
     media_used: set[str] = set()
     note_keys: set[str] = set()
     missing_note_keys: list[str] = []
 
     for md_file in selected_files:
-        parsed = parser.read_markdown_file(md_file, context_root=collection_dir)
+        parsed = read_deck_file(
+            md_file,
+            note_types=root_configs,
+            context_root=collection_dir,
+        )
         parsed_files.append((md_file, parsed))
         for index, note in enumerate(parsed.notes, start=1):
             if not note.note_key:
@@ -153,7 +153,7 @@ def _prepare_create_plan(
                 note_keys.add(note.note_key)
             note_types_used.add(note.note_type)
             for field_value in note.fields.values():
-                media_used.update(_extract_media_references(field_value))
+                media_used.update(extract_media_references(field_value))
 
     if missing_note_keys:
         raise ValueError(
@@ -191,7 +191,7 @@ def _prepare_create_plan(
             _RenderedCreateFile(
                 source_path=md_file,
                 target_path=source.root / md_file.name,
-                content=_render_notes_to_markdown(parsed.notes, scoped_config_by_name),
+                content=render_notes_to_markdown(parsed.notes, scoped_config_by_name),
             )
         )
 

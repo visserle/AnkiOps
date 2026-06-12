@@ -6,8 +6,8 @@ import logging
 import shutil
 import subprocess
 
+from ankiops.deck_sources import SHARED_BRANCH, DeckSource
 from ankiops.git import CollectionGit
-from ankiops.sources import SHARED_BRANCH, SyncSource
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,12 @@ def _visibility_flag(public: bool) -> str:
     return "--public" if public else "--private"
 
 
-def _manual_repo_create_command(source: SyncSource, *, public: bool) -> str:
+def _manual_repo_create_command(source: DeckSource, *, public: bool) -> str:
     slug = source.github_slug or source.source_id
     return f"gh repo create {slug} {_visibility_flag(public)}"
 
 
-def _github_repo_exists(repo: CollectionGit, source: SyncSource) -> bool:
+def _github_repo_exists(repo: CollectionGit, source: DeckSource) -> bool:
     slug = source.github_slug
     if slug is None or source.github_url is None:
         raise ValueError(f"Cannot derive GitHub repo for {source.display_name}")
@@ -42,7 +42,7 @@ def _github_repo_exists(repo: CollectionGit, source: SyncSource) -> bool:
 
 def _create_github_repo(
     repo: CollectionGit,
-    source: SyncSource,
+    source: DeckSource,
     *,
     public: bool,
 ) -> None:
@@ -74,7 +74,7 @@ def _create_github_repo(
 
 def ensure_create_repo(
     repo: CollectionGit,
-    source: SyncSource,
+    source: DeckSource,
     *,
     public: bool,
 ) -> None:
@@ -89,7 +89,7 @@ def ensure_create_repo(
     _create_github_repo(repo, source, public=public)
 
 
-def open_pr_if_possible(repo: CollectionGit, source: SyncSource, branch: str) -> None:
+def open_pr_if_possible(repo: CollectionGit, source: DeckSource, branch: str) -> None:
     if source.github_url is None:
         logger.info("Prepared branch %s. Push it and open a PR manually.", branch)
         return

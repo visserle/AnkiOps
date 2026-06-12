@@ -9,12 +9,12 @@ import pytest
 import yaml
 
 from ankiops.cli import main
-from ankiops.fs import FileSystemAdapter
-from ankiops.note_type_cli import run as run_note_type
+from ankiops.note_types_command import run as run_note_type
+from tests.support.deck_files import DeckFileHarness
 
 
 def _seed_note_types(note_types_dir):
-    FileSystemAdapter().eject_builtin_note_types(note_types_dir)
+    DeckFileHarness().eject_default_note_types(note_types_dir)
 
 
 class _FakeNoteTypeAnki:
@@ -25,10 +25,10 @@ class _FakeNoteTypeAnki:
     def get_active_profile(self):
         return "TestProfile"
 
-    def fetch_model_names(self):
+    def fetch_note_type_names(self):
         return self.model_names
 
-    def fetch_model_states(self, model_names):
+    def fetch_note_type_states(self, model_names):
         return {name: self.model_states[name] for name in model_names}
 
 
@@ -54,8 +54,11 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
     args = SimpleNamespace(action="list", add_name="MyType")
 
     with (
-        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
+        patch(
+            "ankiops.note_types_command.require_collection_dir",
+            return_value=tmp_path,
+        ),
         patch(
             "builtins.input",
             side_effect=["TM", "y", "D", "y", "DEF", "y", "X1", "y"],
@@ -103,8 +106,11 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     args = SimpleNamespace(action="list", add_name="MyType")
 
     with (
-        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
+        patch(
+            "ankiops.note_types_command.require_collection_dir",
+            return_value=tmp_path,
+        ),
         patch("builtins.input", side_effect=["Q", "n", "Q", "y", "CTX", "y"]),
         caplog.at_level("INFO"),
     ):
@@ -140,8 +146,11 @@ def test_note_types_import_reprompts_on_invalid_label(tmp_path, caplog):
     args = SimpleNamespace(action="list", add_name="MyType")
 
     with (
-        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
+        patch(
+            "ankiops.note_types_command.require_collection_dir",
+            return_value=tmp_path,
+        ),
         patch("builtins.input", side_effect=["A B", "QQ", "y", "AA", "y"]),
         caplog.at_level("ERROR"),
     ):
@@ -161,8 +170,11 @@ def test_note_types_import_rejects_unknown_model(tmp_path):
     fake_anki = _FakeNoteTypeAnki(["AnkiOpsQA"])
 
     with (
-        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
+        patch(
+            "ankiops.note_types_command.require_collection_dir",
+            return_value=tmp_path,
+        ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "DoesNotExist"]),
     ):
         with pytest.raises(SystemExit) as exc:
@@ -178,8 +190,11 @@ def test_note_types_import_rejects_existing_target_folder(tmp_path):
     fake_anki = _FakeNoteTypeAnki(["MyType"])
 
     with (
-        patch("ankiops.note_type_cli.connect_or_exit", return_value=fake_anki),
-        patch("ankiops.note_type_cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
+        patch(
+            "ankiops.note_types_command.require_collection_dir",
+            return_value=tmp_path,
+        ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "MyType"]),
     ):
         with pytest.raises(SystemExit) as exc:

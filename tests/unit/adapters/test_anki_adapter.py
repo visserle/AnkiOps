@@ -1,4 +1,4 @@
-"""Error-path tests for AnkiAdapter.apply_note_changes."""
+"""Error-path tests for Anki.apply_note_changes."""
 
 from __future__ import annotations
 
@@ -6,9 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.anki import AnkiAdapter
-from ankiops.anki_client import AnkiConnectionError
-from ankiops.models import Change, ChangeType, Note
+from ankiops.anki import Anki
+from ankiops.anki_rpc import AnkiConnectionError
+from ankiops.notes import Note
+from ankiops.sync.report import Change, ChangeType
 
 
 def _make_update_change() -> Change:
@@ -38,7 +39,7 @@ def _make_create_change(entity_repr: str = "note_key: create") -> Change:
 
 
 def test_apply_note_changes_collects_partial_errors():
-    adapter = AnkiAdapter()
+    adapter = Anki()
     fake_non_create_result = [
         None,
         "change deck failed",
@@ -72,7 +73,7 @@ def test_apply_note_changes_collects_partial_errors():
 
 
 def test_apply_note_changes_surfaces_connection_exception():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch("ankiops.anki.invoke", side_effect=AnkiConnectionError("boom")):
         created_ids, errors = adapter.apply_note_changes(
@@ -89,7 +90,7 @@ def test_apply_note_changes_surfaces_connection_exception():
 
 
 def test_apply_note_changes_preflight_reports_create_context():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -119,7 +120,7 @@ def test_apply_note_changes_preflight_reports_create_context():
 
 
 def test_apply_note_changes_bulk_create_exception_keeps_create_context():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -144,7 +145,7 @@ def test_apply_note_changes_bulk_create_exception_keeps_create_context():
 
 
 def test_fetch_notes_info_maps_tags():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -167,7 +168,7 @@ def test_fetch_notes_info_maps_tags():
 
 
 def test_change_notes_notetype_calls_ankiops_connect_action():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch("ankiops.anki.invoke") as mock_invoke:
         adapter.change_notes_notetype([101, 102], "AnkiOpsQA", "shared/o/r/AnkiOpsQA")
@@ -181,7 +182,7 @@ def test_change_notes_notetype_calls_ankiops_connect_action():
 
 
 def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model():
-    adapter = AnkiAdapter()
+    adapter = Anki()
 
     with patch("ankiops.anki.invoke", return_value=[[101], [201, 202]]) as mock_invoke:
         note_ids = adapter.fetch_note_ids_by_note_keys({"key-b", "key-a"})
@@ -195,7 +196,7 @@ def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model():
 
 
 def test_apply_note_changes_updates_fields_and_tags_with_update_note():
-    adapter = AnkiAdapter()
+    adapter = Anki()
     update_change = Change(
         ChangeType.UPDATE,
         101,
@@ -228,7 +229,7 @@ def test_apply_note_changes_updates_fields_and_tags_with_update_note():
 
 
 def test_apply_note_changes_bulk_create_includes_tags():
-    adapter = AnkiAdapter()
+    adapter = Anki()
     create_change = Change(
         ChangeType.CREATE,
         None,
@@ -268,8 +269,8 @@ def test_apply_note_changes_bulk_create_includes_tags():
     assert note_payload["tags"] == ["a", "z"]
 
 
-def test_fetch_model_states_normalizes_dict_styling_payload():
-    adapter = AnkiAdapter()
+def test_fetch_note_type_states_normalizes_dict_styling_payload():
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -281,13 +282,13 @@ def test_fetch_model_states_normalizes_dict_styling_payload():
             {},
         ],
     ):
-        states = adapter.fetch_model_states(["MyType"])
+        states = adapter.fetch_note_type_states(["MyType"])
 
     assert states["MyType"]["styling"] == ".card { color: red; }"
 
 
-def test_fetch_model_states_preserves_string_styling_payload():
-    adapter = AnkiAdapter()
+def test_fetch_note_type_states_preserves_string_styling_payload():
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -299,13 +300,13 @@ def test_fetch_model_states_preserves_string_styling_payload():
             {},
         ],
     ):
-        states = adapter.fetch_model_states(["MyType"])
+        states = adapter.fetch_note_type_states(["MyType"])
 
     assert states["MyType"]["styling"] == ".card { color: blue; }"
 
 
-def test_fetch_model_states_raises_on_malformed_styling_payload():
-    adapter = AnkiAdapter()
+def test_fetch_note_type_states_raises_on_malformed_styling_payload():
+    adapter = Anki()
 
     with patch(
         "ankiops.anki.invoke",
@@ -321,4 +322,4 @@ def test_fetch_model_states_raises_on_malformed_styling_payload():
             AnkiConnectionError,
             match="Malformed modelStyling response",
         ):
-            adapter.fetch_model_states(["MyType"])
+            adapter.fetch_note_type_states(["MyType"])

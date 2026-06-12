@@ -7,7 +7,7 @@ from textwrap import dedent
 
 import pytest
 
-from ankiops.models import ANKIOPS_KEY_FIELD, Field, NoteTypeConfig
+from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteField, NoteType
 
 
 @pytest.fixture
@@ -37,29 +37,29 @@ def llm_collection(tmp_path: Path, write_file):
 
 
 @pytest.fixture
-def llm_qa_config() -> NoteTypeConfig:
-    return NoteTypeConfig(
+def llm_qa_config() -> NoteType:
+    return NoteType(
         name="AnkiOpsQA",
         fields=[
-            Field("Question", "Q:", identifying=True),
-            Field("Answer", "A:", identifying=True),
-            Field("Source", "S:", identifying=False),
-            Field("AI Notes", "AI:", identifying=False),
+            NoteField("Question", "Q:", identifying=True),
+            NoteField("Answer", "A:", identifying=True),
+            NoteField("Source", "S:", identifying=False),
+            NoteField("AI Notes", "AI:", identifying=False),
             ANKIOPS_KEY_FIELD,
         ],
     )
 
 
 @pytest.fixture
-def llm_choice_config() -> NoteTypeConfig:
-    return NoteTypeConfig(
+def llm_choice_config() -> NoteType:
+    return NoteType(
         name="AnkiOpsChoice",
         fields=[
-            Field("Question", "Q:", identifying=True),
-            Field("Choice 1", "C1:", identifying=True),
-            Field("Choice 2", "C2:", identifying=True),
-            Field("Answer", "A:", identifying=True),
-            Field("AI Notes", "AI:", identifying=False),
+            NoteField("Question", "Q:", identifying=True),
+            NoteField("Choice 1", "C1:", identifying=True),
+            NoteField("Choice 2", "C2:", identifying=True),
+            NoteField("Answer", "A:", identifying=True),
+            NoteField("AI Notes", "AI:", identifying=False),
             ANKIOPS_KEY_FIELD,
         ],
         is_choice=True,

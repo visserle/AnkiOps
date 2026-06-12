@@ -57,9 +57,9 @@ include = ["ankiops*"]
 [tool.setuptools.package-data]
 ankiops = [
     "tutorial/*.md",
-    "note_types/**/*.anki",
-    "note_types/**/*.css",
-    "note_types/**/*.yaml",
+    "default_note_types/**/*.anki",
+    "default_note_types/**/*.css",
+    "default_note_types/**/*.yaml",
     "llm/resources/*.yaml",
     "llm/resources/_system_prompt.md",
 ]
