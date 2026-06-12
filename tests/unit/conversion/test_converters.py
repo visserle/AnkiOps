@@ -52,7 +52,9 @@ def test_links_with_parentheses_are_wrapped_for_stable_roundtrips(
     markdown = "[Wiki](https://example.com/Python_(programming_language))"
 
     html = md_to_html.convert(markdown)
-    assert html == '<a href="https://example.com/Python_(programming_language)">Wiki</a>'
+    assert (
+        html == '<a href="https://example.com/Python_(programming_language)">Wiki</a>'
+    )
     assert (
         html_to_md.convert(html)
         == "[Wiki](<https://example.com/Python_(programming_language)>)"
@@ -172,6 +174,26 @@ def test_underlines_remain_explicit_html(md_to_html, html_to_md):
 
     assert markdown == "<u>underlined</u>"
     assert md_to_html.convert(markdown) == "<u>underlined</u>"
+
+
+def test_html_tables_export_in_compact_markdown(html_to_md):
+    html = (
+        "<table><thead><tr><th>Short</th><th>Long heading</th></tr></thead>"
+        "<tbody><tr><td>a</td><td>bbb</td></tr></tbody></table>"
+    )
+
+    assert html_to_md.convert(html) == (
+        "| Short | Long heading |\n| --- | --- |\n| a | bbb |"
+    )
+
+
+def test_html_table_escaped_pipes_stay_in_their_cells(html_to_md):
+    html = (
+        "<table><tr><th>A</th><th>B</th></tr>"
+        "<tr><td>a | b</td><td><code>c | d</code></td></tr></table>"
+    )
+
+    assert html_to_md.convert(html) == "| A | B |\n| --- | --- |\n| a \\| b | `c | d` |"
 
 
 def test_python_code_blocks_keep_language_and_text(md_to_html, html_to_md):

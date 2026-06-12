@@ -286,18 +286,15 @@ def _enforce_link_angle_brackets(md: str) -> str:
 class HTMLToMarkdown:
     """Convert HTML to clean Markdown."""
 
-    @staticmethod
-    def _build_options() -> ConversionOptions:
-        return ConversionOptions(
-            heading_style="atx",
-            bullets="-",
-            list_indent_width=3,
-            highlight_style="double-equal",
-            autolinks=False,
-            extract_metadata=False,
-        )
-
-    _OPTIONS = _build_options.__func__()
+    _OPTIONS = ConversionOptions(
+        heading_style="atx",
+        bullets="-",
+        list_indent_width=3,
+        highlight_style="double-equal",
+        autolinks=False,
+        compact_tables=True,
+        extract_metadata=False,
+    )
 
     def convert(self, html: str) -> str:
         """Convert HTML to Markdown."""
@@ -345,7 +342,7 @@ class HTMLToMarkdown:
             .replace("\u2260", "=/=")
         )
 
-        def _normalize_code_blocks(match):
+        def _normalize_code_blocks(match: re.Match[str]) -> str:
             content = match.group(1)
             if not content.strip():
                 return ""

@@ -6,6 +6,8 @@ import logging
 import re
 from pathlib import Path
 
+from rich.markup import escape as rich_escape
+
 from ankiops.config import require_collection_dir
 from ankiops.fs import FileSystemAdapter
 from ankiops.git import CollectionGit
@@ -112,7 +114,12 @@ def run_add(args) -> None:
     if source.root.exists():
         raise ValueError(f"Shared source already exists: {source.source_id}")
     repo.subtree_add(source)
-    logger.info("Added %s at %s", args.repo, clickable_path(source.root))
+    logger.info(
+        "Added %s at %s",
+        rich_escape(args.repo),
+        clickable_path(source.root),
+        extra={"markup": True},
+    )
 
 
 def run_update(args) -> None:
@@ -162,7 +169,12 @@ def run_list(args) -> None:
         logger.info("No shared sources found.")
         return
     for source in sources:
-        logger.info("%s  %s", source.source_id, clickable_path(source.root))
+        logger.info(
+            "%s  %s",
+            rich_escape(source.source_id),
+            clickable_path(source.root),
+            extra={"markup": True},
+        )
 
 
 def run(args) -> None:

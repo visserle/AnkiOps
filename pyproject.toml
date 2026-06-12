@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.6.0"
+version = "0.6.1"
 description = "Anki ↔ Markdown, with bidirectional sync, custom note types, and LLM integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,7 @@ classifiers = [
 dependencies = [
     "beautifulsoup4>=4.14.3",
     "blake3>=1.0.8",
-    "html-to-markdown>=3.4.0",
+    "html-to-markdown>=3.5.0,!=3.6.0",
     "mistune>=3.2.0",
     "openai>=2.36.0",
     "pydantic>=2.13.4",
