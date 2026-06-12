@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 
+from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.model_registry import ModelSpec
 from ankiops.llm.runner import (
     LlmTaskExecutor,
@@ -240,6 +241,50 @@ def test_executor_snapshots_queued_deck_paths(
     assert snapshot_calls == [
         (tmp_path, "LLM task grammar", [tmp_path / "Deck.md"])
     ]
+
+
+def test_executor_snapshots_before_opening_llm_db(
+    tmp_path,
+    monkeypatch,
+    llm_qa_config,
+):
+    context = _context(llm_qa_config)
+    events = []
+    real_open = LlmDb.open
+
+    async def fake_call_openai(*, batch, **_kwargs):
+        return _success(
+            _parsed_response(("nk-1", "Question", "Fixed question")),
+            input_tokens=12,
+            output_tokens=6,
+        )
+
+    def fake_deserialize(*_args, **_kwargs):
+        pass
+
+    def record_open(collection_dir):
+        events.append("db_open")
+        return real_open(collection_dir)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.runner.deserialize", fake_deserialize)
+    monkeypatch.setattr("ankiops.llm.runner.LlmDb.open", staticmethod(record_open))
+    monkeypatch.setattr(
+        "ankiops.llm.runner.git_snapshot",
+        lambda *_args, **_kwargs: events.append("snapshot") or True,
+    )
+
+    asyncio.run(
+        LlmTaskExecutor(
+            collection_dir=tmp_path,
+            materialized_context=context,
+            no_auto_commit=False,
+        ).execute()
+    )
+
+    assert events[:2] == ["snapshot", "db_open"]
 
 
 def test_executor_uses_broad_snapshot_when_collab_source_exists(

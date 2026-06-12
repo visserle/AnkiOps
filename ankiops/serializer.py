@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,8 +52,8 @@ class _ValidatedDeck:
 
 @dataclass(frozen=True)
 class DeserializationPlan:
-    data: dict[str, Any]
-    target_paths: list[Path]
+    decks: tuple[_ValidatedDeck, ...]
+    target_paths: tuple[Path, ...]
     has_collab_sources: bool
 
 
@@ -291,7 +292,43 @@ def deserialize(
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
     )
+    _write_validated_decks(
+        decks,
+        collection_dir=collection_dir,
+        overwrite=overwrite,
+        quiet=quiet,
+    )
 
+
+def apply_deserialization_plan(
+    plan: DeserializationPlan,
+    *,
+    collection_dir: Path,
+    overwrite: bool = False,
+    quiet: bool = False,
+) -> None:
+    """Write a previously validated deserialization plan."""
+    logger.debug(f"Target directory: {collection_dir}")
+
+    db_path = collection_dir / ANKIOPS_DB
+    if not db_path.exists():
+        raise ValueError(f"Not an initialized AnkiOps collection: {collection_dir}")
+
+    _write_validated_decks(
+        plan.decks,
+        collection_dir=collection_dir,
+        overwrite=overwrite,
+        quiet=quiet,
+    )
+
+
+def _write_validated_decks(
+    decks: Sequence[_ValidatedDeck],
+    *,
+    collection_dir: Path,
+    overwrite: bool,
+    quiet: bool,
+) -> None:
     total_decks = 0
     total_notes = 0
 
@@ -553,8 +590,8 @@ def plan_deserialize_from_file(
         note_types_dir=note_types_dir,
     )
     return DeserializationPlan(
-        data=data,
-        target_paths=[_deserialize_target_path(deck) for deck in decks],
+        decks=tuple(decks),
+        target_paths=tuple(_deserialize_target_path(deck) for deck in decks),
         has_collab_sources=any(deck.source.is_collab for deck in decks),
     )
 
@@ -582,9 +619,8 @@ def deserialize_from_file(
         collection_dir=collection_dir,
         note_types_dir=resolved_note_types_dir,
     )
-    deserialize(
-        plan.data,
+    apply_deserialization_plan(
+        plan,
         collection_dir=collection_dir,
-        note_types_dir=resolved_note_types_dir,
         overwrite=overwrite,
     )

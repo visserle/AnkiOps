@@ -186,6 +186,26 @@ class LlmTaskExecutor:
     async def execute(self) -> LlmJobResult:
         task_context = self.materialized_context
         task = task_context.task
+        logger.debug(
+            "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
+            task.name,
+            task.model,
+            self.collection_dir,
+            _format_deck_scope(task),
+        )
+        if not self.no_auto_commit:
+            logger.debug("Creating pre-LLM git snapshot")
+            git_snapshot(
+                self.collection_dir,
+                action=f"LLM task {task.name}",
+                paths=_llm_snapshot_paths(
+                    self.collection_dir,
+                    task_context,
+                ),
+            )
+        else:
+            logger.debug("Auto-commit disabled (--no-auto-commit)")
+
         db = LlmDb.open(self.collection_dir)
         try:
             job_id = db.start_job(
@@ -193,26 +213,6 @@ class LlmTaskExecutor:
                 model=task.model.model,
                 model_id=task.model.model_id,
             )
-            logger.debug(
-                "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
-                task.name,
-                task.model,
-                self.collection_dir,
-                _format_deck_scope(task),
-            )
-            if not self.no_auto_commit:
-                logger.debug("Creating pre-LLM git snapshot")
-                git_snapshot(
-                    self.collection_dir,
-                    action=f"LLM task {task.name}",
-                    paths=_llm_snapshot_paths(
-                        self.collection_dir,
-                        task_context,
-                    ),
-                )
-            else:
-                logger.debug("Auto-commit disabled (--no-auto-commit)")
-
             progress_state = _build_progress_state(
                 job_id=job_id,
                 task_name=task.name,

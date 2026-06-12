@@ -451,7 +451,7 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     with (
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.deserialize") as deserialize_mock,
+        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
     ):
         run_deserialize(args)
 
@@ -460,11 +460,12 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
         action="deserializing",
         paths=[tmp_path / "Target.md"],
     )
+    plan = deserialize_mock.call_args.args[0]
+    assert plan.target_paths == (tmp_path / "Target.md",)
     deserialize_mock.assert_called_once_with(
-        payload,
+        plan,
         overwrite=True,
         collection_dir=tmp_path,
-        note_types_dir=tmp_path / "note_types",
     )
 
 
@@ -480,16 +481,17 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     with (
         patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
         patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.deserialize") as deserialize_mock,
+        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
     ):
         run_deserialize(args)
 
     snapshot_mock.assert_not_called()
+    plan = deserialize_mock.call_args.args[0]
+    assert plan.target_paths == ()
     deserialize_mock.assert_called_once_with(
-        {"decks": []},
+        plan,
         overwrite=False,
         collection_dir=tmp_path,
-        note_types_dir=tmp_path / "note_types",
     )
 
 
