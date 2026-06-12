@@ -6,6 +6,8 @@ import logging
 import re
 from pathlib import Path
 
+from rich.markup import escape as rich_escape
+
 from ankiops.collab.hosting import open_pr_if_possible
 from ankiops.collab.publish import publish_deck
 from ankiops.config import require_collection_dir
@@ -111,7 +113,12 @@ def run_subscribe(args) -> None:
     if source.root.exists():
         raise ValueError(f"Collab source already exists: {source.source_id}")
     repo.subtree_add(source)
-    logger.info("Subscribed to %s at %s", args.repo, clickable_path(source.root))
+    logger.info(
+        "Subscribed to %s at %s",
+        rich_escape(args.repo),
+        clickable_path(source.root),
+        extra={"markup": True},
+    )
 
 
 def run_pull(args) -> None:
@@ -161,7 +168,12 @@ def run_status(args) -> None:
         logger.info("No collab sources found.")
         return
     for source in sources:
-        logger.info("%s  %s", source.source_id, clickable_path(source.root))
+        logger.info(
+            "%s  %s",
+            rich_escape(source.source_id),
+            clickable_path(source.root),
+            extra={"markup": True},
+        )
 
 
 def run(args) -> None:
