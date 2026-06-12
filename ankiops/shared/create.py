@@ -13,6 +13,7 @@ from ankiops.export_notes import _render_notes_to_markdown
 from ankiops.fs import FileSystemAdapter
 from ankiops.git import CollectionGit
 from ankiops.models import MarkdownFile, NoteTypeConfig
+from ankiops.shared.errors import format_missing_note_keys_error
 from ankiops.shared.hosting import ensure_create_repo
 from ankiops.sources import SHARED_BRANCH, SyncSource
 from ankiops.sync_media import _extract_media_references
@@ -156,11 +157,7 @@ def _prepare_create_plan(
                 media_used.update(_extract_media_references(field_value))
 
     if missing_note_keys:
-        raise ValueError(
-            "Cannot create shared source: notes are missing note_key metadata: "
-            + ", ".join(missing_note_keys)
-            + ". Run 'ankiops ma' first or add explicit note_key comments."
-        )
+        raise ValueError(format_missing_note_keys_error(len(missing_note_keys)))
 
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
