@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from ankiops.sources import COLLAB_BRANCH, SyncSource
+from ankiops.sources import SHARED_BRANCH, SyncSource
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class CollectionGit:
         if self.cached_diff_exists(rel_paths):
             self.run(["commit", "-m", message, "--", *rel_paths])
 
-    def commit_publish_move(
+    def commit_create_move(
         self,
         *,
         touched_paths: list[Path],
@@ -191,7 +191,7 @@ class CollectionGit:
                 "--prefix",
                 self.source_prefix(source),
                 source.github_url,
-                COLLAB_BRANCH,
+                SHARED_BRANCH,
             ],
         )
 

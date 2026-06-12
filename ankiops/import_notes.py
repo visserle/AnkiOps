@@ -65,20 +65,20 @@ class _NoteTypeConversion:
     import_anki_hash: str
 
 
-def _collab_scope(note_type: str) -> str | None:
+def _shared_scope(note_type: str) -> str | None:
     parts = note_type.split("/")
-    if len(parts) == 4 and parts[0] == "collab":
+    if len(parts) == 4 and parts[0] == "shared":
         return "/".join(parts[:3])
     return None
 
 
-def _format_cross_collab_conversion_error(
+def _format_cross_shared_conversion_error(
     *, note_key: str, markdown_note_type: str, anki_note_type: str
 ) -> str:
     return (
         f"Cannot convert note_key {note_key} from '{anki_note_type}' to "
         f"'{markdown_note_type}': the Anki note already belongs to a different "
-        "collab source. Use the matching collab source or resolve the note "
+        "shared source. Use the matching shared source or resolve the note "
         "ownership manually."
     )
 
@@ -428,11 +428,11 @@ def _sync_keyed_note(
     )
 
     if needs_note_type_conversion:
-        anki_scope = _collab_scope(anki_note.note_type)
-        markdown_scope = _collab_scope(parsed_note.note_type)
+        anki_scope = _shared_scope(anki_note.note_type)
+        markdown_scope = _shared_scope(parsed_note.note_type)
         if anki_scope is not None and anki_scope != markdown_scope:
             result.errors.append(
-                _format_cross_collab_conversion_error(
+                _format_cross_shared_conversion_error(
                     note_key=note_key,
                     markdown_note_type=parsed_note.note_type,
                     anki_note_type=anki_note.note_type,
@@ -465,9 +465,8 @@ def _sync_keyed_note(
             )
         )
 
-    if (
-        not needs_note_type_conversion
-        and _anki_note_match(html_fields, parsed_note.tags, anki_note)
+    if not needs_note_type_conversion and _anki_note_match(
+        html_fields, parsed_note.tags, anki_note
     ):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
@@ -885,9 +884,7 @@ def import_collection(
     sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
     source_configs = load_configs_for_sources(sources)
     configs = [
-        config
-        for source_config in source_configs
-        for config in source_config.configs
+        config for source_config in source_configs for config in source_config.configs
     ]
     required_note_types = [config.name for config in configs]
     config_by_name = {config.name: config for config in configs}
@@ -914,8 +911,7 @@ def import_collection(
         deck_name = file_stem_to_deck_name(source_doc.file_state.file_path.stem)
         previous = deck_sources.get(deck_name)
         current = (
-            f"{source_doc.source.display_name}:"
-            f"{source_doc.file_state.file_path.name}"
+            f"{source_doc.source.display_name}:{source_doc.file_state.file_path.name}"
         )
         if previous is not None:
             deck_duplicates.append(

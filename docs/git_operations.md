@@ -2,11 +2,11 @@
 
 This page lists the Git commands that AnkiOps can run from the `ankiops`
 command line. It covers automatic snapshots, collection initialization, and the
-GitHub-facing collaboration workflow.
+GitHub-facing shared workflow.
 
 The implementation lives mainly in `ankiops/git.py`, with call sites in
 `ankiops/init.py`, `ankiops/cli.py`, `ankiops/llm/runner.py`, and
-`ankiops/collab/`.
+`ankiops/shared/`.
 
 ## Snapshot convention
 
@@ -57,8 +57,8 @@ Important behavior:
 - Deleted tracked files inside the scope are included.
 - If the directory is not a Git repository, Git is missing, or the commit fails,
   AnkiOps skips the snapshot or logs a warning and continues.
-- Commands use the broad fallback when collab sources are present. Source-aware
-  collab snapshots are future work.
+- Commands use the broad fallback when shared sources are present. Source-aware
+  shared snapshots are future work.
 
 ## Commands that snapshot
 
@@ -73,30 +73,30 @@ Important behavior:
 Each command accepts `--no-auto-commit` / `-n`, except that LLM only accepts it
 with `<task> --run`.
 
-`ankiops collab pull --to-anki` runs `ankiops ma` after pulling. `ankiops collab
-contribute --from-anki` runs `ankiops am` before preparing the contribution.
-Until collab-aware scoping exists, those nested snapshots use the broad fallback
-when collab sources are present.
+`ankiops shared update --to-anki` runs `ankiops ma` after updating. `ankiops
+shared submit --from-anki` runs `ankiops am` before preparing the submission.
+Until shared-aware scoping exists, those nested snapshots use the broad fallback
+when shared sources are present.
 
 ## Other Git operations
 
 | CLI command | Git or GitHub operations |
 | --- | --- |
 | `ankiops init` | Checks whether the collection directory is already inside a Git repo with `git rev-parse --git-dir`. If not, runs `git init`. |
-| `ankiops collab publish <deck> <owner>/<repo>` | Requires a Git-backed collection, checks for staged changes, optionally checks or creates the GitHub repo, commits the deck move into `collab/<owner>/<repo>`, splits that subtree to a temporary branch, and pushes it to `main` on the target repo. |
-| `ankiops collab subscribe <owner>/<repo>` | Requires a Git-backed collection and runs `git subtree add` for `https://github.com/<owner>/<repo>.git` at `collab/<owner>/<repo>` from branch `main`. |
-| `ankiops collab pull [owner/repo]` | Requires a Git-backed collection and runs `git subtree pull` for one collab source, or every known collab source when the repo is omitted. |
-| `ankiops collab contribute <owner>/<repo>` | Requires a Git-backed collection, commits changes under `collab/<owner>/<repo>`, splits that subtree to a temporary branch, pushes that branch when possible, and opens a PR with `gh` when available. |
+| `ankiops shared create <deck> <owner>/<repo>` | Requires a Git-backed collection, checks for staged changes, optionally checks or creates the GitHub repo, commits the deck move into `shared/<owner>/<repo>`, splits that subtree to a temporary branch, and pushes it to `main` on the target repo. |
+| `ankiops shared add <owner>/<repo>` | Requires a Git-backed collection and runs `git subtree add` for `https://github.com/<owner>/<repo>.git` at `shared/<owner>/<repo>` from branch `main`. |
+| `ankiops shared update [owner/repo]` | Requires a Git-backed collection and runs `git subtree pull` for one shared source, or every known shared source when the repo is omitted. |
+| `ankiops shared submit <owner>/<repo>` | Requires a Git-backed collection, commits changes under `shared/<owner>/<repo>`, splits that subtree to a temporary branch, pushes that branch when possible, and opens a PR with `gh` when available. |
 
-## Collaboration details
+## Shared details
 
-All collaboration commands use `collab/<owner>/<repo>` as the local subtree
+All shared commands use `shared/<owner>/<repo>` as the local subtree
 prefix and `https://github.com/<owner>/<repo>.git` as the remote URL. The
-collab branch is `main`.
+shared branch is `main`.
 
-### `collab publish`
+### `shared create`
 
-`publish` validates that the collection is a Git repo and that the Git index has
+`create` validates that the collection is a Git repo and that the Git index has
 no staged changes:
 
 ```text
@@ -113,23 +113,23 @@ the remote with:
 git ls-remote https://github.com/<owner>/<repo>.git
 ```
 
-After writing the collab source files, it commits the move:
+After writing the shared source files, it commits the move:
 
 ```text
-git add -A -- <new-collab-paths>
+git add -A -- <new-shared-paths>
 git rm --cached -f --ignore-unmatch -- <original-deck-paths>
 git diff --cached --quiet
-git commit -m "AnkiOps: publish <deck> to collab/<owner>/<repo>"
+git commit -m "AnkiOps: create shared/<owner>/<repo> from <deck>"
 ```
 
-Then it publishes the subtree:
+Then it pushes the subtree:
 
 ```text
-git subtree split --prefix collab/<owner>/<repo> -b ankiops-collab-<owner>-<repo>-<id>
+git subtree split --prefix shared/<owner>/<repo> -b ankiops-shared-<owner>-<repo>-<id>
 git push https://github.com/<owner>/<repo>.git <branch>:main
 ```
 
-If publish fails after creating a commit or temporary branch, AnkiOps attempts to
+If create fails after creating a commit or temporary branch, AnkiOps attempts to
 roll back with the appropriate subset of:
 
 ```text
@@ -140,37 +140,37 @@ git reset HEAD -- <paths>
 git rm -r --cached --ignore-unmatch -- <paths>
 ```
 
-### `collab subscribe`
+### `shared add`
 
-`subscribe` refreshes the index and adds the GitHub repository as a subtree:
-
-```text
-git rev-parse --git-dir
-git update-index -q --refresh
-git subtree add --prefix collab/<owner>/<repo> https://github.com/<owner>/<repo>.git main
-```
-
-### `collab pull`
-
-`pull` refreshes the index and pulls one or more collab subtrees:
+`add` refreshes the index and adds the GitHub repository as a subtree:
 
 ```text
 git rev-parse --git-dir
 git update-index -q --refresh
-git subtree pull --prefix collab/<owner>/<repo> https://github.com/<owner>/<repo>.git main
+git subtree add --prefix shared/<owner>/<repo> https://github.com/<owner>/<repo>.git main
 ```
 
-### `collab contribute`
+### `shared update`
 
-`contribute` commits local collab source changes, creates a subtree branch, and
+`update` refreshes the index and pulls one or more shared subtrees:
+
+```text
+git rev-parse --git-dir
+git update-index -q --refresh
+git subtree pull --prefix shared/<owner>/<repo> https://github.com/<owner>/<repo>.git main
+```
+
+### `shared submit`
+
+`submit` commits local shared source changes, creates a subtree branch, and
 tries to prepare a pull request:
 
 ```text
 git rev-parse --git-dir
-git add -A -- collab/<owner>/<repo>
-git diff --cached --quiet -- collab/<owner>/<repo>
-git commit -m "AnkiOps: contribute collab/<owner>/<repo>" -- collab/<owner>/<repo>
-git subtree split --prefix collab/<owner>/<repo> -b ankiops-collab-<owner>-<repo>-<id>
+git add -A -- shared/<owner>/<repo>
+git diff --cached --quiet -- shared/<owner>/<repo>
+git commit -m "AnkiOps: submit shared/<owner>/<repo>" -- shared/<owner>/<repo>
+git subtree split --prefix shared/<owner>/<repo> -b ankiops-shared-<owner>-<repo>-<id>
 git push https://github.com/<owner>/<repo>.git <branch>:<branch>
 gh pr create --repo <owner>/<repo> --head <branch> --base main --fill
 ```
@@ -184,7 +184,7 @@ The following CLI paths do not trigger Git operations directly:
 
 - `ankiops serialize`
 - `ankiops note-types`
-- `ankiops collab status`
+- `ankiops shared list`
 - `ankiops llm` status output
 - `ankiops llm <task>` dry-run planning
 - `ankiops llm --job <job_id|latest>`

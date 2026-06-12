@@ -54,10 +54,7 @@ class _FakeNote:
         self.id = note_id
         self._model = model
         self.tags = list(tags)
-        self.fields = [
-            fields.get(field["name"], "")
-            for field in model["flds"]
-        ]
+        self.fields = [fields.get(field["name"], "") for field in model["flds"]]
 
     def note_type(self):
         return self._model
@@ -116,10 +113,7 @@ class _FakeModels:
         for note_id in request.note_ids:
             note = self.collection.notes[note_id]
             old_values = list(note.fields)
-            note.fields = [
-                old_values[old_index]
-                for old_index in request.new_fields
-            ]
+            note.fields = [old_values[old_index] for old_index in request.new_fields]
             note._model = new_model
             if self.collection.mutate_card_due_on_change:
                 for card in self.collection.cards.values():
@@ -130,7 +124,7 @@ class _FakeModels:
 class _FakeCollection:
     def __init__(self):
         self.old_model = _model(1, "AnkiOpsQA")
-        self.new_model = _model(2, "collab/owner/repo/AnkiOpsQA")
+        self.new_model = _model(2, "shared/owner/repo/AnkiOpsQA")
         self.models_by_name = {
             self.old_model["name"]: self.old_model,
             self.new_model["name"]: self.new_model,
@@ -285,11 +279,7 @@ class _WriteFakeCollection(_FakeCollection):
         if not query.startswith("nid:"):
             return []
         note_id = int(query.split(":", 1)[1])
-        return [
-            card_id
-            for card_id, card in self.cards.items()
-            if card.nid == note_id
-        ]
+        return [card_id for card_id, card in self.cards.items() if card.nid == note_id]
 
     def get_card(self, card_id: int):
         return self.cards[card_id]
@@ -304,11 +294,11 @@ def test_change_notes_notetype_converts_selected_notes_only():
         col,
         [101],
         "AnkiOpsQA",
-        "collab/owner/repo/AnkiOpsQA",
+        "shared/owner/repo/AnkiOpsQA",
     )
 
     assert result == {"changed": 1}
-    assert col.notes[101].note_type()["name"] == "collab/owner/repo/AnkiOpsQA"
+    assert col.notes[101].note_type()["name"] == "shared/owner/repo/AnkiOpsQA"
     assert col.notes[102].note_type()["name"] == "AnkiOpsQA"
 
 
@@ -329,7 +319,7 @@ def test_change_notes_notetype_blocks_wrong_current_model():
             col,
             [101],
             "AnkiOpsQA",
-            "collab/owner/repo/AnkiOpsQA",
+            "shared/owner/repo/AnkiOpsQA",
         )
 
 
@@ -345,7 +335,7 @@ def test_change_notes_notetype_blocks_missing_ankiops_key_field():
             col,
             [101],
             "AnkiOpsQA",
-            "collab/owner/repo/AnkiOpsQA",
+            "shared/owner/repo/AnkiOpsQA",
         )
 
 
@@ -353,7 +343,7 @@ def test_change_notes_notetype_blocks_mismatched_fields():
     col = _FakeCollection()
     col.new_model = _model(
         2,
-        "collab/owner/repo/AnkiOpsQA",
+        "shared/owner/repo/AnkiOpsQA",
         fields=["Question", "Different", "AnkiOps Key"],
     )
     col.models_by_name[col.new_model["name"]] = col.new_model
@@ -365,7 +355,7 @@ def test_change_notes_notetype_blocks_mismatched_fields():
             col,
             [101],
             "AnkiOpsQA",
-            "collab/owner/repo/AnkiOpsQA",
+            "shared/owner/repo/AnkiOpsQA",
         )
 
 
@@ -382,7 +372,7 @@ def test_change_notes_notetype_blocks_post_verification_failures():
             col,
             [101],
             "AnkiOpsQA",
-            "collab/owner/repo/AnkiOpsQA",
+            "shared/owner/repo/AnkiOpsQA",
         )
 
 
@@ -433,7 +423,7 @@ def test_dispatch_ankiops_connect_action_reads_model_state():
 
     assert dispatch_ankiops_connect_action(col, "modelNames", {}) == [
         "AnkiOpsQA",
-        "collab/owner/repo/AnkiOpsQA",
+        "shared/owner/repo/AnkiOpsQA",
     ]
     assert dispatch_ankiops_connect_action(
         col,
@@ -469,80 +459,111 @@ def test_dispatch_ankiops_connect_action_reads_model_state():
 def test_dispatch_ankiops_connect_action_creates_and_updates_model_state():
     col = _FakeCollection()
 
-    assert dispatch_ankiops_connect_action(
-        col,
-        "createModel",
-        {
-            "modelName": "AnkiOpsNew",
-            "inOrderFields": ["Question", "Answer"],
-            "css": ".card { color: green; }",
-            "isCloze": False,
-            "cardTemplates": [
-                {"Name": "Card 1", "Front": "{{Question}}", "Back": "{{Answer}}"}
-            ],
-        },
-    ) is None
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "createModel",
+            {
+                "modelName": "AnkiOpsNew",
+                "inOrderFields": ["Question", "Answer"],
+                "css": ".card { color: green; }",
+                "isCloze": False,
+                "cardTemplates": [
+                    {"Name": "Card 1", "Front": "{{Question}}", "Back": "{{Answer}}"}
+                ],
+            },
+        )
+        is None
+    )
     assert dispatch_ankiops_connect_action(
         col,
         "modelFieldNames",
         {"modelName": "AnkiOpsNew"},
     ) == ["Question", "Answer"]
 
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelFieldAdd",
-        {"modelName": "AnkiOpsNew", "fieldName": "Extra"},
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelFieldReposition",
-        {"modelName": "AnkiOpsNew", "fieldName": "Extra", "index": 1},
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelFieldSetDescription",
-        {"modelName": "AnkiOpsNew", "fieldName": "Extra", "description": "Details"},
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelFieldSetFontSize",
-        {"modelName": "AnkiOpsNew", "fieldName": "Extra", "fontSize": 15},
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "updateModelStyling",
-        {"model": {"name": "AnkiOpsNew", "css": ".card { color: blue; }"}},
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelTemplateRename",
-        {
-            "modelName": "AnkiOpsNew",
-            "oldTemplateName": "Card 1",
-            "newTemplateName": "Review",
-        },
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelTemplateAdd",
-        {
-            "modelName": "AnkiOpsNew",
-            "template": {"Name": "Extra", "Front": "{{Extra}}", "Back": "{{Answer}}"},
-        },
-    ) is None
-    assert dispatch_ankiops_connect_action(
-        col,
-        "updateModelTemplates",
-        {
-            "model": {
-                "name": "AnkiOpsNew",
-                "templates": {
-                    "Review": {"Front": "{{Question}}?", "Back": "{{Answer}}!"},
-                    "Extra": {"Front": "{{Extra}}?", "Back": "{{Answer}}!"},
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelFieldAdd",
+            {"modelName": "AnkiOpsNew", "fieldName": "Extra"},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelFieldReposition",
+            {"modelName": "AnkiOpsNew", "fieldName": "Extra", "index": 1},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelFieldSetDescription",
+            {"modelName": "AnkiOpsNew", "fieldName": "Extra", "description": "Details"},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelFieldSetFontSize",
+            {"modelName": "AnkiOpsNew", "fieldName": "Extra", "fontSize": 15},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "updateModelStyling",
+            {"model": {"name": "AnkiOpsNew", "css": ".card { color: blue; }"}},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelTemplateRename",
+            {
+                "modelName": "AnkiOpsNew",
+                "oldTemplateName": "Card 1",
+                "newTemplateName": "Review",
+            },
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelTemplateAdd",
+            {
+                "modelName": "AnkiOpsNew",
+                "template": {
+                    "Name": "Extra",
+                    "Front": "{{Extra}}",
+                    "Back": "{{Answer}}",
                 },
-            }
-        },
-    ) is None
+            },
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "updateModelTemplates",
+            {
+                "model": {
+                    "name": "AnkiOpsNew",
+                    "templates": {
+                        "Review": {"Front": "{{Question}}?", "Back": "{{Answer}}!"},
+                        "Extra": {"Front": "{{Extra}}?", "Back": "{{Answer}}!"},
+                    },
+                }
+            },
+        )
+        is None
+    )
 
     assert dispatch_ankiops_connect_action(
         col,
@@ -554,16 +575,22 @@ def test_dispatch_ankiops_connect_action_creates_and_updates_model_state():
         "modelFieldDescriptions",
         {"modelName": "AnkiOpsNew"},
     ) == ["", "Details", ""]
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelFieldFonts",
-        {"modelName": "AnkiOpsNew"},
-    )["Extra"]["size"] == 15
-    assert dispatch_ankiops_connect_action(
-        col,
-        "modelStyling",
-        {"modelName": "AnkiOpsNew"},
-    )["css"] == ".card { color: blue; }"
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelFieldFonts",
+            {"modelName": "AnkiOpsNew"},
+        )["Extra"]["size"]
+        == 15
+    )
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "modelStyling",
+            {"modelName": "AnkiOpsNew"},
+        )["css"]
+        == ".card { color: blue; }"
+    )
     assert dispatch_ankiops_connect_action(
         col,
         "modelTemplates",
@@ -601,20 +628,26 @@ def test_dispatch_ankiops_connect_action_imports_notes_and_media(tmp_path):
     )
     note_id = created_ids[0]
 
-    assert dispatch_ankiops_connect_action(
-        col,
-        "updateNote",
-        {
-            "note": {
-                "id": note_id,
-                "fields": {"Answer": "A2"},
-                "tags": ["updated"],
-            }
-        },
-    ) is None
-    assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]})[0][
-        "fields"
-    ]["Answer"]["value"] == "A2"
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "updateNote",
+            {
+                "note": {
+                    "id": note_id,
+                    "fields": {"Answer": "A2"},
+                    "tags": ["updated"],
+                }
+            },
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]})[0][
+            "fields"
+        ]["Answer"]["value"]
+        == "A2"
+    )
     assert dispatch_ankiops_connect_action(col, "notesInfo", {"notes": [note_id]})[0][
         "tags"
     ] == ["updated"]
@@ -626,14 +659,20 @@ def test_dispatch_ankiops_connect_action_imports_notes_and_media(tmp_path):
     )[0]
     card_id = note_info["cards"][0]
     assert dispatch_ankiops_connect_action(col, "createDeck", {"deck": "Moved"}) == 4
-    assert dispatch_ankiops_connect_action(
-        col,
-        "changeDeck",
-        {"cards": [card_id], "deck": "Moved"},
-    ) is None
-    assert dispatch_ankiops_connect_action(col, "cardsInfo", {"cards": [card_id]})[0][
-        "deckName"
-    ] == "Moved"
+    assert (
+        dispatch_ankiops_connect_action(
+            col,
+            "changeDeck",
+            {"cards": [card_id], "deck": "Moved"},
+        )
+        is None
+    )
+    assert (
+        dispatch_ankiops_connect_action(col, "cardsInfo", {"cards": [card_id]})[0][
+            "deckName"
+        ]
+        == "Moved"
+    )
 
     assert (
         dispatch_ankiops_connect_action(col, "deleteNotes", {"notes": [note_id]})

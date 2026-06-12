@@ -131,7 +131,7 @@ def test_invoke_requires_ankiops_connect_for_custom_actions():
                 "changeNotesNotetype",
                 noteIds=[101],
                 oldModel="AnkiOpsQA",
-                newModel="collab/o/r/AnkiOpsQA",
+                newModel="shared/o/r/AnkiOpsQA",
             )
 
     post.assert_called_once()

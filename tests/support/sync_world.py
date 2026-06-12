@@ -143,14 +143,14 @@ class SyncWorld:
         suffix = "\n" if content and not content.endswith("\n") else ""
         return self.write_raw_deck(deck_name, content + suffix)
 
-    def write_collab_deck(
+    def write_shared_deck(
         self,
         owner: str,
         repo: str,
         deck_name: str,
         content: str,
     ) -> Path:
-        source_root = self.root / "collab" / owner / repo
+        source_root = self.root / "shared" / owner / repo
         source_note_types = source_root / NOTE_TYPES_DIR
         if not source_note_types.exists():
             FileSystemAdapter().eject_builtin_note_types(source_note_types)

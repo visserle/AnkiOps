@@ -10,7 +10,6 @@ from rich.markup import escape as rich_escape
 
 from ankiops.anki_client import AnkiConnectionError
 from ankiops.cli_anki import connect_or_exit
-from ankiops.collab import run as run_collab_impl
 from ankiops.config import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -38,6 +37,7 @@ from ankiops.serializer import (
     plan_deserialize_from_file,
     serialize_to_file,
 )
+from ankiops.shared import run as run_shared_impl
 from ankiops.sources import discover_sync_sources, load_configs_for_sources
 from ankiops.sync_media import (
     format_media_status,
@@ -76,21 +76,21 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
-def _has_collab_sources(collection_dir: Path) -> bool:
+def _has_shared_sources(collection_dir: Path) -> bool:
     sources = discover_sync_sources(
         collection_dir,
         note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
-    return any(source.is_collab for source in sources)
+    return any(source.is_shared for source in sources)
 
 
 def _snapshot_paths(
     collection_dir: Path,
     scoped_paths: Sequence[Path],
     *,
-    has_collab_scope: bool = False,
+    has_shared_scope: bool = False,
 ) -> list[Path]:
-    if has_collab_scope or _has_collab_sources(collection_dir):
+    if has_shared_scope or _has_shared_sources(collection_dir):
         return [collection_dir]
     return list(scoped_paths)
 
@@ -362,7 +362,7 @@ def run_deserialize(args):
             paths=_snapshot_paths(
                 collection_dir,
                 deserialize_plan.target_paths,
-                has_collab_scope=deserialize_plan.has_collab_sources,
+                has_shared_scope=deserialize_plan.has_shared_sources,
             ),
         )
     else:
@@ -459,12 +459,12 @@ def run_llm(args):
     )
 
 
-def run_collab(args):
+def run_shared(args):
     try:
-        if getattr(args, "collab_command", None) == "contribute" and args.from_anki:
+        if getattr(args, "shared_command", None) == "submit" and args.from_anki:
             run_am(SimpleNamespace(no_auto_commit=False))
-        run_collab_impl(args)
-        if getattr(args, "collab_command", None) == "pull" and args.to_anki:
+        run_shared_impl(args)
+        if getattr(args, "shared_command", None) == "update" and args.to_anki:
             run_ma(SimpleNamespace(no_auto_commit=False))
     except ValueError as error:
         logger.error(str(error))
@@ -622,85 +622,85 @@ def main():
 
     configure_llm_parser(subparsers, handler=run_llm)
 
-    collab_parser = subparsers.add_parser(
-        "collab",
-        help="Publish, subscribe to, update, and contribute GitHub collab decks",
+    shared_parser = subparsers.add_parser(
+        "shared",
+        help="Create, add, update, submit, and list GitHub shared decks",
     )
-    collab_subparsers = collab_parser.add_subparsers(
-        dest="collab_command",
+    shared_subparsers = shared_parser.add_subparsers(
+        dest="shared_command",
         required=True,
     )
 
-    collab_publish = collab_subparsers.add_parser(
-        "publish",
-        help="Publish a local deck tree to a GitHub collab source",
+    shared_create = shared_subparsers.add_parser(
+        "create",
+        help="Create a GitHub shared source from a local deck tree",
     )
-    collab_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
-    collab_publish.add_argument(
+    shared_create.add_argument("deck", help="Deck to share (includes subdecks)")
+    shared_create.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    publish_visibility = collab_publish.add_mutually_exclusive_group()
-    publish_visibility.add_argument(
+    create_visibility = shared_create.add_mutually_exclusive_group()
+    create_visibility.add_argument(
         "--public",
         action="store_true",
         help="Create the GitHub repo as public when it does not exist",
     )
-    publish_visibility.add_argument(
+    create_visibility.add_argument(
         "--private",
         action="store_false",
         dest="public",
         help="Create the GitHub repo as private when it does not exist (default)",
     )
-    collab_publish.set_defaults(public=False)
-    collab_publish.set_defaults(handler=run_collab)
+    shared_create.set_defaults(public=False)
+    shared_create.set_defaults(handler=run_shared)
 
-    collab_subscribe = collab_subparsers.add_parser(
-        "subscribe",
-        help="Add a GitHub collab source to this collection",
+    shared_add = shared_subparsers.add_parser(
+        "add",
+        help="Add a GitHub shared source to this collection",
     )
-    collab_subscribe.add_argument(
+    shared_add.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    collab_subscribe.set_defaults(handler=run_collab)
+    shared_add.set_defaults(handler=run_shared)
 
-    collab_pull = collab_subparsers.add_parser(
-        "pull",
-        help="Pull one or all collab sources from GitHub",
+    shared_update = shared_subparsers.add_parser(
+        "update",
+        help="Update one or all shared sources from GitHub",
     )
-    collab_pull.add_argument(
+    shared_update.add_argument(
         "repo",
         nargs="?",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    collab_pull.add_argument(
+    shared_update.add_argument(
         "--to-anki",
         action="store_true",
-        help="Run Markdown -> Anki after pulling files",
+        help="Run Markdown -> Anki after updating files",
     )
-    collab_pull.set_defaults(handler=run_collab)
+    shared_update.set_defaults(handler=run_shared)
 
-    collab_contribute = collab_subparsers.add_parser(
-        "contribute",
-        help="Prepare a GitHub PR from local collab source edits",
+    shared_submit = shared_subparsers.add_parser(
+        "submit",
+        help="Prepare a GitHub PR from local shared source edits",
     )
-    collab_contribute.add_argument(
+    shared_submit.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    collab_contribute.add_argument(
+    shared_submit.add_argument(
         "--from-anki",
         action="store_true",
-        help="Run Anki -> Markdown before preparing the contribution",
+        help="Run Anki -> Markdown before preparing the submission",
     )
-    collab_contribute.set_defaults(handler=run_collab)
+    shared_submit.set_defaults(handler=run_shared)
 
-    collab_status = collab_subparsers.add_parser(
-        "status",
-        help="Show known collab sources",
+    shared_list = shared_subparsers.add_parser(
+        "list",
+        help="Show known shared sources",
     )
-    collab_status.set_defaults(handler=run_collab)
+    shared_list.set_defaults(handler=run_shared)
 
     note_types_parser = subparsers.add_parser(
         "note-types",
@@ -750,6 +750,7 @@ def main():
         print("  deserialize       Deserialize JSON file to Markdown decks")
         print("  fix-image-widths  Normalize or force Markdown image widths")
         print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
+        print("  shared            Create, add, update, submit, and list shared decks")
         print("  note-types        List note type labels or add note types from Anki")
         print()
         print("Usage examples:")
@@ -786,6 +787,7 @@ def main():
             "  ankiops llm --job latest                     # Show most recent LLM job"
         )
         print("  ankiops llm --job <job_id>                   # Show one LLM job")
+        print("  ankiops shared list                          # Show shared sources")
         print(
             "  ankiops note-types                           "
             "# Show note types and label registry"

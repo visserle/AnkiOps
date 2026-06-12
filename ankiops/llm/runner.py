@@ -666,7 +666,7 @@ def _llm_snapshot_paths(
         collection_dir,
         note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
-    if any(source.is_collab for source in sources):
+    if any(source.is_shared for source in sources):
         return [collection_dir]
 
     if any(
@@ -918,8 +918,7 @@ def _validate_note_type_patterns_match_scope(
     if missing_patterns:
         missing = ", ".join(sorted(set(missing_patterns)))
         raise ValueError(
-            "LLM note type pattern(s) matched no notes after deck filtering: "
-            f"{missing}"
+            f"LLM note type pattern(s) matched no notes after deck filtering: {missing}"
         )
 
 
