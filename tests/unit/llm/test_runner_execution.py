@@ -258,14 +258,14 @@ def test_executor_snapshots_only_queued_local_deck_paths(
     assert "Q: Fixed question" in working
 
 
-def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
+def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
     llm_collection,
     write_file,
     monkeypatch,
 ):
     _init_collection(llm_collection)
     FileSystemAdapter().eject_builtin_note_types(
-        llm_collection / "collab" / "owner" / "repo" / "note_types"
+        llm_collection / "shared" / "owner" / "repo" / "note_types"
     )
     write_file(
         llm_collection / "Deck.md",

@@ -117,21 +117,21 @@ def test_serialize_includes_tags(collection, monkeypatch):
     assert result["decks"][0]["notes"][0]["tags"] == ["high-yield", "z"]
 
 
-def test_serialize_includes_collab_sources_and_ignores_reserved_docs(
+def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
     collection, fs, monkeypatch
 ):
     _set_collection_paths(monkeypatch, collection)
-    collab_root = collection / "collab" / "owner" / "repo"
-    fs.eject_builtin_note_types(collab_root / "note_types")
-    (collab_root / "README.md").write_text("# docs", encoding="utf-8")
-    (collab_root / "LICENSE.md").write_text("# license", encoding="utf-8")
-    (collab_root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
-    (collab_root / "_draft.md").write_text(
+    shared_root = collection / "shared" / "owner" / "repo"
+    fs.eject_builtin_note_types(shared_root / "note_types")
+    (shared_root / "README.md").write_text("# docs", encoding="utf-8")
+    (shared_root / "LICENSE.md").write_text("# license", encoding="utf-8")
+    (shared_root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
+    (shared_root / "_draft.md").write_text(
         "<!-- note_key: draft -->\nQ: draft\nA: draft",
         encoding="utf-8",
     )
-    (collab_root / "Shared.md").write_text(
-        "<!-- note_key: collab-1 -->\nQ: collab question\nA: collab answer",
+    (shared_root / "Shared.md").write_text(
+        "<!-- note_key: shared-1 -->\nQ: shared question\nA: shared answer",
         encoding="utf-8",
     )
 
@@ -139,26 +139,26 @@ def test_serialize_includes_collab_sources_and_ignores_reserved_docs(
 
     decks = {(deck["source"], deck["name"]): deck for deck in result["decks"]}
     assert ("local", "TestDeck") in decks
-    assert ("collab/owner/repo", "Shared") in decks
-    assert ("collab/owner/repo", "README") not in decks
-    collab_note = decks[("collab/owner/repo", "Shared")]["notes"][0]
-    assert collab_note["note_type"] == "collab/owner/repo/AnkiOpsQA"
+    assert ("shared/owner/repo", "Shared") in decks
+    assert ("shared/owner/repo", "README") not in decks
+    shared_note = decks[("shared/owner/repo", "Shared")]["notes"][0]
+    assert shared_note["note_type"] == "shared/owner/repo/AnkiOpsQA"
 
 
-def test_serialize_orders_local_before_sorted_collab_sources(
+def test_serialize_orders_local_before_sorted_shared_sources(
     collection, fs, monkeypatch
 ):
     _set_collection_paths(monkeypatch, collection)
-    collab_b = collection / "collab" / "z-owner" / "deck"
-    collab_a = collection / "collab" / "a-owner" / "deck"
-    fs.eject_builtin_note_types(collab_b / "note_types")
-    fs.eject_builtin_note_types(collab_a / "note_types")
-    (collab_b / "B.md").write_text(
-        "<!-- note_key: collab-b -->\nQ: b\nA: b",
+    shared_b = collection / "shared" / "z-owner" / "deck"
+    shared_a = collection / "shared" / "a-owner" / "deck"
+    fs.eject_builtin_note_types(shared_b / "note_types")
+    fs.eject_builtin_note_types(shared_a / "note_types")
+    (shared_b / "B.md").write_text(
+        "<!-- note_key: shared-b -->\nQ: b\nA: b",
         encoding="utf-8",
     )
-    (collab_a / "A.md").write_text(
-        "<!-- note_key: collab-a -->\nQ: a\nA: a",
+    (shared_a / "A.md").write_text(
+        "<!-- note_key: shared-a -->\nQ: a\nA: a",
         encoding="utf-8",
     )
 
@@ -166,8 +166,8 @@ def test_serialize_orders_local_before_sorted_collab_sources(
 
     assert [(deck["source"], deck["name"]) for deck in result["decks"]] == [
         ("local", "TestDeck"),
-        ("collab/a-owner/deck", "A"),
-        ("collab/z-owner/deck", "B"),
+        ("shared/a-owner/deck", "A"),
+        ("shared/z-owner/deck", "B"),
     ]
 
 
@@ -175,10 +175,10 @@ def test_serialize_global_validation_rejects_duplicate_deck_names(
     collection, fs, monkeypatch
 ):
     _set_collection_paths(monkeypatch, collection)
-    collab_root = collection / "collab" / "owner" / "repo"
-    fs.eject_builtin_note_types(collab_root / "note_types")
-    (collab_root / "TestDeck.md").write_text(
-        "<!-- note_key: collab-1 -->\nQ: collab question\nA: collab answer",
+    shared_root = collection / "shared" / "owner" / "repo"
+    fs.eject_builtin_note_types(shared_root / "note_types")
+    (shared_root / "TestDeck.md").write_text(
+        "<!-- note_key: shared-1 -->\nQ: shared question\nA: shared answer",
         encoding="utf-8",
     )
 
@@ -199,9 +199,7 @@ def test_serialize_global_validation_rejects_duplicate_note_keys(
         serialize(collection)
 
 
-def test_serialize_global_validation_allows_missing_note_keys(
-    collection, monkeypatch
-):
+def test_serialize_global_validation_allows_missing_note_keys(collection, monkeypatch):
     _set_collection_paths(monkeypatch, collection)
     (collection / "MissingKey.md").write_text(
         "Q: missing key\nA: missing key",
@@ -410,8 +408,8 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
             "missing required source",
         ),
         (
-            {"decks": [_serialized_deck(source="collab/missing/repo")]},
-            "unknown source 'collab/missing/repo'",
+            {"decks": [_serialized_deck(source="shared/missing/repo")]},
+            "unknown source 'shared/missing/repo'",
         ),
         (
             {"decks": [_serialized_deck(note_type="MissingType")]},
@@ -475,9 +473,7 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
         ),
     ],
 )
-def test_deserialize_rejects_invalid_data_before_writes(
-    tmp_path, fs, data, message
-):
+def test_deserialize_rejects_invalid_data_before_writes(tmp_path, fs, data, message):
     note_types_dir = _init_collection(tmp_path, fs)
 
     with pytest.raises(ValueError, match=message):
@@ -507,18 +503,18 @@ def test_deserialize_accepts_null_note_key(tmp_path, fs):
     assert "Q: Q" in content
 
 
-def test_deserialize_rejects_collab_source_with_missing_note_types(tmp_path, fs):
+def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs):
     note_types_dir = _init_collection(tmp_path, fs)
-    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
+    (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
 
     with pytest.raises(ValueError, match="note_types/ cannot be loaded"):
         deserialize(
             {
                 "decks": [
                     _serialized_deck(
-                        source="collab/owner/repo",
+                        source="shared/owner/repo",
                         name="Shared",
-                        note_type="collab/owner/repo/AnkiOpsQA",
+                        note_type="shared/owner/repo/AnkiOpsQA",
                     )
                 ]
             },
@@ -527,23 +523,23 @@ def test_deserialize_rejects_collab_source_with_missing_note_types(tmp_path, fs)
             overwrite=True,
         )
 
-    assert not (tmp_path / "collab" / "owner" / "repo" / "Shared.md").exists()
+    assert not (tmp_path / "shared" / "owner" / "repo" / "Shared.md").exists()
 
 
-def test_deserialize_writes_local_and_collab_decks_to_owning_sources(tmp_path, fs):
+def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, fs):
     note_types_dir = _init_collection(tmp_path, fs)
-    collab_root = tmp_path / "collab" / "owner" / "repo"
-    fs.eject_builtin_note_types(collab_root / "note_types")
+    shared_root = tmp_path / "shared" / "owner" / "repo"
+    fs.eject_builtin_note_types(shared_root / "note_types")
 
     deserialize(
         {
             "decks": [
                 _serialized_deck(name="LocalDeck", note_key="local-1"),
                 _serialized_deck(
-                    source="collab/owner/repo",
+                    source="shared/owner/repo",
                     name="SharedDeck",
-                    note_key="collab-1",
-                    note_type="collab/owner/repo/AnkiOpsQA",
+                    note_key="shared-1",
+                    note_type="shared/owner/repo/AnkiOpsQA",
                     fields={"Question": "CQ", "Answer": "CA"},
                 ),
             ]
@@ -553,12 +549,12 @@ def test_deserialize_writes_local_and_collab_decks_to_owning_sources(tmp_path, f
         overwrite=True,
     )
 
-    assert "<!-- note_type: AnkiOpsQA -->" in (
-        tmp_path / "LocalDeck.md"
-    ).read_text(encoding="utf-8")
-    collab_content = (collab_root / "SharedDeck.md").read_text(encoding="utf-8")
-    assert "<!-- note_type: collab/owner/repo/AnkiOpsQA -->" in collab_content
-    assert "Q: CQ" in collab_content
+    assert "<!-- note_type: AnkiOpsQA -->" in (tmp_path / "LocalDeck.md").read_text(
+        encoding="utf-8"
+    )
+    shared_content = (shared_root / "SharedDeck.md").read_text(encoding="utf-8")
+    assert "<!-- note_type: shared/owner/repo/AnkiOpsQA -->" in shared_content
+    assert "Q: CQ" in shared_content
 
 
 def test_deserialize_skips_existing_targets_without_overwrite(tmp_path, fs):

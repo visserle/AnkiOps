@@ -40,12 +40,12 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(fs, tmp_p
         "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
     )
 
-    collab_root = tmp_path / "collab" / "owner" / "repo"
-    collab_media = collab_root / LOCAL_MEDIA_DIR
-    collab_media.mkdir(parents=True)
-    (collab_media / "image.png").write_bytes(b"collab image")
-    (collab_root / "CollabDeck.md").write_text(
-        "Q: Collab\nA: ![img](media/image.png)", encoding="utf-8"
+    shared_root = tmp_path / "shared" / "owner" / "repo"
+    shared_media = shared_root / LOCAL_MEDIA_DIR
+    shared_media.mkdir(parents=True)
+    (shared_media / "image.png").write_bytes(b"shared image")
+    (shared_root / "SharedDeck.md").write_text(
+        "Q: Shared\nA: ![img](media/image.png)", encoding="utf-8"
     )
 
     anki_media_dir = tmp_path / "anki_media"
@@ -59,24 +59,22 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(fs, tmp_p
         db.close()
 
     root_names = sorted(path.name for path in root_media.glob("image_*.png"))
-    collab_names = sorted(path.name for path in collab_media.glob("image_*.png"))
+    shared_names = sorted(path.name for path in shared_media.glob("image_*.png"))
     assert len(root_names) == 1
-    assert len(collab_names) == 1
-    assert root_names != collab_names
+    assert len(shared_names) == 1
+    assert root_names != shared_names
     assert result.summary.synced == 2
     assert (anki_media_dir / root_names[0]).exists()
-    assert (anki_media_dir / collab_names[0]).exists()
+    assert (anki_media_dir / shared_names[0]).exists()
     assert f"media/{root_names[0]}" in (tmp_path / "RootDeck.md").read_text(
         encoding="utf-8"
     )
-    assert f"media/{collab_names[0]}" in (
-        collab_root / "CollabDeck.md"
-    ).read_text(encoding="utf-8")
+    assert f"media/{shared_names[0]}" in (shared_root / "SharedDeck.md").read_text(
+        encoding="utf-8"
+    )
 
 
-def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(
-    fs, tmp_path
-):
+def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(fs, tmp_path):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "a(b).jpg").write_bytes(b"paren image")

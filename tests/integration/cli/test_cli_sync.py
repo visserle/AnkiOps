@@ -212,17 +212,17 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
-def test_cli_collab_publish_accepts_public_visibility_flag():
+def test_cli_shared_create_accepts_public_visibility_flag():
     captured = []
 
     with (
         patch(
-            "ankiops.cli.run_collab_impl",
+            "ankiops.cli.run_shared_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
             "sys.argv",
-            ["ankiops", "collab", "publish", "Deck", "owner/repo", "--public"],
+            ["ankiops", "shared", "create", "Deck", "owner/repo", "--public"],
         ),
     ):
         main()
@@ -449,9 +449,9 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     assert "ankiops ma" in caplog.text
 
 
-def test_run_fix_image_widths_uses_broad_snapshot_with_collab_sources(tmp_path):
+def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
     (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
-    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
+    (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
     args = SimpleNamespace(
         deck=None,
         no_subdecks=False,

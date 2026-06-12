@@ -1,4 +1,4 @@
-"""GitHub hosting operations for collab sources."""
+"""GitHub hosting operations for shared sources."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import shutil
 import subprocess
 
 from ankiops.git import CollectionGit
-from ankiops.sources import COLLAB_BRANCH, SyncSource
+from ankiops.sources import SHARED_BRANCH, SyncSource
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _create_github_repo(
         )
 
 
-def ensure_publish_repo(
+def ensure_create_repo(
     repo: CollectionGit,
     source: SyncSource,
     *,
@@ -120,7 +120,7 @@ def open_pr_if_possible(repo: CollectionGit, source: SyncSource, branch: str) ->
             "--head",
             branch,
             "--base",
-            COLLAB_BRANCH,
+            SHARED_BRANCH,
             "--fill",
         ],
         cwd=repo.collection_dir,

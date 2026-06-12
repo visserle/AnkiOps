@@ -170,13 +170,13 @@ def test_change_notes_notetype_calls_ankiops_connect_action():
     adapter = AnkiAdapter()
 
     with patch("ankiops.anki.invoke") as mock_invoke:
-        adapter.change_notes_notetype([101, 102], "AnkiOpsQA", "collab/o/r/AnkiOpsQA")
+        adapter.change_notes_notetype([101, 102], "AnkiOpsQA", "shared/o/r/AnkiOpsQA")
 
     mock_invoke.assert_called_once_with(
         "changeNotesNotetype",
         noteIds=[101, 102],
         oldModel="AnkiOpsQA",
-        newModel="collab/o/r/AnkiOpsQA",
+        newModel="shared/o/r/AnkiOpsQA",
     )
 
 

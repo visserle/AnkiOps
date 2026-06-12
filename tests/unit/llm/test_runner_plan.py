@@ -192,12 +192,12 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
     assert surface_by_type["AnkiOpsReversed"].candidate_notes == 0
 
 
-def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_file):
+def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_file):
     _init_collection_db(llm_collection)
     fs = FileSystemAdapter()
     fs.eject_builtin_note_types(llm_collection / "note_types")
-    collab_root = llm_collection / "collab" / "owner" / "repo"
-    fs.eject_builtin_note_types(collab_root / "note_types")
+    shared_root = llm_collection / "shared" / "owner" / "repo"
+    fs.eject_builtin_note_types(shared_root / "note_types")
     write_file(
         llm_collection / "Local.md",
         """
@@ -207,11 +207,11 @@ def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_fil
         """,
     )
     write_file(
-        collab_root / "Shared.md",
+        shared_root / "Shared.md",
         """
-        <!-- note_key: collab-1 -->
-        Q: collab question
-        A: collab answer
+        <!-- note_key: shared-1 -->
+        Q: shared question
+        A: shared answer
         """,
     )
     write_file(
@@ -233,11 +233,12 @@ def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_fil
 
     surface = {(item.source, item.note_type): item for item in plan.field_surface}
     assert ("local", "AnkiOpsQA") in surface
-    assert ("collab/owner/repo", "collab/owner/repo/AnkiOpsQA") in surface
+    assert ("shared/owner/repo", "shared/owner/repo/AnkiOpsQA") in surface
     assert surface[("local", "AnkiOpsQA")].candidate_notes == 1
-    assert surface[
-        ("collab/owner/repo", "collab/owner/repo/AnkiOpsQA")
-    ].candidate_notes == 1
+    assert (
+        surface[("shared/owner/repo", "shared/owner/repo/AnkiOpsQA")].candidate_notes
+        == 1
+    )
 
 
 def test_plan_task_rejects_explicit_note_type_pattern_after_deck_filter(

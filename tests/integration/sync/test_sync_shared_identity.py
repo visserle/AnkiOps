@@ -1,13 +1,13 @@
-"""Collaboration scenarios where note_key is the only shared identity."""
+"""Shared scenarios where note_key is the only shared identity."""
 
 from __future__ import annotations
 
 from tests.support.assertions import assert_summary
 
 
-def test_collab_import_move_without_db_mapping_moves_existing_note(world):
+def test_shared_import_move_without_db_mapping_moves_existing_note(world):
     """With empty DB, import should still move by embedded AnkiOps Key."""
-    note_key = "collab-move-001"
+    note_key = "shared-move-001"
     note_id = world.add_qa_note(
         deck_name="SourceDeck",
         question="Move Q",
@@ -35,10 +35,10 @@ def test_collab_import_move_without_db_mapping_moves_existing_note(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "TargetDeck"
 
 
-def test_collab_import_recovers_all_keys_without_db(world):
+def test_shared_import_recovers_all_keys_without_db(world):
     """With empty DB, import recovers note_key->note_id mapping from Anki."""
-    note_key_a = "collab-recover-001-a"
-    note_key_b = "collab-recover-001-b"
+    note_key_a = "shared-recover-001-a"
+    note_key_b = "shared-recover-001-b"
     note_id_a = world.add_qa_note(
         deck_name="DeckA",
         question="Qa",
@@ -71,9 +71,9 @@ def test_collab_import_recovers_all_keys_without_db(world):
         assert db.resolve_note_ids([note_key_b]).get(note_key_b) == note_id_b
 
 
-def test_collab_export_recovers_mapping_from_embedded_note_key(world):
+def test_shared_export_recovers_mapping_from_embedded_note_key(world):
     """With empty DB, export should keep stable note_key identity."""
-    note_key = "collab-export-001"
+    note_key = "shared-export-001"
     note_id = world.add_qa_note(
         deck_name="ExportDeck",
         question="Q1",

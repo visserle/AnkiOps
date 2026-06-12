@@ -54,7 +54,7 @@ class _ValidatedDeck:
 class DeserializationPlan:
     decks: tuple[_ValidatedDeck, ...]
     target_paths: tuple[Path, ...]
-    has_collab_sources: bool
+    has_shared_sources: bool
 
 
 def _source_name(source: SyncSource) -> str:
@@ -509,9 +509,7 @@ def _validate_serialized_data(
                 else:
                     seen_note_keys[note_key] = (deck_name, deck_index, note_index)
             else:
-                errors.append(
-                    f"{context} note_key must be a non-empty string or null."
-                )
+                errors.append(f"{context} note_key must be a non-empty string or null.")
 
             if not isinstance(note_type, str) or not note_type.strip():
                 errors.append(f"{context} is missing required note_type.")
@@ -592,7 +590,7 @@ def plan_deserialize_from_file(
     return DeserializationPlan(
         decks=tuple(decks),
         target_paths=tuple(_deserialize_target_path(deck) for deck in decks),
-        has_collab_sources=any(deck.source.is_collab for deck in decks),
+        has_shared_sources=any(deck.source.is_shared for deck in decks),
     )
 
 

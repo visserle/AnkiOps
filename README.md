@@ -10,7 +10,7 @@ AnkiOps is a bidirectional Anki ↔ Markdown bridge where each deck becomes a Ma
 - **Markdown-first**: Edit in your favourite editor and render Markdown features in Anki (including syntax highlighting)
 - **Simple CLI interface** for importing and exporting between Anki and the filesystem
 - **LLM-integration**: Run programmable tasks such as content review, grammar fixes, or translations on your collection
-- **GitHub collaboration**: Publish deck trees to GitHub, subscribe to shared decks, pull updates, and contribute changes through PRs (experimental)
+- **GitHub shared**: Create shared deck sources on GitHub, add shared decks, update them, and submit changes through PRs (experimental)
 
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder. You can add note types from Anki using various methods described below.
@@ -39,7 +39,7 @@ same for note type:Inference is only for fresh notes that do not yet have metada
 pipx install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. (For collab operations, the AnkiOps addon must be manually installed which is currently experimental.) Run `ankiops init` in an empty collection directory. AnkiOps creates `.ankiops.db`, `llm/`, and `note_types/`. The tutorial flag also creates a sample Markdown deck.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. (For shared operations, the AnkiOps addon must be manually installed which is currently experimental.) Run `ankiops init` in an empty collection directory. AnkiOps creates `.ankiops.db`, `llm/`, and `note_types/`. The tutorial flag also creates a sample Markdown deck.
 
 ```bash
 ankiops init --tutorial
@@ -127,32 +127,32 @@ We recommend VS Code because it previews Markdown and can paste clipboard images
 
 ### How can I share my AnkiOps collection? (experimental)
 
-Use `ankiops collab` from a Git-backed collection. AnkiOps stores each collab source at `collab/<owner>/<repo>` and pulls from `https://github.com/<owner>/<repo>.git` on the `main` branch. AnkiOps scopes note types from that source as `collab/<owner>/<repo>/<note_type>`, so two shared decks can use the same local note type names without colliding.
+Use `ankiops shared` from a Git-backed collection. AnkiOps stores each shared source at `shared/<owner>/<repo>` and pulls from `https://github.com/<owner>/<repo>.git` on the `main` branch. AnkiOps scopes note types from that source as `shared/<owner>/<repo>/<note_type>`, so two shared decks can use the same local note type names without colliding.
 
-To publish one of your decks:
+To create a shared source from one of your decks:
 
 ```bash
-ankiops collab publish "Deck Name" owner/repo
+ankiops shared create "Deck Name" owner/repo
 ```
 
-`publish` requires a clean Git index and `note_key` metadata on every selected note. It includes the selected deck and its subdecks, copies referenced media and used note types into the collab source, commits the move, and pushes the subtree to GitHub. If the GitHub repository does not exist and the `gh` CLI is available, AnkiOps creates a private repo by default. Pass `--public` to create a public repo.
+`create` requires a clean Git index and `note_key` metadata on every selected note. It includes the selected deck and its subdecks, copies referenced media and used note types into the shared source, commits the move, and pushes the subtree to GitHub. If the GitHub repository does not exist and the `gh` CLI is available, AnkiOps creates a private repo by default. Pass `--public` to create a public repo.
 
 To use a shared deck:
 
 ```bash
-ankiops collab subscribe owner/repo
-ankiops collab pull owner/repo --to-anki
+ankiops shared add owner/repo
+ankiops shared update owner/repo --to-anki
 ```
 
-`subscribe` adds the GitHub repository as a subtree. `pull` updates one source, or all sources when you omit `owner/repo`. `--to-anki` runs Markdown-to-Anki after the pull.
+`add` adds the GitHub repository as a subtree. `update` refreshes one source, or all sources when you omit `owner/repo`. `--to-anki` runs Markdown-to-Anki after the update.
 
-To contribute local edits back:
+To submit local edits back:
 
 ```bash
-ankiops collab contribute owner/repo --from-anki
+ankiops shared submit owner/repo --from-anki
 ```
 
-`--from-anki` exports Anki edits to Markdown first. `contribute` then commits the collab source, creates a subtree branch, and opens a pull request with `gh` when possible. Without `gh`, AnkiOps leaves you with the branch name and GitHub remote so you can push and open the PR yourself.
+`--from-anki` exports Anki edits to Markdown first. `submit` then commits the shared source, creates a subtree branch, and opens a pull request with `gh` when possible. Without `gh`, AnkiOps leaves you with the branch name and GitHub remote so you can push and open the PR yourself.
 
 ### How do I upgrade AnkiOps to the latest version?
 
@@ -160,7 +160,7 @@ AnkiOps is in early development, so breaking changes are expected. Use `pipx upg
 
 ### What is the Add-on for?
 
-The Add-on has two main purposes. First, it adds `am` and `ma` buttons to the Anki toolbar for quick sync. Second, it implements AnkiOpsConnect, an extension of AnkiConnect that enables operations for the collaboration features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
+The Add-on has two main purposes. First, it adds `am` and `ma` buttons to the Anki toolbar for quick sync. Second, it implements AnkiOpsConnect, an extension of AnkiConnect that enables operations for the shared features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
 
 Advanced: the CLI sends AnkiOpsConnect requests to `http://127.0.0.1:8766` by default. For connection to a different host, set `ANKIOPS_CONNECT_URL` :
 
@@ -228,9 +228,9 @@ Yes. Bug fixes, feature work, and documentation PRs are welcome. Open an issue f
 - `ankiops llm <task_name> --run [--model <model>] [--deck <deck_name>] [--no-auto-commit]` - Run one configured task job
 - `ankiops llm --job <job_id|latest>` - Show one LLM job in detail
 
-**`collab`:**
-- `ankiops collab publish <deck> <owner>/<repo> [--public|--private]` - Publish a local deck tree as a GitHub collab source
-- `ankiops collab subscribe <owner>/<repo>` - Add a GitHub collab source to the collection
-- `ankiops collab pull [owner/repo] [--to-anki]` - Pull one collab source, or all sources when omitted
-- `ankiops collab contribute <owner>/<repo> [--from-anki]` - Prepare a contribution branch and PR for local collab edits
-- `ankiops collab status` - Show known collab sources
+**`shared`:**
+- `ankiops shared create <deck> <owner>/<repo> [--public|--private]` - Create a GitHub shared source from a local deck tree
+- `ankiops shared add <owner>/<repo>` - Add a GitHub shared source to the collection
+- `ankiops shared update [owner/repo] [--to-anki]` - Update one shared source, or all sources when omitted
+- `ankiops shared submit <owner>/<repo> [--from-anki]` - Prepare a submission branch and PR for local shared edits
+- `ankiops shared list` - Show known shared sources
