@@ -237,9 +237,18 @@ def test_create_rejects_missing_note_keys_before_file_mutations(
     )
     _init_git_repo(collection_dir)
 
-    with pytest.raises(ValueError, match="missing note_key metadata"):
+    with pytest.raises(ValueError) as excinfo:
         run_create(SimpleNamespace(deck="Deck", repo="owner/repo"))
 
+    message = str(excinfo.value)
+    assert message == (
+        "Missing note_keys for 1 note. "
+        "note_keys are stable IDs AnkiOps needs to match notes across "
+        "collections without duplicates. "
+        "Fix: run 'ankiops ma' to assign them."
+    )
+    assert "explicit note_key" not in message
+    assert "Deck.md note" not in message
     assert deck.exists()
     assert not (collection_dir / "shared").exists()
 
@@ -603,9 +612,18 @@ def test_submit_rejects_keyless_notes_without_mutating_files(
         lambda: collection_dir,
     )
 
-    with pytest.raises(ValueError, match="missing note_key metadata"):
+    with pytest.raises(ValueError) as excinfo:
         run_submit(SimpleNamespace(repo="owner/repo"))
 
+    message = str(excinfo.value)
+    assert message == (
+        "Missing note_keys for 1 note. "
+        "note_keys are stable IDs AnkiOps needs to match notes across "
+        "collections without duplicates. "
+        "Fix: run 'ankiops ma' to assign them."
+    )
+    assert "explicit note_key" not in message
+    assert "Deck.md note" not in message
     assert deck.read_text(encoding="utf-8") == original
     assert _git_status(collection_dir) == ""
 

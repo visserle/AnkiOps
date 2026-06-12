@@ -13,6 +13,7 @@ from ankiops.fs import FileSystemAdapter
 from ankiops.git import CollectionGit
 from ankiops.log import clickable_path
 from ankiops.shared.create import create_shared_deck
+from ankiops.shared.errors import format_missing_note_keys_error
 from ankiops.shared.hosting import open_pr_if_possible
 from ankiops.sources import (
     SyncSource,
@@ -82,11 +83,7 @@ def _ensure_submittable_note_keys(source: SyncSource) -> None:
                 missing.append(f"{md_file.relative_to(source.root)} note {index}")
 
     if missing:
-        raise ValueError(
-            "Cannot submit: notes are missing note_key metadata: "
-            + ", ".join(missing)
-            + ". Run 'ankiops ma' first or add explicit note_key comments."
-        )
+        raise ValueError(format_missing_note_keys_error(len(missing)))
 
 
 def run_create(args) -> None:
