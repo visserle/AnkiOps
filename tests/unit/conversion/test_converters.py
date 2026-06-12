@@ -142,8 +142,17 @@ def test_display_math_delimiters_are_canonicalized_without_shortening(
     assert html_to_md.convert(f"<div>{markdown}</div>") == expected_math
 
 
-def test_escaped_bracket_suffix_roundtrip_stays_stable(md_to_html, html_to_md):
-    markdown = r"\[\]\]"
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        r"\[\]\]",
+        r"\[0\]\]",
+        r"\[0\]\\]",
+    ],
+)
+def test_escaped_bracket_suffix_roundtrip_stays_stable(
+    md_to_html, html_to_md, markdown
+):
 
     first = html_to_md.convert(md_to_html.convert(markdown))
     second = html_to_md.convert(md_to_html.convert(first))

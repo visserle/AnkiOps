@@ -59,6 +59,7 @@ def test_sync_note_types_uses_cache_when_unchanged(tmp_path):
     try:
         first = sync_note_types(anki, fs, tmp_path, db)
         assert first == "1 synced"
+        assert fs.load_count == 1
         assert anki.state_fetches == [["AnkiOpsQA"]]
         assert anki.updated == [["AnkiOpsQA"]]
 
@@ -67,6 +68,7 @@ def test_sync_note_types_uses_cache_when_unchanged(tmp_path):
 
         second = sync_note_types(anki, fs, tmp_path, db)
         assert second == "1 up to date (cached)"
+        assert fs.load_count == 2
         assert anki.state_fetches == []
         assert anki.updated == []
     finally:
@@ -89,6 +91,7 @@ def test_sync_note_types_cache_invalidates_on_local_change(tmp_path):
 
     assert first == "1 synced"
     assert second == "1 synced"
+    assert fs.load_count == 2
     assert anki.state_fetches == [["AnkiOpsQA"], ["AnkiOpsQA"]]
 
 
@@ -99,4 +102,5 @@ def test_sync_note_types_without_db_does_not_cache(tmp_path):
     sync_note_types(anki, fs, tmp_path, None)
     sync_note_types(anki, fs, tmp_path, None)
 
+    assert fs.load_count == 2
     assert anki.state_fetches == [["AnkiOpsQA"], ["AnkiOpsQA"]]

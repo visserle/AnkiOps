@@ -287,13 +287,20 @@ class SyncWorld:
             ["git", "config", "user.email", "test@example.invalid"],
             cwd=self.root,
             check=True,
+            capture_output=True,
         )
         subprocess.run(
             ["git", "config", "user.name", "Test User"],
             cwd=self.root,
             check=True,
+            capture_output=True,
         )
-        subprocess.run(["git", "add", "-A", "."], cwd=self.root, check=True)
+        subprocess.run(
+            ["git", "add", "-A", "."],
+            cwd=self.root,
+            check=True,
+            capture_output=True,
+        )
         subprocess.run(
             ["git", "commit", "-m", "initial"],
             cwd=self.root,

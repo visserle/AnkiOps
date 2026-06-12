@@ -3,6 +3,7 @@
 import json
 import logging
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -268,6 +269,49 @@ def test_run_serialize_rejects_no_subdecks_without_deck():
         run_serialize(args)
 
     assert exc.value.code == 2
+
+
+def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
+    output = tmp_path / "deck.json"
+    args = SimpleNamespace(
+        output=str(output),
+        deck="Parent::Child",
+        no_subdecks=True,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        output,
+        deck="Parent::Child",
+        no_subdecks=True,
+    )
+
+
+def test_run_serialize_defaults_output_to_deck_name(tmp_path):
+    args = SimpleNamespace(
+        output=None,
+        deck="Parent::Child",
+        no_subdecks=False,
+    )
+
+    with (
+        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+    ):
+        run_serialize(args)
+
+    serialize_mock.assert_called_once_with(
+        tmp_path,
+        Path("Parent__Child.json"),
+        deck="Parent::Child",
+        no_subdecks=False,
+    )
 
 
 def test_run_deserialize_snapshots_by_default(tmp_path):
