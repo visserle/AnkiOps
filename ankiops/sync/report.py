@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -175,8 +175,9 @@ class SyncSummary:
             return NotImplemented
         return SyncSummary(
             **{
-                field_name: getattr(self, field_name) + getattr(other, field_name)
-                for field_name in self.__annotations__
+                field_info.name: getattr(self, field_info.name)
+                + getattr(other, field_info.name)
+                for field_info in fields(self)
             }
         )
 
@@ -229,8 +230,8 @@ class SyncSummary:
 
     def to_dict(self) -> dict[str, int]:
         return {
-            field_name: getattr(self, field_name)
-            for field_name in type(self).__annotations__
+            field_info.name: getattr(self, field_info.name)
+            for field_info in fields(self)
         }
 
     @staticmethod

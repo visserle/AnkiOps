@@ -13,7 +13,7 @@ from ankiops.note_types import eject_default_note_types
 
 logger = logging.getLogger(__name__)
 
-ANKIOPS_DB = ".ankiops.sync.state"
+ANKIOPS_DB = ".ankiops.db"
 NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 LLM_DIR = "llm"

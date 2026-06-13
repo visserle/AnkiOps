@@ -518,10 +518,6 @@ def sync_note_type_configs(
         logger.debug("Note types: %s synced (%s)", len(to_update), names)
         parts.append(f"{len(to_update)} synced")
 
-    if not parts:
-        logger.debug("Note types: up to date")
-        return None
-
     if sync_state is not None:
         sync_state.set_note_type_sync_state(local_hash, names_signature)
 
