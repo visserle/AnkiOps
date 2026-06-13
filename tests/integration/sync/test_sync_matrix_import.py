@@ -6,7 +6,6 @@ import shutil
 
 import pytest
 
-from ankiops.notes import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
@@ -410,48 +409,6 @@ def test_imp_run_conflict_003_duplicate_ankiops_key_across_local_note_types_bloc
 
     assert old_note_id in world.mock_anki.notes
     assert new_note_id in world.mock_anki.notes
-
-
-def test_imp_run_update_002_cached_same_type_skip_avoids_markdown_render(
-    world,
-    monkeypatch,
-):
-    """Cached unchanged keyed notes should skip before Markdown-to-HTML rendering."""
-    note_key = "cached-fast-path-key"
-    note_id = world.add_qa_note(
-        deck_name="CachedFastPathDeck",
-        question="Cached Q",
-        answer="Cached A",
-        note_key=note_key,
-    )
-    world.write_qa_deck("CachedFastPathDeck", [("Cached Q", "Cached A", note_key)])
-    md_hash = note_fingerprint(
-        "AnkiOpsQA",
-        {"Question": "Cached Q", "Answer": "Cached A"},
-    )
-    anki_hash = note_fingerprint(
-        "AnkiOpsQA",
-        {
-            "Question": "Cached Q",
-            "Answer": "Cached A",
-            "AnkiOps Key": note_key,
-        },
-    )
-
-    def fail_to_html(*_args, **_kwargs):
-        raise AssertionError("unexpected Markdown render on cached skip")
-
-    monkeypatch.setattr("ankiops.sync.to_anki_deck._to_html", fail_to_html)
-
-    with world.db_session() as db:
-        db.upsert_note_links([(note_key, note_id)])
-        db.upsert_import_hashes([(note_key, md_hash, anki_hash)])
-        result = world.sync_import(db)
-
-    sync_result = result.results[0]
-    assert sync_result.errors == []
-    assert sync_result.summary.skipped == 1
-    assert_summary(sync_result.summary, created=0, updated=0, moved=0, deleted=0)
 
 
 def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(world):

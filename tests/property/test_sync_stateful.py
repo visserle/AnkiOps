@@ -6,7 +6,6 @@ import re
 import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -106,7 +105,7 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
         deck_file = collection_dir / f"{deck_name_to_file_stem('StatefulDeck')}.md"
 
         mock_anki = MockAnki()
-        anki = Anki()
+        anki = Anki(invoke_func=mock_anki.invoke)
         fs = DeckFileHarness()
         note_types_dir = collection_dir / NOTE_TYPES_DIR
         if not note_types_dir.exists():
@@ -117,47 +116,43 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
         question_idx = 0
 
         try:
-            with (
-                patch("ankiops.anki_rpc.invoke", side_effect=mock_anki.invoke),
-                patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
-            ):
-                for step, op in enumerate(ops):
-                    if op == "md_create":
-                        question_idx += 1
-                        question_text = f"Q{question_idx}"
-                        answer_text = f"A{question_idx}"
-                        deck_file.write_text(
-                            f"Q: {question_text}\nA: {answer_text}\n",
-                            encoding="utf-8",
-                        )
+            for step, op in enumerate(ops):
+                if op == "md_create":
+                    question_idx += 1
+                    question_text = f"Q{question_idx}"
+                    answer_text = f"A{question_idx}"
+                    deck_file.write_text(
+                        f"Q: {question_text}\nA: {answer_text}\n",
+                        encoding="utf-8",
+                    )
 
-                    elif op == "md_update":
-                        if (
-                            deck_file.exists()
-                            and deck_file.read_text(encoding="utf-8").strip()
-                        ):
-                            content = deck_file.read_text(encoding="utf-8")
-                            updated = _replace_answer(content, f"A{step}-md")
-                            deck_file.write_text(updated, encoding="utf-8")
+                elif op == "md_update":
+                    if (
+                        deck_file.exists()
+                        and deck_file.read_text(encoding="utf-8").strip()
+                    ):
+                        content = deck_file.read_text(encoding="utf-8")
+                        updated = _replace_answer(content, f"A{step}-md")
+                        deck_file.write_text(updated, encoding="utf-8")
 
-                    elif op == "md_delete":
-                        if deck_file.exists():
-                            deck_file.write_text("", encoding="utf-8")
+                elif op == "md_delete":
+                    if deck_file.exists():
+                        deck_file.write_text("", encoding="utf-8")
 
-                    elif op == "anki_update":
-                        if mock_anki.notes:
-                            note_id = next(iter(mock_anki.notes.keys()))
-                            mock_anki.notes[note_id]["fields"]["Answer"] = {
-                                "value": f"A{step}-anki"
-                            }
+                elif op == "anki_update":
+                    if mock_anki.notes:
+                        note_id = next(iter(mock_anki.notes.keys()))
+                        mock_anki.notes[note_id]["fields"]["Answer"] = {
+                            "value": f"A{step}-anki"
+                        }
 
-                    elif op == "sync_import":
-                        _sync_import(anki, fs, db, collection_dir)
+                elif op == "sync_import":
+                    _sync_import(anki, fs, db, collection_dir)
 
-                    elif op == "sync_export":
-                        _sync_export(anki, fs, db, collection_dir)
+                elif op == "sync_export":
+                    _sync_export(anki, fs, db, collection_dir)
 
-                    if op in {"sync_import", "sync_export"}:
-                        _assert_mapping_invariants(deck_file, mock_anki, collection_dir)
+                if op in {"sync_import", "sync_export"}:
+                    _assert_mapping_invariants(deck_file, mock_anki, collection_dir)
         finally:
             db.close()

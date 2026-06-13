@@ -2,7 +2,9 @@
 
 import logging
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from ankiops.anki_rpc import AnkiConnectionError, invoke
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
@@ -59,19 +61,20 @@ def _normalize_model_styling_payload(styling: object, *, model_name: str) -> str
 class Anki:
     """Adapter for Anki's local HTTP connection."""
 
-    def __init__(self) -> None:
+    def __init__(self, invoke_func: Callable[..., Any] | None = None) -> None:
+        self._invoke = invoke if invoke_func is None else invoke_func
         self._media_dir: Path | None = None
 
     def get_version(self) -> int:
         """Get the active Anki connection version."""
-        return invoke("version")
+        return self._invoke("version")
 
     def get_active_profile(self) -> str:
         """Get the currently active Anki profile name."""
-        return invoke("getActiveProfile")
+        return self._invoke("getActiveProfile")
 
     def fetch_deck_names_and_ids(self) -> dict[str, int]:
-        return invoke("deckNamesAndIds")
+        return self._invoke("deckNamesAndIds")
 
     def fetch_all_note_ids(self, required_types: list[str]) -> list[int]:
         if not required_types:
@@ -79,7 +82,7 @@ class Anki:
         query = " OR ".join(
             f"note:{_quote_search_value(model_name)}" for model_name in required_types
         )
-        return invoke("findNotes", query=query)
+        return self._invoke("findNotes", query=query)
 
     def fetch_note_ids_by_note_keys(self, note_keys: set[str]) -> dict[str, list[int]]:
         if not note_keys:
@@ -92,7 +95,7 @@ class Anki:
             )
             for note_key in keys
         ]
-        results = invoke("multi", actions=actions)
+        results = self._invoke("multi", actions=actions)
         note_ids_by_key = {}
         for note_key, result in zip(keys, results):
             if isinstance(result, str):
@@ -105,13 +108,13 @@ class Anki:
     def fetch_cards_info(self, card_ids: list[int]) -> dict[int, dict]:
         if not card_ids:
             return {}
-        cards = invoke("cardsInfo", cards=card_ids)
+        cards = self._invoke("cardsInfo", cards=card_ids)
         return {card["cardId"]: card for card in cards if card}
 
     def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]:
         if not note_ids:
             return {}
-        notes = invoke("notesInfo", notes=note_ids)
+        notes = self._invoke("notesInfo", notes=note_ids)
         notes_by_id = {}
         for note_data in notes:
             if not note_data:
@@ -128,7 +131,7 @@ class Anki:
 
     # Models are Anki's note types
     def fetch_note_type_names(self) -> list[str]:
-        return invoke("modelNames")
+        return self._invoke("modelNames")
 
     def fetch_note_type_states(self, note_type_names: list[str]) -> dict[str, dict]:
         if not note_type_names:
@@ -141,7 +144,7 @@ class Anki:
             read_actions.append(_action("modelFieldDescriptions", modelName=name))
             read_actions.append(_action("modelFieldFonts", modelName=name))
 
-        read_results = invoke("multi", actions=read_actions)
+        read_results = self._invoke("multi", actions=read_actions)
         states = {}
         for model_index, name in enumerate(note_type_names):
             base = model_index * 5
@@ -199,7 +202,7 @@ class Anki:
                         )
                     )
 
-        results = invoke("multi", actions=actions)
+        results = self._invoke("multi", actions=actions)
         errors = [
             result
             for result in results
@@ -330,7 +333,7 @@ class Anki:
                     )
 
         if actions:
-            results = invoke("multi", actions=actions)
+            results = self._invoke("multi", actions=actions)
             errors = [
                 result
                 for result in results
@@ -391,7 +394,7 @@ class Anki:
 
         if actions:
             try:
-                results = invoke("multi", actions=actions)
+                results = self._invoke("multi", actions=actions)
                 update_idx = 0
                 for tag, action_result in zip(action_tags, results):
                     if tag == "update":
@@ -488,7 +491,7 @@ class Anki:
             for create_change in creates
         ]
         try:
-            can_add_results = invoke("canAddNotesWithErrorDetail", notes=notes)
+            can_add_results = self._invoke("canAddNotesWithErrorDetail", notes=notes)
             can_add_errors = self._collect_can_add_errors(creates, can_add_results)
             if can_add_errors:
                 return [None] * len(creates), can_add_errors
@@ -496,7 +499,7 @@ class Anki:
             pass
 
         try:
-            results = invoke("addNotes", notes=notes)
+            results = self._invoke("addNotes", notes=notes)
             return self._collect_create_results(creates, results)
         except AnkiConnectionError as error:
             return [None] * len(creates), [
@@ -505,7 +508,7 @@ class Anki:
             ]
 
     def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
-        return invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
+        return self._invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
 
     def change_notes_notetype(
         self,
@@ -513,7 +516,7 @@ class Anki:
         old_model: str,
         new_model: str,
     ) -> None:
-        invoke(
+        self._invoke(
             "changeNotesNotetype",
             noteIds=note_ids,
             oldModel=old_model,
@@ -524,7 +527,7 @@ class Anki:
         """Return Anki's collection.media directory, cached after first call."""
         cached = self._media_dir
         if cached is None:
-            cached = Path(invoke("getMediaDirPath"))
+            cached = Path(self._invoke("getMediaDirPath"))
             self._media_dir = cached
         return cached
 

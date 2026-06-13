@@ -17,8 +17,8 @@ _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
 
 @contextmanager
-def _ports(collection_dir, *, preload_configs: bool):
-    anki = Anki()
+def _ports(collection_dir, mock_anki, *, preload_configs: bool):
+    anki = Anki(invoke_func=mock_anki.invoke)
     fs = DeckFileHarness()
     note_types_dir = collection_dir / NOTE_TYPES_DIR
     if not note_types_dir.exists():
@@ -32,8 +32,8 @@ def _ports(collection_dir, *, preload_configs: bool):
         db.close()
 
 
-def _run_import(collection_dir, *, preload_configs: bool = True):
-    with _ports(collection_dir, preload_configs=preload_configs) as (
+def _run_import(collection_dir, mock_anki, *, preload_configs: bool = True):
+    with _ports(collection_dir, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
         db,
@@ -47,8 +47,8 @@ def _run_import(collection_dir, *, preload_configs: bool = True):
         )
 
 
-def _run_export(collection_dir, *, preload_configs: bool = False):
-    with _ports(collection_dir, preload_configs=preload_configs) as (
+def _run_export(collection_dir, mock_anki, *, preload_configs: bool = False):
+    with _ports(collection_dir, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
         db,
@@ -88,12 +88,12 @@ def _extract_note_key_order(content: str) -> list[str]:
     return _NOTE_KEY_RE.findall(content)
 
 
-def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiops):
+def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki):
     """Export should materialize one markdown file per deck."""
     mock_anki.add_note("Deck A", "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
     mock_anki.add_note("Deck B", "AnkiOpsQA", {"Question": "Q2", "Answer": "A2"})
 
-    summary = _run_export(tmp_path)
+    summary = _run_export(tmp_path, mock_anki)
     assert len(summary.results) == 2
 
     file_a = tmp_path / f"{deck_name_to_file_stem('Deck A')}.md"
@@ -110,12 +110,12 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki, run_ankiop
     assert "Q: Q2" in content_b
 
 
-def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki, run_ankiops):
+def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki):
     """Export should escape slash deck names into a single markdown filename."""
     deck_name = "EEG/MEG I"
     mock_anki.add_note(deck_name, "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
 
-    summary = _run_export(tmp_path)
+    summary = _run_export(tmp_path, mock_anki)
     assert len(summary.results) == 1
 
     md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
@@ -124,7 +124,7 @@ def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki, run_ankiops)
     assert "Q: Q1" in md_file.read_text(encoding="utf-8")
 
 
-def test_export_first_time_orders_by_note_id(tmp_path, mock_anki, run_ankiops):
+def test_export_first_time_orders_by_note_id(tmp_path, mock_anki):
     """First export should use note_id ascending as creation-time ordering."""
     deck_name = "OrderFreshDeck"
     _insert_mock_note(
@@ -150,7 +150,7 @@ def test_export_first_time_orders_by_note_id(tmp_path, mock_anki, run_ankiops):
         },
     )
 
-    _run_export(tmp_path)
+    _run_export(tmp_path, mock_anki)
 
     content = (tmp_path / f"{deck_name_to_file_stem(deck_name)}.md").read_text(
         encoding="utf-8"
@@ -158,7 +158,7 @@ def test_export_first_time_orders_by_note_id(tmp_path, mock_anki, run_ankiops):
     assert _extract_note_key_order(content) == ["fresh-k-101", "fresh-k-202"]
 
 
-def test_export_existing_keeps_markdown_order(tmp_path, mock_anki, run_ankiops):
+def test_export_existing_keeps_markdown_order(tmp_path, mock_anki):
     """Existing deck export should preserve markdown order for existing notes."""
     deck_name = "OrderRunDeck"
     _insert_mock_note(
@@ -201,13 +201,13 @@ def test_export_existing_keeps_markdown_order(tmp_path, mock_anki, run_ankiops):
     finally:
         db.close()
 
-    _run_export(tmp_path)
+    _run_export(tmp_path, mock_anki)
 
     content = md_file.read_text(encoding="utf-8")
     assert _extract_note_key_order(content) == ["run-k-2", "run-k-1"]
 
 
-def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_ankiops):
+def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki):
     """Existing deck export should append unseen notes in note_id order."""
     deck_name = "OrderAppendDeck"
     _insert_mock_note(
@@ -272,7 +272,7 @@ def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_a
     finally:
         db.close()
 
-    _run_export(tmp_path)
+    _run_export(tmp_path, mock_anki)
 
     content = md_file.read_text(encoding="utf-8")
     assert _extract_note_key_order(content) == [
@@ -283,7 +283,7 @@ def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki, run_a
     ]
 
 
-def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
+def test_all_note_types_integration(tmp_path, mock_anki):
     """Import + export should preserve all supported note-type content."""
     deck_name = "AllTypes"
     md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
@@ -318,7 +318,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
         encoding="utf-8",
     )
 
-    import_result = _run_import(tmp_path)
+    import_result = _run_import(tmp_path, mock_anki)
     assert import_result.results[0].errors == []
     assert_summary(
         import_result.summary, created=6, updated=0, moved=0, deleted=0, errors=0
@@ -352,7 +352,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
             assert fields["Answer"]["value"] == "1"
 
     md_file.unlink()
-    export_result = _run_export(tmp_path)
+    export_result = _run_export(tmp_path, mock_anki)
     assert export_result.results[0].file_path.exists()
     new_content = export_result.results[0].file_path.read_text(encoding="utf-8")
     assert "Q: QA Question" in new_content
@@ -365,7 +365,7 @@ def test_all_note_types_integration(tmp_path, mock_anki, run_ankiops):
     assert "IO_QM:" in new_content
 
 
-def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
+def test_ankiops_id_populated_on_update(tmp_path, mock_anki):
     """Import update should backfill missing AnkiOps Key on existing note."""
     note_key = "notekeyexisting"
     note_id = 999
@@ -389,14 +389,14 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki, run_ankiops):
         encoding="utf-8",
     )
 
-    _run_import(tmp_path)
+    _run_import(tmp_path, mock_anki)
 
     updated_note = mock_anki.notes[note_id]
     assert updated_note["fields"]["Answer"]["value"] == "UpdatedA"
     assert updated_note["fields"]["AnkiOps Key"]["value"] == note_key
 
 
-def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankiops):
+def test_import_note_key_placement_trailing_space(tmp_path, mock_anki):
     """Generated note_key comment should sit immediately above the note label."""
     deck_file = tmp_path / f"{deck_name_to_file_stem('TrailingSpaceDeck')}.md"
     deck_file.write_text(
@@ -404,7 +404,7 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
         encoding="utf-8",
     )
 
-    _run_import(tmp_path)
+    _run_import(tmp_path, mock_anki)
 
     content = deck_file.read_text(encoding="utf-8")
     assert "<!-- note_key:" in content
@@ -421,9 +421,7 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki, run_ankio
     assert lines[key_line_idx + 2].startswith("Q: Trailing Space Question ")
 
 
-def test_import_key_insertion_preserves_note_block_order(
-    tmp_path, mock_anki, run_ankiops
-):
+def test_import_key_insertion_preserves_note_block_order(tmp_path, mock_anki):
     """Import should insert note_key comments without reordering note blocks."""
     deck_file = tmp_path / f"{deck_name_to_file_stem('OrderPreserveDeck')}.md"
     deck_file.write_text(
@@ -440,7 +438,7 @@ def test_import_key_insertion_preserves_note_block_order(
         encoding="utf-8",
     )
 
-    _run_import(tmp_path)
+    _run_import(tmp_path, mock_anki)
 
     content = deck_file.read_text(encoding="utf-8")
     lines = content.splitlines()

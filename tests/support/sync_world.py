@@ -33,7 +33,7 @@ class SyncWorld:
     def __init__(self, root: Path, mock_anki):
         self.root = root
         self.mock_anki = mock_anki
-        self.anki = Anki()
+        self.anki = Anki(invoke_func=self.mock_anki.invoke)
         self.note_types_dir = self.root / NOTE_TYPES_DIR
         self.mock_anki.media_dir = self.root / "anki_media"
         self.mock_anki.media_dir.mkdir(parents=True, exist_ok=True)

@@ -54,17 +54,7 @@ def mock_anki() -> MockAnki:
 
 
 @pytest.fixture
-def run_ankiops(mock_anki):
-    """Patch both Anki invoke entry points with the stateful fake backend."""
-    with (
-        patch("ankiops.anki_rpc.invoke", side_effect=mock_anki.invoke),
-        patch("ankiops.anki.invoke", side_effect=mock_anki.invoke),
-    ):
-        yield
-
-
-@pytest.fixture
-def world(tmp_path, mock_anki, run_ankiops) -> SyncWorld:
+def world(tmp_path, mock_anki) -> SyncWorld:
     """High-level sync helper for scenario-style tests."""
     return SyncWorld(root=tmp_path, mock_anki=mock_anki)
 

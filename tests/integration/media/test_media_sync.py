@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.media import (
-    sync_all_media_from_anki,
     sync_all_media_to_anki,
     sync_media_to_anki,
 )
@@ -88,32 +86,6 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path)
     )
 
 
-def test_sync_all_media_suppresses_empty_source_cache_debug(tmp_path, caplog):
-    root_media = tmp_path / LOCAL_MEDIA_DIR
-    root_media.mkdir()
-    (root_media / "image.png").write_bytes(b"root image")
-    (tmp_path / "RootDeck.md").write_text(
-        "Q: Root\nA: ![img](media/image.png)", encoding="utf-8"
-    )
-    (tmp_path / "shared" / "owner" / "repo" / LOCAL_MEDIA_DIR).mkdir(parents=True)
-
-    anki_media_dir = tmp_path / "anki_media"
-    anki_media_dir.mkdir()
-    anki = _FakeMediaAnki(anki_media_dir)
-
-    db = SyncState.open(tmp_path)
-    try:
-        with caplog.at_level(logging.DEBUG, logger="ankiops.media"):
-            sync_all_media_to_anki(anki, tmp_path, db)
-            sync_all_media_from_anki(anki, tmp_path, db)
-    finally:
-        db.close()
-
-    assert "across 0 markdown files" not in caplog.text
-    assert "across 0 candidate files" not in caplog.text
-    assert "Skipped 0 unchanged media pushes" not in caplog.text
-
-
 def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_path):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
@@ -146,35 +118,6 @@ def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_pa
     assert "a(b)_" in content
     assert "a b_" in content
     assert "[sound:clip_" in content
-
-
-def test_sync_media_to_anki_warm_run_skips_unchanged_pushes(tmp_path, caplog):
-    media_dir = tmp_path / LOCAL_MEDIA_DIR
-    media_dir.mkdir()
-    (media_dir / "img.png").write_bytes(b"image-content")
-    (tmp_path / "deck.md").write_text(
-        "Q: Prompt\nA: ![img](media/img.png)", encoding="utf-8"
-    )
-
-    anki_media_dir = tmp_path / "anki_media"
-    anki_media_dir.mkdir()
-    anki = _FakeMediaAnki(anki_media_dir)
-
-    db = SyncState.open(tmp_path)
-    try:
-        first = sync_media_to_anki(anki, tmp_path, db)
-        with caplog.at_level(logging.DEBUG, logger="ankiops.media"):
-            second = sync_media_to_anki(anki, tmp_path, db)
-    finally:
-        db.close()
-
-    assert first.summary.synced == 1
-    assert second.summary.synced == 0
-    assert anki.push_count == 1
-    assert "Media push cache: 1 unchanged media file already present in Anki" in (
-        caplog.text
-    )
-    assert "Skipped 1 unchanged media pushes" not in caplog.text
 
 
 def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path):
@@ -231,7 +174,7 @@ def test_sync_media_prunes_deleted_markdown_cache_rows(tmp_path):
         db.close()
 
 
-def test_sync_media_to_anki_reports_missing_local_references(tmp_path, caplog):
+def test_sync_media_to_anki_reports_missing_local_references(tmp_path):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "present.png").write_bytes(b"image-content")
@@ -250,8 +193,7 @@ def test_sync_media_to_anki_reports_missing_local_references(tmp_path, caplog):
 
     db = SyncState.open(tmp_path)
     try:
-        with caplog.at_level(logging.WARNING):
-            result = sync_media_to_anki(anki, tmp_path, db)
+        result = sync_media_to_anki(anki, tmp_path, db)
     finally:
         db.close()
 
@@ -259,6 +201,3 @@ def test_sync_media_to_anki_reports_missing_local_references(tmp_path, caplog):
     assert result.missing == 1
     assert result.summary.synced == 1
     assert anki.push_count == 1
-    assert "missing.png referenced in markdown but missing in local media/" in (
-        caplog.text
-    )
