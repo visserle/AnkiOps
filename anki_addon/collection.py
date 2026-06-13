@@ -22,6 +22,7 @@ CARD_SNAPSHOT_COLUMNS = (
     "odid",
 )
 
+
 def get_active_profile_action(col, _params: dict) -> str:
     if hasattr(col, "ankiops_connect_active_profile"):
         return str(col.ankiops_connect_active_profile)

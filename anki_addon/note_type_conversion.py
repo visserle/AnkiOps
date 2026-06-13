@@ -15,6 +15,7 @@ def convert_notes_to_note_type_action(col, params: dict) -> dict:
         new_note_type=params.get("newNoteType") or "",
     )
 
+
 def convert_notes_to_note_type(
     col,
     note_ids,
@@ -56,8 +57,7 @@ def convert_notes_to_note_type(
         actual_note_type = note_type_name(note)
         if actual_note_type != old_note_type:
             raise AnkiOpsConnectActionError(
-                f"Note {note_id} uses '{actual_note_type}', "
-                f"expected '{old_note_type}'."
+                f"Note {note_id} uses '{actual_note_type}', expected '{old_note_type}'."
             )
 
     before_notes = {
