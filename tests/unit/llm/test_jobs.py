@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import sqlite3
+from re import escape
 
 import pytest
 
 from ankiops.collection import LLM_DB_FILENAME, LLM_DIR
-from ankiops.llm.llm_db import LlmDb
-from ankiops.llm.types import LlmItemStatus
+from ankiops.llm.jobs import LlmItemStatus, LlmJobStore
 
 
-def _start_job(db: LlmDb) -> int:
+def _start_job(db: LlmJobStore) -> int:
     return db.start_job(task_name="grammar", model="test", model_id="gpt-test")
 
 
 def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
-    db = LlmDb.open(tmp_path)
+    db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
 
@@ -55,12 +55,12 @@ def test_open_rejects_old_job_item_schema_without_source(tmp_path):
     finally:
         conn.close()
 
-    with pytest.raises(RuntimeError, match=r"Delete '.*\.llm\.db'"):
-        LlmDb.open(tmp_path)
+    with pytest.raises(RuntimeError, match=rf"Delete '.*{escape(LLM_DB_FILENAME)}'"):
+        LlmJobStore.open(tmp_path)
 
 
 def test_write_tx_rolls_back_request(tmp_path):
-    db = LlmDb.open(tmp_path)
+    db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
         item_id = db.insert_job_item(
@@ -103,7 +103,7 @@ def test_write_tx_rolls_back_request(tmp_path):
 
 
 def test_get_job_detail_reports_usage_at_request_level(tmp_path):
-    db = LlmDb.open(tmp_path)
+    db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
         first_id = db.insert_job_item(
@@ -170,7 +170,7 @@ def test_get_job_detail_reports_usage_at_request_level(tmp_path):
 
 
 def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
-    db = LlmDb.open(tmp_path)
+    db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
         queued_id = db.insert_job_item(

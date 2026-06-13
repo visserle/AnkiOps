@@ -6,7 +6,8 @@ import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
 
-from ankiops.llm.runner import OpenAIResult, _validate_cloze_text_fields, run_task
+from ankiops.collection import LLM_DB_FILENAME
+from ankiops.llm.execution import OpenAIResult, _validate_cloze_text_fields, run_task
 from ankiops.notes import Note
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
@@ -158,8 +159,8 @@ def test_executor_persists_successful_field_updates(
         )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
-    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
         collection_dir=llm_collection,
@@ -232,8 +233,8 @@ def test_executor_snapshots_only_queued_local_deck_paths(
         )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
-    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
         collection_dir=llm_collection,
@@ -310,8 +311,8 @@ def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
         )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
-    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
         collection_dir=llm_collection,
@@ -323,8 +324,8 @@ def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
     assert result.persisted
     assert "M\tDeck.md" in show
     assert "M\tOther.txt" in show
-    assert ".llm.db" not in show
-    assert (llm_collection / "llm" / ".llm.db").exists()
+    assert LLM_DB_FILENAME not in show
+    assert (llm_collection / "llm" / LLM_DB_FILENAME).exists()
 
 
 def test_executor_persists_successful_tag_updates(
@@ -367,8 +368,8 @@ def test_executor_persists_successful_tag_updates(
         )
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
-    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
         collection_dir=llm_collection,
@@ -432,8 +433,8 @@ def test_executor_cancels_queued_items_after_fatal_error(
         return _fatal_error()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("ankiops.llm.runner.AsyncOpenAI", _FakeAsyncOpenAI)
-    monkeypatch.setattr("ankiops.llm.runner._call_openai", fake_call_openai)
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
         collection_dir=llm_collection,

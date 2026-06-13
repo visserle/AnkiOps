@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.llm.model_registry import ModelRegistryError, _parse_registry
+from ankiops.llm.models import ModelRegistryError, _parse_registry
 
 
 def test_model_registry_rejects_base_url_with_responses_suffix(tmp_path):

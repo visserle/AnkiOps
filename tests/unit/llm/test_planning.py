@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from ankiops.collection import LLM_DB_FILENAME
-from ankiops.llm.runner import plan_task
-from ankiops.llm.types import FieldAccess
+from ankiops.llm.planning import plan_task
+from ankiops.llm.tasks import FieldAccess
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 

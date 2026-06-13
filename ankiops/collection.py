@@ -116,7 +116,7 @@ def require_collection_dir(active_profile: str | None = None) -> Path:
 
 def initialize_collection(profile: str) -> Path:
     """Initialize the current directory as an AnkiOps collection."""
-    from ankiops.llm.llm_db import LlmDb
+    from ankiops.llm.jobs import LlmJobStore
     from ankiops.sync.state import SyncState
 
     collection_dir = get_collection_dir()
@@ -125,7 +125,7 @@ def initialize_collection(profile: str) -> Path:
     sync_state = SyncState.open(collection_dir)
     sync_state.set_profile_name(profile)
     sync_state.close()
-    llm_db = LlmDb.open(collection_dir)
+    llm_db = LlmJobStore.open(collection_dir)
     llm_db.close()
 
     (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
@@ -227,7 +227,7 @@ def _setup_git(collection_dir: Path) -> None:
 
 
 def _eject_llm_configs(collection_dir: Path) -> None:
-    from ankiops.llm.model_registry import (
+    from ankiops.llm.models import (
         MODEL_REGISTRY_FILE_NAME,
         SYSTEM_PROMPT_FILE_NAME,
     )

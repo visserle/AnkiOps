@@ -1,4 +1,4 @@
-"""OpenAI-only LLM task planning and execution."""
+"""Execute LLM tasks and apply accepted edits."""
 
 from __future__ import annotations
 
@@ -8,10 +8,9 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, replace
-from fnmatch import fnmatchcase
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, AuthenticationError
 from openai.types.responses import (
@@ -19,55 +18,70 @@ from openai.types.responses import (
     ResponseOutputMessage,
     ResponseOutputRefusal,
 )
+from pydantic import ConfigDict, create_model
 
-from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
-from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
+from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.git import git_snapshot
-from ankiops.interchange import deserialize, serialize
-from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
+from ankiops.interchange import deserialize
+from ankiops.note_types import NoteType
 from ankiops.notes import Note, normalize_tags
 
-from .config_loader import is_task_config_file, load_llm_task_catalog
-from .llm_db import LlmDb, LlmJobDetail, LlmJobListItem
-from .model_registry import parse_model
-from .schemas import (
-    build_response_model,
-    parsed_response_json,
-    parsed_tag_updates,
-    parsed_updates,
-)
-from .types import (
-    DeckScope,
-    DiscoveryCounts,
+from .jobs import LlmItemStatus, LlmJobStatus, LlmJobStore, TaskRunSummary
+from .planning import (
     DiscoveryItem,
     DiscoverySnapshot,
+    EligibleBatch,
     EligibleCandidate,
-    FieldAccess,
-    LlmItemStatus,
-    LlmJobResult,
-    LlmJobStatus,
+    MaterializedTaskContext,
     NotePayload,
-    PlanFieldSurface,
-    TaskConfig,
-    TaskExecutionProgress,
-    TaskPlanResult,
-    TaskRequestOptions,
-    TaskRunSummary,
+    build_candidate_batches,
+    build_note_request_payload,
+    format_deck_scope,
+    materialize_task_context,
+    snapshot_paths_for_task,
 )
+from .tasks import TaskConfig
 
 logger = logging.getLogger(__name__)
+_SAFE_NAME_PATTERN = re.compile(r"[^A-Za-z0-9_]+")
+
+
+@dataclass(frozen=True)
+class LlmJobResult:
+    job_id: int
+    status: str
+    summary: TaskRunSummary
+    failed: bool
+    persisted: bool
+
+
+@dataclass(frozen=True)
+class TaskExecutionProgress:
+    job_id: int
+    task_name: str
+    total: int
+    completed: int
+    in_flight: int
+    queued: int
+    updated: int
+    unchanged: int
+    skipped: int
+    errors: int
+    canceled: int
+
+    @property
+    def fraction(self) -> float:
+        if self.total <= 0:
+            return 1.0
+        return min(self.completed / self.total, 1.0)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.completed >= self.total
 
 
 class ProgressReporter(Protocol):
     def __call__(self, progress: TaskExecutionProgress) -> object: ...
-
-
-@dataclass(frozen=True)
-class MaterializedTaskContext:
-    task: TaskConfig
-    note_type_configs: dict[str, NoteType]
-    serialized_data: dict[str, Any]
-    discovery_snapshot: DiscoverySnapshot
 
 
 @dataclass(frozen=True)
@@ -82,25 +96,6 @@ class OpenAIResult:
     input_tokens: int
     output_tokens: int
     fatal: bool = False
-
-
-@dataclass(frozen=True)
-class EligibleBatch:
-    note_type: str
-    note_type_config: NoteType
-    candidates: tuple[EligibleCandidate, ...]
-
-    @property
-    def item_ids(self) -> list[int]:
-        return [candidate.item_id for candidate in self.candidates]
-
-    @property
-    def note_count(self) -> int:
-        return len(self.candidates)
-
-    @property
-    def payloads(self) -> list[NotePayload]:
-        return [candidate.payload for candidate in self.candidates]
 
 
 @dataclass(frozen=True)
@@ -191,14 +186,14 @@ class LlmTaskExecutor:
             task.name,
             task.model,
             self.collection_dir,
-            _format_deck_scope(task),
+            format_deck_scope(task),
         )
         if not self.no_auto_commit:
             logger.debug("Creating pre-LLM git snapshot")
             git_snapshot(
                 self.collection_dir,
                 action=f"LLM task {task.name}",
-                paths=_llm_snapshot_paths(
+                paths=snapshot_paths_for_task(
                     self.collection_dir,
                     task_context,
                 ),
@@ -206,7 +201,7 @@ class LlmTaskExecutor:
         else:
             logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-        db = LlmDb.open(self.collection_dir)
+        db = LlmJobStore.open(self.collection_dir)
         try:
             job_id = db.start_job(
                 task_name=task.name,
@@ -278,7 +273,7 @@ class LlmTaskExecutor:
     async def _execute_candidates(
         self,
         *,
-        db: LlmDb,
+        db: LlmJobStore,
         job_id: int,
         task: TaskConfig,
         candidates: list[EligibleCandidate],
@@ -292,7 +287,7 @@ class LlmTaskExecutor:
             max_retries=0,
         )
         try:
-            batches = _build_candidate_batches(
+            batches = build_candidate_batches(
                 candidates,
                 max_notes_per_request=task.request.max_notes_per_request,
             )
@@ -358,7 +353,7 @@ class LlmTaskExecutor:
     async def _process_batch(
         self,
         *,
-        db: LlmDb,
+        db: LlmJobStore,
         job_id: int,
         task: TaskConfig,
         client: AsyncOpenAI,
@@ -491,26 +486,6 @@ class LlmTaskExecutor:
             logger.debug("Progress callback raised an exception", exc_info=True)
 
 
-def plan_task(
-    *,
-    collection_dir: Path,
-    task_name: str,
-    model_override: str | None = None,
-    deck_override: str | None = None,
-) -> TaskPlanResult:
-    context = _materialize_task_context(
-        collection_dir=collection_dir,
-        task_name=task_name,
-        model_override=model_override,
-        deck_override=deck_override,
-    )
-    return _build_task_plan_result(
-        task=context.task,
-        note_type_configs=context.note_type_configs,
-        snapshot=context.discovery_snapshot,
-    )
-
-
 async def run_task_async(
     *,
     collection_dir: Path,
@@ -520,7 +495,7 @@ async def run_task_async(
     no_auto_commit: bool = False,
     progress_callback: ProgressReporter | None = None,
 ) -> LlmJobResult:
-    context = _materialize_task_context(
+    context = materialize_task_context(
         collection_dir=collection_dir,
         task_name=task_name,
         model_override=model_override,
@@ -555,376 +530,9 @@ def run_task(
     )
 
 
-def list_jobs(*, collection_dir: Path) -> list[LlmJobListItem]:
-    db = LlmDb.open(collection_dir)
-    try:
-        return db.list_jobs()
-    finally:
-        db.close()
-
-
-def show_job(*, collection_dir: Path, job_id: str | int) -> LlmJobDetail | None:
-    db = LlmDb.open(collection_dir)
-    try:
-        resolved_job_id = (
-            db.resolve_job_id(job_id) if isinstance(job_id, str) else int(job_id)
-        )
-        if resolved_job_id is None:
-            return None
-        return db.get_job_detail(resolved_job_id)
-    finally:
-        db.close()
-
-
-def _materialize_task_context(
-    *,
-    collection_dir: Path,
-    task_name: str,
-    model_override: str | None,
-    deck_override: str | None,
-) -> MaterializedTaskContext:
-    task, note_type_configs = _load_task(
-        collection_dir=collection_dir,
-        task_name=task_name,
-    )
-    if deck_override is not None:
-        task = replace(task, decks=DeckScope(deck_root=deck_override))
-    if model_override is not None:
-        model = parse_model(model_override, collection_dir=collection_dir)
-        if model is None:
-            raise ValueError(f"Unknown model '{model_override}'")
-        task = replace(task, model=model)
-
-    deck, no_subdecks = _resolve_serializer_scope(task)
-    serialized_data = serialize(
-        collection_dir,
-        deck=deck,
-        no_subdecks=no_subdecks,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-    discovery_snapshot = _discover_candidates(
-        data=serialized_data,
-        task=task,
-        note_type_configs=note_type_configs,
-    )
-    _validate_note_type_patterns_match_scope(task, discovery_snapshot)
-    return MaterializedTaskContext(
-        task=task,
-        note_type_configs=note_type_configs,
-        serialized_data=serialized_data,
-        discovery_snapshot=discovery_snapshot,
-    )
-
-
-def _load_task(
-    *,
-    collection_dir: Path,
-    task_name: str,
-) -> tuple[TaskConfig, dict[str, NoteType]]:
-    sources = discover_deck_sources(
-        collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-    note_type_configs = [
-        config
-        for source_config in load_note_types_for_sources(sources)
-        for config in source_config.note_types
-    ]
-    catalog = load_llm_task_catalog(
-        collection_dir,
-        note_type_configs=note_type_configs,
-    )
-    task = catalog.tasks_by_name.get(task_name)
-    if task is None:
-        task_errors = [
-            message
-            for path, message in catalog.errors.items()
-            if _is_task_file_for_name(path, task_name)
-        ]
-        if task_errors:
-            raise ValueError(
-                "Invalid LLM task configuration:\n" + "\n".join(task_errors)
-            )
-        shared_errors = [
-            message
-            for path, message in catalog.errors.items()
-            if not _is_task_file(path)
-        ]
-        if shared_errors:
-            raise ValueError(
-                "Invalid LLM task configuration:\n" + "\n".join(shared_errors)
-            )
-        raise ValueError(f"Unknown task '{task_name}'")
-    return task, {config.name: config for config in note_type_configs}
-
-
-def _llm_snapshot_paths(
-    collection_dir: Path,
-    task_context: MaterializedTaskContext,
-) -> list[Path]:
-    sources = discover_deck_sources(
-        collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-    if any(source.is_shared for source in sources):
-        return [collection_dir]
-
-    if any(
-        item.item_status is LlmItemStatus.QUEUED and item.source != "local"
-        for item in task_context.discovery_snapshot.items
-    ):
-        return [collection_dir]
-
-    deck_names = {
-        item.deck_name
-        for item in task_context.discovery_snapshot.items
-        if item.item_status is LlmItemStatus.QUEUED and item.source == "local"
-    }
-    return [
-        collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
-        for deck_name in sorted(deck_names)
-    ]
-
-
-def _discover_candidates(
-    *,
-    data: dict[str, Any],
-    task: TaskConfig,
-    note_type_configs: dict[str, NoteType],
-) -> DiscoverySnapshot:
-    decks = data.get("decks")
-    if not isinstance(decks, list):
-        raise ValueError("Serialized collection is missing a decks list")
-
-    items: list[DiscoveryItem] = []
-    decks_seen = 0
-    decks_matched = 0
-    notes_seen = 0
-    ordinal = 0
-
-    for deck in decks:
-        if not isinstance(deck, dict):
-            continue
-        source = deck.get("source")
-        deck_name = deck.get("name")
-        notes = deck.get("notes")
-        if not isinstance(source, str) or not source.strip():
-            raise ValueError("Serialized deck is missing source")
-        if not isinstance(deck_name, str) or not isinstance(notes, list):
-            raise ValueError(f"Serialized deck in source '{source}' is malformed")
-        decks_seen += 1
-        notes_seen += len(notes)
-        if not task.decks.matches(deck_name):
-            continue
-        decks_matched += 1
-
-        for note_index, note in enumerate(notes, start=1):
-            if not isinstance(note, dict):
-                continue
-            note_key = note.get("note_key")
-            if not isinstance(note_key, str) or not note_key.strip():
-                raise ValueError(
-                    "LLM tasks require note_key metadata: "
-                    f"{source}:{deck_name} note {note_index}"
-                )
-            ordinal += 1
-            items.append(
-                _discover_note(
-                    task=task,
-                    source=source,
-                    deck_name=deck_name,
-                    ordinal=ordinal,
-                    note=note,
-                    note_type_configs=note_type_configs,
-                )
-            )
-
-    return DiscoverySnapshot(
-        counts=DiscoveryCounts(
-            decks_seen=decks_seen,
-            decks_matched=decks_matched,
-            notes_seen=notes_seen,
-        ),
-        items=items,
-    )
-
-
-def _discover_note(
-    *,
-    task: TaskConfig,
-    source: str,
-    deck_name: str,
-    ordinal: int,
-    note: dict[str, Any],
-    note_type_configs: dict[str, NoteType],
-) -> DiscoveryItem:
-    note_key = note.get("note_key")
-    note_type_name = note.get("note_type")
-    fields = note.get("fields")
-    note_key_value = note_key if isinstance(note_key, str) else None
-    note_type_value = note_type_name if isinstance(note_type_name, str) else None
-
-    if not isinstance(note_key, str) or not isinstance(note_type_name, str):
-        return _invalid_discovery_item(
-            source=source,
-            deck_name=deck_name,
-            ordinal=ordinal,
-            note_key=note_key_value,
-            note_type=note_type_value,
-            error_message="Serialized note is missing note_key or note_type",
-            serialized_note=note,
-        )
-    if not isinstance(fields, dict):
-        return _invalid_discovery_item(
-            source=source,
-            deck_name=deck_name,
-            ordinal=ordinal,
-            note_key=note_key,
-            note_type=note_type_name,
-            error_message="Serialized note fields must be a mapping",
-            serialized_note=note,
-        )
-
-    note_type_config = note_type_configs.get(note_type_name)
-    if note_type_config is None:
-        return _invalid_discovery_item(
-            source=source,
-            deck_name=deck_name,
-            ordinal=ordinal,
-            note_key=note_key,
-            note_type=note_type_name,
-            error_message=f"Unknown note type '{note_type_name}' in serialized note",
-            serialized_note=note,
-        )
-
-    editable_fields: dict[str, str] = {}
-    read_only_fields: dict[str, str] = {}
-    for field in note_type_config.fields:
-        if field.name == ANKIOPS_KEY_FIELD.name:
-            continue
-        access = task.field_access(note_type_name, field.name)
-        if access is FieldAccess.HIDDEN:
-            continue
-        raw_value = fields.get(field.name, "")
-        if raw_value is None:
-            raw_value = ""
-        if not isinstance(raw_value, str):
-            return _invalid_discovery_item(
-                source=source,
-                deck_name=deck_name,
-                ordinal=ordinal,
-                note_key=note_key,
-                note_type=note_type_name,
-                error_message=f"Serialized field '{field.name}' must be a string",
-                serialized_note=note,
-            )
-        if access is FieldAccess.READ_ONLY:
-            read_only_fields[field.name] = raw_value
-        else:
-            editable_fields[field.name] = raw_value
-
-    tags = normalize_tags(note.get("tags", ()))
-    editable_tags = tags if task.tag_access is FieldAccess.EDITABLE else None
-    read_only_tags = tags if task.tag_access is FieldAccess.READ_ONLY else None
-    has_editable_surface = bool(editable_fields) or editable_tags is not None
-    has_visible_field_surface = bool(editable_fields) or bool(read_only_fields)
-    tag_only_without_fields = (
-        editable_tags is not None and not has_visible_field_surface
-    )
-    if not has_editable_surface or tag_only_without_fields:
-        skip_reason = (
-            "no readable fields" if has_editable_surface else "no editable fields"
-        )
-        return DiscoveryItem(
-            ordinal=ordinal,
-            source=source,
-            deck_name=deck_name,
-            note_key=note_key,
-            note_type=note_type_name,
-            item_status=LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS,
-            skip_reason=skip_reason,
-            error_message=None,
-            payload=None,
-            note_type_config=note_type_config,
-            serialized_note=note,
-        )
-
-    return DiscoveryItem(
-        ordinal=ordinal,
-        source=source,
-        deck_name=deck_name,
-        note_key=note_key,
-        note_type=note_type_name,
-        item_status=LlmItemStatus.QUEUED,
-        skip_reason=None,
-        error_message=None,
-        payload=NotePayload(
-            note_key=note_key,
-            note_type=note_type_name,
-            editable_fields=editable_fields,
-            read_only_fields=read_only_fields,
-            editable_tags=editable_tags,
-            read_only_tags=read_only_tags,
-        ),
-        note_type_config=note_type_config,
-        serialized_note=note,
-    )
-
-
-def _invalid_discovery_item(
-    *,
-    source: str,
-    deck_name: str,
-    ordinal: int,
-    note_key: str | None,
-    note_type: str | None,
-    error_message: str,
-    serialized_note: dict[str, Any] | None,
-) -> DiscoveryItem:
-    return DiscoveryItem(
-        ordinal=ordinal,
-        source=source,
-        deck_name=deck_name,
-        note_key=note_key,
-        note_type=note_type,
-        item_status=LlmItemStatus.INVALID_NOTE,
-        skip_reason=None,
-        error_message=error_message,
-        payload=None,
-        note_type_config=None,
-        serialized_note=serialized_note,
-    )
-
-
-def _validate_note_type_patterns_match_scope(
-    task: TaskConfig,
-    snapshot: DiscoverySnapshot,
-) -> None:
-    observed_note_types = {
-        item.note_type
-        for item in snapshot.items
-        if item.note_type is not None and item.note_type_config is not None
-    }
-    missing_patterns: list[str] = []
-    for rule in task.field_rules:
-        for pattern in rule.note_types:
-            if pattern == "*":
-                continue
-            if not any(
-                fnmatchcase(note_type, pattern) for note_type in observed_note_types
-            ):
-                missing_patterns.append(pattern)
-
-    if missing_patterns:
-        missing = ", ".join(sorted(set(missing_patterns)))
-        raise ValueError(
-            f"LLM note type pattern(s) matched no notes after deck filtering: {missing}"
-        )
-
-
 def _record_discovery_snapshot(
     *,
-    db: LlmDb,
+    db: LlmJobStore,
     job_id: int,
     snapshot: DiscoverySnapshot,
 ) -> list[EligibleCandidate]:
@@ -945,7 +553,7 @@ def _record_discovery_snapshot(
 
 def _record_discovery_item(
     *,
-    db: LlmDb,
+    db: LlmJobStore,
     job_id: int,
     item: DiscoveryItem,
 ) -> EligibleCandidate | None:
@@ -1008,45 +616,6 @@ def _record_discovery_item(
         note_type_config=item.note_type_config,
         serialized_note=item.serialized_note,
     )
-
-
-def _build_candidate_batches(
-    candidates: list[EligibleCandidate],
-    *,
-    max_notes_per_request: int,
-) -> list[EligibleBatch]:
-    by_note_type: dict[str, list[EligibleCandidate]] = {}
-    for candidate in candidates:
-        by_note_type.setdefault(candidate.payload.note_type, []).append(candidate)
-
-    batches: list[EligibleBatch] = []
-    for note_type, grouped_candidates in by_note_type.items():
-        for start in range(0, len(grouped_candidates), max_notes_per_request):
-            chunk = grouped_candidates[start : start + max_notes_per_request]
-            batches.append(
-                EligibleBatch(
-                    note_type=note_type,
-                    note_type_config=chunk[0].note_type_config,
-                    candidates=tuple(chunk),
-                )
-            )
-    return batches
-
-
-def _build_payload_batches(
-    payloads: list[NotePayload],
-    *,
-    max_notes_per_request: int,
-) -> list[list[NotePayload]]:
-    by_note_type: dict[str, list[NotePayload]] = {}
-    for payload in payloads:
-        by_note_type.setdefault(payload.note_type, []).append(payload)
-
-    batches: list[list[NotePayload]] = []
-    for grouped_payloads in by_note_type.values():
-        for start in range(0, len(grouped_payloads), max_notes_per_request):
-            batches.append(grouped_payloads[start : start + max_notes_per_request])
-    return batches
 
 
 async def _call_openai(
@@ -1161,7 +730,7 @@ def _build_request_content(
         "user_prompt": task.user_prompt,
         "note_type": batch.note_type,
         "notes": [
-            _build_note_request_payload(candidate.payload)
+            build_note_request_payload(candidate.payload)
             for candidate in batch.candidates
         ],
     }
@@ -1169,20 +738,6 @@ def _build_request_content(
         task.system_prompt.strip(),
         json.dumps(payload, ensure_ascii=False),
     )
-
-
-def _build_note_request_payload(payload: NotePayload) -> dict[str, object]:
-    note_payload: dict[str, object] = {
-        "note_key": payload.note_key,
-        "editable_fields": payload.editable_fields,
-    }
-    if payload.read_only_fields:
-        note_payload["read_only_fields"] = payload.read_only_fields
-    if payload.editable_tags is not None:
-        note_payload["editable_tags"] = list(payload.editable_tags)
-    if payload.read_only_tags is not None:
-        note_payload["read_only_tags"] = list(payload.read_only_tags)
-    return note_payload
 
 
 def _openai_error_result(
@@ -1382,7 +937,7 @@ def _cloze_template_field_names(config: NoteType) -> set[str]:
 
 def _persist_updates(
     *,
-    db: LlmDb,
+    db: LlmJobStore,
     job_id: int,
     data: dict[str, Any],
     collection_dir: Path,
@@ -1422,187 +977,6 @@ def _build_progress_state(
     for item in snapshot.items:
         state.record_status(item.item_status)
     return state
-
-
-def _build_task_plan_result(
-    *,
-    task: TaskConfig,
-    note_type_configs: dict[str, NoteType],
-    snapshot: DiscoverySnapshot,
-) -> TaskPlanResult:
-    eligible_items = [
-        item
-        for item in snapshot.items
-        if item.item_status is LlmItemStatus.QUEUED and item.payload is not None
-    ]
-    eligible_payloads = [
-        item.payload for item in eligible_items if item.payload is not None
-    ]
-    payload_batches = _build_payload_batches(
-        eligible_payloads,
-        max_notes_per_request=task.request.max_notes_per_request,
-    )
-    skipped = sum(
-        1
-        for item in snapshot.items
-        if item.item_status is LlmItemStatus.SKIPPED_NO_EDITABLE_FIELDS
-    )
-    errors = sum(
-        1 for item in snapshot.items if item.item_status is LlmItemStatus.INVALID_NOTE
-    )
-    input_tokens_estimate = sum(
-        _estimate_batch_input_tokens(task, payload_batch)
-        for payload_batch in payload_batches
-    )
-    summary = TaskRunSummary(
-        task_name=task.name,
-        model=task.model,
-        decks_seen=snapshot.counts.decks_seen,
-        decks_matched=snapshot.counts.decks_matched,
-        notes_seen=snapshot.counts.notes_seen,
-        eligible=len(eligible_items),
-        skipped_no_editable_fields=skipped,
-        errors=errors,
-        requests=len(payload_batches),
-    )
-    return TaskPlanResult(
-        task_name=task.name,
-        model=task.model,
-        deck_scope=_format_deck_scope(task),
-        serializer_scope=_format_serializer_scope(task),
-        system_prompt_path=(
-            str(task.system_prompt_path)
-            if task.system_prompt_path is not None
-            else None
-        ),
-        user_prompt_path=(
-            str(task.user_prompt_path) if task.user_prompt_path is not None else None
-        ),
-        system_prompt=task.system_prompt,
-        user_prompt=task.user_prompt,
-        request_defaults=_format_request_defaults(task.request),
-        summary=summary,
-        field_surface=_build_plan_field_surface(
-            task=task,
-            note_type_configs=note_type_configs,
-            snapshot_items=snapshot.items,
-        ),
-        requests_estimate=len(payload_batches),
-        input_tokens_estimate=input_tokens_estimate,
-    )
-
-
-def _build_plan_field_surface(
-    *,
-    task: TaskConfig,
-    note_type_configs: dict[str, NoteType],
-    snapshot_items: list[DiscoveryItem],
-) -> list[PlanFieldSurface]:
-    observed = {
-        (item.source, item.note_type)
-        for item in snapshot_items
-        if item.note_type is not None and item.note_type_config is not None
-    }
-    surface: list[PlanFieldSurface] = []
-    for source, note_type in sorted(
-        observed,
-        key=lambda item: (0 if item[0] == "local" else 1, item[0], item[1]),
-    ):
-        config = note_type_configs.get(note_type)
-        if config is None:
-            continue
-        editable_fields: list[str] = []
-        read_only_fields: list[str] = []
-        hidden_fields: list[str] = []
-        for field in config.fields:
-            if field.name == ANKIOPS_KEY_FIELD.name:
-                continue
-            access = task.field_access(note_type, field.name)
-            if access is FieldAccess.EDITABLE:
-                editable_fields.append(field.name)
-            elif access is FieldAccess.READ_ONLY:
-                read_only_fields.append(field.name)
-            else:
-                hidden_fields.append(field.name)
-        candidate_notes = sum(
-            1
-            for item in snapshot_items
-            if item.item_status is LlmItemStatus.QUEUED
-            and item.source == source
-            and item.note_type == note_type
-        )
-        surface.append(
-            PlanFieldSurface(
-                source=source,
-                note_type=note_type,
-                candidate_notes=candidate_notes,
-                editable_fields=editable_fields,
-                read_only_fields=read_only_fields,
-                hidden_fields=hidden_fields,
-                tag_access=task.tag_access,
-            )
-        )
-    return surface
-
-
-def _estimate_batch_input_tokens(task: TaskConfig, payloads: list[NotePayload]) -> int:
-    if not payloads:
-        return 0
-    request_payload = {
-        "user_prompt": task.user_prompt,
-        "note_type": payloads[0].note_type,
-        "notes": [_build_note_request_payload(payload) for payload in payloads],
-    }
-    return _estimate_tokens(
-        "\n".join(
-            [
-                task.system_prompt,
-                json.dumps(request_payload, ensure_ascii=False),
-            ]
-        )
-    )
-
-
-def _estimate_tokens(text: str) -> int:
-    value = text.strip()
-    if not value:
-        return 0
-    return max(1, (len(value) + 3) // 4)
-
-
-def _resolve_serializer_scope(task: TaskConfig) -> tuple[str | None, bool]:
-    return task.decks.deck_root, False
-
-
-def _format_deck_scope(task: TaskConfig) -> str:
-    return task.decks.deck_root or "all decks"
-
-
-def _format_serializer_scope(task: TaskConfig) -> str:
-    deck, no_subdecks = _resolve_serializer_scope(task)
-    if deck is None:
-        return "all markdown decks"
-    suffix = "exact deck only" if no_subdecks else "including subdecks"
-    return f"{deck} ({suffix})"
-
-
-def _format_request_defaults(request: TaskRequestOptions) -> str:
-    parts = [f"max_notes_per_request={request.max_notes_per_request}"]
-    if request.temperature is not None:
-        parts.append(f"temperature={request.temperature:g}")
-    if request.reasoning is not None:
-        parts.append(f"reasoning={request.reasoning}")
-    return ", ".join(parts)
-
-
-def _is_task_file(path: str) -> bool:
-    path_obj = Path(path)
-    return path_obj.parent.name == "llm" and is_task_config_file(path_obj)
-
-
-def _is_task_file_for_name(path: str, task_name: str) -> bool:
-    path_obj = Path(path)
-    return _is_task_file(path) and path_obj.stem == task_name
 
 
 def _resolve_api_key(configured_value: str) -> str:
@@ -1649,3 +1023,115 @@ def _log_note_error(candidate: EligibleCandidate, message: str) -> None:
         candidate.payload.note_type,
         message,
     )
+
+
+def build_response_model(
+    *,
+    note_type: str,
+    payloads: list[NotePayload],
+) -> type[Any]:
+    """Build a strict response model for one note type and request batch."""
+    if not payloads:
+        raise ValueError("response model requires at least one payload")
+
+    note_keys = sorted({payload.note_key for payload in payloads})
+    editable_fields = sorted(
+        {field_name for payload in payloads for field_name in payload.editable_fields}
+    )
+    has_editable_tags = any(payload.editable_tags is not None for payload in payloads)
+    if not editable_fields and not has_editable_tags:
+        raise ValueError(
+            "response model requires at least one editable field or editable tags"
+        )
+
+    suffix = _safe_type_name(note_type)
+    response_fields: dict[str, Any] = {}
+    if editable_fields:
+        update_model = create_model(
+            f"{suffix}Update",
+            __config__=ConfigDict(extra="forbid"),
+            note_key=(_literal(note_keys), ...),
+            field=(_literal(editable_fields), ...),
+            value=(str, ...),
+        )
+        update_model_type: Any = update_model
+        response_fields["updates"] = (list[update_model_type], ...)
+    if has_editable_tags:
+        tag_update_model = create_model(
+            f"{suffix}TagUpdate",
+            __config__=ConfigDict(extra="forbid"),
+            note_key=(_literal(note_keys), ...),
+            tags=(list[str], ...),
+        )
+        tag_update_model_type: Any = tag_update_model
+        response_fields["tag_updates"] = (list[tag_update_model_type], ...)
+    return cast(
+        type[Any],
+        create_model(
+            f"{suffix}Response",
+            __config__=ConfigDict(extra="forbid"),
+            **response_fields,
+        ),
+    )
+
+
+def parsed_updates(parsed_response: object) -> list[tuple[str, str, str]]:
+    """Return ``(note_key, field, value)`` tuples from a parsed Pydantic object."""
+    raw_updates = getattr(parsed_response, "updates", [])
+    if not isinstance(raw_updates, list):
+        raise ValueError("Parsed response is missing updates list")
+
+    updates: list[tuple[str, str, str]] = []
+    for raw_update in raw_updates:
+        note_key = getattr(raw_update, "note_key", None)
+        field = getattr(raw_update, "field", None)
+        value = getattr(raw_update, "value", None)
+        if not isinstance(note_key, str):
+            raise ValueError("Parsed update note_key must be a string")
+        if not isinstance(field, str):
+            raise ValueError("Parsed update field must be a string")
+        if not isinstance(value, str):
+            raise ValueError("Parsed update value must be a string")
+        updates.append((note_key, field, value))
+    return updates
+
+
+def parsed_tag_updates(parsed_response: object) -> list[tuple[str, list[str]]]:
+    """Return ``(note_key, tags)`` tuples from a parsed Pydantic object."""
+    raw_updates = getattr(parsed_response, "tag_updates", [])
+    if not isinstance(raw_updates, list):
+        raise ValueError("Parsed response is missing tag_updates list")
+
+    updates: list[tuple[str, list[str]]] = []
+    for raw_update in raw_updates:
+        note_key = getattr(raw_update, "note_key", None)
+        tags = getattr(raw_update, "tags", None)
+        if not isinstance(note_key, str):
+            raise ValueError("Parsed tag update note_key must be a string")
+        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+            raise ValueError("Parsed tag update tags must be a list of strings")
+        updates.append((note_key, tags))
+    return updates
+
+
+def parsed_response_json(parsed_response: object) -> dict[str, object] | None:
+    model_dump = getattr(parsed_response, "model_dump", None)
+    if not callable(model_dump):
+        return None
+    value = model_dump(mode="json")
+    return value if isinstance(value, dict) else None
+
+
+def _literal(values: list[str]) -> object:
+    if not values:
+        raise ValueError("Literal requires at least one value")
+    return Literal.__getitem__(tuple(values))
+
+
+def _safe_type_name(value: str) -> str:
+    safe = _SAFE_NAME_PATTERN.sub("_", value).strip("_")
+    if not safe:
+        return "Note"
+    if safe[0].isdigit():
+        safe = f"Note_{safe}"
+    return safe

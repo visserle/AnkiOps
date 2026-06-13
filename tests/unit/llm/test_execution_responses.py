@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from ankiops.llm.runner import EligibleBatch, _apply_batch_parsed_response
-from ankiops.llm.schemas import build_response_model
-from ankiops.llm.types import EligibleCandidate, LlmItemStatus, NotePayload
+from ankiops.llm.execution import _apply_batch_parsed_response, build_response_model
+from ankiops.llm.jobs import LlmItemStatus
+from ankiops.llm.planning import EligibleBatch, EligibleCandidate, NotePayload
 
 
 def _parsed_response(*updates, tag_updates=()):
