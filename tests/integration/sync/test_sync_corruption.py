@@ -90,3 +90,24 @@ def test_corr_db_004_schema_corruption_is_auto_recovered(tmp_path):
         assert check_db.resolve_note_ids(["schema-key"]).get("schema-key") == 101
     finally:
         check_db.close()
+
+
+def test_corr_db_005_existing_corrupt_backup_is_replaced(tmp_path):
+    """CORR-DB-005."""
+    db_path = tmp_path / ANKIOPS_DB
+    corrupt_path = tmp_path / f"{ANKIOPS_DB}.corrupt"
+    db_path.write_text("corrupt data", encoding="utf-8")
+    corrupt_path.write_text("old corrupt backup", encoding="utf-8")
+
+    recovered = SyncState.open(tmp_path)
+    try:
+        recovered.upsert_note_links([("recovered-key", 101)])
+    finally:
+        recovered.close()
+
+    check_db = SyncState.open(tmp_path)
+    try:
+        assert check_db.resolve_note_ids(["recovered-key"])["recovered-key"] == 101
+    finally:
+        check_db.close()
+    assert corrupt_path.read_text(encoding="utf-8") == "corrupt data"

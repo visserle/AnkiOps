@@ -106,9 +106,10 @@ class SyncState:
             )
             if db_path.exists():
                 try:
-                    db_path.rename(str(db_path) + ".corrupt")
+                    db_path.replace(db_path.with_name(f"{db_path.name}.corrupt"))
                 except OSError as error:
-                    logger.error(f"Failed to rename corrupt database: {error}")
+                    logger.error(f"Failed to back up corrupt database: {error}")
+                    raise
 
             return cls.open(collection_dir)
 
