@@ -8,7 +8,7 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .ankiops_connect_actions import dispatch_ankiops_connect_action
+from .actions import dispatch_action as default_dispatch_action
 
 ANKIOPS_CONNECT_HOST = "127.0.0.1"
 ANKIOPS_CONNECT_PORT = 8766
@@ -30,7 +30,7 @@ class AnkiOpsConnectHost:
         dispatch_action: Callable[
             [object, str, dict],
             object,
-        ] = dispatch_ankiops_connect_action,
+        ] = default_dispatch_action,
         host: str = ANKIOPS_CONNECT_HOST,
         port: int = ANKIOPS_CONNECT_PORT,
         body_limit: int = ANKIOPS_CONNECT_BODY_LIMIT,
@@ -121,13 +121,13 @@ class AnkiOpsConnectHost:
         return box.get("result")
 
     def _handler_class(self):
-        ankiops_connect_host = self
+        connect_host = self
 
         class _AnkiOpsConnectHandler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
                 try:
-                    payload = ankiops_connect_host.read_payload(self)
-                    response = ankiops_connect_host.handle_payload(payload)
+                    payload = connect_host.read_payload(self)
+                    response = connect_host.handle_payload(payload)
                 except Exception as error:
                     response = {"result": None, "error": str(error)}
                 self._send_json(response)

@@ -510,17 +510,17 @@ class Anki:
     def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
         return self._invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
 
-    def change_notes_notetype(
+    def convert_notes_to_note_type(
         self,
         note_ids: list[int],
-        old_model: str,
-        new_model: str,
+        old_note_type: str,
+        new_note_type: str,
     ) -> None:
         self._invoke(
-            "changeNotesNotetype",
+            "convertNotesToNoteType",
             noteIds=note_ids,
-            oldModel=old_model,
-            newModel=new_model,
+            oldNoteType=old_note_type,
+            newNoteType=new_note_type,
         )
 
     def get_media_dir(self) -> Path:

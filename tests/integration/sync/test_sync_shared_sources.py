@@ -104,11 +104,11 @@ def test_import_converts_root_note_to_scoped_shared_type_without_duplicate(world
         "shared/owner/repo/AnkiOpsQA"
     )
     assert (
-        "changeNotesNotetype",
+        "convertNotesToNoteType",
         {
             "noteIds": [note_id],
-            "oldModel": "AnkiOpsQA",
-            "newModel": "shared/owner/repo/AnkiOpsQA",
+            "oldNoteType": "AnkiOpsQA",
+            "newNoteType": "shared/owner/repo/AnkiOpsQA",
         },
     ) in world.mock_anki.calls
 
@@ -134,7 +134,7 @@ def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(worl
         note_key,
     )
 
-    world.mock_anki.fail_actions["changeNotesNotetype"] = RuntimeError(
+    world.mock_anki.fail_actions["convertNotesToNoteType"] = RuntimeError(
         "AnkiOpsConnect down"
     )
 

@@ -128,10 +128,10 @@ def test_invoke_requires_ankiops_connect_for_custom_actions():
     ) as post:
         with pytest.raises(AnkiConnectionError, match="requires AnkiOpsConnect"):
             invoke(
-                "changeNotesNotetype",
+                "convertNotesToNoteType",
                 noteIds=[101],
-                oldModel="AnkiOpsQA",
-                newModel="shared/o/r/AnkiOpsQA",
+                oldNoteType="AnkiOpsQA",
+                newNoteType="shared/o/r/AnkiOpsQA",
             )
 
     post.assert_called_once()

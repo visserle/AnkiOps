@@ -1,36 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
 import io
-import sys
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
-
-def _load_ankiops_connect_host_module():
-    addon_dir = Path(__file__).resolve().parents[2] / "anki_addon"
-    package = sys.modules.get("anki_addon")
-    if package is None:
-        package = ModuleType("anki_addon")
-        package.__path__ = [str(addon_dir)]
-        sys.modules["anki_addon"] = package
-    spec = importlib.util.spec_from_file_location(
-        "anki_addon.ankiops_connect_host",
-        addon_dir / "ankiops_connect_host.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    return module
+from anki_addon.host import AnkiOpsConnectHost
 
 
-ankiops_connect_host = _load_ankiops_connect_host_module()
-AnkiOpsConnectHost = ankiops_connect_host.AnkiOpsConnectHost
-
-
-def test_ankiops_connect_host_dispatches_on_main_thread():
+def test_host_dispatches_on_main_thread():
     collection = object()
     ran_on_main = []
     calls = []
@@ -56,7 +34,7 @@ def test_ankiops_connect_host_dispatches_on_main_thread():
     assert calls == [(collection, "version", {"x": 1})]
 
 
-def test_ankiops_connect_host_returns_structured_errors():
+def test_host_returns_structured_errors():
     host = AnkiOpsConnectHost(
         get_collection=lambda: None,
         run_on_main=lambda work: work(),
@@ -68,7 +46,7 @@ def test_ankiops_connect_host_returns_structured_errors():
     }
 
 
-def test_ankiops_connect_host_validates_payload_shape():
+def test_host_validates_payload_shape():
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
@@ -80,7 +58,7 @@ def test_ankiops_connect_host_validates_payload_shape():
     }
 
 
-def test_ankiops_connect_host_reads_json_request_body():
+def test_host_reads_json_request_body():
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
@@ -97,7 +75,7 @@ def test_ankiops_connect_host_reads_json_request_body():
     assert host.read_payload(handler) == {"action": "version", "params": {}}
 
 
-def test_ankiops_connect_host_rejects_invalid_content_length():
+def test_host_rejects_invalid_content_length():
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),

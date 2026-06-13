@@ -9,7 +9,7 @@ DEFAULT_ANKIOPS_CONNECT_URL = "http://127.0.0.1:8766"
 ANKIOPS_CONNECT_URL_ENV = "ANKIOPS_CONNECT_URL"
 ANKI_CONNECT_URL = "http://localhost:8765"
 DEFAULT_TIMEOUT_SECONDS = 10
-ANKIOPS_CONNECT_ONLY_ACTIONS = frozenset({"changeNotesNotetype"})
+ANKIOPS_CONNECT_ONLY_ACTIONS = frozenset({"convertNotesToNoteType"})
 
 _session = requests.Session()
 
