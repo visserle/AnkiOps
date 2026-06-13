@@ -606,7 +606,7 @@ def _apply_note_type_conversions(
 
     try:
         for (old_model, new_model), grouped in sorted(by_model_pair.items()):
-            anki_port.change_notes_notetype(
+            anki_port.convert_notes_to_note_type(
                 sorted(conversion.note_id for conversion in grouped),
                 old_model,
                 new_model,

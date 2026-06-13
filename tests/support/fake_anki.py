@@ -114,11 +114,11 @@ class MockAnki:
                     results.append(res)
                 return results
 
-            case "changeNotesNotetype":
-                return self.change_notes_notetype(
+            case "convertNotesToNoteType":
+                return self.convert_notes_to_note_type(
                     params["noteIds"],
-                    params["oldModel"],
-                    params["newModel"],
+                    params["oldNoteType"],
+                    params["newNoteType"],
                 )
 
             case "modelNames":
@@ -376,31 +376,36 @@ class MockAnki:
             },
         )
 
-    def change_notes_notetype(
+    def convert_notes_to_note_type(
         self,
         note_ids: list[int],
-        old_model: str,
-        new_model: str,
+        old_note_type: str,
+        new_note_type: str,
     ) -> None:
         self.calls.append(
             (
-                "changeNotesNotetype",
-                {"noteIds": note_ids, "oldModel": old_model, "newModel": new_model},
+                "convertNotesToNoteType",
+                {
+                    "noteIds": note_ids,
+                    "oldNoteType": old_note_type,
+                    "newNoteType": new_note_type,
+                },
             )
         )
         for note_id in note_ids:
             note = self.notes[note_id]
-            if note["modelName"] != old_model:
+            if note["modelName"] != old_note_type:
                 raise ValueError(
                     f"note {note_id} has model {note['modelName']}, expected "
-                    f"{old_model}"
+                    f"{old_note_type}"
                 )
-            old_fields = set(self.invoke("modelFieldNames", modelName=old_model))
-            new_fields = set(self.invoke("modelFieldNames", modelName=new_model))
+            old_fields = set(self.invoke("modelFieldNames", modelName=old_note_type))
+            new_fields = set(self.invoke("modelFieldNames", modelName=new_note_type))
             if old_fields != new_fields:
                 raise ValueError(
-                    f"Cannot convert {old_model} to {new_model}: field names differ"
+                    f"Cannot convert {old_note_type} to {new_note_type}: "
+                    "field names differ"
                 )
-            note["modelName"] = new_model
+            note["modelName"] = new_note_type
             for card_id in note["cards"]:
-                self.cards[card_id]["modelName"] = new_model
+                self.cards[card_id]["modelName"] = new_note_type
