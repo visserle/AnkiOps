@@ -11,7 +11,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
 from pygments.util import ClassNotFound
 
-from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.math_delimiters import (
     normalize_escaped_math_delimiters,
     preserve_math_delimiters_plugin,

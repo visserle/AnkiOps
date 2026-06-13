@@ -8,7 +8,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-from ankiops.models import NoteTypeConfig, SyncSummary
+from ankiops.note_types import NoteType
+from ankiops.sync.report import SyncSummary
 
 from .model_registry import ModelSpec
 
@@ -138,7 +139,7 @@ class DiscoveryItem:
     skip_reason: str | None
     error_message: str | None
     payload: NotePayload | None
-    note_type_config: NoteTypeConfig | None
+    note_type_config: NoteType | None
     serialized_note: dict[str, Any] | None
 
 
@@ -154,7 +155,7 @@ class EligibleCandidate:
     source: str
     deck_name: str
     payload: NotePayload
-    note_type_config: NoteTypeConfig
+    note_type_config: NoteType
     serialized_note: dict[str, Any]
 
 

@@ -6,18 +6,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from ankiops.fs import FileSystemAdapter
+from ankiops.deck_sources import DeckSource
 from ankiops.git import CollectionGit
-from ankiops.markdown_format import NOTE_SEPARATOR
+from ankiops.markdown import NOTE_SEPARATOR
 from ankiops.shared import run_create, run_list, run_submit
 from ankiops.shared.commands import _parse_slug
 from ankiops.shared.create import _unlink_created_source_files
 from ankiops.shared.hosting import ensure_create_repo
-from ankiops.sources import SyncSource
+from tests.support.deck_files import DeckFileHarness
 
 
 def _setup_collection(tmp_path):
-    FileSystemAdapter().eject_builtin_note_types(tmp_path / "note_types")
+    DeckFileHarness().eject_default_note_types(tmp_path / "note_types")
     (tmp_path / "media").mkdir()
     return tmp_path
 
@@ -151,7 +151,7 @@ def test_create_unsynced_deck_moves_files_media_and_note_types(tmp_path, monkeyp
     assert (shared_root / "note_types" / "AnkiOpsQA").is_dir()
     assert (shared_root / "note_types" / "AnkiOpsStyling.css").exists()
     assert (shared_root / "note_types" / "SyntaxHighlighting.css").exists()
-    FileSystemAdapter().load_note_type_configs(shared_root / "note_types")
+    DeckFileHarness().load_note_types(shared_root / "note_types")
     assert _git_status(collection_dir) == ""
     assert pushed[0][1] == "https://github.com/owner/repo.git"
     assert pushed[0][3] == "main"
@@ -509,7 +509,7 @@ def test_ensure_create_repo_without_gh_prints_manual_create_command(
     tmp_path,
     monkeypatch,
 ):
-    source = SyncSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner", "repo")
     monkeypatch.setattr(
         "ankiops.shared.hosting._github_repo_exists", lambda *_args: False
     )
@@ -523,7 +523,7 @@ def test_ensure_create_repo_creates_missing_private_repo_with_gh(
     tmp_path,
     monkeypatch,
 ):
-    source = SyncSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner", "repo")
     calls = []
     monkeypatch.setattr(
         "ankiops.shared.hosting._github_repo_exists", lambda *_args: False
@@ -548,7 +548,7 @@ def test_ensure_create_repo_creates_missing_public_repo_with_gh(
     tmp_path,
     monkeypatch,
 ):
-    source = SyncSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner", "repo")
     calls = []
     monkeypatch.setattr(
         "ankiops.shared.hosting._github_repo_exists", lambda *_args: False
@@ -601,7 +601,7 @@ def test_submit_rejects_keyless_notes_without_mutating_files(
 ):
     collection_dir = _setup_collection(tmp_path)
     shared_root = collection_dir / "shared" / "owner" / "repo"
-    FileSystemAdapter().eject_builtin_note_types(shared_root / "note_types")
+    DeckFileHarness().eject_default_note_types(shared_root / "note_types")
     deck = shared_root / "Deck.md"
     original = "<!-- note_type: shared/owner/repo/AnkiOpsQA -->\nQ: local\nA: deck\n"
     deck.write_text(original, encoding="utf-8")
@@ -629,7 +629,7 @@ def test_submit_rejects_keyless_notes_without_mutating_files(
 
 
 def test_subtree_commands_use_shared_prefix_and_github_url(tmp_path, monkeypatch):
-    source = SyncSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner", "repo")
     calls = []
 
     def fake_run(repo, args, *, check=True):

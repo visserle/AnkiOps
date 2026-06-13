@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,10 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.anki_client import AnkiConnectionError
-from ankiops.cli import main, run_deserialize, run_fix_image_widths, run_serialize
-from ankiops.fs import FileSystemAdapter
+from ankiops.anki_rpc import AnkiConnectionError
+from ankiops.cli import main
+from ankiops.cli_commands import run_deserialize, run_fix_image_widths, run_serialize
 from ankiops.image_widths import ImageWidthFixResult
+from tests.support.deck_files import DeckFileHarness
 
 
 class _FailingProfileAnki:
@@ -170,6 +172,48 @@ def test_run_ma_logs_real_media_status(world, caplog):
     assert "1 synced" in caplog.text
 
 
+def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
+    for path in world.note_types_dir.iterdir():
+        if path.is_dir() and path.name != "AnkiOpsQA":
+            shutil.rmtree(path)
+
+    world.write_deck("CachedTypesDeck", "Q: prompt\nA: answer")
+
+    with caplog.at_level(logging.INFO):
+        world.run_ma()
+
+    assert "Note types: 1 synced" in caplog.text
+
+    world.mock_anki.calls.clear()
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        world.run_ma()
+
+    note_type_diff_actions = {
+        "modelFieldAdd",
+        "modelFieldNames",
+        "modelFieldRemove",
+        "modelFieldReposition",
+        "modelFieldSetDescription",
+        "modelFieldSetFontSize",
+        "modelFieldDescriptions",
+        "modelFieldFonts",
+        "modelStyling",
+        "modelTemplateAdd",
+        "modelTemplateRename",
+        "modelTemplates",
+        "updateModelStyling",
+        "updateModelTemplates",
+    }
+    assert "Note types: 1 up to date (cached)" in caplog.text
+    assert not [
+        action
+        for action, _params in world.mock_anki.calls
+        if action in note_type_diff_actions
+    ]
+
+
 def test_run_am_logs_missing_anki_media_summary(world, caplog):
     world.write_deck(
         "MediaDeck",
@@ -217,7 +261,7 @@ def test_cli_shared_create_accepts_public_visibility_flag():
 
     with (
         patch(
-            "ankiops.cli.run_shared_impl",
+            "ankiops.cli_commands.run_shared_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
@@ -234,7 +278,10 @@ def test_cli_shared_create_accepts_public_visibility_flag():
 
 def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
     with (
-        patch("ankiops.cli.connect_or_exit", return_value=_FailingProfileAnki()),
+        patch(
+            "ankiops.cli_commands.connect_or_exit",
+            return_value=_FailingProfileAnki(),
+        ),
         patch("ankiops.cli.configure_logging"),
         patch("sys.argv", ["ankiops", "init"]),
         caplog.at_level(logging.ERROR),
@@ -280,8 +327,8 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
 
@@ -301,8 +348,8 @@ def test_run_serialize_defaults_output_to_deck_name(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.serialize_to_file") as serialize_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
 
@@ -315,7 +362,7 @@ def test_run_serialize_defaults_output_to_deck_name(tmp_path):
 
 
 def test_run_deserialize_snapshots_by_default(tmp_path):
-    FileSystemAdapter().eject_builtin_note_types(tmp_path / "note_types")
+    DeckFileHarness().eject_default_note_types(tmp_path / "note_types")
     json_file = tmp_path / "in.json"
     payload = {
         "decks": [
@@ -334,9 +381,9 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli_commands.apply_deserialization_plan") as deserialize_mock,
     ):
         run_deserialize(args)
 
@@ -364,9 +411,9 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.apply_deserialization_plan") as deserialize_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli_commands.apply_deserialization_plan") as deserialize_mock,
     ):
         run_deserialize(args)
 
@@ -401,10 +448,10 @@ def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch(
-            "ankiops.cli.fix_image_widths_collection",
+            "ankiops.cli_commands.fix_image_widths_collection",
             return_value=result,
         ) as fix_mock,
     ):
@@ -437,9 +484,9 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     result = ImageWidthFixResult(images_changed=2)
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
-        patch("ankiops.cli.fix_image_widths_collection", return_value=result),
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli_commands.fix_image_widths_collection", return_value=result),
         caplog.at_level(logging.INFO),
     ):
         run_fix_image_widths(args)
@@ -461,10 +508,10 @@ def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
     )
 
     with (
-        patch("ankiops.cli.require_collection_dir", return_value=tmp_path),
-        patch("ankiops.cli.git_snapshot") as snapshot_mock,
+        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch(
-            "ankiops.cli.fix_image_widths_collection",
+            "ankiops.cli_commands.fix_image_widths_collection",
             return_value=ImageWidthFixResult(),
         ),
     ):

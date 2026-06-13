@@ -95,9 +95,7 @@ def parsed_tag_updates(parsed_response: object) -> list[tuple[str, list[str]]]:
         tags = getattr(raw_update, "tags", None)
         if not isinstance(note_key, str):
             raise ValueError("Parsed tag update note_key must be a string")
-        if not isinstance(tags, list) or not all(
-            isinstance(tag, str) for tag in tags
-        ):
+        if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
             raise ValueError("Parsed tag update tags must be a list of strings")
         updates.append((note_key, tags))
     return updates

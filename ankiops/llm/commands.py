@@ -24,13 +24,13 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from ankiops.config import (
+from ankiops.collection import (
     LLM_DIR,
     NOTE_TYPES_DIR,
     file_stem_to_deck_name,
     require_collection_dir,
 )
-from ankiops.sources import discover_sync_sources, load_configs_for_sources
+from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
 
 from .config_loader import load_llm_task_catalog
 from .llm_db import LlmJobRequestNoteRef
@@ -462,11 +462,11 @@ def _show_plan(
 
 def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
     collection_dir = note_types_dir.parent
-    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
     return [
         config
-        for source_config in load_configs_for_sources(sources)
-        for config in source_config.configs
+        for source_config in load_note_types_for_sources(sources)
+        for config in source_config.note_types
     ]
 
 

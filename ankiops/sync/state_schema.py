@@ -44,8 +44,8 @@ CREATE TABLE markdown_media_cache (
     media_names_json TEXT NOT NULL
 )
 """,
-    "media_state": """
-CREATE TABLE media_state (
+    "media_files": """
+CREATE TABLE media_files (
     name TEXT PRIMARY KEY,
     mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
     size INTEGER NOT NULL CHECK (size >= 0),

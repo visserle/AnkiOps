@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
-from ankiops.config import LLM_DB_FILENAME, LLM_DIR
+from ankiops.collection import LLM_DB_FILENAME, LLM_DIR
 
 from .model_registry import ModelSpec, parse_model
 from .types import LlmItemStatus, LlmJobStatus, TaskRunSummary

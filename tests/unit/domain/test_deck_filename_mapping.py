@@ -1,4 +1,4 @@
-from ankiops.config import deck_name_to_file_stem, file_stem_to_deck_name
+from ankiops.collection import deck_name_to_file_stem, file_stem_to_deck_name
 
 
 def test_subdeck_separator_uses_double_underscore():

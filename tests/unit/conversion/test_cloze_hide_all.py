@@ -9,7 +9,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def template_dir() -> Path:
-    return Path(__file__).parents[3] / "ankiops/note_types/AnkiOpsClozeHideAll"
+    return Path(__file__).parents[3] / "ankiops/default_note_types/AnkiOpsClozeHideAll"
 
 
 @pytest.mark.parametrize(

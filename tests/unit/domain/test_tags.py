@@ -1,6 +1,7 @@
 """Tests for note-level tag helpers."""
 
-from ankiops.tags import format_tags_comment, normalize_tags, parse_tags_comment
+from ankiops.markdown import format_tags_comment, parse_tags_comment
+from ankiops.notes import normalize_tags
 
 
 def test_normalize_tags_handles_empty_input():

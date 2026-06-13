@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.config import require_collection_dir
-from ankiops.db import SQLiteDbAdapter
+from ankiops.collection import require_collection_dir
+from ankiops.sync.state import SyncState
 
 
 def test_require_collection_dir_exits_when_profile_is_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: tmp_path)
+    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     db.close()
 
     with pytest.raises(SystemExit):
@@ -19,9 +19,9 @@ def test_require_collection_dir_exits_when_profile_is_unset(tmp_path, monkeypatc
 
 
 def test_require_collection_dir_exits_on_profile_mismatch(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: tmp_path)
+    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.set_profile_name("Work")
     finally:
@@ -32,9 +32,9 @@ def test_require_collection_dir_exits_on_profile_mismatch(tmp_path, monkeypatch)
 
 
 def test_require_collection_dir_returns_path_on_profile_match(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: tmp_path)
+    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.set_profile_name("Work")
     finally:

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from ankiops.sources import SHARED_BRANCH, SyncSource
+from ankiops.deck_sources import SHARED_BRANCH, DeckSource
 
 logger = logging.getLogger(__name__)
 
@@ -129,13 +129,13 @@ class CollectionGit:
         else:
             self.run(["rm", "-r", "--cached", "--ignore-unmatch", "--", *paths])
 
-    def subtree_add(self, source: SyncSource) -> None:
+    def subtree_add(self, source: DeckSource) -> None:
         self._run_subtree(source, "add")
 
-    def subtree_pull(self, source: SyncSource) -> None:
+    def subtree_pull(self, source: DeckSource) -> None:
         self._run_subtree(source, "pull")
 
-    def subtree_split(self, source: SyncSource) -> str:
+    def subtree_split(self, source: DeckSource) -> str:
         branch = f"ankiops-{source.source_id.replace('/', '-')}-{uuid4().hex[:8]}"
         self.run(
             [
@@ -162,7 +162,7 @@ class CollectionGit:
     ) -> subprocess.CompletedProcess:
         return self.run(["push", url, f"{source_ref}:{target_ref}"], check=check)
 
-    def source_prefix(self, source: SyncSource) -> str:
+    def source_prefix(self, source: DeckSource) -> str:
         return self.rel_path(source.root)
 
     def rel_path(self, path: Path) -> str:
@@ -180,7 +180,7 @@ class CollectionGit:
                 seen.add(rel_path)
         return rel_paths
 
-    def _run_subtree(self, source: SyncSource, action: str) -> None:
+    def _run_subtree(self, source: DeckSource, action: str) -> None:
         if source.github_url is None:
             raise ValueError(f"Cannot derive GitHub URL for {source.display_name}")
         self.refresh_index()

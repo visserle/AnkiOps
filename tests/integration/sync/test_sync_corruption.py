@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.db import SQLiteDbAdapter
+from ankiops.collection import ANKIOPS_DB
+from ankiops.sync.state import SyncState
 from tests.support.assertions import assert_summary
 
 
@@ -62,9 +62,7 @@ def test_corr_db_003_import_rebuilds_mapping_from_embedded_key(world):
         )
         assert len(world.mock_anki.notes) == 1
         assert note_id in world.mock_anki.notes
-        assert (
-            world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "New A"
-        )
+        assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "New A"
         assert recovered.resolve_note_ids([note_key]).get(note_key) == note_id
 
     assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
@@ -81,14 +79,35 @@ def test_corr_db_004_schema_corruption_is_auto_recovered(tmp_path):
     finally:
         conn.close()
 
-    recovered = SQLiteDbAdapter.open(tmp_path)
+    recovered = SyncState.open(tmp_path)
     try:
         recovered.upsert_note_links([("schema-key", 101)])
     finally:
         recovered.close()
 
-    check_db = SQLiteDbAdapter.open(tmp_path)
+    check_db = SyncState.open(tmp_path)
     try:
         assert check_db.resolve_note_ids(["schema-key"]).get("schema-key") == 101
     finally:
         check_db.close()
+
+
+def test_corr_db_005_existing_corrupt_backup_is_replaced(tmp_path):
+    """CORR-DB-005."""
+    db_path = tmp_path / ANKIOPS_DB
+    corrupt_path = tmp_path / f"{ANKIOPS_DB}.corrupt"
+    db_path.write_text("corrupt data", encoding="utf-8")
+    corrupt_path.write_text("old corrupt backup", encoding="utf-8")
+
+    recovered = SyncState.open(tmp_path)
+    try:
+        recovered.upsert_note_links([("recovered-key", 101)])
+    finally:
+        recovered.close()
+
+    check_db = SyncState.open(tmp_path)
+    try:
+        assert check_db.resolve_note_ids(["recovered-key"])["recovered-key"] == 101
+    finally:
+        check_db.close()
+    assert corrupt_path.read_text(encoding="utf-8") == "corrupt data"

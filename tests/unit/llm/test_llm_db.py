@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from ankiops.config import LLM_DB_FILENAME, LLM_DIR
+from ankiops.collection import LLM_DB_FILENAME, LLM_DIR
 from ankiops.llm.llm_db import LlmDb
 from ankiops.llm.types import LlmItemStatus
 

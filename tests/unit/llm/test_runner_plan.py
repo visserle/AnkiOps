@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.config import LLM_DB_FILENAME
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fs import FileSystemAdapter
+from ankiops.collection import LLM_DB_FILENAME
 from ankiops.llm.runner import plan_task
 from ankiops.llm.types import FieldAccess
+from ankiops.sync.state import SyncState
+from tests.support.deck_files import DeckFileHarness
 
 
 def _init_collection_db(collection_dir):
-    db = SQLiteDbAdapter.open(collection_dir)
+    db = SyncState.open(collection_dir)
     try:
         db.set_profile_name("test")
     finally:
@@ -21,7 +21,7 @@ def _init_collection_db(collection_dir):
 
 def _eject_note_types(collection_dir):
     _init_collection_db(collection_dir)
-    FileSystemAdapter().eject_builtin_note_types(collection_dir / "note_types")
+    DeckFileHarness().eject_default_note_types(collection_dir / "note_types")
 
 
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
@@ -194,10 +194,10 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
 
 def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_file):
     _init_collection_db(llm_collection)
-    fs = FileSystemAdapter()
-    fs.eject_builtin_note_types(llm_collection / "note_types")
+    fs = DeckFileHarness()
+    fs.eject_default_note_types(llm_collection / "note_types")
     shared_root = llm_collection / "shared" / "owner" / "repo"
-    fs.eject_builtin_note_types(shared_root / "note_types")
+    fs.eject_default_note_types(shared_root / "note_types")
     write_file(
         llm_collection / "Local.md",
         """

@@ -4,34 +4,33 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.config import deck_name_to_file_stem
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fs import FileSystemAdapter
-from ankiops.serializer import (
+from ankiops.collection import deck_name_to_file_stem
+from ankiops.interchange import (
     deserialize,
     deserialize_from_file,
     serialize,
     serialize_to_file,
 )
+from ankiops.sync.state import SyncState
 
 
 def _set_collection_paths(monkeypatch, collection_dir):
-    monkeypatch.setattr("ankiops.config.get_collection_dir", lambda: collection_dir)
+    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: collection_dir)
     monkeypatch.setattr(
-        "ankiops.serializer.get_collection_dir",
+        "ankiops.interchange.get_collection_dir",
         lambda: collection_dir,
     )
 
 
 def _init_collection(collection_dir, fs):
-    db = SQLiteDbAdapter.open(collection_dir)
+    db = SyncState.open(collection_dir)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
 
     note_types_dir = collection_dir / "note_types"
-    fs.eject_builtin_note_types(note_types_dir)
+    fs.eject_default_note_types(note_types_dir)
     return note_types_dir
 
 
@@ -122,7 +121,7 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
 ):
     _set_collection_paths(monkeypatch, collection)
     shared_root = collection / "shared" / "owner" / "repo"
-    fs.eject_builtin_note_types(shared_root / "note_types")
+    fs.eject_default_note_types(shared_root / "note_types")
     (shared_root / "README.md").write_text("# docs", encoding="utf-8")
     (shared_root / "LICENSE.md").write_text("# license", encoding="utf-8")
     (shared_root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
@@ -151,8 +150,8 @@ def test_serialize_orders_local_before_sorted_shared_sources(
     _set_collection_paths(monkeypatch, collection)
     shared_b = collection / "shared" / "z-owner" / "deck"
     shared_a = collection / "shared" / "a-owner" / "deck"
-    fs.eject_builtin_note_types(shared_b / "note_types")
-    fs.eject_builtin_note_types(shared_a / "note_types")
+    fs.eject_default_note_types(shared_b / "note_types")
+    fs.eject_default_note_types(shared_a / "note_types")
     (shared_b / "B.md").write_text(
         "<!-- note_key: shared-b -->\nQ: b\nA: b",
         encoding="utf-8",
@@ -176,7 +175,7 @@ def test_serialize_global_validation_rejects_duplicate_deck_names(
 ):
     _set_collection_paths(monkeypatch, collection)
     shared_root = collection / "shared" / "owner" / "repo"
-    fs.eject_builtin_note_types(shared_root / "note_types")
+    fs.eject_default_note_types(shared_root / "note_types")
     (shared_root / "TestDeck.md").write_text(
         "<!-- note_key: shared-1 -->\nQ: shared question\nA: shared answer",
         encoding="utf-8",
@@ -290,17 +289,19 @@ def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatc
     broken_file = collection / broken_name
     broken_file.write_text("Q: Broken", encoding="utf-8")
 
-    original_read = FileSystemAdapter.read_markdown_file
+    import ankiops.interchange as interchange
 
-    def _fake_read_markdown_file(self, md_file, *, context_root=None):
+    original_read = interchange.read_deck_file
+
+    def _fake_read_deck_file(md_file, *, note_types, context_root=None):
         if md_file.name == broken_name:
             raise ValueError("synthetic parse failure")
-        return original_read(self, md_file, context_root=context_root)
+        return original_read(md_file, note_types=note_types, context_root=context_root)
 
     monkeypatch.setattr(
-        FileSystemAdapter,
-        "read_markdown_file",
-        _fake_read_markdown_file,
+        interchange,
+        "read_deck_file",
+        _fake_read_deck_file,
     )
 
     with pytest.raises(
@@ -389,7 +390,7 @@ def test_roundtrip_preserves_tags(collection, tmp_path, fs, monkeypatch):
 
 def test_deserialize_requires_initialized_collection(tmp_path, fs):
     note_types_dir = tmp_path / "note_types"
-    fs.eject_builtin_note_types(note_types_dir)
+    fs.eject_default_note_types(note_types_dir)
 
     with pytest.raises(ValueError, match="Not an initialized AnkiOps collection"):
         deserialize(
@@ -529,7 +530,7 @@ def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs)
 def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, fs):
     note_types_dir = _init_collection(tmp_path, fs)
     shared_root = tmp_path / "shared" / "owner" / "repo"
-    fs.eject_builtin_note_types(shared_root / "note_types")
+    fs.eject_default_note_types(shared_root / "note_types")
 
     deserialize(
         {

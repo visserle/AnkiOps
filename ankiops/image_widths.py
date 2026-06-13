@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ankiops.config import NOTE_TYPES_DIR
-from ankiops.serializer import deserialize, serialize
+from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.interchange import deserialize, serialize
 
 logger = logging.getLogger(__name__)
 

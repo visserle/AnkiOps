@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 from html_to_markdown import ConversionOptions
 from html_to_markdown import convert as convert_html_to_markdown
 
-from ankiops.config import LOCAL_MEDIA_DIR
+from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.math_delimiters import normalize_escaped_math_delimiters
 
 # Use Unicode placeholders (zero-width joiners + unique pattern)
@@ -292,8 +292,8 @@ class HTMLToMarkdown:
         list_indent_width=3,
         highlight_style="double-equal",
         autolinks=False,
-        compact_tables=True,
         extract_metadata=False,
+        compact_tables=True,
     )
 
     def convert(self, html: str) -> str:

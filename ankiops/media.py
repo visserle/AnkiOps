@@ -5,19 +5,19 @@ import re
 from pathlib import Path
 from urllib.parse import unquote
 
+from blake3 import blake3
 from rich.markup import escape as rich_escape
 
-from ankiops.anki import AnkiAdapter
-from ankiops.config import LOCAL_MEDIA_DIR
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fs import FileSystemAdapter
-from ankiops.log import clickable_path
-from ankiops.models import Change, ChangeType, SyncResult
-from ankiops.sources import (
-    SyncSource,
-    discover_sync_sources,
-    markdown_files_for_source,
+from ankiops.anki import Anki
+from ankiops.collection import LOCAL_MEDIA_DIR
+from ankiops.console import clickable_path
+from ankiops.deck_sources import (
+    DeckSource,
+    deck_files_for_source,
+    discover_deck_sources,
 )
+from ankiops.sync.report import Change, ChangeType, SyncReport
+from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +72,69 @@ def _markdown_cache_key(cache_root: Path, md_file: Path) -> str:
     return str(md_file.relative_to(cache_root))
 
 
+def extract_media_references(text: str) -> set[str]:
+    return _extract_media_references(text)
+
+
+def calculate_blake3(file_path: Path) -> str:
+    hash_state = blake3()
+    with open(file_path, "rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(65536), b""):
+            hash_state.update(chunk)
+    return hash_state.hexdigest(length=4)
+
+
+def update_references(directory: Path, rename_map: dict[str, str]) -> int:
+    if not rename_map:
+        return 0
+
+    updated_files = 0
+    pattern = re.compile(
+        r"(!\[.*?\]\()(?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))(\)(?:\{[^}]*\})?)"
+        r'|(src=["\'])(.+?)(["\'])'
+        r"|(\[sound:)(.+?)(\])"
+    )
+
+    def replace_callback(match: re.Match) -> str:
+        if match.group(1) is not None:
+            opener = match.group(1)
+            path = match.group(2) or match.group(3)
+            suffix = match.group(4)
+            is_markdown = True
+            media_context = "markdown"
+        elif match.group(5) is not None:
+            opener, path, suffix = match.group(5), match.group(6), match.group(7)
+            is_markdown = False
+            media_context = "html"
+        else:
+            opener, path, suffix = match.group(8), match.group(9), match.group(10)
+            is_markdown = False
+            media_context = "sound"
+
+        decoded_path = unquote(path)
+        lookup_path = decoded_path.strip("<>").replace("\\", "/")
+        if lookup_path not in rename_map:
+            return match.group(0)
+
+        new_path = rename_map[lookup_path]
+        if media_context == "sound" and new_path.startswith(f"{LOCAL_MEDIA_DIR}/"):
+            new_path = new_path[len(LOCAL_MEDIA_DIR) + 1 :]
+        if is_markdown and not new_path.startswith("<"):
+            new_path = f"<{new_path}>"
+        return f"{opener}{new_path}{suffix}"
+
+    for md_file in directory.glob("*.md"):
+        content = md_file.read_text(encoding="utf-8")
+        new_content = pattern.sub(replace_callback, content)
+        if new_content != content:
+            md_file.write_text(new_content, encoding="utf-8")
+            updated_files += 1
+
+    return updated_files
+
+
 def _collect_referenced_media(
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
     collection_dir: Path,
     *,
     cache_root: Path | None = None,
@@ -82,10 +142,12 @@ def _collect_referenced_media(
     prune_cache: bool = True,
 ) -> set[str]:
     resolved_cache_root = cache_root or collection_dir
-    md_files = md_files or fs_port.find_markdown_files(collection_dir)
+    md_files = md_files or sorted(
+        collection_dir.glob("*.md"),
+        key=lambda path: path.name,
+    )
     md_keys = [
-        _markdown_cache_key(resolved_cache_root, md_file)
-        for md_file in md_files
+        _markdown_cache_key(resolved_cache_root, md_file) for md_file in md_files
     ]
     if prune_cache:
         pruned = db_port.prune_markdown_media_cache(md_keys)
@@ -127,10 +189,9 @@ def _collect_referenced_media(
 
 
 def hash_and_update_references(
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
     collection_dir: Path,
-    result: SyncResult,
+    result: SyncReport,
     *,
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
@@ -143,7 +204,6 @@ def hash_and_update_references(
 
     # 1. Find directly referenced files first
     referenced = _collect_referenced_media(
-        fs_port,
         db_port,
         collection_dir,
         cache_root=cache_root,
@@ -182,7 +242,7 @@ def hash_and_update_references(
                 digest = cached[2]
                 hash_cache_hits += 1
             else:
-                digest = fs_port.calculate_blake3(file_path)
+                digest = calculate_blake3(file_path)
                 hash_cache_misses += 1
             new_name = _get_hashed_name(file_path, digest)
             final_path = file_path
@@ -190,7 +250,7 @@ def hash_and_update_references(
             if new_name != file_path.name:
                 new_path = file_path.with_name(new_name)
                 if new_path.exists():
-                    new_digest = fs_port.calculate_blake3(new_path)
+                    new_digest = calculate_blake3(new_path)
                     if new_digest == digest:
                         file_path.unlink()
                         fingerprint_removals.append(file_path.name)
@@ -237,7 +297,7 @@ def hash_and_update_references(
     if fingerprint_updates:
         db_port.upsert_media_fingerprints(fingerprint_updates)
     if fingerprint_removals:
-        db_port.delete_media_state(fingerprint_removals)
+        db_port.delete_media_files(fingerprint_removals)
 
     if cache_candidates:
         logger.debug(
@@ -247,11 +307,10 @@ def hash_and_update_references(
 
     # 3. Update Markdown files in bulk
     if rename_map:
-        count = fs_port.update_media_references(collection_dir, rename_map)
+        count = update_references(collection_dir, rename_map)
         logger.debug(f"Updated {count} markdown files with {len(rename_map)} renames")
         # 4. Re-collect now-correctly-hashed active references
         final_referenced = _collect_referenced_media(
-            fs_port,
             db_port,
             collection_dir,
             cache_root=cache_root,
@@ -264,17 +323,16 @@ def hash_and_update_references(
 
 
 def sync_media_to_anki(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
+    anki_port: Anki,
     collection_dir: Path,
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
     *,
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
-) -> SyncResult:
+) -> SyncReport:
     """Push local media to Anki."""
-    result = SyncResult.for_media()
+    result = SyncReport.for_media()
     media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
 
     anki_media_dir = anki_port.get_media_dir().resolve()
@@ -285,7 +343,6 @@ def sync_media_to_anki(
         )
 
     active_refs, digest_by_name = hash_and_update_references(
-        fs_port,
         db_port,
         collection_dir,
         result,
@@ -348,7 +405,7 @@ def sync_media_to_anki(
                 ):
                     digest = cached[2]
                 else:
-                    digest = fs_port.calculate_blake3(file_path)
+                    digest = calculate_blake3(file_path)
                     fingerprint_updates.append(
                         (
                             name,
@@ -395,7 +452,7 @@ def sync_media_to_anki(
     if push_state_updates:
         db_port.upsert_media_push_digests(push_state_updates)
     if removed_names:
-        db_port.delete_media_state(removed_names)
+        db_port.delete_media_files(removed_names)
 
     if skipped_pushes:
         noun = "file" if skipped_pushes == 1 else "files"
@@ -407,22 +464,20 @@ def sync_media_to_anki(
 
 
 def sync_media_from_anki(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
+    anki_port: Anki,
     collection_dir: Path,
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
     *,
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
-) -> SyncResult:
+) -> SyncReport:
     """Pull missing media from Anki."""
-    result = SyncResult.for_media()
+    result = SyncReport.for_media()
     media_root = collection_dir / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
 
     referenced = _collect_referenced_media(
-        fs_port,
         db_port,
         collection_dir,
         cache_root=cache_root,
@@ -452,7 +507,7 @@ def sync_media_from_anki(
     return result
 
 
-def _combine_media_result(target: SyncResult, source: SyncResult) -> None:
+def _combine_media_result(target: SyncReport, source: SyncReport) -> None:
     target.changes.extend(source.changes)
     target.errors.extend(source.errors)
     target.checked += source.checked
@@ -461,14 +516,14 @@ def _combine_media_result(target: SyncResult, source: SyncResult) -> None:
 
 
 def _prune_media_cache_for_sources(
-    db_port: SQLiteDbAdapter,
+    db_port: SyncState,
     collection_dir: Path,
-    sources: list[SyncSource],
+    sources: list[DeckSource],
 ) -> None:
     md_keys = [
         _markdown_cache_key(collection_dir, md_file)
         for source in sources
-        for md_file in markdown_files_for_source(source)
+        for md_file in deck_files_for_source(source)
     ]
     pruned = db_port.prune_markdown_media_cache(md_keys)
     if pruned:
@@ -476,23 +531,21 @@ def _prune_media_cache_for_sources(
 
 
 def sync_all_media_to_anki(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
+    anki_port: Anki,
     collection_dir: Path,
-    db_port: SQLiteDbAdapter,
-) -> SyncResult:
+    db_port: SyncState,
+) -> SyncReport:
     """Push media from all active sync sources to Anki."""
-    sources = discover_sync_sources(collection_dir)
+    sources = discover_deck_sources(collection_dir)
     _prune_media_cache_for_sources(db_port, collection_dir, sources)
-    combined = SyncResult.for_media()
+    combined = SyncReport.for_media()
     for source in sources:
         source_result = sync_media_to_anki(
             anki_port,
-            fs_port,
             source.root,
             db_port,
             cache_root=collection_dir,
-            md_files=markdown_files_for_source(source),
+            md_files=deck_files_for_source(source),
             prune_cache=False,
         )
         _combine_media_result(combined, source_result)
@@ -500,30 +553,28 @@ def sync_all_media_to_anki(
 
 
 def sync_all_media_from_anki(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
+    anki_port: Anki,
     collection_dir: Path,
-    db_port: SQLiteDbAdapter,
-) -> SyncResult:
+    db_port: SyncState,
+) -> SyncReport:
     """Pull referenced media for all active sync sources from Anki."""
-    sources = discover_sync_sources(collection_dir)
+    sources = discover_deck_sources(collection_dir)
     _prune_media_cache_for_sources(db_port, collection_dir, sources)
-    combined = SyncResult.for_media()
+    combined = SyncReport.for_media()
     for source in sources:
         source_result = sync_media_from_anki(
             anki_port,
-            fs_port,
             source.root,
             db_port,
             cache_root=collection_dir,
-            md_files=markdown_files_for_source(source),
+            md_files=deck_files_for_source(source),
             prune_cache=False,
         )
         _combine_media_result(combined, source_result)
     return combined
 
 
-def format_media_status(media_result: SyncResult, *, from_anki: bool) -> str:
+def format_media_status(media_result: SyncReport, *, from_anki: bool) -> str:
     checked = media_result.checked
     summary = media_result.summary
 

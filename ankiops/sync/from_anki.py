@@ -3,41 +3,43 @@
 import logging
 from pathlib import Path
 
-from ankiops.anki import AnkiAdapter
-from ankiops.config import (
+from ankiops.anki import Anki
+from ankiops.collection import (
     deck_name_to_file_stem,
     file_stem_to_deck_name,
 )
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fingerprints import note_fingerprint
-from ankiops.fs import FileSystemAdapter
-from ankiops.markdown_format import (
+from ankiops.deck_sources import (
+    DeckSource,
+    deck_files_for_source,
+    discover_deck_sources,
+    load_note_types_for_sources,
+)
+from ankiops.html_to_markdown import HTMLToMarkdown
+from ankiops.markdown import (
     NOTE_SEPARATOR,
-    format_note_key_comment,
+    DeckFile,
     format_note_type_comment,
     is_code_fence_line,
     is_note_type_comment,
+    read_deck_file,
+    render_notes_to_markdown,
+    write_deck_file,
 )
-from ankiops.models import (
-    ANKIOPS_KEY_FIELD,
+from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
+from ankiops.notes import (
     AnkiNote,
+    Note,
+    note_fingerprint,
+)
+from ankiops.sync.identity import assert_unique_export_note_keys
+from ankiops.sync.report import (
     Change,
     ChangeType,
-    CollectionResult,
-    MarkdownFile,
-    Note,
-    NoteTypeConfig,
+    CollectionReport,
     ProtectedNoteGroup,
-    SyncResult,
+    SyncReport,
 )
-from ankiops.note_identity import assert_unique_export_note_keys
-from ankiops.sources import (
-    SyncSource,
-    discover_sync_sources,
-    load_configs_for_sources,
-    markdown_files_for_source,
-)
-from ankiops.tags import format_tags_comment
+from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +69,16 @@ def _format_pending_note_type_conversion_error(
 
 def _from_html(
     anki_note: AnkiNote,
-    config: NoteTypeConfig,
-    fs_port: FileSystemAdapter,
+    config: NoteType,
+    html_to_markdown: HTMLToMarkdown,
 ) -> Note:
-    """Convert an AnkiNote into a Domain Note using the FS Port."""
+    """Convert an Anki note into a Markdown-domain note."""
     fields = {}
     for field_config in config.fields:
         if field_config.name == ANKIOPS_KEY_FIELD.name:
             continue
         if field_config.name in anki_note.fields:
-            md_val = fs_port.convert_to_markdown(anki_note.fields[field_config.name])
+            md_val = html_to_markdown.convert(anki_note.fields[field_config.name])
             if md_val:
                 fields[field_config.name] = md_val
 
@@ -93,13 +95,14 @@ def _load_deck_markdown_state(
     deck_name: str,
     existing_file_path: Path | None,
     collection_dir: Path,
-    fs_port: FileSystemAdapter,
-) -> tuple[Path, MarkdownFile, bool]:
+    note_types: list[NoteType],
+) -> tuple[Path, DeckFile, bool]:
     if existing_file_path and existing_file_path.exists():
         return (
             existing_file_path,
-            fs_port.read_markdown_file(
+            read_deck_file(
                 existing_file_path,
+                note_types=note_types,
                 context_root=collection_dir,
             ),
             False,
@@ -109,24 +112,28 @@ def _load_deck_markdown_state(
     if file_path.exists():
         return (
             file_path,
-            fs_port.read_markdown_file(file_path, context_root=collection_dir),
+            read_deck_file(
+                file_path,
+                note_types=note_types,
+                context_root=collection_dir,
+            ),
             False,
         )
 
-    fs_port.write_markdown_file(file_path, "")
+    write_deck_file(file_path, "")
     return (
         file_path,
-        fs_port.read_markdown_file(file_path, context_root=collection_dir),
+        read_deck_file(file_path, note_types=note_types, context_root=collection_dir),
         True,
     )
 
 
 def _resolve_deck_notes(
     anki_notes: list[AnkiNote],
-    config_by_name: dict[str, NoteTypeConfig],
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
-    result: SyncResult,
+    config_by_name: dict[str, NoteType],
+    html_to_markdown: HTMLToMarkdown,
+    db_port: SyncState,
+    result: SyncReport,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
     note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
@@ -198,7 +205,7 @@ def _resolve_deck_notes(
             )
             continue
 
-        domain_note = _from_html(anki_note, cfg, fs_port)
+        domain_note = _from_html(anki_note, cfg, html_to_markdown)
 
         if not note_key:
             # Match by content when no mapped/embedded note_key exists.
@@ -348,9 +355,9 @@ def _order_resolved_notes(
 def _can_skip_markdown_rebuild(
     *,
     is_first_export: bool,
-    fs: MarkdownFile,
+    fs: DeckFile,
     final_notes: list[Note],
-    result: SyncResult,
+    result: SyncReport,
     resolve_errors: list[str],
 ) -> bool:
     if is_first_export or resolve_errors:
@@ -366,7 +373,7 @@ def _can_skip_markdown_rebuild(
     return _has_current_note_type_metadata(fs, final_notes)
 
 
-def _has_current_note_type_metadata(fs: MarkdownFile, notes: list[Note]) -> bool:
+def _has_current_note_type_metadata(fs: DeckFile, notes: list[Note]) -> bool:
     blocks = fs.raw_content.split(NOTE_SEPARATOR)
     note_idx = 0
     for block in blocks:
@@ -401,57 +408,25 @@ def _block_has_current_note_type_metadata(block: str, note_type: str) -> bool:
     return found
 
 
-def _render_notes_to_markdown(
-    notes: list[Note],
-    config_by_name: dict[str, NoteTypeConfig],
-) -> str:
-    content_parts: list[str] = []
-
-    for note in notes:
-        parts = []
-        if note.note_key:
-            parts.append(format_note_key_comment(note.note_key))
-        parts.append(format_note_type_comment(note.note_type))
-        tags_comment = format_tags_comment(note.tags)
-        if tags_comment:
-            parts.append(tags_comment)
-
-        cfg = config_by_name[note.note_type]
-        for field_config in cfg.fields:
-            if (
-                field_config.label
-                and field_config.name in note.fields
-                and note.fields[field_config.name]
-            ):
-                lines = note.fields[field_config.name].split("\n")
-                parts.append(f"{field_config.label} {lines[0]}")
-                if len(lines) > 1:
-                    parts.extend(lines[1:])
-
-        content_parts.append("\n".join(parts))
-
-    return NOTE_SEPARATOR.join(content_parts) + "\n"
-
-
 def _sync_deck(
     deck_name: str,
     anki_notes: list[AnkiNote],
-    config_by_name: dict[str, NoteTypeConfig],
+    config_by_name: dict[str, NoteType],
     existing_file_path: Path | None,
     collection_dir: Path,
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
+    html_to_markdown: HTMLToMarkdown,
+    db_port: SyncState,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
     note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_export_fingerprints: list[tuple[str, str, str]],
-) -> SyncResult:
-    result = SyncResult.for_notes(name=deck_name, file_path=existing_file_path)
+) -> SyncReport:
+    result = SyncReport.for_notes(name=deck_name, file_path=existing_file_path)
     file_path, fs, is_first_export = _load_deck_markdown_state(
         deck_name=deck_name,
         existing_file_path=existing_file_path,
         collection_dir=collection_dir,
-        fs_port=fs_port,
+        note_types=list(config_by_name.values()),
     )
     result.file_path = file_path
 
@@ -469,7 +444,7 @@ def _sync_deck(
     resolved_notes, resolve_errors = _resolve_deck_notes(
         anki_notes=anki_notes,
         config_by_name=config_by_name,
-        fs_port=fs_port,
+        html_to_markdown=html_to_markdown,
         db_port=db_port,
         result=result,
         note_keys_by_id=note_keys_by_id,
@@ -501,13 +476,13 @@ def _sync_deck(
         result.order_changes(order=_SYNC_ORDER)
         return result
 
-    final_text = _render_notes_to_markdown(
+    final_text = render_notes_to_markdown(
         notes=final_notes,
-        config_by_name=config_by_name,
+        note_types_by_name=config_by_name,
     )
 
     if final_text.strip() != fs.raw_content.strip():
-        fs_port.write_markdown_file(result.file_path, final_text)
+        write_deck_file(result.file_path, final_text)
 
     # Detect deleted notes
     final_note_keys = {
@@ -531,10 +506,14 @@ def _split_orphan_file_notes(
     *,
     md_file: Path,
     collection_dir: Path,
-    fs_port: FileSystemAdapter,
+    note_types: list[NoteType],
 ) -> tuple[list[Note], list[Note]] | None:
     try:
-        file_state = fs_port.read_markdown_file(md_file, context_root=collection_dir)
+        file_state = read_deck_file(
+            md_file,
+            note_types=note_types,
+            context_root=collection_dir,
+        )
     except Exception as error:  # pragma: no cover - defensive fail-safe
         logger.warning(
             f"Preserving orphan markdown file '{md_file.name}' because it "
@@ -552,23 +531,22 @@ def _split_orphan_file_notes(
     return keyless_notes, keyed_notes
 
 
-def export_collection(
-    anki_port: AnkiAdapter,
-    fs_port: FileSystemAdapter,
-    db_port: SQLiteDbAdapter,
+def sync_collection_from_anki(
+    anki_port: Anki,
+    db_port: SyncState,
     collection_dir: Path,
     note_types_dir: Path,
-) -> CollectionResult:
-    sources = discover_sync_sources(collection_dir, note_types_dir=note_types_dir)
+) -> CollectionReport:
+    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
     local_source = sources[0]
-    source_configs = load_configs_for_sources(sources)
+    source_configs = load_note_types_for_sources(sources)
     configs = [
         config
         for source_config in source_configs
-        for config in source_config.configs
+        for config in source_config.note_types
     ]
     config_by_name = {config.name: config for config in configs}
-    fs_port.set_configs(configs)
+    html_to_markdown = HTMLToMarkdown()
     with db_port.write_tx():
         deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
 
@@ -582,9 +560,7 @@ def export_collection(
         pending_note_mappings: list[tuple[str, int]] = []
         note_key_candidates = set(note_keys_by_id.values())
         for anki_note in anki_notes.values():
-            embedded_note_key = anki_note.fields.get(
-                ANKIOPS_KEY_FIELD.name, ""
-            ).strip()
+            embedded_note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
             if embedded_note_key:
                 note_key_candidates.add(embedded_note_key)
         note_export_fingerprints_by_note_key = db_port.resolve_export_hashes(
@@ -606,14 +582,16 @@ def export_collection(
             if not primary_card_info:
                 continue
             deck_name = primary_card_info.get("deckName")
+            if deck_name is None:
+                continue
             notes_by_deck.setdefault(deck_name, []).append(anki_note)
 
         md_files: list[Path] = []
-        source_by_file: dict[Path, SyncSource] = {}
-        file_map_by_deck_name: dict[str, tuple[SyncSource, Path]] = {}
+        source_by_file: dict[Path, DeckSource] = {}
+        file_map_by_deck_name: dict[str, tuple[DeckSource, Path]] = {}
         deck_conflicts: list[str] = []
         for source in sources:
-            for md_file in markdown_files_for_source(source):
+            for md_file in deck_files_for_source(source):
                 md_files.append(md_file)
                 source_by_file[md_file] = source
                 deck_name = file_stem_to_deck_name(md_file.stem)
@@ -667,7 +645,7 @@ def export_collection(
                 config_by_name,
                 target_file,
                 target_source.root,
-                fs_port,
+                html_to_markdown,
                 db_port,
                 note_keys_by_id,
                 pending_note_mappings,
@@ -706,7 +684,7 @@ def export_collection(
                 orphan_split = _split_orphan_file_notes(
                     md_file=md_file,
                     collection_dir=source.root,
-                    fs_port=fs_port,
+                    note_types=configs,
                 )
                 if orphan_split is None:
                     db_port.delete_deck(deck_name)
@@ -729,11 +707,11 @@ def export_collection(
                         ProtectedNoteGroup(deck_name, protected_note_count)
                     )
                     if keyed_notes:
-                        final_text = _render_notes_to_markdown(
+                        final_text = render_notes_to_markdown(
                             notes=keyless_notes,
-                            config_by_name=config_by_name,
+                            note_types_by_name=config_by_name,
                         )
-                        fs_port.write_markdown_file(md_file, final_text)
+                        write_deck_file(md_file, final_text)
                         extra_changes.extend(
                             Change(ChangeType.DELETE, None, orphan.identifier)
                             for orphan in keyed_notes
@@ -751,7 +729,7 @@ def export_collection(
                     Change(ChangeType.DELETE, None, orphan.identifier)
                     for orphan in keyed_notes
                 )
-        return CollectionResult.for_export(
+        return CollectionReport.for_export(
             results=results,
             extra_changes=extra_changes,
             protected_note_groups=protected_note_groups,

@@ -1,15 +1,15 @@
 """Tests for sync summary aggregation and projection."""
 
-from ankiops.models import (
+from ankiops.sync.report import (
     Change,
     ChangeType,
-    CollectionResult,
-    SyncResult,
+    CollectionReport,
+    SyncReport,
 )
 
 
 def test_note_summary_prefers_higher_priority_change_per_entity():
-    result = SyncResult.for_notes(name="Deck", file_path=None)
+    result = SyncReport.for_notes(name="Deck", file_path=None)
     result.changes = [
         Change(ChangeType.SKIP, 1, "note_key: one"),
         Change(ChangeType.UPDATE, 1, "note_key: one"),
@@ -29,7 +29,7 @@ def test_note_summary_prefers_higher_priority_change_per_entity():
 
 
 def test_media_summary_tracks_sync_and_hash_with_deduplication():
-    result = SyncResult.for_media()
+    result = SyncReport.for_media()
     result.changes = [
         Change(ChangeType.HASH, "a.png", "a.png"),
         Change(ChangeType.SYNC, "a.png", "a.png"),
@@ -45,9 +45,9 @@ def test_media_summary_tracks_sync_and_hash_with_deduplication():
 
 
 def test_collection_export_extra_note_changes_update_counters_not_total():
-    deck_result = SyncResult.for_notes(name="Deck", file_path=None)
+    deck_result = SyncReport.for_notes(name="Deck", file_path=None)
     deck_result.changes = [Change(ChangeType.CREATE, 1, "note_key: one")]
-    export_result = CollectionResult.for_export(
+    export_result = CollectionReport.for_export(
         results=[deck_result],
         extra_changes=[Change(ChangeType.DELETE, None, "note_key: stale")],
     )

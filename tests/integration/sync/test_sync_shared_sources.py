@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.fs import FileSystemAdapter
-from ankiops.markdown_format import NOTE_SEPARATOR
+from ankiops.markdown import NOTE_SEPARATOR
+from tests.support.deck_files import DeckFileHarness
 
 
 def _setup_shared_root(world):
     shared_root = world.root / "shared" / "owner" / "repo"
-    FileSystemAdapter().eject_builtin_note_types(shared_root / "note_types")
+    DeckFileHarness().eject_default_note_types(shared_root / "note_types")
     shared_root.mkdir(parents=True, exist_ok=True)
     return shared_root
 
@@ -113,10 +113,7 @@ def test_import_converts_root_note_to_scoped_shared_type_without_duplicate(world
     ) in world.mock_anki.calls
 
 
-def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(
-    world,
-    monkeypatch,
-):
+def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(world):
     shared_root = _setup_shared_root(world)
     note_key = "created-key-ankiops-connect-down"
     world.mock_anki.add_note(
@@ -137,12 +134,9 @@ def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(
         note_key,
     )
 
-    def fail_change_notetype(action: str, **params):
-        if action == "changeNotesNotetype":
-            raise RuntimeError("AnkiOpsConnect down")
-        return world.mock_anki.invoke(action, **params)
-
-    monkeypatch.setattr("ankiops.anki.invoke", fail_change_notetype)
+    world.mock_anki.fail_actions["changeNotesNotetype"] = RuntimeError(
+        "AnkiOpsConnect down"
+    )
 
     with world.db_session() as db:
         result = world.sync_import(db)

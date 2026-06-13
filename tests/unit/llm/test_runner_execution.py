@@ -6,10 +6,10 @@ import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
 
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fs import FileSystemAdapter
 from ankiops.llm.runner import OpenAIResult, _validate_cloze_text_fields, run_task
-from ankiops.models import Note
+from ankiops.notes import Note
+from ankiops.sync.state import SyncState
+from tests.support.deck_files import DeckFileHarness
 
 
 class _FakeAsyncOpenAI:
@@ -21,12 +21,12 @@ class _FakeAsyncOpenAI:
 
 
 def _init_collection(collection_dir) -> None:
-    db = SQLiteDbAdapter.open(collection_dir)
+    db = SyncState.open(collection_dir)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
-    FileSystemAdapter().eject_builtin_note_types(collection_dir / "note_types")
+    DeckFileHarness().eject_default_note_types(collection_dir / "note_types")
 
 
 def _init_git_repo(collection_dir) -> None:
@@ -264,7 +264,7 @@ def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
     monkeypatch,
 ):
     _init_collection(llm_collection)
-    FileSystemAdapter().eject_builtin_note_types(
+    DeckFileHarness().eject_default_note_types(
         llm_collection / "shared" / "owner" / "repo" / "note_types"
     )
     write_file(

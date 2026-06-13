@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ankiops.anki_client import AnkiConnectionError
-from ankiops.tags import normalize_tags
+from ankiops.anki_rpc import AnkiConnectionError
+from ankiops.notes import normalize_tags
 
 
 class MockAnki:
@@ -22,6 +22,7 @@ class MockAnki:
         self.calls = []
         self.active_profile = "TestProfile"
         self.media_dir: Path | None = None
+        self.fail_actions: dict[str, Exception] = {}
 
     def _base_model_name(self, model_name: str | None) -> str | None:
         if model_name == "RenamedQA":
@@ -38,6 +39,8 @@ class MockAnki:
 
     def invoke(self, action: str, **params) -> Any:
         self.calls.append((action, params))
+        if action in self.fail_actions:
+            raise self.fail_actions[action]
 
         match action:
             case "getActiveProfile":

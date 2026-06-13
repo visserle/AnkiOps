@@ -1,19 +1,19 @@
-from ankiops.config import deck_name_to_file_stem
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fs import FileSystemAdapter
+from ankiops.collection import deck_name_to_file_stem
 from ankiops.image_widths import fix_image_widths_collection
+from ankiops.sync.state import SyncState
+from tests.support.deck_files import DeckFileHarness
 
 
 def _make_collection(tmp_path):
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
 
-    fs = FileSystemAdapter()
+    fs = DeckFileHarness()
     note_types_dir = tmp_path / "note_types"
-    fs.eject_builtin_note_types(note_types_dir)
+    fs.eject_default_note_types(note_types_dir)
     return note_types_dir
 
 
@@ -87,9 +87,9 @@ def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
 
 def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
     note_types_dir = _make_collection(tmp_path)
-    fs = FileSystemAdapter()
+    fs = DeckFileHarness()
     shared_root = tmp_path / "shared" / "owner" / "repo"
-    fs.eject_builtin_note_types(shared_root / "note_types")
+    fs.eject_default_note_types(shared_root / "note_types")
     shared_file = shared_root / "Shared.md"
     shared_file.write_text(
         "<!-- note_key: shared-1 -->\n"

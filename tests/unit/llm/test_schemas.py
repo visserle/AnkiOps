@@ -158,9 +158,7 @@ def test_response_model_accepts_mixed_field_and_tag_updates():
 
     response_model.model_validate(
         {
-            "updates": [
-                {"note_key": "nk-1", "field": "Question", "value": "Fixed"}
-            ],
+            "updates": [{"note_key": "nk-1", "field": "Question", "value": "Fixed"}],
             "tag_updates": [{"note_key": "nk-1", "tags": ["new"]}],
         }
     )

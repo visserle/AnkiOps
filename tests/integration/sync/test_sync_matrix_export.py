@@ -6,9 +6,9 @@ import logging
 
 import pytest
 
-from ankiops.config import ANKIOPS_DB
-from ankiops.db import SQLiteDbAdapter
-from ankiops.fingerprints import note_fingerprint
+from ankiops.collection import ANKIOPS_DB
+from ankiops.notes import note_fingerprint
+from ankiops.sync.state import SyncState
 from tests.support.assertions import assert_summary
 
 
@@ -71,6 +71,23 @@ def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
             "Q: Q1",
             "A: A1",
         )
+
+
+def test_exp_fresh_skip_001_ignores_card_missing_deck_name(world):
+    """Malformed card info should not crash export."""
+    note_id = world.add_qa_note(
+        deck_name="MalformedCardDeck",
+        question="Q1",
+        answer="A1",
+    )
+    card_id = world.mock_anki.notes[note_id]["cards"][0]
+    del world.mock_anki.cards[card_id]["deckName"]
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    assert_summary(result.summary, created=0, updated=0, deleted=0, errors=0)
+    assert world.deck_path("MalformedCardDeck").exists() is False
 
 
 def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(world):
@@ -158,9 +175,9 @@ def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(world):
     )
     world.write_qa_deck("MetadataBackfillDeck", [("Q0", "A0", note_key)])
 
-    local_note = world.fs.read_markdown_file(
-        world.deck_path("MetadataBackfillDeck")
-    ).notes[0]
+    local_note = world.fs.read_deck_file(world.deck_path("MetadataBackfillDeck")).notes[
+        0
+    ]
     local_md_hash = note_fingerprint(
         local_note.note_type,
         local_note.fields,
@@ -370,7 +387,7 @@ def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_dele
     assert orphan_file.exists()
 
     with world.db_session() as db:
-        with caplog.at_level(logging.DEBUG, logger="ankiops.export_notes"):
+        with caplog.at_level(logging.DEBUG, logger="ankiops.sync.from_anki"):
             result = world.sync_export(db)
 
     assert not orphan_file.exists()
@@ -528,7 +545,7 @@ def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
         note_key="embedded-good-key",
     )
 
-    db = SQLiteDbAdapter.open(world.root)
+    db = SyncState.open(world.root)
     try:
         db.upsert_note_links([("stale-wrong-key", note_id)])
 

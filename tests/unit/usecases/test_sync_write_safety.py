@@ -6,36 +6,37 @@ from pathlib import Path
 
 import pytest
 
-from ankiops.db import SQLiteDbAdapter
-from ankiops.export_notes import _can_skip_markdown_rebuild, _sync_deck
-from ankiops.fs import FileSystemAdapter
-from ankiops.import_notes import _flush_writes, _PendingWrite
-from ankiops.markdown_format import NOTE_SEPARATOR
-from ankiops.models import (
+from ankiops.html_to_markdown import HTMLToMarkdown
+from ankiops.markdown import NOTE_SEPARATOR, DeckFile
+from ankiops.note_types import NoteField, NoteType
+from ankiops.notes import (
     AnkiNote,
+    Note,
+)
+from ankiops.sync.from_anki import _can_skip_markdown_rebuild, _sync_deck
+from ankiops.sync.report import (
     Change,
     ChangeType,
-    Field,
-    MarkdownFile,
-    Note,
-    NoteTypeConfig,
-    SyncResult,
+    SyncReport,
 )
+from ankiops.sync.state import SyncState
+from ankiops.sync.to_anki_deck import PendingDeckWrite, flush_deck_metadata_writes
+from tests.support.deck_files import DeckFileHarness
 
 
-def _qa_config() -> NoteTypeConfig:
-    return NoteTypeConfig(
+def _qa_config() -> NoteType:
+    return NoteType(
         name="AnkiOpsQA",
         fields=[
-            Field(name="Question", label="Q:", identifying=True),
-            Field(name="Answer", label="A:", identifying=True),
+            NoteField(name="Question", label="Q:", identifying=True),
+            NoteField(name="Answer", label="A:", identifying=True),
         ],
     )
 
 
-def _configured_fs() -> FileSystemAdapter:
-    fs = FileSystemAdapter()
-    fs.set_configs([_qa_config()])
+def _configured_fs() -> DeckFileHarness:
+    fs = DeckFileHarness()
+    fs.set_note_types([_qa_config()])
     return fs
 
 
@@ -68,55 +69,46 @@ def _raw_note(
     return "\n".join(lines) + "\n"
 
 
-class _WriteRecorder:
-    def __init__(self) -> None:
-        self.writes: list[tuple[Path, str]] = []
-
-    def write_markdown_file(self, file_path: Path, content: str) -> None:
-        self.writes.append((file_path, content))
-
-
-def test_flush_writes_persists_assigned_note_key_and_note_type_metadata():
+def test_flush_writes_persists_assigned_note_key_and_note_type_metadata(tmp_path):
     note = _note("Question", "Answer")
-    file_state = MarkdownFile(
-        file_path=Path("Deck.md"),
+    deck_path = tmp_path / "Deck.md"
+    deck_path.write_text("Q: Question\nA: Answer\n", encoding="utf-8")
+    file_state = DeckFile(
+        file_path=deck_path,
         raw_content="Q: Question\nA: Answer\n",
         notes=[note],
     )
-    fs = _WriteRecorder()
 
-    _flush_writes(fs, [_PendingWrite(file_state, [(note, "generated-key")])])
+    flush_deck_metadata_writes(
+        [PendingDeckWrite(file_state, [(note, "generated-key")])]
+    )
 
-    assert fs.writes == [
-        (
-            Path("Deck.md"),
-            (
-                "<!-- note_key: generated-key -->\n"
-                "<!-- note_type: AnkiOpsQA -->\n"
-                "Q: Question\n"
-                "A: Answer\n"
-            ),
-        )
-    ]
+    assert deck_path.read_text(encoding="utf-8") == (
+        "<!-- note_key: generated-key -->\n"
+        "<!-- note_type: AnkiOpsQA -->\n"
+        "Q: Question\n"
+        "A: Answer\n"
+    )
 
 
-def test_flush_writes_does_not_touch_current_metadata():
+def test_flush_writes_does_not_touch_current_metadata(tmp_path):
     note = _note("Question", "Answer", note_key="existing-key")
     raw_content = _raw_note("Question", "Answer", note_key="existing-key")
-    file_state = MarkdownFile(
-        file_path=Path("Deck.md"),
+    deck_path = tmp_path / "Deck.md"
+    deck_path.write_text(raw_content, encoding="utf-8")
+    file_state = DeckFile(
+        file_path=deck_path,
         raw_content=raw_content,
         notes=[note],
     )
-    fs = _WriteRecorder()
 
-    _flush_writes(fs, [_PendingWrite(file_state, [])])
+    flush_deck_metadata_writes([PendingDeckWrite(file_state, [])])
 
-    assert fs.writes == []
+    assert deck_path.read_text(encoding="utf-8") == raw_content
 
 
 def test_flush_writes_fails_when_note_blocks_and_parsed_notes_diverge():
-    file_state = MarkdownFile(
+    file_state = DeckFile(
         file_path=Path("Deck.md"),
         raw_content="Q: One\nA: One\n",
         notes=[
@@ -126,12 +118,12 @@ def test_flush_writes_fails_when_note_blocks_and_parsed_notes_diverge():
     )
 
     with pytest.raises(ValueError, match="Failed to align parsed notes"):
-        _flush_writes(_WriteRecorder(), [_PendingWrite(file_state, [])])
+        flush_deck_metadata_writes([PendingDeckWrite(file_state, [])])
 
 
 def test_export_skip_gate_requires_current_note_type_metadata():
     note = _note("Question", "Answer", note_key="stable-key")
-    fs = MarkdownFile(
+    fs = DeckFile(
         file_path=Path("Deck.md"),
         raw_content=_raw_note(
             "Question",
@@ -141,7 +133,7 @@ def test_export_skip_gate_requires_current_note_type_metadata():
         ),
         notes=[note],
     )
-    result = SyncResult.for_notes(name="Deck", file_path=fs.file_path)
+    result = SyncReport.for_notes(name="Deck", file_path=fs.file_path)
     result.add_change(Change(ChangeType.SKIP, 101, note.identifier))
 
     assert not _can_skip_markdown_rebuild(
@@ -156,12 +148,12 @@ def test_export_skip_gate_requires_current_note_type_metadata():
 def test_export_skip_gate_requires_same_note_objects():
     existing = _note("Question", "Answer", note_key="stable-key")
     replacement = _note("Question", "Answer", note_key="stable-key")
-    fs = MarkdownFile(
+    fs = DeckFile(
         file_path=Path("Deck.md"),
         raw_content=_raw_note("Question", "Answer", note_key="stable-key"),
         notes=[existing],
     )
-    result = SyncResult.for_notes(name="Deck", file_path=fs.file_path)
+    result = SyncReport.for_notes(name="Deck", file_path=fs.file_path)
     result.add_change(Change(ChangeType.SKIP, 101, existing.identifier))
 
     assert not _can_skip_markdown_rebuild(
@@ -175,12 +167,12 @@ def test_export_skip_gate_requires_same_note_objects():
 
 def test_export_skip_gate_allows_true_noop_with_current_metadata():
     note = _note("Question", "Answer", note_key="stable-key")
-    fs = MarkdownFile(
+    fs = DeckFile(
         file_path=Path("Deck.md"),
         raw_content=_raw_note("Question", "Answer", note_key="stable-key"),
         notes=[note],
     )
-    result = SyncResult.for_notes(name="Deck", file_path=fs.file_path)
+    result = SyncReport.for_notes(name="Deck", file_path=fs.file_path)
     result.add_change(Change(ChangeType.SKIP, 101, note.identifier))
 
     assert _can_skip_markdown_rebuild(
@@ -210,7 +202,7 @@ def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
     )
     pending_fingerprints: list[tuple[str, str, str]] = []
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         result = _sync_deck(
             "Deck",
@@ -218,7 +210,7 @@ def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
             {"AnkiOpsQA": _qa_config()},
             deck_path,
             tmp_path,
-            _configured_fs(),
+            HTMLToMarkdown(),
             db,
             {101: "stable-key"},
             [],
@@ -256,7 +248,7 @@ def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path):
         card_ids=[1001],
     )
 
-    db = SQLiteDbAdapter.open(tmp_path)
+    db = SyncState.open(tmp_path)
     try:
         result = _sync_deck(
             "Deck",
@@ -264,7 +256,7 @@ def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path):
             {"AnkiOpsQA": _qa_config()},
             deck_path,
             tmp_path,
-            _configured_fs(),
+            HTMLToMarkdown(),
             db,
             {101: "stable-key"},
             [],

@@ -1,13 +1,12 @@
-"""Sync source discovery for local and GitHub-shared decks."""
+"""Deck source discovery for local and GitHub-shared decks."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ankiops.config import NOTE_TYPES_DIR
-from ankiops.fs import FileSystemAdapter
-from ankiops.models import NoteTypeConfig
+from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.note_types import NoteType, load_note_types
 
 SHARED_DIR = "shared"
 SHARED_BRANCH = "main"
@@ -20,7 +19,7 @@ RESERVED_SHARED_MARKDOWN = {
 
 
 @dataclass(frozen=True)
-class SyncSource:
+class DeckSource:
     """A filesystem root that contributes decks to one logical collection."""
 
     root: Path
@@ -79,9 +78,9 @@ class SyncSource:
 
 
 @dataclass(frozen=True)
-class SourceConfigs:
-    source: SyncSource
-    configs: list[NoteTypeConfig]
+class SourceNoteTypes:
+    source: DeckSource
+    note_types: list[NoteType]
 
 
 def is_reserved_shared_markdown(path: Path) -> bool:
@@ -89,19 +88,19 @@ def is_reserved_shared_markdown(path: Path) -> bool:
     return name in RESERVED_SHARED_MARKDOWN or name.startswith("_")
 
 
-def markdown_files_for_source(source: SyncSource) -> list[Path]:
+def deck_files_for_source(source: DeckSource) -> list[Path]:
     files = sorted(source.root.glob("*.md"))
     if not source.is_shared:
         return files
     return [path for path in files if not is_reserved_shared_markdown(path)]
 
 
-def discover_sync_sources(
+def discover_deck_sources(
     collection_dir: Path,
     *,
     note_types_dir: Path | None = None,
-) -> list[SyncSource]:
-    sources = [SyncSource.local(collection_dir, note_types_dir)]
+) -> list[DeckSource]:
+    sources = [DeckSource.local(collection_dir, note_types_dir)]
     shared_root = collection_dir / SHARED_DIR
     if not shared_root.exists():
         return sources
@@ -113,13 +112,13 @@ def discover_sync_sources(
             if not repo_dir.is_dir():
                 continue
             sources.append(
-                SyncSource.shared(collection_dir, owner_dir.name, repo_dir.name)
+                DeckSource.shared(collection_dir, owner_dir.name, repo_dir.name)
             )
     return sources
 
 
-def load_configs_for_source(source: SyncSource) -> list[NoteTypeConfig]:
-    configs = FileSystemAdapter().load_note_type_configs(source.note_types_dir)
+def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
+    configs = load_note_types(source.note_types_dir)
     if not source.is_shared:
         return configs
     return [
@@ -128,8 +127,8 @@ def load_configs_for_source(source: SyncSource) -> list[NoteTypeConfig]:
     ]
 
 
-def load_configs_for_sources(sources: list[SyncSource]) -> list[SourceConfigs]:
+def load_note_types_for_sources(sources: list[DeckSource]) -> list[SourceNoteTypes]:
     return [
-        SourceConfigs(source=source, configs=load_configs_for_source(source))
+        SourceNoteTypes(source=source, note_types=load_note_types_for_source(source))
         for source in sources
     ]
