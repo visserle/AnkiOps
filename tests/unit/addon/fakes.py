@@ -97,8 +97,8 @@ class _FakeModels:
             note._model = new_model
             if self.collection.mutate_card_due_on_change:
                 for card in self.collection.cards.values():
-                    if card["nid"] == note_id:
-                        card["due"] += 1
+                    if card.nid == note_id:
+                        card.due += 1
 
 
 class _FakeCollection:
@@ -129,22 +129,7 @@ class _FakeCollection:
                 "AnkiOps Key": key,
             },
         )
-        self.cards[note_id * 10] = {
-            "id": note_id * 10,
-            "nid": note_id,
-            "ord": 0,
-            "did": 1,
-            "queue": 2,
-            "type": 2,
-            "due": 10,
-            "ivl": 5,
-            "factor": 2500,
-            "reps": 3,
-            "lapses": 0,
-            "left": 0,
-            "odue": 0,
-            "odid": 0,
-        }
+        self.cards[note_id * 10] = _FakeCard(note_id * 10, note_id, 1)
 
     def get_note(self, note_id: int):
         if note_id not in self.notes:
@@ -153,9 +138,9 @@ class _FakeCollection:
 
     def ankiops_connect_cards_snapshot(self, note_ids):
         return {
-            card_id: tuple(card.values())
+            card_id: card.snapshot()
             for card_id, card in self.cards.items()
-            if card["nid"] in note_ids
+            if card.nid in note_ids
         }
 
 
@@ -187,7 +172,36 @@ class _FakeCard:
     def __init__(self, card_id: int, note_id: int, deck_id: int):
         self.id = card_id
         self.nid = note_id
+        self.ord = 0
         self.did = deck_id
+        self.queue = 2
+        self.type = 2
+        self.due = 10
+        self.ivl = 5
+        self.factor = 2500
+        self.reps = 3
+        self.lapses = 0
+        self.left = 0
+        self.odue = 0
+        self.odid = 0
+
+    def snapshot(self):
+        return (
+            self.id,
+            self.nid,
+            self.ord,
+            self.did,
+            self.queue,
+            self.type,
+            self.due,
+            self.ivl,
+            self.factor,
+            self.reps,
+            self.lapses,
+            self.left,
+            self.odue,
+            self.odid,
+        )
 
 
 class _ReadFakeCollection:
@@ -263,5 +277,4 @@ class _WriteFakeCollection(_FakeCollection):
 
     def get_card(self, card_id: int):
         return self.cards[card_id]
-
 
