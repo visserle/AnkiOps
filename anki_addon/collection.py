@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from .actions import AnkiOpsConnectActionError
 from .note_types import field_names, required_note_type
+from .protocol import AnkiOpsConnectActionError
 
 CARD_SNAPSHOT_COLUMNS = (
     "id",

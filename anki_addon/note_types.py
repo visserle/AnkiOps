@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .actions import AnkiOpsConnectActionError
+from .protocol import AnkiOpsConnectActionError
 
 
 def note_type_names_action(col, _params: dict) -> list[str]:

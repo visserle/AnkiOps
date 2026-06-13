@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from anki_addon.actions import AnkiOpsConnectActionError
 from anki_addon.note_type_conversion import convert_notes_to_note_type
+from anki_addon.protocol import AnkiOpsConnectActionError
 from tests.unit.addon.fakes import _FakeCollection, _model
 
 

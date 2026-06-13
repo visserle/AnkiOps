@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .actions import ANKIOPS_KEY_FIELD_NAME, AnkiOpsConnectActionError
 from .collection import card_snapshot, load_notes, note_field_values, note_type_name
 from .note_types import field_names, note_type_by_name, note_type_id, template_names
+from .protocol import ANKIOPS_KEY_FIELD_NAME, AnkiOpsConnectActionError
 
 
 def convert_notes_to_note_type_action(col, params: dict) -> dict:
