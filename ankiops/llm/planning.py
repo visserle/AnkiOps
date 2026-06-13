@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, replace
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -196,7 +195,6 @@ def materialize_task_context(
         task=task,
         note_type_configs=note_type_configs,
     )
-    _validate_note_type_patterns_match_scope(task, discovery_snapshot)
     return MaterializedTaskContext(
         task=task,
         note_type_configs=note_type_configs,
@@ -483,32 +481,6 @@ def _invalid_discovery_item(
         note_type_config=None,
         serialized_note=serialized_note,
     )
-
-
-def _validate_note_type_patterns_match_scope(
-    task: TaskConfig,
-    snapshot: DiscoverySnapshot,
-) -> None:
-    observed_note_types = {
-        item.note_type
-        for item in snapshot.items
-        if item.note_type is not None and item.note_type_config is not None
-    }
-    missing_patterns: list[str] = []
-    for rule in task.field_rules:
-        for pattern in rule.note_types:
-            if pattern == "*":
-                continue
-            if not any(
-                fnmatchcase(note_type, pattern) for note_type in observed_note_types
-            ):
-                missing_patterns.append(pattern)
-
-    if missing_patterns:
-        missing = ", ".join(sorted(set(missing_patterns)))
-        raise ValueError(
-            f"LLM note type pattern(s) matched no notes after deck filtering: {missing}"
-        )
 
 
 def build_candidate_batches(

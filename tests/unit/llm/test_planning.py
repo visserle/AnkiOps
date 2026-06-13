@@ -241,18 +241,19 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
     )
 
 
-def test_plan_task_rejects_explicit_note_type_pattern_after_deck_filter(
+def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(
     llm_collection,
     write_file,
 ):
-    _init_collection_db(llm_collection)
     _eject_note_types(llm_collection)
     write_file(
-        llm_collection / "Deck.md",
+        llm_collection / "Psychotherapie__Stoerungen.md",
         """
         <!-- note_key: qa-1 -->
         Q: question
         A: answer
+        S: source
+        AI: private
         """,
     )
     write_file(
@@ -265,10 +266,25 @@ def test_plan_task_rejects_explicit_note_type_pattern_after_deck_filter(
           max_notes_per_request: 4
         fields:
           default_access: editable
+          hidden:
+            "*": ["AI Notes"]
+            "AnkiOpsImageOcclusion": ["*"]
           read_only:
             "AnkiOpsChoice": ["Answer"]
         """,
     )
 
-    with pytest.raises(ValueError, match="matched no notes after deck filtering"):
-        plan_task(collection_dir=llm_collection, task_name="grammar")
+    plan = plan_task(
+        collection_dir=llm_collection,
+        task_name="grammar",
+        deck_override="Psychotherapie::Stoerungen",
+    )
+
+    assert plan.summary.decks_seen == 1
+    assert plan.summary.decks_matched == 1
+    assert plan.summary.notes_seen == 1
+    assert plan.summary.eligible == 1
+    assert plan.requests_estimate == 1
+    surface_by_type = {surface.note_type: surface for surface in plan.field_surface}
+    assert set(surface_by_type) == {"AnkiOpsQA"}
+    assert "AI Notes" in surface_by_type["AnkiOpsQA"].hidden_fields
