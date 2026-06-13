@@ -73,6 +73,23 @@ def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
         )
 
 
+def test_exp_fresh_skip_001_ignores_card_missing_deck_name(world):
+    """Malformed card info should not crash export."""
+    note_id = world.add_qa_note(
+        deck_name="MalformedCardDeck",
+        question="Q1",
+        answer="A1",
+    )
+    card_id = world.mock_anki.notes[note_id]["cards"][0]
+    del world.mock_anki.cards[card_id]["deckName"]
+
+    with world.db_session() as db:
+        result = world.sync_export(db)
+
+    assert_summary(result.summary, created=0, updated=0, deleted=0, errors=0)
+    assert world.deck_path("MalformedCardDeck").exists() is False
+
+
 def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(world):
     """Export must not write two Markdown notes with the same note_key."""
     note_key = "exp-duplicate-key"

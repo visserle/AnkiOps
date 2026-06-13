@@ -582,6 +582,8 @@ def sync_collection_from_anki(
             if not primary_card_info:
                 continue
             deck_name = primary_card_info.get("deckName")
+            if deck_name is None:
+                continue
             notes_by_deck.setdefault(deck_name, []).append(anki_note)
 
         md_files: list[Path] = []
