@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -12,19 +14,13 @@ from yaml.nodes import ScalarNode
 from ankiops.collection import LLM_DIR
 from ankiops.note_types import NoteType
 
-from .model_registry import (
+from .models import (
     MODEL_REGISTRY_FILE_NAME,
     ModelRegistry,
     ModelRegistryError,
+    ModelSpec,
     load_model_registry,
     model_registry_path,
-)
-from .types import (
-    FieldAccess,
-    FieldAccessRule,
-    TaskCatalog,
-    TaskConfig,
-    TaskRequestOptions,
 )
 
 _SUPPORTED_TASK_KEYS = (
@@ -52,6 +48,91 @@ _SUPPORTED_REASONING_EFFORTS = (
 
 class LlmConfigError(ValueError):
     """Raised when a task config is invalid."""
+
+
+class FieldAccess(Enum):
+    EDITABLE = "editable"
+    READ_ONLY = "read_only"
+    HIDDEN = "hidden"
+
+
+@dataclass(frozen=True)
+class DeckScope:
+    deck_root: str | None = None
+
+    def matches(self, deck_name: str) -> bool:
+        if self.deck_root is None:
+            return True
+        return deck_name == self.deck_root or deck_name.startswith(
+            f"{self.deck_root}::"
+        )
+
+
+@dataclass(frozen=True)
+class FieldAccessRule:
+    note_types: list[str] = field(default_factory=lambda: ["*"])
+    editable: list[str] = field(default_factory=list)
+    read_only: list[str] = field(default_factory=list)
+    hidden: list[str] = field(default_factory=list)
+
+    def matches_note_type(self, note_type: str) -> bool:
+        return any(fnmatchcase(note_type, pattern) for pattern in self.note_types)
+
+    def marks_editable(self, field_name: str) -> bool:
+        return _matches_any(self.editable, field_name)
+
+    def marks_read_only(self, field_name: str) -> bool:
+        return _matches_any(self.read_only, field_name)
+
+    def marks_hidden(self, field_name: str) -> bool:
+        return _matches_any(self.hidden, field_name)
+
+
+@dataclass(frozen=True)
+class TaskRequestOptions:
+    max_notes_per_request: int = 1
+    temperature: float | None = None
+    reasoning: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskConfig:
+    name: str
+    model: ModelSpec
+    system_prompt: str
+    user_prompt: str
+    system_prompt_path: Path | None = None
+    user_prompt_path: Path | None = None
+    decks: DeckScope = field(default_factory=DeckScope)
+    default_field_access: FieldAccess = FieldAccess.EDITABLE
+    field_rules: list[FieldAccessRule] = field(default_factory=list)
+    tag_access: FieldAccess = FieldAccess.HIDDEN
+    request: TaskRequestOptions = field(default_factory=TaskRequestOptions)
+
+    def field_access(self, note_type: str, field_name: str) -> FieldAccess:
+        editable = False
+        read_only = False
+        hidden = False
+        for rule in self.field_rules:
+            if not rule.matches_note_type(note_type):
+                continue
+            editable = editable or rule.marks_editable(field_name)
+            read_only = read_only or rule.marks_read_only(field_name)
+            hidden = hidden or rule.marks_hidden(field_name)
+
+        if hidden:
+            return FieldAccess.HIDDEN
+        if editable:
+            return FieldAccess.EDITABLE
+        if read_only:
+            return FieldAccess.READ_ONLY
+        return self.default_field_access
+
+
+@dataclass(frozen=True)
+class TaskCatalog:
+    tasks_by_name: dict[str, TaskConfig]
+    errors: dict[str, str]
 
 
 class _FileSource:
@@ -520,3 +601,7 @@ def _validate_field_patterns(
                 f"{entry_path}: field pattern '{pattern}' does not exist on any "
                 "matched note type"
             )
+
+
+def _matches_any(patterns: list[str], value: str) -> bool:
+    return any(fnmatchcase(value, pattern) for pattern in patterns)

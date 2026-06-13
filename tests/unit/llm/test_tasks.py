@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.types import FieldAccess, TaskRequestOptions
+from ankiops.llm.tasks import FieldAccess, TaskRequestOptions, load_llm_task_catalog
 
 
 def test_load_llm_task_catalog_loads_files_fields_and_request(

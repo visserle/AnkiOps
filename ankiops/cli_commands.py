@@ -25,9 +25,11 @@ from ankiops.interchange import (
     serialize_to_file,
 )
 from ankiops.llm.commands import run_llm as run_llm_impl
-from ankiops.llm.config_loader import load_llm_task_catalog
-from ankiops.llm.runner import list_jobs as list_llm_jobs
-from ankiops.llm.runner import plan_task, run_task, show_job
+from ankiops.llm.execution import run_task
+from ankiops.llm.jobs import list_jobs as list_llm_jobs
+from ankiops.llm.jobs import show_job
+from ankiops.llm.planning import plan_task
+from ankiops.llm.tasks import load_llm_task_catalog
 from ankiops.media import (
     format_media_status,
     sync_all_media_from_anki,

@@ -32,12 +32,12 @@ from ankiops.collection import (
 )
 from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
 
-from .config_loader import load_llm_task_catalog
-from .llm_db import LlmJobRequestNoteRef
-from .model_registry import MODEL_REGISTRY_FILE_NAME
-from .runner import list_jobs as list_llm_jobs
-from .runner import plan_task, run_task, show_job
-from .types import TaskExecutionProgress
+from .execution import TaskExecutionProgress, run_task
+from .jobs import LlmJobRequestNoteRef, show_job
+from .jobs import list_jobs as list_llm_jobs
+from .models import MODEL_REGISTRY_FILE_NAME
+from .planning import plan_task
+from .tasks import load_llm_task_catalog
 
 logger = logging.getLogger(__name__)
 

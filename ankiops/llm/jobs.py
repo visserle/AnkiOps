@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
 from ankiops.collection import LLM_DB_FILENAME, LLM_DIR
+from ankiops.sync.report import SyncSummary
 
-from .model_registry import ModelSpec, parse_model
-from .types import LlmItemStatus, LlmJobStatus, TaskRunSummary
+from .models import ModelSpec, parse_model
 
 _DEFAULT_JOB_LIST_LIMIT = 20
 _JOB_TABLE = "llm_job"
@@ -22,6 +22,80 @@ _ITEM_TABLE = "llm_job_item"
 _REQUEST_TABLE = "llm_request"
 _REQUEST_ITEM_TABLE = "llm_request_item"
 EnumT = TypeVar("EnumT", bound=Enum)
+
+
+class LlmItemStatus(Enum):
+    QUEUED = "queued"
+    SKIPPED_NO_EDITABLE_FIELDS = "skipped_no_editable_fields"
+    INVALID_NOTE = "invalid_note"
+    SUCCEEDED_UPDATED = "succeeded_updated"
+    SUCCEEDED_UNCHANGED = "succeeded_unchanged"
+    NOTE_ERROR = "note_error"
+    PROVIDER_ERROR = "provider_error"
+    FATAL_ERROR = "fatal_error"
+    CANCELED = "canceled"
+
+
+class LlmJobStatus(Enum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass
+class TaskRunSummary:
+    task_name: str
+    model: ModelSpec
+    decks_seen: int = 0
+    decks_matched: int = 0
+    notes_seen: int = 0
+    eligible: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped_no_editable_fields: int = 0
+    errors: int = 0
+    canceled: int = 0
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    provider_latency_ms_total: int = 0
+
+    @property
+    def skipped(self) -> int:
+        return self.skipped_no_editable_fields
+
+    def format(self) -> str:
+        changes = SyncSummary.format_change_counts(
+            updated=self.updated,
+            unchanged=self.unchanged,
+            skipped=self.skipped,
+            errors=self.errors,
+        )
+        base = (
+            f"Task '{self.task_name}' ({self.model}): {self.eligible} notes - {changes}"
+        )
+        if self.canceled:
+            return f"{base}, {self.canceled} canceled"
+        return base
+
+    def format_usage(self) -> str:
+        request_label = "request" if self.requests == 1 else "requests"
+        provider_seconds = self.provider_latency_ms_total / 1000
+        return (
+            f"{self.requests} {request_label}, "
+            f"{self.input_tokens} input tokens, "
+            f"{self.output_tokens} output tokens, "
+            f"{provider_seconds:.1f}s provider time"
+        )
+
+    def format_cost(self) -> str:
+        estimate = self.model.estimate_cost(
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+        )
+        if estimate is None:
+            return "n/a"
+        return estimate.format()
 
 
 @dataclass(frozen=True)
@@ -91,7 +165,7 @@ class JobAggregate:
     status: LlmJobStatus
 
 
-class LlmDb:
+class LlmJobStore:
     """Tiny SQLite wrapper for LLM job history."""
 
     def __init__(self, conn: sqlite3.Connection, db_path: Path) -> None:
@@ -100,7 +174,7 @@ class LlmDb:
         self._tx_depth = 0
 
     @classmethod
-    def open(cls, collection_dir: Path) -> "LlmDb":
+    def open(cls, collection_dir: Path) -> "LlmJobStore":
         llm_dir = collection_dir / LLM_DIR
         llm_dir.mkdir(parents=True, exist_ok=True)
         db_path = llm_dir / LLM_DB_FILENAME
@@ -695,6 +769,27 @@ class LlmDb:
             return self._conn.execute(sql, params)
         with self._conn:
             return self._conn.execute(sql, params)
+
+
+def list_jobs(*, collection_dir: Path) -> list[LlmJobListItem]:
+    store = LlmJobStore.open(collection_dir)
+    try:
+        return store.list_jobs()
+    finally:
+        store.close()
+
+
+def show_job(*, collection_dir: Path, job_id: str | int) -> LlmJobDetail | None:
+    store = LlmJobStore.open(collection_dir)
+    try:
+        resolved_job_id = (
+            store.resolve_job_id(job_id) if isinstance(job_id, str) else int(job_id)
+        )
+        if resolved_job_id is None:
+            return None
+        return store.get_job_detail(resolved_job_id)
+    finally:
+        store.close()
 
 
 def _resolve_model_for_summary(row: sqlite3.Row, *, collection_dir: Path) -> ModelSpec:
