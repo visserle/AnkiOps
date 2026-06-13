@@ -160,15 +160,7 @@ AnkiOps is in early development, so breaking changes are expected. Use `pipx upg
 
 ### What is the Add-on for?
 
-The Add-on has two main purposes. First, it adds `am` and `ma` buttons to the Anki toolbar for quick sync. Second, it implements AnkiOpsConnect, an extension of AnkiConnect that enables operations for the shared features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
-
-Advanced: the CLI sends AnkiOpsConnect requests to `http://127.0.0.1:8766` by default. For connection to a different host, set `ANKIOPS_CONNECT_URL` :
-
-```bash
-ANKIOPS_CONNECT_URL=http://host.docker.internal:8766 ankiops ma
-```
-
-When this variable is set, AnkiOps does not fall back to AnkiConnect; connection problems fail fast. This changes only where the CLI connects, not where the Anki add-on listens.
+The Add-on has two purposes. It adds `am` and `ma` buttons to the Anki toolbar for quick sync andit implements AnkiOpsConnect, a rewrite of AnkiConnect that enables operations for the shared features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
 
 ### How can I develop AnkiOps locally?
 
