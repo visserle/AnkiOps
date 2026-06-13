@@ -175,79 +175,6 @@ def _restore_custom_tag_placeholders(md: str, replacements: dict[str, str]) -> s
     return md
 
 
-def _split_table_row(line: str) -> list[str] | None:
-    stripped = line.strip()
-    if not stripped.startswith("|") or not stripped.endswith("|"):
-        return None
-
-    cells: list[str] = []
-    current: list[str] = []
-    in_code = False
-    escaped = False
-    for char in stripped[1:-1]:
-        if escaped:
-            current.append(char)
-            escaped = False
-            continue
-        if char == "\\":
-            current.append(char)
-            escaped = True
-            continue
-        if char == "`":
-            in_code = not in_code
-            current.append(char)
-            continue
-        if char == "|" and not in_code:
-            cells.append("".join(current).strip())
-            current = []
-            continue
-        current.append(char)
-    cells.append("".join(current).strip())
-    return cells
-
-
-def _is_table_separator(cells: list[str]) -> bool:
-    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells)
-
-
-def _compact_table_block(lines: list[str]) -> list[str]:
-    split_rows = [_split_table_row(line) for line in lines]
-    if (
-        len(split_rows) < 2
-        or split_rows[0] is None
-        or split_rows[1] is None
-        or not _is_table_separator(split_rows[1])
-    ):
-        return lines
-
-    column_count = len(split_rows[0])
-    compacted = []
-    for index, cells in enumerate(split_rows):
-        if cells is None or len(cells) != column_count:
-            return lines
-        if index == 1:
-            cells = ["---"] * column_count
-        compacted.append("| " + " | ".join(cells) + " |")
-    return compacted
-
-
-def _compact_markdown_tables(md: str) -> str:
-    lines = md.split("\n")
-    output: list[str] = []
-    index = 0
-    while index < len(lines):
-        if _split_table_row(lines[index]) is None:
-            output.append(lines[index])
-            index += 1
-            continue
-
-        start = index
-        while index < len(lines) and _split_table_row(lines[index]) is not None:
-            index += 1
-        output.extend(_compact_table_block(lines[start:index]))
-    return "\n".join(output)
-
-
 def _parse_link_destination(
     md: str,
     start: int,
@@ -366,6 +293,7 @@ class HTMLToMarkdown:
         highlight_style="double-equal",
         autolinks=False,
         extract_metadata=False,
+        compact_tables=True,
     )
 
     def convert(self, html: str) -> str:
@@ -397,7 +325,6 @@ class HTMLToMarkdown:
             if md is None:
                 md = ""
             md = _restore_custom_tag_placeholders(md, replacements)
-            md = _compact_markdown_tables(md)
             md = _enforce_link_angle_brackets(md)
         else:
             md = html
