@@ -2,6 +2,7 @@
 
 import json
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -169,6 +170,48 @@ def test_run_ma_logs_real_media_status(world, caplog):
     assert "Media: 1 files checked" in caplog.text
     assert "1 hashed" in caplog.text
     assert "1 synced" in caplog.text
+
+
+def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
+    for path in world.note_types_dir.iterdir():
+        if path.is_dir() and path.name != "AnkiOpsQA":
+            shutil.rmtree(path)
+
+    world.write_deck("CachedTypesDeck", "Q: prompt\nA: answer")
+
+    with caplog.at_level(logging.INFO):
+        world.run_ma()
+
+    assert "Note types: 1 synced" in caplog.text
+
+    world.mock_anki.calls.clear()
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        world.run_ma()
+
+    note_type_diff_actions = {
+        "modelFieldAdd",
+        "modelFieldNames",
+        "modelFieldRemove",
+        "modelFieldReposition",
+        "modelFieldSetDescription",
+        "modelFieldSetFontSize",
+        "modelFieldDescriptions",
+        "modelFieldFonts",
+        "modelStyling",
+        "modelTemplateAdd",
+        "modelTemplateRename",
+        "modelTemplates",
+        "updateModelStyling",
+        "updateModelTemplates",
+    }
+    assert "Note types: 1 up to date (cached)" in caplog.text
+    assert not [
+        action
+        for action, _params in world.mock_anki.calls
+        if action in note_type_diff_actions
+    ]
 
 
 def test_run_am_logs_missing_anki_media_summary(world, caplog):
