@@ -504,6 +504,24 @@ def test_deserialize_accepts_null_note_key(tmp_path, fs):
     assert "Q: Q" in content
 
 
+def test_deserialize_writes_final_newline(tmp_path, fs):
+    note_types_dir = _init_collection(tmp_path, fs)
+
+    deserialize(
+        {"decks": [_serialized_deck(name="NewlineDeck", note_key="nk-newline")]},
+        collection_dir=tmp_path,
+        note_types_dir=note_types_dir,
+        overwrite=True,
+    )
+
+    assert (tmp_path / "NewlineDeck.md").read_text(encoding="utf-8") == (
+        "<!-- note_key: nk-newline -->\n"
+        "<!-- note_type: AnkiOpsQA -->\n"
+        "Q: Q\n"
+        "A: A\n"
+    )
+
+
 def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs):
     note_types_dir = _init_collection(tmp_path, fs)
     (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
