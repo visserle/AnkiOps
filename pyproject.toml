@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ankiops"
-version = "0.6.1"
+version = "0.6.2"
 description = "Anki ↔ Markdown, with bidirectional sync, custom note types, and LLM integration"
 readme = "README.md"
 requires-python = ">=3.10"
