@@ -271,7 +271,13 @@ def read_deck_file(
 
 def write_deck_file(file_path: Path, content: str) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(content, encoding="utf-8")
+    file_path.write_text(_ensure_final_newline(content), encoding="utf-8")
+
+
+def _ensure_final_newline(content: str) -> str:
+    if content and not content.endswith("\n"):
+        return content + "\n"
+    return content
 
 
 def find_deck_files(directory: Path) -> list[Path]:

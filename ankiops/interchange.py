@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ankiops.collection import (
     ANKIOPS_DB,
@@ -24,13 +24,12 @@ from ankiops.deck_sources import (
 )
 from ankiops.markdown import (
     DeckFile,
-    format_note_key_comment,
-    format_note_type_comment,
-    format_tags_comment,
     read_deck_file,
+    render_notes_to_markdown,
+    write_deck_file,
 )
 from ankiops.note_types import NoteType
-from ankiops.notes import normalize_tags
+from ankiops.notes import Note
 
 logger = logging.getLogger(__name__)
 
@@ -341,42 +340,21 @@ def _write_validated_decks(
 
     for deck in decks:
         output_path = _deserialize_target_path(deck)
-
-        lines = []
-        written_notes = 0
-
-        for note in deck.notes:
-            note_key = note["note_key"]
-            note_type = str(note["note_type"])
-            fields = note["fields"]
-            tags = normalize_tags(note["tags"])
-            config = deck.note_types_by_name[note_type]
-
-            if note_key is not None:
-                lines.append(format_note_key_comment(note_key))
-            lines.append(format_note_type_comment(note_type))
-            tag_comment = format_tags_comment(tags)
-            if tag_comment:
-                lines.append(tag_comment)
-
-            for field in config.fields:
-                field_content = fields.get(field.name)
-                if field_content and field.label:
-                    lines.append(f"{field.label} {field_content}")
-            written_notes += 1
-
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-
-        # Remove trailing separator
-        while lines and lines[-1] in ("", "---"):
-            lines.pop()
-
-        content = "\n".join(lines)
+        notes = [
+            Note(
+                note_key=cast(str | None, note["note_key"]),
+                note_type=cast(str, note["note_type"]),
+                fields=cast(dict[str, str], note["fields"]),
+                tags=cast(list[str], note["tags"]),
+            )
+            for note in deck.notes
+        ]
+        content = (
+            render_notes_to_markdown(notes, deck.note_types_by_name) if notes else ""
+        )
+        written_notes = len(notes)
         if overwrite or not output_path.exists():
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(content, encoding="utf-8")
+            write_deck_file(output_path, content)
             created_message = (
                 f"  Created {clickable_path(output_path)} ({written_notes} notes)"
             )
