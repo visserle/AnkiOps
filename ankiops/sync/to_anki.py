@@ -8,7 +8,6 @@ from ankiops.anki import Anki
 from ankiops.collection import file_stem_to_deck_name
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
     load_note_types_for_sources,
 )
@@ -55,7 +54,7 @@ def _load_source_deck_files(
 
     source_deck_files: list[_SourceDeckFile] = []
     for source_types in source_note_types:
-        for deck_path in deck_files_for_source(source_types.source):
+        for deck_path in source_types.source.deck_files():
             source_deck_files.append(
                 _SourceDeckFile(
                     source=source_types.source,

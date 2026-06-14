@@ -49,6 +49,11 @@ def sanitize_filename(deck_name: str) -> str:
 
 def deck_name_to_file_stem(deck_name: str) -> str:
     """Encode an Anki deck name to a reversible Markdown filename stem."""
+    if "_::" in deck_name or "::_" in deck_name:
+        raise ValueError(
+            f"Ambiguous deck name '{deck_name}': do not place '_' next to "
+            "the '::' subdeck separator."
+        )
     return (
         deck_name.replace("%", "%25")
         .replace("__", "%5F%5F")

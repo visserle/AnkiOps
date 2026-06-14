@@ -16,7 +16,11 @@ from ankiops.collection import (
     require_collection_dir,
 )
 from ankiops.console import clickable_path, connect_or_exit
-from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
+from ankiops.deck_sources import (
+    DeckSource,
+    discover_deck_sources,
+    load_note_types_for_sources,
+)
 from ankiops.git import git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
@@ -79,7 +83,7 @@ def _snapshot_paths(
 
 
 def _local_markdown_paths(collection_dir: Path) -> list[Path]:
-    return sorted(collection_dir.glob("*.md"))
+    return DeckSource.local(collection_dir).deck_files()
 
 
 def run_init(args):

@@ -275,7 +275,9 @@ def write_deck_file(file_path: Path, content: str) -> None:
 
 
 def find_deck_files(directory: Path) -> list[Path]:
-    return sorted(directory.glob("*.md"), key=lambda path: path.name)
+    from ankiops.deck_sources import DeckSource
+
+    return DeckSource.local(directory).deck_files()
 
 
 def render_notes_to_markdown(

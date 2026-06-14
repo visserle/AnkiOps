@@ -10,7 +10,6 @@ from ankiops.collection import (
 )
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
     load_note_types_for_sources,
 )
@@ -591,7 +590,7 @@ def sync_collection_from_anki(
         file_map_by_deck_name: dict[str, tuple[DeckSource, Path]] = {}
         deck_conflicts: list[str] = []
         for source in sources:
-            for md_file in deck_files_for_source(source):
+            for md_file in source.deck_files():
                 md_files.append(md_file)
                 source_by_file[md_file] = source
                 deck_name = file_stem_to_deck_name(md_file.stem)

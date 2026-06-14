@@ -120,6 +120,10 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
     collection, fs, monkeypatch
 ):
     _set_collection_paths(monkeypatch, collection)
+    (collection / "README.md").write_text(
+        "Q: local docs\nA: local docs",
+        encoding="utf-8",
+    )
     shared_root = collection / "shared" / "owner" / "repo"
     fs.eject_default_note_types(shared_root / "note_types")
     (shared_root / "README.md").write_text("# docs", encoding="utf-8")
@@ -138,8 +142,10 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
 
     decks = {(deck["source"], deck["name"]): deck for deck in result["decks"]}
     assert ("local", "TestDeck") in decks
+    assert ("local", "README") not in decks
     assert ("shared/owner/repo", "Shared") in decks
     assert ("shared/owner/repo", "README") not in decks
+    assert ("shared/owner/repo", "_draft") in decks
     shared_note = decks[("shared/owner/repo", "Shared")]["notes"][0]
     assert shared_note["note_type"] == "shared/owner/repo/AnkiOpsQA"
 

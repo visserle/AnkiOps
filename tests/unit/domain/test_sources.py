@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
     load_note_types_for_source,
 )
@@ -25,29 +26,35 @@ def test_discover_deck_sources_includes_local_and_shared(tmp_path):
     assert sources[2].github_url == "https://github.com/owner/repo.git"
 
 
-def test_shared_markdown_files_ignore_reserved_docs(tmp_path):
-    source = DeckSource.shared(tmp_path, "owner", "repo")
-    source.root.mkdir(parents=True)
-    (source.root / "Deck.md").write_text("Q: a\nA: b", encoding="utf-8")
-    (source.root / "README.md").write_text("# docs", encoding="utf-8")
-    (source.root / "LICENSE.md").write_text("# license", encoding="utf-8")
-    (source.root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
-    (source.root / "_draft.md").write_text("Q: x\nA: y", encoding="utf-8")
+def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path):
+    local_source = DeckSource.local(tmp_path)
+    shared_source = DeckSource.shared(tmp_path, "owner", "repo")
+    shared_source.root.mkdir(parents=True)
 
-    assert [path.name for path in deck_files_for_source(source)] == ["Deck.md"]
+    for root in [local_source.root, shared_source.root]:
+        (root / "Deck.md").write_text("Q: a\nA: b", encoding="utf-8")
+        (root / "README.md").write_text("# docs", encoding="utf-8")
+        (root / "LICENSE.md").write_text("# license", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
+        (root / "CONTRIBUTING.md").write_text("# contributing", encoding="utf-8")
+        (root / "_draft.md").write_text("Q: x\nA: y", encoding="utf-8")
 
-
-def test_reserved_markdown_names_are_not_ignored_in_local_root(tmp_path):
-    source = DeckSource.local(tmp_path)
-    for name in ["README.md", "LICENSE.md", "CHANGELOG.md", "_draft.md"]:
-        (tmp_path / name).write_text("Q: local\nA: deck", encoding="utf-8")
-
-    assert [path.name for path in deck_files_for_source(source)] == [
-        "CHANGELOG.md",
-        "LICENSE.md",
-        "README.md",
+    assert [path.name for path in local_source.deck_files()] == [
+        "Deck.md",
         "_draft.md",
     ]
+    assert [path.name for path in shared_source.deck_files()] == [
+        "Deck.md",
+        "_draft.md",
+    ]
+
+
+def test_ambiguous_deck_file_names_raise(tmp_path):
+    source = DeckSource.local(tmp_path)
+    (tmp_path / "a___b.md").write_text("Q: local\nA: deck", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Ambiguous deck filename 'a___b.md'"):
+        source.deck_files()
 
 
 def test_shared_configs_are_scoped_by_source(tmp_path):

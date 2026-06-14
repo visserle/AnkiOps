@@ -110,6 +110,31 @@ def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
     assert "{width=404}" not in shared_file.read_text(encoding="utf-8")
 
 
+def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
+    note_types_dir = _make_collection(tmp_path)
+    deck_file = _write_qa_deck(
+        tmp_path,
+        "Deck",
+        "![a](a.png){width=400}\n![b](b.png){width=404}",
+    )
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "Q: Docs\nA: ![a](a.png){width=400}\n![b](b.png){width=404}",
+        encoding="utf-8",
+    )
+
+    result = fix_image_widths_collection(
+        tmp_path,
+        width=500,
+        tolerance=5,
+        note_types_dir=note_types_dir,
+    )
+
+    assert result.decks_checked == 1
+    assert "{width=500}" in deck_file.read_text(encoding="utf-8")
+    assert "{width=404}" in readme.read_text(encoding="utf-8")
+
+
 def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path):
     note_types_dir = _make_collection(tmp_path)
     deck_file = tmp_path / "Broken.md"
