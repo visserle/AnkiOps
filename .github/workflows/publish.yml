@@ -4,9 +4,6 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build distribution
@@ -20,17 +17,11 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.10.7"
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
+      - name: Install build
+        run: python -m pip install build
 
       - name: Build distributions
-        run: uv build --no-sources
+        run: python -m build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
