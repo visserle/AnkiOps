@@ -138,7 +138,6 @@ class MockAnki:
                         "Answer",
                         "Extra",
                         "More",
-                        "Source",
                         "AI Notes",
                         "AnkiOps Key",
                     ]
@@ -149,7 +148,6 @@ class MockAnki:
                         "Divider",
                         "Extra",
                         "More",
-                        "Source",
                         "AI Notes",
                         "AnkiOps Key",
                     ]
@@ -158,7 +156,6 @@ class MockAnki:
                         "Text",
                         "Extra",
                         "More",
-                        "Source",
                         "AI Notes",
                         "AnkiOps Key",
                     ]
@@ -169,7 +166,6 @@ class MockAnki:
                         "Answer",
                         "Extra",
                         "More",
-                        "Source",
                         "AI Notes",
                         "AnkiOps Key",
                     ]
@@ -184,7 +180,6 @@ class MockAnki:
                         "Answer",
                         "Extra",
                         "More",
-                        "Source",
                         "AI Notes",
                         "AnkiOps Key",
                     ]

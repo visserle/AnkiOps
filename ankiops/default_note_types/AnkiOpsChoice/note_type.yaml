@@ -44,9 +44,6 @@ fields:
   - name: More
     label: "M:"
     identifying: false
-  - name: Source
-    label: "S:"
-    identifying: false
   - name: AI Notes
     label: "AI:"
     identifying: false

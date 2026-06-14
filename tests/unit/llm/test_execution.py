@@ -120,14 +120,14 @@ def test_executor_persists_successful_field_updates(
         <!-- tags: keep-me -->
         Q: Broken
         A: Existing answer
-        S: Book
+        E: Book
 
         ---
 
         <!-- note_key: nk-2 -->
         Q: Already good
         A: Existing answer
-        S: Book
+        E: Book
         """,
     )
     write_file(
@@ -143,7 +143,7 @@ def test_executor_persists_successful_field_updates(
           editable:
             "AnkiOpsQA": ["Question"]
           read_only:
-            "AnkiOpsQA": ["Source"]
+                        "AnkiOpsQA": ["Extra"]
         """,
     )
 
@@ -178,6 +178,7 @@ def test_executor_persists_successful_field_updates(
     assert result.summary.output_tokens == 6
     assert "Q: Fixed question" in content
     assert "<!-- tags: keep-me -->" in content
+    assert "E: Book" in content
     assert "Q: Already good" in content
 
 

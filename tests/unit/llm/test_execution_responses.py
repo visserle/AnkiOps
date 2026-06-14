@@ -34,7 +34,7 @@ def _candidate(llm_qa_config) -> EligibleCandidate:
             note_key="nk-1",
             note_type="AnkiOpsQA",
             editable_fields={"Question": "Broken"},
-            read_only_fields={"Source": "Book"},
+            read_only_fields={"Extra": "Book"},
         ),
         note_type_config=llm_qa_config,
         serialized_note={
@@ -43,7 +43,7 @@ def _candidate(llm_qa_config) -> EligibleCandidate:
             "fields": {
                 "Question": "Broken",
                 "Answer": "Existing answer",
-                "Source": "Book",
+                "Extra": "Book",
                 "AI Notes": "Private",
             },
         },
@@ -112,7 +112,7 @@ def test_response_model_accepts_only_known_note_keys_and_editable_fields():
         )
     with pytest.raises(ValidationError):
         response_model.model_validate(
-            {"updates": [{"note_key": "nk-1", "field": "Source", "value": "Book"}]}
+            {"updates": [{"note_key": "nk-1", "field": "Extra", "value": "Book"}]}
         )
 
 
@@ -183,7 +183,7 @@ def test_apply_batch_parsed_response_updates_editable_fields(llm_qa_config):
     assert candidate.serialized_note["fields"] == {
         "Question": "Fixed question",
         "Answer": "Existing answer",
-        "Source": "Book",
+        "Extra": "Book",
         "AI Notes": "Private",
     }
 
@@ -247,8 +247,8 @@ def test_apply_batch_parsed_response_rejects_unexpected_note_key(llm_qa_config):
             "duplicate update for 'Question'",
         ),
         (
-            [("nk-1", "Source", "New source")],
-            "read-only field 'Source'",
+            [("nk-1", "Extra", "New source")],
+            "read-only field 'Extra'",
         ),
         (
             [("nk-1", "AI Notes", "New private note")],

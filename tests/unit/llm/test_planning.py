@@ -35,7 +35,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         <!-- note_key: nk-1 -->
         Q: broken question
         A: answer
-        S: book
+        E: book
         AI: private
 
         ---
@@ -53,7 +53,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         <!-- note_key: nk-3 -->
         Q: another broken question
         A: another answer
-        S: article
+        E: article
         AI: private
         """,
     )
@@ -143,14 +143,14 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
         <!-- tags: old -->
         Q: What?
         A: That.
-        S: book
+        E: book
 
         ---
 
         <!-- note_key: cloze-1 -->
         <!-- note_type: AnkiOpsCloze -->
         T: {{c1::Cloze}} text
-        S: article
+        E: article
 
         ---
 
@@ -252,7 +252,7 @@ def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(
         <!-- note_key: qa-1 -->
         Q: question
         A: answer
-        S: source
+        E: source
         AI: private
         """,
     )

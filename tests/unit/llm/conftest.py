@@ -43,7 +43,7 @@ def llm_qa_config() -> NoteType:
         fields=[
             NoteField("Question", "Q:", identifying=True),
             NoteField("Answer", "A:", identifying=True),
-            NoteField("Source", "S:", identifying=False),
+            NoteField("Extra", "E:", identifying=False),
             NoteField("AI Notes", "AI:", identifying=False),
             ANKIOPS_KEY_FIELD,
         ],
