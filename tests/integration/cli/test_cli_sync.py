@@ -22,7 +22,7 @@ class _FailingProfileAnki:
         raise AnkiConnectionError("Connection reset by peer")
 
 
-def test_run_ma_warns_for_untracked_anki_decks(world, caplog):
+def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
     world.add_anki_note(
         deck_name="AnkiOnlyDeck",
         fields={"Question": "remote", "Answer": "remote"},
@@ -30,18 +30,18 @@ def test_run_ma_warns_for_untracked_anki_decks(world, caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        world.run_ma()
+        world.run_fa()
 
     assert "untracked Anki deck(s)" in caplog.text
     assert "AnkiOnlyDeck" in caplog.text
     world.assert_anki_note(deck_name="AnkiOnlyDeck", note_key="remote-key")
 
 
-def test_run_ma_has_no_untracked_warning_for_declared_collection(world, caplog):
+def test_run_fa_has_no_untracked_warning_for_declared_collection(world, caplog):
     world.write_deck("DeclaredDeck", "Q: local\nA: answer")
 
     with caplog.at_level(logging.WARNING):
-        world.run_ma()
+        world.run_fa()
 
     assert "untracked Anki deck(s)" not in caplog.text
     world.assert_anki_note(
@@ -52,7 +52,7 @@ def test_run_ma_has_no_untracked_warning_for_declared_collection(world, caplog):
     assert world.extract_note_keys("DeclaredDeck")
 
 
-def test_run_ma_warns_for_keyless_anki_notes_it_protects(world, caplog):
+def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
     world.write_qa_deck("ProtectDeck", [("managed", "local", "managed-key")])
     keyless_id = world.add_anki_note(
         deck_name="ProtectDeck",
@@ -60,26 +60,29 @@ def test_run_ma_warns_for_keyless_anki_notes_it_protects(world, caplog):
     )
 
     with caplog.at_level(logging.WARNING):
-        world.run_ma()
+        world.run_fa()
 
-    assert "Protected 1 keyless Anki note(s) during import." in caplog.text
+    assert (
+        "Protected 1 keyless Anki note(s) during files -> Anki sync."
+        in caplog.text
+    )
     assert "ProtectDeck" in caplog.text
     assert keyless_id in world.mock_anki.notes
 
 
-def test_run_am_warns_for_keyless_markdown_notes_it_protects(world, caplog):
+def test_run_af_warns_for_keyless_markdown_notes_it_protects(world, caplog):
     world.write_deck("DraftDeck", "Q: draft\nA: keep me")
 
     with caplog.at_level(logging.WARNING):
-        world.run_am()
+        world.run_af()
 
     assert "Protected 1 local markdown note(s)" in caplog.text
     assert "DraftDeck" in caplog.text
-    assert "Use 'ankiops ma'" in caplog.text
+    assert "Use 'ankiops fa'" in caplog.text
     world.assert_deck_contains("DraftDeck", "Q: draft")
 
 
-def test_run_ma_logs_import_errors_with_actionable_details(world, caplog):
+def test_run_fa_logs_sync_errors_with_actionable_details(world, caplog):
     world.write_deck(
         "Rhetorik",
         (
@@ -96,22 +99,22 @@ def test_run_ma_logs_import_errors_with_actionable_details(world, caplog):
     )
 
     with caplog.at_level(logging.ERROR):
-        world.run_ma()
+        world.run_fa()
 
-    assert "Import errors:" in caplog.text
+    assert "Files -> Anki errors:" in caplog.text
     assert "Rhetorik" in caplog.text
     assert "field names differ" in caplog.text
     assert "Review and resolve errors above" in caplog.text
 
 
-def test_run_ma_auto_commit_snapshots_declared_state_before_sync_mutates_media(
+def test_run_fa_auto_commit_snapshots_declared_state_before_sync_mutates_media(
     world,
 ):
     world.init_git()
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
 
-    world.run_ma(no_auto_commit=False)
+    world.run_fa(no_auto_commit=False)
 
     committed = subprocess.run(
         ["git", "show", "HEAD:MediaDeck.md"],
@@ -128,7 +131,7 @@ def test_run_ma_auto_commit_snapshots_declared_state_before_sync_mutates_media(
     assert "<!-- note_key:" in working
 
 
-def test_run_am_auto_commit_snapshots_markdown_before_export_updates(world):
+def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
     world.write_deck(
         "ExportDeck",
         "<!-- note_key: key-1 -->\nQ: prompt\nA: committed answer",
@@ -145,7 +148,7 @@ def test_run_am_auto_commit_snapshots_markdown_before_export_updates(world):
         "<!-- note_key: key-1 -->\nQ: prompt\nA: local draft",
     )
 
-    world.run_am(no_auto_commit=False)
+    world.run_af(no_auto_commit=False)
 
     committed = subprocess.run(
         ["git", "show", "HEAD:ExportDeck.md"],
@@ -160,19 +163,19 @@ def test_run_am_auto_commit_snapshots_markdown_before_export_updates(world):
     assert "A: Anki answer" in working
 
 
-def test_run_ma_logs_real_media_status(world, caplog):
+def test_run_fa_logs_real_media_status(world, caplog):
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
 
     with caplog.at_level(logging.INFO):
-        world.run_ma()
+        world.run_fa()
 
     assert "Media: 1 files checked" in caplog.text
     assert "1 hashed" in caplog.text
     assert "1 synced" in caplog.text
 
 
-def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
+def test_run_fa_reuses_note_type_sync_cache_on_second_run(world, caplog):
     for path in world.note_types_dir.iterdir():
         if path.is_dir() and path.name != "AnkiOpsQA":
             shutil.rmtree(path)
@@ -180,7 +183,7 @@ def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
     world.write_deck("CachedTypesDeck", "Q: prompt\nA: answer")
 
     with caplog.at_level(logging.INFO):
-        world.run_ma()
+        world.run_fa()
 
     assert "Note types: 1 synced" in caplog.text
 
@@ -188,7 +191,7 @@ def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
     caplog.clear()
 
     with caplog.at_level(logging.INFO):
-        world.run_ma()
+        world.run_fa()
 
     note_type_diff_actions = {
         "modelFieldAdd",
@@ -214,7 +217,7 @@ def test_run_ma_reuses_note_type_sync_cache_on_second_run(world, caplog):
     ]
 
 
-def test_run_am_logs_missing_anki_media_summary(world, caplog):
+def test_run_af_logs_missing_anki_media_summary(world, caplog):
     world.write_deck(
         "MediaDeck",
         "<!-- note_key: key-1 -->\nQ: prompt\nA: ![missing](media/missing.png)",
@@ -227,7 +230,7 @@ def test_run_am_logs_missing_anki_media_summary(world, caplog):
     world.seed_db_link("key-1", note_id)
 
     with caplog.at_level(logging.INFO):
-        world.run_am()
+        world.run_af()
 
     assert "Media: 1 files checked" in caplog.text
     assert "0 pulled, 1 missing in Anki" in caplog.text
@@ -493,7 +496,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
 
     snapshot_mock.assert_not_called()
     assert "Only Markdown files were edited" in caplog.text
-    assert "ankiops ma" in caplog.text
+    assert "ankiops fa" in caplog.text
 
 
 def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):

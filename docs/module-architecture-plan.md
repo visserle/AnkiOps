@@ -170,7 +170,7 @@ Owns terminal-adjacent helpers:
 
 ### `collection.py`
 
-Owns the AnkiOps collection as a local workspace:
+Owns the AnkiOps collection as a local file tree:
 
 - well-known names: `.ankiops.db`, `note_types/`, `media/`, `llm/`
 - deck name to filename mapping

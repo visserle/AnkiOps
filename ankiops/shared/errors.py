@@ -9,5 +9,5 @@ def format_missing_note_keys_error(missing_count: int) -> str:
         f"Missing note_keys for {missing_count} {note_label}. "
         "note_keys are stable IDs AnkiOps needs to match notes across "
         "collections without duplicates. "
-        "Fix: run 'ankiops ma' to assign them."
+        "Fix: run 'ankiops fa' to assign them."
     )

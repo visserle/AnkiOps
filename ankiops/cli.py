@@ -4,12 +4,12 @@ from importlib.metadata import PackageNotFoundError, version
 
 from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli_commands import (
-    run_am,
+    run_af,
     run_deserialize,
+    run_fa,
     run_fix_image_widths,
     run_init,
     run_llm,
-    run_ma,
     run_note_type,
     run_serialize,
     run_shared,
@@ -71,33 +71,33 @@ def main():
     )
     init_parser.set_defaults(handler=run_init)
 
-    # Anki to Markdown (am) parser
-    am_parser = subparsers.add_parser(
-        "anki-to-markdown",
-        aliases=["am"],
-        help="Anki -> Markdown (export)",
+    # Anki to files (af) parser
+    af_parser = subparsers.add_parser(
+        "anki-to-files",
+        aliases=["af"],
+        help="Anki -> files",
     )
-    am_parser.add_argument(
+    af_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
         help="Skip the automatic git commit for this operation",
     )
-    am_parser.set_defaults(handler=run_am)
+    af_parser.set_defaults(handler=run_af)
 
-    # Markdown to Anki (ma) parser
-    ma_parser = subparsers.add_parser(
-        "markdown-to-anki",
-        aliases=["ma"],
-        help="Markdown -> Anki (import)",
+    # Files to Anki (fa) parser
+    fa_parser = subparsers.add_parser(
+        "files-to-anki",
+        aliases=["fa"],
+        help="Files -> Anki",
     )
-    ma_parser.add_argument(
+    fa_parser.add_argument(
         "--no-auto-commit",
         "-n",
         action="store_true",
         help="Skip the automatic git commit for this operation",
     )
-    ma_parser.set_defaults(handler=run_ma)
+    fa_parser.set_defaults(handler=run_fa)
 
     # Serialize parser
     serialize_parser = subparsers.add_parser(
@@ -236,7 +236,7 @@ def main():
     shared_update.add_argument(
         "--to-anki",
         action="store_true",
-        help="Run Markdown -> Anki after updating files",
+        help="Run files -> Anki after updating files",
     )
     shared_update.set_defaults(handler=run_shared)
 
@@ -251,7 +251,7 @@ def main():
     shared_submit.add_argument(
         "--from-anki",
         action="store_true",
-        help="Run Anki -> Markdown before preparing the submission",
+        help="Run Anki -> files before preparing the submission",
     )
     shared_submit.set_defaults(handler=run_shared)
 
@@ -296,15 +296,15 @@ def main():
         # Show welcome screen when no command is provided
         cli_version = _get_cli_version()
         print("=" * 60)
-        print(f"AnkiOps v{cli_version} – A bidirectional Anki-Markdown bridge")
+        print(f"AnkiOps v{cli_version} – A bidirectional Anki-files bridge")
         print("=" * 60)
         print()
         print("Available commands:")
         print(
             "  init              Initialize current directory as an AnkiOps collection"
         )
-        print("  anki-to-markdown  Export Anki decks to Markdown files (alias: am)")
-        print("  markdown-to-anki  Import Markdown files into Anki (alias: ma)")
+        print("  anki-to-files     Sync Anki changes into files (alias: af)")
+        print("  files-to-anki     Sync file changes into Anki (alias: fa)")
         print("  serialize         Serialize Markdown decks to JSON format")
         print("  deserialize       Deserialize JSON file to Markdown decks")
         print("  fix-image-widths  Normalize or force Markdown image widths")
@@ -317,12 +317,12 @@ def main():
             "  ankiops init --tutorial                      # Initialize with tutorial"
         )
         print(
-            "  ankiops am                                   "
-            "# Export all decks to Markdown"
+            "  ankiops af                                   "
+            "# Sync Anki to files"
         )
         print(
-            "  ankiops ma                                   "
-            "# Import all Markdown files to Anki"
+            "  ankiops fa                                   "
+            "# Sync files to Anki"
         )
         print(
             "  ankiops serialize -o my-deck.json            "

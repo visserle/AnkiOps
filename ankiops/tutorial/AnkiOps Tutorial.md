@@ -45,7 +45,7 @@ E: *Everything renders beautifully on desktop and mobile.*
 ---
 
 Q: How do I get started?
-A: Run `ankiops ma` to import Markdown --> Anki
+A: Run `ankiops fa` to sync files --> Anki
 
-Run `ankiops am` to export Anki --> Markdown
+Run `ankiops af` to sync Anki --> files
 E: Check the README for detailed documentation!

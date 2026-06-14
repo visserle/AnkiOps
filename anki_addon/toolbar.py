@@ -61,7 +61,7 @@ class AnkiOpsCommandRunner:
             output = ((result.stdout or "") + (result.stderr or "")).strip()
             if result.returncode == 0:
                 self._show_output(f"ankiops {command} — done", output)
-                if command == "ma":
+                if command == "fa":
                     self._mw.reset()
             else:
                 self._show_output(
@@ -123,20 +123,20 @@ def add_toolbar_links(links: list[str], toolbar, runner: AnkiOpsCommandRunner) -
     links.insert(
         -2,
         toolbar.create_link(
-            cmd="ankiops_anki_to_markdown",
-            label="am",
-            func=lambda: runner.run("am"),
-            tip="ankiops anki-to-markdown",
-            id="ankiops-anki-to-markdown",
+            cmd="ankiops_anki_to_files",
+            label="af",
+            func=lambda: runner.run("af"),
+            tip="ankiops anki-to-files",
+            id="ankiops-anki-to-files",
         ),
     )
     links.insert(
         -2,
         toolbar.create_link(
-            cmd="ankiops_markdown_to_anki",
-            label="ma",
-            func=lambda: runner.run("ma"),
-            tip="ankiops markdown-to-anki",
-            id="ankiops-markdown-to-anki",
+            cmd="ankiops_files_to_anki",
+            label="fa",
+            func=lambda: runner.run("fa"),
+            tip="ankiops files-to-anki",
+            id="ankiops-files-to-anki",
         ),
     )

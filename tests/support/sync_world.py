@@ -10,8 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from ankiops.anki import Anki
-from ankiops.cli_commands import run_am as run_cli_am
-from ankiops.cli_commands import run_ma as run_cli_ma
+from ankiops.cli_commands import run_af as run_cli_af
+from ankiops.cli_commands import run_fa as run_cli_fa
 from ankiops.collection import (
     ANKIOPS_DB,
     LOCAL_MEDIA_DIR,
@@ -110,7 +110,7 @@ class SyncWorld:
 
         return sync_all_media_from_anki(self.anki, self.root, db)
 
-    def run_ma(self, *, no_auto_commit: bool = True) -> None:
+    def run_fa(self, *, no_auto_commit: bool = True) -> None:
         args = SimpleNamespace(no_auto_commit=no_auto_commit)
         with (
             patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
@@ -119,9 +119,9 @@ class SyncWorld:
                 return_value=self.root,
             ),
         ):
-            run_cli_ma(args)
+            run_cli_fa(args)
 
-    def run_am(self, *, no_auto_commit: bool = True) -> None:
+    def run_af(self, *, no_auto_commit: bool = True) -> None:
         args = SimpleNamespace(no_auto_commit=no_auto_commit)
         with (
             patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
@@ -130,7 +130,7 @@ class SyncWorld:
                 return_value=self.root,
             ),
         ):
-            run_cli_am(args)
+            run_cli_af(args)
 
     def deck_path(self, deck_name: str) -> Path:
         safe = deck_name_to_file_stem(deck_name)

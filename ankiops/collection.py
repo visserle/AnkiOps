@@ -1,4 +1,4 @@
-"""Collection paths, initialization, and local workspace shape."""
+"""Collection paths, initialization, and local file tree shape."""
 
 from __future__ import annotations
 
