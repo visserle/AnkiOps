@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ankiops.deck_sources import DeckSource
 from ankiops.note_types import (
     ANKIOPS_KEY_FIELD,
     NoteType,
@@ -275,8 +276,6 @@ def write_deck_file(file_path: Path, content: str) -> None:
 
 
 def find_deck_files(directory: Path) -> list[Path]:
-    from ankiops.deck_sources import DeckSource
-
     return DeckSource.local(directory).deck_files()
 
 
