@@ -18,7 +18,6 @@ from ankiops.collection import (
 from ankiops.console import clickable_path
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
     load_note_types_for_source,
 )
@@ -144,7 +143,7 @@ def _parse_sources(
     parsed_decks: list[_ParsedDeck] = []
     for source in sources:
         configs = load_note_types_for_source(source)
-        for md_file in deck_files_for_source(source):
+        for md_file in source.deck_files():
             try:
                 parsed = read_deck_file(
                     md_file,

@@ -12,7 +12,6 @@ from ankiops.collection import require_collection_dir
 from ankiops.console import clickable_path
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
     load_note_types_for_source,
 )
@@ -74,7 +73,7 @@ def _ensure_submittable_note_keys(source: DeckSource) -> None:
     configs = load_note_types_for_source(source)
     missing: list[str] = []
 
-    for md_file in deck_files_for_source(source):
+    for md_file in source.deck_files():
         parsed = read_deck_file(md_file, note_types=configs, context_root=source.root)
         for index, note in enumerate(parsed.notes, start=1):
             if not note.note_key:

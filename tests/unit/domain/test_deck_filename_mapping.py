@@ -1,3 +1,5 @@
+import pytest
+
 from ankiops.collection import deck_name_to_file_stem, file_stem_to_deck_name
 
 
@@ -36,3 +38,9 @@ def test_path_separators_are_roundtrip_safe():
 
     assert stem == "A%2FB%5CC"
     assert file_stem_to_deck_name(stem) == deck_name
+
+
+@pytest.mark.parametrize("deck_name", ["A_::B", "A::_B", "A_::_B"])
+def test_underscores_adjacent_to_subdeck_separator_are_rejected(deck_name):
+    with pytest.raises(ValueError, match="Ambiguous deck name"):
+        deck_name_to_file_stem(deck_name)

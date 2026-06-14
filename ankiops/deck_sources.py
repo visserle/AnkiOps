@@ -10,11 +10,15 @@ from ankiops.note_types import NoteType, load_note_types
 
 SHARED_DIR = "shared"
 SHARED_BRANCH = "main"
-RESERVED_SHARED_MARKDOWN = {
-    "README.md",
-    "README.markdown",
-    "LICENSE.md",
-    "CHANGELOG.md",
+RESERVED_MARKDOWN_FILES = {
+    "CHANGELOG.MD",
+    "CODE_OF_CONDUCT.MD",
+    "CONTRIBUTING.MD",
+    "FUNDING.MD",
+    "LICENSE.MD",
+    "README.MD",
+    "SECURITY.MD",
+    "SUPPORT.MD",
 }
 
 
@@ -76,23 +80,24 @@ class DeckSource:
         prefix = f"{self.source_id}/"
         return name[len(prefix) :] if name.startswith(prefix) else name
 
+    def deck_files(self) -> list[Path]:
+        files = []
+        for path in sorted(self.root.glob("*.md")):
+            if path.name.upper() in RESERVED_MARKDOWN_FILES:
+                continue
+            if "___" in path.stem:
+                raise ValueError(
+                    f"Ambiguous deck filename '{path.name}': do not place '_' "
+                    "next to the '__' subdeck separator."
+                )
+            files.append(path)
+        return files
+
 
 @dataclass(frozen=True)
 class SourceNoteTypes:
     source: DeckSource
     note_types: list[NoteType]
-
-
-def is_reserved_shared_markdown(path: Path) -> bool:
-    name = path.name
-    return name in RESERVED_SHARED_MARKDOWN or name.startswith("_")
-
-
-def deck_files_for_source(source: DeckSource) -> list[Path]:
-    files = sorted(source.root.glob("*.md"))
-    if not source.is_shared:
-        return files
-    return [path for path in files if not is_reserved_shared_markdown(path)]
 
 
 def discover_deck_sources(

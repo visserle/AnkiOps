@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ankiops.deck_sources import DeckSource
 from ankiops.note_types import (
     ANKIOPS_KEY_FIELD,
     NoteType,
@@ -281,7 +282,7 @@ def _ensure_final_newline(content: str) -> str:
 
 
 def find_deck_files(directory: Path) -> list[Path]:
-    return sorted(directory.glob("*.md"), key=lambda path: path.name)
+    return DeckSource.local(directory).deck_files()
 
 
 def render_notes_to_markdown(

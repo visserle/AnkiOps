@@ -86,6 +86,30 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path)
     )
 
 
+def test_sync_media_to_anki_does_not_rewrite_readme_references(tmp_path):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "image.png").write_bytes(b"deck image")
+    (tmp_path / "Deck.md").write_text(
+        "Q: Deck\nA: ![img](media/image.png)", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text(
+        "# Docs\n\n![img](media/image.png)", encoding="utf-8"
+    )
+
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
+
+    result = _sync_to_anki(tmp_path, anki)
+
+    deck_content = (tmp_path / "Deck.md").read_text(encoding="utf-8")
+    readme_content = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert result.checked == 1
+    assert "image_" in deck_content
+    assert "media/image.png" in readme_content
+
+
 def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_path):
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()

@@ -13,7 +13,6 @@ from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.console import clickable_path
 from ankiops.deck_sources import (
     DeckSource,
-    deck_files_for_source,
     discover_deck_sources,
 )
 from ankiops.sync.report import Change, ChangeType, SyncReport
@@ -84,7 +83,12 @@ def calculate_blake3(file_path: Path) -> str:
     return hash_state.hexdigest(length=4)
 
 
-def update_references(directory: Path, rename_map: dict[str, str]) -> int:
+def update_references(
+    directory: Path,
+    rename_map: dict[str, str],
+    *,
+    md_files: list[Path] | None = None,
+) -> int:
     if not rename_map:
         return 0
 
@@ -123,7 +127,9 @@ def update_references(directory: Path, rename_map: dict[str, str]) -> int:
             new_path = f"<{new_path}>"
         return f"{opener}{new_path}{suffix}"
 
-    for md_file in directory.glob("*.md"):
+    if md_files is None:
+        md_files = DeckSource.local(directory).deck_files()
+    for md_file in md_files:
         content = md_file.read_text(encoding="utf-8")
         new_content = pattern.sub(replace_callback, content)
         if new_content != content:
@@ -142,10 +148,8 @@ def _collect_referenced_media(
     prune_cache: bool = True,
 ) -> set[str]:
     resolved_cache_root = cache_root or collection_dir
-    md_files = md_files or sorted(
-        collection_dir.glob("*.md"),
-        key=lambda path: path.name,
-    )
+    if md_files is None:
+        md_files = DeckSource.local(collection_dir).deck_files()
     md_keys = [
         _markdown_cache_key(resolved_cache_root, md_file) for md_file in md_files
     ]
@@ -307,7 +311,7 @@ def hash_and_update_references(
 
     # 3. Update Markdown files in bulk
     if rename_map:
-        count = update_references(collection_dir, rename_map)
+        count = update_references(collection_dir, rename_map, md_files=md_files)
         logger.debug(f"Updated {count} markdown files with {len(rename_map)} renames")
         # 4. Re-collect now-correctly-hashed active references
         final_referenced = _collect_referenced_media(
@@ -523,7 +527,7 @@ def _prune_media_cache_for_sources(
     md_keys = [
         _markdown_cache_key(collection_dir, md_file)
         for source in sources
-        for md_file in deck_files_for_source(source)
+        for md_file in source.deck_files()
     ]
     pruned = db_port.prune_markdown_media_cache(md_keys)
     if pruned:
@@ -545,7 +549,7 @@ def sync_all_media_to_anki(
             source.root,
             db_port,
             cache_root=collection_dir,
-            md_files=deck_files_for_source(source),
+            md_files=source.deck_files(),
             prune_cache=False,
         )
         _combine_media_result(combined, source_result)
@@ -567,7 +571,7 @@ def sync_all_media_from_anki(
             source.root,
             db_port,
             cache_root=collection_dir,
-            md_files=deck_files_for_source(source),
+            md_files=source.deck_files(),
             prune_cache=False,
         )
         _combine_media_result(combined, source_result)
