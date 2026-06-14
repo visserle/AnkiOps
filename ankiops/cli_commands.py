@@ -98,8 +98,8 @@ def run_init(args):
     )
 
 
-def run_am(args):
-    """Anki -> Markdown: export decks to markdown files."""
+def run_af(args):
+    """Anki -> files: sync Anki changes into local files."""
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
 
@@ -107,10 +107,10 @@ def run_am(args):
     logger.debug(f"Collection directory: {collection_dir}")
 
     if not args.no_auto_commit:
-        logger.debug("Creating pre-export git snapshot")
+        logger.debug("Creating pre-anki-to-files git snapshot")
         git_snapshot(
             collection_dir,
-            action="export",
+            action="anki-to-files",
             paths=_snapshot_paths(
                 collection_dir,
                 [
@@ -124,7 +124,7 @@ def run_am(args):
     db = SyncState.open(collection_dir)
     note_types_dir = collection_dir / NOTE_TYPES_DIR
 
-    logger.debug("Starting note export (Anki -> Markdown)")
+    logger.debug("Starting note sync (Anki -> files)")
     export_summary: CollectionReport = sync_collection_from_anki(
         anki_port=anki,
         db_port=db,
@@ -136,7 +136,9 @@ def run_am(args):
     note_count = note_summary.total
     changes = note_summary.format()
 
-    logger.info(f"Export: {deck_count} decks with {note_count} notes — {changes}")
+    logger.info(
+        f"Anki -> files: {deck_count} decks with {note_count} notes — {changes}"
+    )
     for res in export_summary.results:
         deck_summary = res.summary
         deck_fmt = deck_summary.format()
@@ -152,13 +154,13 @@ def run_am(args):
         logger.warning(
             "Protected "
             f"{protected_total} local markdown note(s) without note_key comments "
-            "during export."
+            "during Anki -> files sync."
         )
         logger.warning(f"Affected deck file(s): {len(protected)}")
         for group in protected:
             logger.warning(f"  - {group.deck_name} ({group.note_count} notes)")
         logger.warning(
-            "These notes were kept and not deleted. Use 'ankiops ma' to "
+            "These notes were kept and not deleted. Use 'ankiops fa' to "
             "import them and assign note_key comments."
         )
 
@@ -171,14 +173,14 @@ def run_am(args):
         logger.warning(f"Media sync failed: {error}")
 
 
-def _log_import_errors(import_summary: CollectionReport) -> None:
+def _log_files_to_anki_errors(import_summary: CollectionReport) -> None:
     has_errors = False
     for result in import_summary.results:
         if not result.errors:
             continue
 
         if not has_errors:
-            logger.error("Import errors:")
+            logger.error("Files -> Anki errors:")
             has_errors = True
 
         source = rich_escape(result.name or "unknown deck")
@@ -192,8 +194,8 @@ def _log_import_errors(import_summary: CollectionReport) -> None:
             )
 
 
-def run_ma(args):
-    """Markdown -> Anki: import markdown files into Anki."""
+def run_fa(args):
+    """Files -> Anki: sync local file changes into Anki."""
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
 
@@ -201,10 +203,10 @@ def run_ma(args):
     logger.debug(f"Collection directory: {collection_dir}")
 
     if not args.no_auto_commit:
-        logger.debug("Creating pre-import git snapshot")
+        logger.debug("Creating pre-files-to-anki git snapshot")
         git_snapshot(
             collection_dir,
-            action="import",
+            action="files-to-anki",
             paths=_snapshot_paths(
                 collection_dir,
                 [
@@ -232,7 +234,7 @@ def run_ma(args):
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
-    logger.debug("Starting note import (Markdown -> Anki)")
+    logger.debug("Starting note sync (files -> Anki)")
     import_summary: CollectionReport = sync_collection_to_anki(
         anki_port=anki,
         db_port=db,
@@ -245,7 +247,9 @@ def run_ma(args):
     untracked = import_summary.untracked_decks
     changes = note_summary.format()
 
-    logger.info(f"Import: {deck_count} decks with {note_count} notes — {changes}")
+    logger.info(
+        f"Files -> Anki: {deck_count} decks with {note_count} notes — {changes}"
+    )
     for res in import_summary.results:
         deck_summary = res.summary
         deck_fmt = deck_summary.format()
@@ -253,21 +257,22 @@ def run_ma(args):
             logger.info(f"  {res.name}  {deck_fmt}")
 
     if note_summary.errors:
-        _log_import_errors(import_summary)
+        _log_files_to_anki_errors(import_summary)
 
     protected = import_summary.protected_note_groups
     if protected:
         protected_total = sum(group.note_count for group in protected)
         logger.warning(
-            f"Protected {protected_total} keyless Anki note(s) during import."
+            f"Protected {protected_total} keyless Anki note(s) during "
+            "files -> Anki sync."
         )
         logger.warning(f"Affected deck(s): {len(protected)}")
         for group in protected:
             logger.warning(f"  - {group.deck_name} ({group.note_count} notes)")
         logger.warning(
             "These notes were kept and not deleted because they do not have "
-            "an AnkiOps Key. Add note_key comments in markdown and re-import "
-            "to bring them under sync management."
+            "an AnkiOps Key. Add note_key comments in markdown and run "
+            "'ankiops fa' to bring them under sync management."
         )
 
     if untracked:
@@ -277,12 +282,12 @@ def run_ma(args):
         )
         for deck in untracked:
             logger.warning(f"  - {deck.deck_name} ({len(deck.note_ids)} notes)")
-        logger.warning("Use 'ankiops am' to bring them into your collection.")
+        logger.warning("Use 'ankiops af' to bring them into your files.")
 
     if note_summary.errors:
         logger.critical(
-            "Review and resolve errors above, then re-run the import — "
-            "or you risk losing notes with the next export."
+            "Review and resolve errors above, then re-run files -> Anki — "
+            "or you risk losing notes with the next Anki -> files sync."
         )
 
 
@@ -410,7 +415,7 @@ def run_fix_image_widths(args):
         f"{result.images_changed} images changed"
     )
     if result.changed:
-        logger.info("Only Markdown files were edited. Run 'ankiops ma' to sync.")
+        logger.info("Only Markdown files were edited. Run 'ankiops fa' to sync.")
 
 
 def run_llm(args):
@@ -445,10 +450,10 @@ def run_note_type(args):
 def run_shared(args):
     try:
         if getattr(args, "shared_command", None) == "submit" and args.from_anki:
-            run_am(SimpleNamespace(no_auto_commit=False))
+            run_af(SimpleNamespace(no_auto_commit=False))
         run_shared_impl(args)
         if getattr(args, "shared_command", None) == "update" and args.to_anki:
-            run_ma(SimpleNamespace(no_auto_commit=False))
+            run_fa(SimpleNamespace(no_auto_commit=False))
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error

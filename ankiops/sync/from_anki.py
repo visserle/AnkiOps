@@ -63,7 +63,7 @@ def _format_pending_note_type_conversion_error(
     return (
         f"Pending note type conversion for note_key {note_key}: Markdown uses "
         f"'{markdown_note_type}' but Anki has '{anki_note_type}'. Run "
-        "'ankiops ma' before exporting with 'ankiops am'."
+        "'ankiops fa' before syncing with 'ankiops af'."
     )
 
 

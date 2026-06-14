@@ -1,6 +1,6 @@
 # AnkiOps add-on
 
-Adds import (**ma**) and export (**am**) buttons to Anki's top toolbar that shell out to the `ankiops` CLI (`ankiops ma` and `ankiops am`).
+Adds file sync buttons (**af** and **fa**) to Anki's top toolbar that shell out to the `ankiops` CLI (`ankiops af` and `ankiops fa`).
 
 ## Setup
 
@@ -12,4 +12,3 @@ Adds import (**ma**) and export (**am**) buttons to Anki's top toolbar that shel
 
 - **`collection_dir`** — absolute path to your AnkiOps collection directory (the folder containing `.ankiops.db`). Required.
 - **`ankiops_path`** — absolute path to the `ankiops` binary. Optional; leave empty to auto-discover from `PATH` and common pipx locations (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`).
-

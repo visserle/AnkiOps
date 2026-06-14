@@ -22,8 +22,8 @@ AnkiOps: snapshot before <action>
 
 Examples:
 
-- `AnkiOps: snapshot before export`
-- `AnkiOps: snapshot before import`
+- `AnkiOps: snapshot before anki-to-files`
+- `AnkiOps: snapshot before files-to-anki`
 - `AnkiOps: snapshot before deserializing`
 - `AnkiOps: snapshot before fixing image widths`
 - `AnkiOps: snapshot before LLM task grammar`
@@ -64,8 +64,8 @@ Important behavior:
 
 | CLI command | Snapshot action | Snapshot scope |
 | --- | --- | --- |
-| `ankiops anki-to-markdown` / `ankiops am` | `export` | Root Markdown deck files plus `media/`. |
-| `ankiops markdown-to-anki` / `ankiops ma` | `import` | Root Markdown deck files plus `media/` and `note_types/`. |
+| `ankiops anki-to-files` / `ankiops af` | `anki-to-files` | Root Markdown deck files plus `media/`. |
+| `ankiops files-to-anki` / `ankiops fa` | `files-to-anki` | Root Markdown deck files plus `media/` and `note_types/`. |
 | `ankiops deserialize` | `deserializing` | Local target Markdown deck files derived from the input JSON after validation. |
 | `ankiops fix-image-widths` | `fixing image widths` | Local Markdown deck files selected by `--deck` and `--no-subdecks`. |
 | `ankiops llm <task> --run` | `LLM task <task>` | Local Markdown deck files containing queued candidate notes. |
@@ -73,8 +73,8 @@ Important behavior:
 Each command accepts `--no-auto-commit` / `-n`, except that LLM only accepts it
 with `<task> --run`.
 
-`ankiops shared update --to-anki` runs `ankiops ma` after updating. `ankiops
-shared submit --from-anki` runs `ankiops am` before preparing the submission.
+`ankiops shared update --to-anki` runs `ankiops fa` after updating. `ankiops
+shared submit --from-anki` runs `ankiops af` before preparing the submission.
 Until shared-aware scoping exists, those nested snapshots use the broad fallback
 when shared sources are present.
 

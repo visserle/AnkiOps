@@ -2,13 +2,13 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/) 
 
-AnkiOps is a bidirectional Anki ↔ Markdown bridge where each deck becomes a Markdown file. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
+AnkiOps is a bidirectional Anki ↔ files bridge where each deck becomes an editable Markdown file. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways. 
 
 ## Features
 
 - **Full Anki support**: Safe, performant bidirectional syncing of notes with custom note types, (sub-)decks, and media files
 - **Markdown-first**: Edit in your favourite editor and render Markdown features in Anki (including syntax highlighting)
-- **Simple CLI interface** for importing and exporting between Anki and the filesystem
+- **Simple CLI interface** for syncing between Anki and your local files
 - **LLM-integration**: Run programmable tasks such as content review, grammar fixes, or translations on your collection
 - **GitHub shared**: Create shared deck sources on GitHub, add shared decks, update them, and submit changes through PRs (experimental)
 
@@ -47,16 +47,16 @@ ankiops init --tutorial
 
 
 
-3. **Import Markdown into Anki**: Import the current collection of Markdown decks into Anki.
+3. **Sync files to Anki**: Apply the current files, including Markdown decks, media, and note types, to Anki.
 
 ```bash
-ankiops ma # alias for markdown-to-anki (import)
+ankiops fa # alias for files-to-anki
 ```
 
-4. **Sync Anki back to Markdown**: After you review or edit cards in Anki, export those changes. Each sync makes one side match the other.
+4. **Sync Anki back to files**: After you review or edit cards in Anki, apply those changes to your local files. Each sync makes one side match the other.
 
 ```bash
-ankiops am # alias for anki-to-markdown (export)
+ankiops af # alias for anki-to-files
 ```
 
 ## FAQ
@@ -71,7 +71,7 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### How do I create new notes?
 
-Create a new Markdown file in your initialized AnkiOps folder. On the first import, AnkiOps uses the file name as the deck name. Subdecks use `__` (for example, `Anatomy::Heart` maps to `Anatomy__Heart.md`). Separate notes with a blank line, three dashes `---`, and another blank line. You can add new notes anywhere in an existing file.
+Create a new Markdown file in your initialized AnkiOps folder. On the first files-to-Anki sync, AnkiOps uses the file name as the deck name. Subdecks use `__` (for example, `Anatomy::Heart` maps to `Anatomy__Heart.md`). Separate notes with a blank line, three dashes `---`, and another blank line. You can add new notes anywhere in an existing file.
 
 ```markdown
 <!-- note_key: 123487556abc -->
@@ -101,7 +101,7 @@ C3: randomized answers.
 A: 1, 3
 ```
 
-On the next import, AnkiOps assigns a `note_key` and `note_type` comment to the last note.
+On the next files-to-Anki sync, AnkiOps assigns a `note_key` and `note_type` comment to the last note.
 
 ### How are different note types handled?
 
@@ -114,8 +114,8 @@ You can migrate existing notes in three ways: write matching note type files in 
 For Anki browser conversion, use this workflow:
 
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
-2. Export your notes from Anki to Markdown using `ankiops am`.
-3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting. Formatting issues can be fixed by hand or via LLM tasks.
+2. Sync your notes from Anki to files using `ankiops af`.
+3. Review the Git diff after the first files-to-Anki sync. Original Anki HTML may not match CommonMark, so the first files-to-Anki sync can change formatting. Formatting issues can be fixed by hand or via LLM tasks.
 
 ### How does it work?
 
@@ -144,7 +144,7 @@ ankiops shared add owner/repo
 ankiops shared update owner/repo --to-anki
 ```
 
-`add` adds the GitHub repository as a subtree. `update` refreshes one source, or all sources when you omit `owner/repo`. `--to-anki` runs Markdown-to-Anki after the update.
+`add` adds the GitHub repository as a subtree. `update` refreshes one source, or all sources when you omit `owner/repo`. `--to-anki` runs files-to-Anki after the update.
 
 To submit local edits back:
 
@@ -152,15 +152,15 @@ To submit local edits back:
 ankiops shared submit owner/repo --from-anki
 ```
 
-`--from-anki` exports Anki edits to Markdown first. `submit` then commits the shared source, creates a subtree branch, and opens a pull request with `gh` when possible. Without `gh`, AnkiOps leaves you with the branch name and GitHub remote so you can push and open the PR yourself.
+`--from-anki` syncs Anki edits to files first. `submit` then commits the shared source, creates a subtree branch, and opens a pull request with `gh` when possible. Without `gh`, AnkiOps leaves you with the branch name and GitHub remote so you can push and open the PR yourself.
 
 ### How do I upgrade AnkiOps to the latest version?
 
-AnkiOps is in early development, so breaking changes are expected. Use `pipx upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. If your collection is in Git, inspect the diff before you continue syncing.
+AnkiOps is in early development, so breaking changes are expected. Use `pipx upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and sync from Anki with `ankiops af`. If your collection is in Git, inspect the diff before you continue syncing.
 
 ### What is the Add-on for?
 
-The Add-on has two purposes. It adds `am` and `ma` buttons to the Anki toolbar for quick sync andit implements AnkiOpsConnect, a rewrite of AnkiConnect that enables operations for the shared features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
+The Add-on has two purposes. It adds `af` and `fa` buttons to the Anki toolbar for quick sync and it implements AnkiOpsConnect, a rewrite of AnkiConnect that enables operations for the shared features (mainly the conversion of note types without losing schedule information). The Add-on is still experimental and not available on AnkiWeb yet. To install it, download the folder and put it in your Anki add-ons directory.
 
 ### How can I develop AnkiOps locally?
 
@@ -171,7 +171,7 @@ git clone https://github.com/visserle/ankiops.git
 cd ankiops
 uv sync
 uv run python -m main init --tutorial
-uv run python -m main ma
+uv run python -m main fa
 ```
 
 ### Are Pull Requests welcome?
@@ -188,10 +188,10 @@ Yes. Bug fixes, feature work, and documentation PRs are welcome. Open an issue f
 **`init`:**
 - `--tutorial` - Create tutorial markdown file
 
-**`anki-to-markdown` / `am`:**
+**`anki-to-files` / `af`:**
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
-**`markdown-to-anki` / `ma`:**
+**`files-to-anki` / `fa`:**
 - `--no-auto-commit`, `-n` - Skip automatic git commit
 
 **`note-types`:**

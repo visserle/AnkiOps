@@ -245,7 +245,7 @@ def test_create_rejects_missing_note_keys_before_file_mutations(
         "Missing note_keys for 1 note. "
         "note_keys are stable IDs AnkiOps needs to match notes across "
         "collections without duplicates. "
-        "Fix: run 'ankiops ma' to assign them."
+        "Fix: run 'ankiops fa' to assign them."
     )
     assert "explicit note_key" not in message
     assert "Deck.md note" not in message
@@ -620,7 +620,7 @@ def test_submit_rejects_keyless_notes_without_mutating_files(
         "Missing note_keys for 1 note. "
         "note_keys are stable IDs AnkiOps needs to match notes across "
         "collections without duplicates. "
-        "Fix: run 'ankiops ma' to assign them."
+        "Fix: run 'ankiops fa' to assign them."
     )
     assert "explicit note_key" not in message
     assert "Deck.md note" not in message

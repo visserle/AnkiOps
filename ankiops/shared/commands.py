@@ -95,7 +95,7 @@ def run_create(args) -> None:
     )
     logger.info(
         "Created shared source %s from %s. "
-        "Run 'ankiops ma' to apply scoped note types to Anki.",
+        "Run 'ankiops fa' to apply scoped note types to Anki.",
         source.source_id,
         args.deck,
     )
