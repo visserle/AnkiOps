@@ -19,8 +19,8 @@ from aqt.utils import showCritical, tooltip
 _COMPACT_LINK_STYLE = (
     "margin-left:0;"
     "margin-right:0;"
-    "padding-left:1px;"
-    "padding-right:1px;"
+    "padding-left:3px;"
+    "padding-right:3px;"
 )
 _COMPACT_GROUP_STYLE = (
     "display:inline-flex;"
@@ -29,7 +29,7 @@ _COMPACT_GROUP_STYLE = (
     "margin-left:8px;"
     "margin-right:8px;"
 )
-_SEPARATOR_STYLE = "margin-left:1px;margin-right:1px;opacity:.75;"
+_SEPARATOR_STYLE = "margin-left:2px;margin-right:2px;color:currentColor;"
 
 
 class AnkiOpsCommandRunner:

@@ -113,7 +113,7 @@ class _FakeRunner:
         self.commands.append(command)
 
 
-def test_add_toolbar_links_groups_af_and_fa_with_a_tight_separator(monkeypatch):
+def test_add_toolbar_links_groups_af_and_fa_with_readable_spacing(monkeypatch):
     toolbar_module = _load_toolbar_module(monkeypatch)
     links = ["Decks", "Add", "Browse", "Stats", "Sync"]
     toolbar = _FakeToolbar()
@@ -128,7 +128,9 @@ def test_add_toolbar_links_groups_af_and_fa_with_a_tight_separator(monkeypatch):
     assert ">|</span><a " in compact_link
     assert ">fa</a>" in compact_link
     assert "margin-left:0" in compact_link
-    assert "padding-right:1px" in compact_link
+    assert "padding-right:3px" in compact_link
+    assert "margin-right:2px;color:currentColor" in compact_link
+    assert "opacity:" not in compact_link
 
     toolbar.handlers["ankiops_anki_to_files"]()
     toolbar.handlers["ankiops_files_to_anki"]()
