@@ -16,6 +16,21 @@ from aqt.qt import (
 )
 from aqt.utils import showCritical, tooltip
 
+_COMPACT_LINK_STYLE = (
+    "margin-left:0;"
+    "margin-right:0;"
+    "padding-left:1px;"
+    "padding-right:1px;"
+)
+_COMPACT_GROUP_STYLE = (
+    "display:inline-flex;"
+    "align-items:center;"
+    "white-space:nowrap;"
+    "margin-left:8px;"
+    "margin-right:8px;"
+)
+_SEPARATOR_STYLE = "margin-left:1px;margin-right:1px;opacity:.75;"
+
 
 class AnkiOpsCommandRunner:
     def __init__(self, *, mw, addon_module_name: str) -> None:
@@ -119,24 +134,37 @@ class AnkiOpsCommandRunner:
         dialog.exec()
 
 
+def _compact_toolbar_link(link: str) -> str:
+    return link.replace("<a ", f'<a style="{_COMPACT_LINK_STYLE}" ', 1)
+
+
+def _compact_toolbar_pair(left_link: str, right_link: str) -> str:
+    return (
+        f'<span class="ankiops-toolbar-pair" style="{_COMPACT_GROUP_STYLE}">'
+        f"{_compact_toolbar_link(left_link)}"
+        f'<span aria-hidden="true" style="{_SEPARATOR_STYLE}">|</span>'
+        f"{_compact_toolbar_link(right_link)}"
+        "</span>"
+    )
+
+
 def add_toolbar_links(links: list[str], toolbar, runner: AnkiOpsCommandRunner) -> None:
     links.insert(
         -2,
-        toolbar.create_link(
-            cmd="ankiops_anki_to_files",
-            label="af",
-            func=lambda: runner.run("af"),
-            tip="ankiops anki-to-files",
-            id="ankiops-anki-to-files",
-        ),
-    )
-    links.insert(
-        -2,
-        toolbar.create_link(
-            cmd="ankiops_files_to_anki",
-            label="fa",
-            func=lambda: runner.run("fa"),
-            tip="ankiops files-to-anki",
-            id="ankiops-files-to-anki",
+        _compact_toolbar_pair(
+            toolbar.create_link(
+                cmd="ankiops_anki_to_files",
+                label="af",
+                func=lambda: runner.run("af"),
+                tip="ankiops anki-to-files",
+                id="ankiops-anki-to-files",
+            ),
+            toolbar.create_link(
+                cmd="ankiops_files_to_anki",
+                label="fa",
+                func=lambda: runner.run("fa"),
+                tip="ankiops files-to-anki",
+                id="ankiops-files-to-anki",
+            ),
         ),
     )
