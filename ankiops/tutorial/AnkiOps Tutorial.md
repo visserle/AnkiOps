@@ -38,7 +38,6 @@ A: **Bold text**, *italic text*, ==highlighted text==, ~~strikethrough~~, `inlin
 ```python
 def truth():
     print("AnkiOps is awesome")
-
 ```
 E: *Everything renders beautifully on desktop and mobile.*
 
