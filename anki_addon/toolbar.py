@@ -29,7 +29,12 @@ _COMPACT_GROUP_STYLE = (
     "margin-left:8px;"
     "margin-right:8px;"
 )
-_SEPARATOR_STYLE = "margin-left:2px;margin-right:2px;color:currentColor;"
+_SEPARATOR_STYLE = (
+    "margin-left:2px;"
+    "margin-right:2px;"
+    "color:currentColor;"
+    "font-weight:400;"
+)
 
 
 class AnkiOpsCommandRunner:

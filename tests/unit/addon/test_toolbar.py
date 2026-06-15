@@ -129,7 +129,7 @@ def test_add_toolbar_links_groups_af_and_fa_with_readable_spacing(monkeypatch):
     assert ">fa</a>" in compact_link
     assert "margin-left:0" in compact_link
     assert "padding-right:3px" in compact_link
-    assert "margin-right:2px;color:currentColor" in compact_link
+    assert "color:currentColor;font-weight:400" in compact_link
     assert "opacity:" not in compact_link
 
     toolbar.handlers["ankiops_anki_to_files"]()
