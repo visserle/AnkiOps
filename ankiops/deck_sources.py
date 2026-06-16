@@ -137,3 +137,18 @@ def load_note_types_for_sources(sources: list[DeckSource]) -> list[SourceNoteTyp
         SourceNoteTypes(source=source, note_types=load_note_types_for_source(source))
         for source in sources
     ]
+
+
+def load_note_types_for_collection(
+    collection_dir: Path,
+    *,
+    note_types_dir: Path | None = None,
+) -> list[NoteType]:
+    """Load all note types for a collection, with shared source names scoped."""
+    return [
+        note_type
+        for source_types in load_note_types_for_sources(
+            discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+        )
+        for note_type in source_types.note_types
+    ]

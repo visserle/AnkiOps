@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
-from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
+from ankiops.deck_sources import discover_deck_sources, load_note_types_for_collection
 from ankiops.interchange import serialize
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
 from ankiops.notes import normalize_tags
@@ -208,15 +208,10 @@ def _load_task(
     collection_dir: Path,
     task_name: str,
 ) -> tuple[TaskConfig, dict[str, NoteType]]:
-    sources = discover_deck_sources(
+    note_type_configs = load_note_types_for_collection(
         collection_dir,
         note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
-    note_type_configs = [
-        config
-        for source_config in load_note_types_for_sources(sources)
-        for config in source_config.note_types
-    ]
     catalog = load_llm_task_catalog(
         collection_dir,
         note_type_configs=note_type_configs,
