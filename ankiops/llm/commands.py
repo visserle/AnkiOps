@@ -30,7 +30,7 @@ from ankiops.collection import (
     file_stem_to_deck_name,
     require_collection_dir,
 )
-from ankiops.deck_sources import discover_deck_sources, load_note_types_for_sources
+from ankiops.deck_sources import load_note_types_for_collection
 
 from .execution import TaskExecutionProgress, run_task
 from .jobs import LlmJobRequestNoteRef, show_job
@@ -461,13 +461,10 @@ def _show_plan(
 
 
 def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
-    collection_dir = note_types_dir.parent
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    return [
-        config
-        for source_config in load_note_types_for_sources(sources)
-        for config in source_config.note_types
-    ]
+    return load_note_types_for_collection(
+        note_types_dir.parent,
+        note_types_dir=note_types_dir,
+    )
 
 
 def _normalize_deck_override(value: str | None) -> str | None:
