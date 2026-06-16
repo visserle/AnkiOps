@@ -120,14 +120,7 @@ def _is_local_markdown_deck_path(collection_dir: Path, path: Path) -> bool:
 
 
 def _unique_paths(paths: Sequence[Path]) -> list[Path]:
-    unique = []
-    seen = set()
-    for path in paths:
-        if path in seen:
-            continue
-        unique.append(path)
-        seen.add(path)
-    return unique
+    return list(dict.fromkeys(paths))
 
 
 def run_init(args):
