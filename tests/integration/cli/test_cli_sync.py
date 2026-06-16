@@ -163,6 +163,32 @@ def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
     assert "A: Anki answer" in working
 
 
+def test_run_fa_auto_commit_snapshots_deleted_markdown_deck_file(world):
+    world.write_deck("DeletedDeck", "Q: prompt\nA: answer")
+    world.init_git()
+    world.deck_path("DeletedDeck").unlink()
+
+    world.run_fa(no_auto_commit=False)
+
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"],
+        cwd=world.root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    committed_paths = subprocess.run(
+        ["git", "show", "--name-status", "--format=", "HEAD"],
+        cwd=world.root,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+    assert subject == "AnkiOps: snapshot before files-to-anki"
+    assert "D\tDeletedDeck.md" in committed_paths
+
+
 def test_run_fa_logs_real_media_status(world, caplog):
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
