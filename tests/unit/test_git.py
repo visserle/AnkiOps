@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 
-from ankiops.git import git_snapshot
+from ankiops.git import git_snapshot, local_markdown_snapshot_paths
 
 
 def _init_git_repo(collection_dir):
@@ -134,3 +134,20 @@ def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path):
     assert "M\tDeck.md" in show
     assert "M\tOther.md" in show
     assert _git_status(tmp_path) == ""
+
+
+def test_local_markdown_snapshot_paths_include_deleted_tracked_decks(tmp_path):
+    _init_git_repo(tmp_path)
+    deck = tmp_path / "Deck.md"
+    readme = tmp_path / "README.md"
+    deck.write_text("old\n", encoding="utf-8")
+    readme.write_text("docs\n", encoding="utf-8")
+    _commit_all(tmp_path, "root")
+
+    deck.unlink()
+    readme.unlink()
+
+    names = {path.name for path in local_markdown_snapshot_paths(tmp_path)}
+
+    assert "Deck.md" in names
+    assert "README.md" not in names

@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.collection import (
+    NOTE_TYPES_DIR,
+    deck_name_in_scope,
+    file_stem_to_deck_name,
+)
 from ankiops.note_types import NoteType, load_note_types
 
 SHARED_DIR = "shared"
@@ -93,6 +97,25 @@ class DeckSource:
             files.append(path)
         return files
 
+    def deck_name_for_path(self, path: Path) -> str:
+        return file_stem_to_deck_name(path.stem)
+
+    def deck_files_in_scope(
+        self,
+        *,
+        deck: str | None = None,
+        no_subdecks: bool = False,
+    ) -> list[Path]:
+        return [
+            path
+            for path in self.deck_files()
+            if deck_name_in_scope(
+                self.deck_name_for_path(path),
+                deck=deck,
+                no_subdecks=no_subdecks,
+            )
+        ]
+
 
 @dataclass(frozen=True)
 class SourceNoteTypes:
@@ -120,6 +143,15 @@ def discover_deck_sources(
                 DeckSource.shared(collection_dir, owner_dir.name, repo_dir.name)
             )
     return sources
+
+
+def is_local_markdown_deck_path(collection_dir: Path, path: Path) -> bool:
+    return (
+        path.parent == collection_dir
+        and path.suffix == ".md"
+        and path.name.upper() not in RESERVED_MARKDOWN_FILES
+        and "___" not in path.stem
+    )
 
 
 def load_note_types_for_source(source: DeckSource) -> list[NoteType]:

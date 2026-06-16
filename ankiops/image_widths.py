@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.deck_sources import discover_deck_sources
 from ankiops.interchange import deserialize, serialize
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,37 @@ class ImageWidthFixResult:
     @property
     def changed(self) -> bool:
         return self.images_changed > 0
+
+
+@dataclass(frozen=True)
+class ImageWidthFixPlan:
+    """Filesystem scope for a fix-image-widths run."""
+
+    target_paths: tuple[Path, ...]
+    has_shared_sources: bool
+
+
+def plan_image_width_fix(
+    collection_dir: Path,
+    *,
+    deck: str | None = None,
+    no_subdecks: bool = False,
+    note_types_dir: Path | None = None,
+) -> ImageWidthFixPlan:
+    resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
+    sources = discover_deck_sources(
+        collection_dir,
+        note_types_dir=resolved_note_types_dir,
+    )
+    target_paths = tuple(
+        path
+        for source in sources
+        for path in source.deck_files_in_scope(deck=deck, no_subdecks=no_subdecks)
+    )
+    return ImageWidthFixPlan(
+        target_paths=target_paths,
+        has_shared_sources=any(source.is_shared for source in sources),
+    )
 
 
 def _replacement_with_width(match: re.Match[str], width: int) -> str:

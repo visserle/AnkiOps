@@ -68,6 +68,21 @@ def file_stem_to_deck_name(file_stem: str) -> str:
     return unquote(file_stem.replace("__", "::"))
 
 
+def deck_name_in_scope(
+    deck_name: str,
+    *,
+    deck: str | None,
+    no_subdecks: bool,
+) -> bool:
+    """Return whether `deck_name` is selected by a deck/subdeck scope."""
+    deck_filter = deck.strip() if isinstance(deck, str) else None
+    if deck_filter is None:
+        return True
+    if no_subdecks:
+        return deck_name == deck_filter
+    return deck_name == deck_filter or deck_name.startswith(f"{deck_filter}::")
+
+
 def get_collection_dir() -> Path:
     """Get the collection directory path."""
     pyproject = Path.cwd() / "pyproject.toml"

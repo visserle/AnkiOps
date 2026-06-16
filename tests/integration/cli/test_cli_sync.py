@@ -290,7 +290,7 @@ def test_cli_shared_create_accepts_public_visibility_flag():
 
     with (
         patch(
-            "ankiops.cli_commands.run_shared_impl",
+            "ankiops.shared.commands.run_create",
             side_effect=lambda args: captured.append(args),
         ),
         patch(

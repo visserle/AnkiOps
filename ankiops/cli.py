@@ -5,17 +5,19 @@ from importlib.metadata import PackageNotFoundError, version
 from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli_commands import (
     run_af,
+    run_af_command,
     run_deserialize,
     run_fa,
+    run_fa_command,
     run_fix_image_widths,
     run_init,
-    run_llm,
-    run_note_type,
     run_serialize,
-    run_shared,
 )
 from ankiops.console import configure_logging
-from ankiops.llm.commands import configure_llm_parser
+from ankiops.llm.commands import configure_llm_parser, run_llm
+from ankiops.note_types_command import run as run_note_type
+from ankiops.shared import SharedSyncHooks
+from ankiops.shared import run as run_shared
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,16 @@ def _get_cli_version() -> str:
         return version("ankiops")
     except PackageNotFoundError:
         return "unknown"
+
+
+def run_shared_cli(args) -> None:
+    run_shared(
+        args,
+        sync_hooks=SharedSyncHooks(
+            from_anki=lambda: run_af_command(no_auto_commit=False),
+            to_anki=lambda: run_fa_command(no_auto_commit=False),
+        ),
+    )
 
 
 def main():
@@ -212,7 +224,7 @@ def main():
         help="Create the GitHub repo as private when it does not exist (default)",
     )
     shared_create.set_defaults(public=False)
-    shared_create.set_defaults(handler=run_shared)
+    shared_create.set_defaults(handler=run_shared_cli)
 
     shared_add = shared_subparsers.add_parser(
         "add",
@@ -222,7 +234,7 @@ def main():
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    shared_add.set_defaults(handler=run_shared)
+    shared_add.set_defaults(handler=run_shared_cli)
 
     shared_update = shared_subparsers.add_parser(
         "update",
@@ -238,7 +250,7 @@ def main():
         action="store_true",
         help="Run files -> Anki after updating files",
     )
-    shared_update.set_defaults(handler=run_shared)
+    shared_update.set_defaults(handler=run_shared_cli)
 
     shared_submit = shared_subparsers.add_parser(
         "submit",
@@ -253,13 +265,13 @@ def main():
         action="store_true",
         help="Run Anki -> files before preparing the submission",
     )
-    shared_submit.set_defaults(handler=run_shared)
+    shared_submit.set_defaults(handler=run_shared_cli)
 
     shared_list = shared_subparsers.add_parser(
         "list",
         help="Show known shared sources",
     )
-    shared_list.set_defaults(handler=run_shared)
+    shared_list.set_defaults(handler=run_shared_cli)
 
     note_types_parser = subparsers.add_parser(
         "note-types",

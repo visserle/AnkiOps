@@ -5,8 +5,8 @@ command line. It covers automatic snapshots, collection initialization, and the
 GitHub-facing shared workflow.
 
 The implementation lives mainly in `ankiops/git.py`, with call sites in
-`ankiops/init.py`, `ankiops/cli.py`, `ankiops/llm/runner.py`, and
-`ankiops/shared/`.
+`ankiops/collection.py`, `ankiops/cli_commands.py`, `ankiops/llm/execution.py`,
+and `ankiops/shared/`.
 
 ## Snapshot convention
 
@@ -30,8 +30,8 @@ Examples:
 
 ## Snapshot Git sequence
 
-Snapshot callers pass an explicit path scope to `git_snapshot`. The scoped
-sequence is:
+Snapshot callers build path scopes with helpers in `ankiops/git.py` and pass
+the resulting explicit scope to `git_snapshot`. The scoped sequence is:
 
 ```text
 git rev-parse --git-dir

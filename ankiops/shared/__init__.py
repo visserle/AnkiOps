@@ -1,6 +1,7 @@
 """GitHub-native shared support for AnkiOps."""
 
 from ankiops.shared.commands import (
+    SharedSyncHooks,
     run,
     run_add,
     run_create,
@@ -10,6 +11,7 @@ from ankiops.shared.commands import (
 )
 
 __all__ = [
+    "SharedSyncHooks",
     "run",
     "run_submit",
     "run_create",

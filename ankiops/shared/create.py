@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
+from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR
 from ankiops.deck_sources import SHARED_BRANCH, DeckSource
 from ankiops.git import CollectionGit
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
@@ -99,14 +99,8 @@ def _remove_create_source_root(plan: _CreatePlan) -> None:
 
 
 def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
-    deck_filter = deck.strip()
-    subdeck_scope = f"{deck_filter}::"
-    files = []
     local_source = DeckSource.local(collection_dir)
-    for md_file in local_source.deck_files():
-        deck_name = file_stem_to_deck_name(md_file.stem)
-        if deck_name == deck_filter or deck_name.startswith(subdeck_scope):
-            files.append(md_file)
+    files = local_source.deck_files_in_scope(deck=deck, no_subdecks=False)
     if not files:
         raise ValueError(f"No local deck files found for '{deck}'")
     return files

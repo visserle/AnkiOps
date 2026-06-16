@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from rich.markup import escape as rich_escape
@@ -26,6 +29,12 @@ logger = logging.getLogger(__name__)
 _SAFE_SLUG_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")
 _GITHUB_OWNER_MAX_LENGTH = 39
 _GITHUB_REPO_MAX_LENGTH = 100
+
+
+@dataclass(frozen=True)
+class SharedSyncHooks:
+    from_anki: Callable[[], None]
+    to_anki: Callable[[], None]
 
 
 def _parse_slug(slug: str) -> tuple[str, str]:
@@ -171,17 +180,40 @@ def run_list(args) -> None:
         )
 
 
-def run(args) -> None:
-    match args.shared_command:
-        case "create":
-            run_create(args)
-        case "add":
-            run_add(args)
-        case "update":
-            run_update(args)
-        case "submit":
-            run_submit(args)
-        case "list":
-            run_list(args)
-        case _:
-            raise SystemExit(2)
+def run(args, *, sync_hooks: SharedSyncHooks | None = None) -> None:
+    try:
+        command = getattr(args, "shared_command", None)
+        needs_from_anki = command == "submit" and getattr(args, "from_anki", False)
+        needs_to_anki = command == "update" and getattr(args, "to_anki", False)
+        if sync_hooks is None:
+            if needs_from_anki:
+                raise ValueError("--from-anki is only available from the CLI")
+            if needs_to_anki:
+                raise ValueError("--to-anki is only available from the CLI")
+
+        if needs_from_anki and sync_hooks is not None:
+            sync_hooks.from_anki()
+
+        match command:
+            case "create":
+                run_create(args)
+            case "add":
+                run_add(args)
+            case "update":
+                run_update(args)
+            case "submit":
+                run_submit(args)
+            case "list":
+                run_list(args)
+            case _:
+                raise SystemExit(2)
+
+        if needs_to_anki and sync_hooks is not None:
+            sync_hooks.to_anki()
+    except ValueError as error:
+        logger.error(str(error))
+        raise SystemExit(1) from error
+    except subprocess.CalledProcessError as error:
+        output = ((error.stdout or "") + (error.stderr or "")).strip()
+        logger.error(output or f"git command failed with exit {error.returncode}")
+        raise SystemExit(1) from error

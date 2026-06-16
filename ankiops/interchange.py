@@ -11,6 +11,7 @@ from typing import Any, cast
 from ankiops.collection import (
     ANKIOPS_DB,
     NOTE_TYPES_DIR,
+    deck_name_in_scope,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
     get_collection_dir,
@@ -91,9 +92,9 @@ def serialize(
     filtered_decks = [
         parsed_deck
         for parsed_deck in parsed_decks
-        if _deck_matches_filter(
+        if deck_name_in_scope(
             parsed_deck.deck_name,
-            deck_filter=deck_filter,
+            deck=deck_filter,
             no_subdecks=no_subdecks,
         )
     ]
@@ -219,19 +220,6 @@ def _display_source_path(collection_dir: Path, source: DeckSource, path: Path) -
         except ValueError:
             return str(path)
     return f"{_source_name(source)}:{relative}"
-
-
-def _deck_matches_filter(
-    deck_name: str,
-    *,
-    deck_filter: str | None,
-    no_subdecks: bool,
-) -> bool:
-    if deck_filter is None:
-        return True
-    if no_subdecks:
-        return deck_name == deck_filter
-    return deck_name == deck_filter or deck_name.startswith(f"{deck_filter}::")
 
 
 def serialize_to_file(

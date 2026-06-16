@@ -10,7 +10,8 @@ from ankiops.deck_sources import DeckSource
 from ankiops.git import CollectionGit
 from ankiops.markdown import NOTE_SEPARATOR
 from ankiops.shared import run_create, run_list, run_submit
-from ankiops.shared.commands import _parse_slug
+from ankiops.shared.commands import SharedSyncHooks, _parse_slug
+from ankiops.shared.commands import run as run_shared
 from ankiops.shared.create import _unlink_created_source_files
 from ankiops.shared.hosting import ensure_create_repo
 from tests.support.deck_files import DeckFileHarness
@@ -94,6 +95,70 @@ def test_parse_slug_accepts_safe_owner_repo(slug, expected):
 def test_parse_slug_rejects_unsafe_owner_repo(slug):
     with pytest.raises(ValueError, match="Invalid GitHub repo slug"):
         _parse_slug(slug)
+
+
+def test_run_submit_from_anki_uses_hook_before_submit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "ankiops.shared.commands.run_submit",
+        lambda _args: calls.append("submit"),
+    )
+    hooks = SharedSyncHooks(
+        from_anki=lambda: calls.append("from_anki"),
+        to_anki=lambda: calls.append("to_anki"),
+    )
+
+    run_shared(
+        SimpleNamespace(shared_command="submit", repo="owner/repo", from_anki=True),
+        sync_hooks=hooks,
+    )
+
+    assert calls == ["from_anki", "submit"]
+
+
+def test_run_update_to_anki_uses_hook_after_update(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "ankiops.shared.commands.run_update",
+        lambda _args: calls.append("update"),
+    )
+    hooks = SharedSyncHooks(
+        from_anki=lambda: calls.append("from_anki"),
+        to_anki=lambda: calls.append("to_anki"),
+    )
+
+    run_shared(
+        SimpleNamespace(shared_command="update", repo=None, to_anki=True),
+        sync_hooks=hooks,
+    )
+
+    assert calls == ["update", "to_anki"]
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (
+            SimpleNamespace(
+                shared_command="submit",
+                repo="owner/repo",
+                from_anki=True,
+            ),
+            "--from-anki is only available from the CLI",
+        ),
+        (
+            SimpleNamespace(shared_command="update", repo=None, to_anki=True),
+            "--to-anki is only available from the CLI",
+        ),
+    ],
+)
+def test_run_requires_sync_hooks_for_nested_sync(args, message, caplog):
+    with caplog.at_level(logging.ERROR, logger="ankiops.shared.commands"):
+        with pytest.raises(SystemExit) as excinfo:
+            run_shared(args)
+
+    assert excinfo.value.code == 1
+    assert message in caplog.text
 
 
 def test_list_logs_clickable_paths_as_rich_markup(tmp_path, monkeypatch, caplog):

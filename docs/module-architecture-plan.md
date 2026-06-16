@@ -140,8 +140,8 @@ flowchart LR
 
 ### `cli.py`
 
-Owns argument parsing and command dispatch. It should not contain workflow
-logic.
+Owns argument parsing and command dispatch to the command modules. It should
+not contain workflow logic.
 
 ### `cli_commands.py`
 
@@ -152,13 +152,9 @@ Owns top-level command workflows:
 - Anki to Markdown sync
 - interchange import/export
 - image width normalization
-- LLM command delegation
-- shared-source command delegation
-- note-type command delegation
 
-The specialized `note-types` terminal interaction remains in
-`note_types_command.py`; `cli_commands.py` is the command surface that `cli.py`
-routes to.
+The specialized LLM, shared-source, and note-type terminal interactions remain
+in `llm/commands.py`, `shared/commands.py`, and `note_types_command.py`.
 
 ### `console.py`
 
@@ -491,15 +487,15 @@ the semantic cut. These counts are from the implemented tree after formatting.
 | --- | ---: | ---: | --- |
 | `anki.py` | 539 | 750 | One concrete external-system interface over Anki. |
 | `anki_rpc.py` | 123 | 220 | Raw request transport only. |
-| `cli.py` | 364 | 450 | Parser construction and command dispatch. |
-| `cli_commands.py` | 456 | 650 | Command handlers are workflow glue; split only by command family. |
-| `collection.py` | 262 | 500 | Paths, deck filename mapping, profile guard, initialization. |
+| `cli.py` | 376 | 450 | Parser construction and command dispatch. |
+| `cli_commands.py` | 394 | 650 | Sync, interchange, and maintenance command workflows. |
+| `collection.py` | 282 | 500 | Paths, deck filename mapping, profile guard, initialization. |
 | `console.py` | 137 | 300 | Logging, clickable paths, and connect-or-exit terminal helper. |
-| `deck_sources.py` | 134 | 260 | Local/shared source discovery and scoped note type loading. |
-| `git.py` | 243 | 400 | Concrete collection Git operations. |
+| `deck_sources.py` | 171 | 260 | Local/shared source discovery and scoped note type/deck loading. |
+| `git.py` | 298 | 400 | Concrete collection Git operations and snapshot scoping. |
 | `html_to_markdown.py` | 430 | 550 | Directional conversion from Anki HTML to Markdown. |
-| `image_widths.py` | 194 | 300 | Focused standalone tool. |
-| `interchange.py` | 631 | 850 | One portable format for collections and selected deck trees. |
+| `image_widths.py` | 226 | 300 | Focused standalone tool. |
+| `interchange.py` | 596 | 850 | One portable format for collections and selected deck trees. |
 | `markdown.py` | 424 | 650 | One deep interface for the AnkiOps Markdown deck format. |
 | `markdown_to_html.py` | 147 | 280 | Directional conversion from Markdown to Anki HTML. |
 | `math_delimiters.py` | 87 | 160 | Focused conversion helper. |

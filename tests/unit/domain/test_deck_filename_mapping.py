@@ -1,6 +1,10 @@
 import pytest
 
-from ankiops.collection import deck_name_to_file_stem, file_stem_to_deck_name
+from ankiops.collection import (
+    deck_name_in_scope,
+    deck_name_to_file_stem,
+    file_stem_to_deck_name,
+)
 
 
 def test_subdeck_separator_uses_double_underscore():
@@ -44,3 +48,14 @@ def test_path_separators_are_roundtrip_safe():
 def test_underscores_adjacent_to_subdeck_separator_are_rejected(deck_name):
     with pytest.raises(ValueError, match="Ambiguous deck name"):
         deck_name_to_file_stem(deck_name)
+
+
+def test_deck_name_scope_includes_subdecks_by_default():
+    assert deck_name_in_scope("Parent", deck="Parent", no_subdecks=False)
+    assert deck_name_in_scope("Parent::Child", deck="Parent", no_subdecks=False)
+    assert not deck_name_in_scope("Other", deck="Parent", no_subdecks=False)
+
+
+def test_deck_name_scope_can_exclude_subdecks():
+    assert deck_name_in_scope("Parent", deck="Parent", no_subdecks=True)
+    assert not deck_name_in_scope("Parent::Child", deck="Parent", no_subdecks=True)

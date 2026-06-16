@@ -9,7 +9,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from ankiops.deck_sources import SHARED_BRANCH, DeckSource
+from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.deck_sources import (
+    SHARED_BRANCH,
+    DeckSource,
+    discover_deck_sources,
+    is_local_markdown_deck_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +82,16 @@ class CollectionGit:
             ).returncode
             == 0
         )
+
+    def deleted_tracked_paths(self) -> list[Path]:
+        result = self.run(["ls-files", "-z", "--deleted"], check=False)
+        if result.returncode != 0:
+            return []
+        return [
+            self.collection_dir / rel_path
+            for rel_path in result.stdout.split("\0")
+            if rel_path
+        ]
 
     def commit_paths(self, paths: list[Path], message: str) -> None:
         rel_paths = self._tracked_or_existing_paths(paths)
@@ -241,3 +257,42 @@ def git_snapshot(
     except FileNotFoundError:
         logger.debug("Git not found, skipping auto-commit")
         return False
+
+
+def local_markdown_snapshot_paths(collection_dir: Path) -> list[Path]:
+    """Return local Markdown deck paths, including deleted tracked deck files."""
+    paths = DeckSource.local(collection_dir).deck_files()
+    try:
+        deleted_paths = CollectionGit(collection_dir).deleted_tracked_paths()
+    except FileNotFoundError:
+        deleted_paths = []
+    paths.extend(
+        path
+        for path in deleted_paths
+        if is_local_markdown_deck_path(collection_dir, path)
+    )
+    return _unique_paths(paths)
+
+
+def snapshot_scope_paths(
+    collection_dir: Path,
+    scoped_paths: Sequence[Path],
+    *,
+    has_shared_scope: bool = False,
+) -> list[Path]:
+    """Return scoped snapshot paths, using broad fallback for shared sources."""
+    if has_shared_scope or _has_shared_sources(collection_dir):
+        return [collection_dir]
+    return list(scoped_paths)
+
+
+def _has_shared_sources(collection_dir: Path) -> bool:
+    sources = discover_deck_sources(
+        collection_dir,
+        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+    )
+    return any(source.is_shared for source in sources)
+
+
+def _unique_paths(paths: Sequence[Path]) -> list[Path]:
+    return list(dict.fromkeys(paths))
