@@ -18,10 +18,11 @@ from ankiops.collection import (
 from ankiops.console import clickable_path, connect_or_exit
 from ankiops.deck_sources import (
     DeckSource,
+    RESERVED_MARKDOWN_FILES,
     discover_deck_sources,
     load_note_types_for_sources,
 )
-from ankiops.git import git_snapshot
+from ankiops.git import CollectionGit, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
     apply_deserialization_plan,
@@ -83,7 +84,50 @@ def _snapshot_paths(
 
 
 def _local_markdown_paths(collection_dir: Path) -> list[Path]:
-    return DeckSource.local(collection_dir).deck_files()
+    paths = DeckSource.local(collection_dir).deck_files()
+    paths.extend(_deleted_local_markdown_paths(collection_dir))
+    return _unique_paths(paths)
+
+
+def _deleted_local_markdown_paths(collection_dir: Path) -> list[Path]:
+    try:
+        result = CollectionGit(collection_dir).run(
+            ["ls-files", "-z", "--deleted"],
+            check=False,
+        )
+    except FileNotFoundError:
+        return []
+    if result.returncode != 0:
+        return []
+
+    paths = []
+    for rel_path in result.stdout.split("\0"):
+        if not rel_path:
+            continue
+        path = collection_dir / rel_path
+        if _is_local_markdown_deck_path(collection_dir, path):
+            paths.append(path)
+    return paths
+
+
+def _is_local_markdown_deck_path(collection_dir: Path, path: Path) -> bool:
+    return (
+        path.parent == collection_dir
+        and path.suffix == ".md"
+        and path.name.upper() not in RESERVED_MARKDOWN_FILES
+        and "___" not in path.stem
+    )
+
+
+def _unique_paths(paths: Sequence[Path]) -> list[Path]:
+    unique = []
+    seen = set()
+    for path in paths:
+        if path in seen:
+            continue
+        unique.append(path)
+        seen.add(path)
+    return unique
 
 
 def run_init(args):
