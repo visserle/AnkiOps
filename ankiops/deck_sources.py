@@ -94,12 +94,6 @@ class DeckSource:
         return files
 
 
-@dataclass(frozen=True)
-class SourceNoteTypes:
-    source: DeckSource
-    note_types: list[NoteType]
-
-
 def discover_deck_sources(
     collection_dir: Path,
     *,
@@ -132,13 +126,6 @@ def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
     ]
 
 
-def load_note_types_for_sources(sources: list[DeckSource]) -> list[SourceNoteTypes]:
-    return [
-        SourceNoteTypes(source=source, note_types=load_note_types_for_source(source))
-        for source in sources
-    ]
-
-
 def load_note_types_for_collection(
     collection_dir: Path,
     *,
@@ -147,8 +134,9 @@ def load_note_types_for_collection(
     """Load all note types for a collection, with shared source names scoped."""
     return [
         note_type
-        for source_types in load_note_types_for_sources(
-            discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+        for source in discover_deck_sources(
+            collection_dir,
+            note_types_dir=note_types_dir,
         )
-        for note_type in source_types.note_types
+        for note_type in load_note_types_for_source(source)
     ]
