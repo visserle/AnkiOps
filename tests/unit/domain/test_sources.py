@@ -68,7 +68,7 @@ def test_shared_configs_are_scoped_by_source(tmp_path):
     assert "AnkiOpsQA" not in names
 
 
-def test_collection_configs_include_local_and_scoped_shared_types(tmp_path):
+def test_collection_note_types_include_local_and_scoped_shared_configs(tmp_path):
     harness = DeckFileHarness()
     harness.eject_default_note_types(tmp_path / "note_types")
     shared_source = DeckSource.shared(tmp_path, "owner", "repo")

@@ -1,3 +1,7 @@
+"""CLI command adapters and orchestration for argparse handlers."""
+
+from __future__ import annotations
+
 import logging
 import subprocess
 from collections.abc import Sequence
@@ -54,12 +58,12 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def sync_note_types(anki_port, collection_dir, note_types_dir, db_port):
-    configs = load_note_types_for_collection(
-        collection_dir,
-        note_types_dir=note_types_dir,
+def _sync_note_types(anki_port, collection_dir, note_types_dir, db_port):
+    return sync_note_type_configs(
+        anki_port,
+        load_note_types_for_collection(collection_dir, note_types_dir=note_types_dir),
+        sync_state=db_port,
     )
-    return sync_note_type_configs(anki_port, configs, sync_state=db_port)
 
 
 def _has_shared_sources(collection_dir: Path) -> bool:
@@ -84,7 +88,7 @@ def _snapshot_paths(
 def _local_markdown_paths(collection_dir: Path) -> list[Path]:
     paths = DeckSource.local(collection_dir).deck_files()
     paths.extend(_deleted_local_markdown_paths(collection_dir))
-    return _unique_paths(paths)
+    return list(dict.fromkeys(paths))
 
 
 def _deleted_local_markdown_paths(collection_dir: Path) -> list[Path]:
@@ -115,10 +119,6 @@ def _is_local_markdown_deck_path(collection_dir: Path, path: Path) -> bool:
         and path.name.upper() not in RESERVED_MARKDOWN_FILES
         and "___" not in path.stem
     )
-
-
-def _unique_paths(paths: Sequence[Path]) -> list[Path]:
-    return list(dict.fromkeys(paths))
 
 
 def run_init(args):
@@ -269,7 +269,7 @@ def run_fa(args):
         logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
-    nt_summary = sync_note_types(anki, collection_dir, note_types_dir, db)
+    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, db)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
@@ -458,7 +458,7 @@ def run_fix_image_widths(args):
 
 
 def run_llm(args):
-    """Delegates LLM command handling to the LLM CLI module."""
+    """Delegate LLM command handling to the LLM CLI module."""
     run_llm_impl(
         args,
         require_collection_dir_fn=require_collection_dir,
