@@ -5,6 +5,7 @@ import pytest
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
+    load_note_types_for_collection,
     load_note_types_for_source,
 )
 from tests.support.deck_files import DeckFileHarness
@@ -65,6 +66,18 @@ def test_shared_configs_are_scoped_by_source(tmp_path):
 
     assert "shared/owner/repo/AnkiOpsQA" in names
     assert "AnkiOpsQA" not in names
+
+
+def test_collection_configs_include_local_and_scoped_shared_types(tmp_path):
+    harness = DeckFileHarness()
+    harness.eject_default_note_types(tmp_path / "note_types")
+    shared_source = DeckSource.shared(tmp_path, "owner", "repo")
+    harness.eject_default_note_types(shared_source.note_types_dir)
+
+    names = {config.name for config in load_note_types_for_collection(tmp_path)}
+
+    assert "AnkiOpsQA" in names
+    assert "shared/owner/repo/AnkiOpsQA" in names
 
 
 def test_shared_note_type_names_are_path_like(tmp_path):

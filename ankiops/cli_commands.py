@@ -17,10 +17,10 @@ from ankiops.collection import (
 )
 from ankiops.console import clickable_path, connect_or_exit
 from ankiops.deck_sources import (
-    DeckSource,
     RESERVED_MARKDOWN_FILES,
+    DeckSource,
     discover_deck_sources,
-    load_note_types_for_sources,
+    load_note_types_for_collection,
 )
 from ankiops.git import CollectionGit, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
@@ -55,12 +55,10 @@ sync_media_to_anki = sync_all_media_to_anki
 
 
 def sync_note_types(anki_port, collection_dir, note_types_dir, db_port):
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    configs = [
-        config
-        for source_config in load_note_types_for_sources(sources)
-        for config in source_config.note_types
-    ]
+    configs = load_note_types_for_collection(
+        collection_dir,
+        note_types_dir=note_types_dir,
+    )
     return sync_note_type_configs(anki_port, configs, sync_state=db_port)
 
 
@@ -465,16 +463,10 @@ def run_llm(args):
         args,
         require_collection_dir_fn=require_collection_dir,
         load_note_type_configs_fn=(
-            lambda note_types_dir: [
-                config
-                for source_config in load_note_types_for_sources(
-                    discover_deck_sources(
-                        note_types_dir.parent,
-                        note_types_dir=note_types_dir,
-                    )
-                )
-                for config in source_config.note_types
-            ]
+            lambda note_types_dir: load_note_types_for_collection(
+                note_types_dir.parent,
+                note_types_dir=note_types_dir,
+            )
         ),
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
