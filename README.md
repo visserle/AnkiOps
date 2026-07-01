@@ -14,11 +14,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ## How It Works
 
-There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors your whole collection in a folder of your choice. Each deck becomes a a Markdown file, and media and note type definitions are stored along with it. Having your collection represented in the filesystem easily allows for:
-
-- version control via automated Git commits,
-- automation of various tasks using scripts or LLMs, and
-- collaboration with reviewable pull requests. 
+There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors your whole collection in a folder of your choice. Each deck becomes a a Markdown file, and media and note type definitions are stored along with it. Having your collection represented in the filesystem easily allows for version control, automation and collaboration.
 
 The basic structure of an AnkiOps collection folder is:
 
