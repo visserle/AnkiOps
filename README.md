@@ -12,7 +12,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 - **Performance**: AnkiOps can sync thousands of notes in under a second
 - **Collaboration**: Share decks on GitHub and collaborate with others
 
-## Basic Concept
+## How It Works
 
 There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors your whole collection in a folder of your choice. Each deck becomes a a Markdown file, and media and note type definitions are stored along with it. Having your collection represented in the filesystem easily allows for:
 
