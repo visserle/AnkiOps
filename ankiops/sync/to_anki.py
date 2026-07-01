@@ -9,7 +9,7 @@ from ankiops.collection import file_stem_to_deck_name
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
-    load_note_types_for_sources,
+    load_note_types_for_source,
 )
 from ankiops.markdown import DeckFile, read_deck_file
 from ankiops.markdown_to_html import MarkdownToHTML
@@ -44,24 +44,22 @@ def _load_source_deck_files(
     note_types_dir: Path,
 ) -> tuple[list[_SourceDeckFile], dict[str, NoteType]]:
     sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    source_note_types = load_note_types_for_sources(sources)
-    note_types = [
-        note_type
-        for source_types in source_note_types
-        for note_type in source_types.note_types
-    ]
-    note_types_by_name = {note_type.name: note_type for note_type in note_types}
+    note_types_by_name: dict[str, NoteType] = {}
 
     source_deck_files: list[_SourceDeckFile] = []
-    for source_types in source_note_types:
-        for deck_path in source_types.source.deck_files():
+    for source in sources:
+        note_types = load_note_types_for_source(source)
+        note_types_by_name.update(
+            {note_type.name: note_type for note_type in note_types}
+        )
+        for deck_path in source.deck_files():
             source_deck_files.append(
                 _SourceDeckFile(
-                    source=source_types.source,
+                    source=source,
                     file_state=read_deck_file(
                         deck_path,
-                        note_types=source_types.note_types,
-                        context_root=source_types.source.root,
+                        note_types=note_types,
+                        context_root=source.root,
                     ),
                 )
             )

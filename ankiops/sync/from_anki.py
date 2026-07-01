@@ -11,7 +11,7 @@ from ankiops.collection import (
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
-    load_note_types_for_sources,
+    load_note_types_for_source,
 )
 from ankiops.html_to_markdown import HTMLToMarkdown
 from ankiops.markdown import (
@@ -538,11 +538,10 @@ def sync_collection_from_anki(
 ) -> CollectionReport:
     sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
     local_source = sources[0]
-    source_configs = load_note_types_for_sources(sources)
     configs = [
         config
-        for source_config in source_configs
-        for config in source_config.note_types
+        for source in sources
+        for config in load_note_types_for_source(source)
     ]
     config_by_name = {config.name: config for config in configs}
     html_to_markdown = HTMLToMarkdown()
