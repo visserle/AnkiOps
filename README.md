@@ -14,23 +14,11 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ## How It Works
 
-There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors a full Anki collection in a folder of your choice. Each deck becomes a a Markdown file. Media and note type definitions are stored along with it. Having your collection represented in the filesystem allows for straight-forward version control, automation and collaboration.
-
-The basic structure of an AnkiOps collection is:
-
-```text
-media/                 
-note_types/          
-.ankiops.db         
-Deck1.md         
-Deck1__Subdeck1.md      
-```
-
-The file name maps to the Anki deck name, where `__` becomes the subdeck delimiter `::` in Anki. Common repository files such as `README.md` are ignored.
+There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors a full Anki collection in a folder of your choice. Each deck becomes a a Markdown file. Media and note type definitions are stored along with it. Having your collection represented in the filesystem allows for straight-forward version control, automation, and collaboration.
 
 ### Markdown Files
 
-A deck file contains one note after another. Each note is separated by a blank line, three dashes, and another blank line.
+In a deck file, each note is separated by a blank line, three dashes, and another blank line:
 
 ```markdown
 Q: How are the 86 billion neurons distributed across the human brain?
@@ -72,7 +60,21 @@ T: The {{c1::corpus callosum}} connects the left and right cerebral hemispheres.
 E: Cutting it can stop information from passing directly between the hemispheres.
 ```
 
-The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs via the local `.ankiops.db` file. The `note_type` comment is solely added for the user's reference. Neither comment should be edited by hand (in contrast to the tags comment, which is user-editable and synced with Anki).
+The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is solely added for the user's reference. Neither comment should be edited by hand (in contrast to the tags comment, which is user-editable and synced with Anki).
+
+### Collection Structure
+
+The basic structure of an AnkiOps collection is:
+
+```text
+media/                 
+note_types/          
+.ankiops.db         
+Deck1.md         
+Deck1__Subdeck1.md      
+```
+
+The file name maps to the Anki deck name, where `__` becomes the subdeck delimiter `::` in Anki. Common repository files such as `README.md` are ignored. The local `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` values in the Markdown files to Anki's internal note IDs, manages all media and note type definitions, and tracks the last sync state of the collection for fast updates.
 
 ### Note Types
 
