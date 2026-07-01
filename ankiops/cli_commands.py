@@ -483,7 +483,7 @@ def run_note_type(args):
 def run_shared(args):
     try:
         if getattr(args, "shared_command", None) == "submit" and args.from_anki:
-            run_af(SimpleNamespace(no_auto_commit=False))
+            run_af(SimpleNamespace(no_auto_commit=True))
         run_shared_impl(args)
         if getattr(args, "shared_command", None) == "update" and args.to_anki:
             run_fa(SimpleNamespace(no_auto_commit=False))

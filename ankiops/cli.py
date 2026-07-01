@@ -34,6 +34,13 @@ def _non_negative_int(value: str) -> int:
     return parsed
 
 
+def _single_line_text(value: str) -> str:
+    parsed = value.strip()
+    if not parsed or "\n" in parsed or "\r" in parsed:
+        raise argparse.ArgumentTypeError("must be a non-empty single line")
+    return parsed
+
+
 def _get_cli_version() -> str:
     try:
         return version("ankiops")
@@ -253,7 +260,28 @@ def main():
         action="store_true",
         help="Run Anki -> files before preparing the submission",
     )
+    shared_submit.add_argument(
+        "--message",
+        "-m",
+        type=_single_line_text,
+        help="Pull request title; also the commit message with --commit",
+    )
+    shared_submit.add_argument(
+        "--commit",
+        action="store_true",
+        help="Commit dirty shared files before preparing the pull request",
+    )
     shared_submit.set_defaults(handler=run_shared)
+
+    shared_status = shared_subparsers.add_parser(
+        "status",
+        help="Show local changes, remote state, and the next submit action",
+    )
+    shared_status.add_argument(
+        "repo",
+        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+    )
+    shared_status.set_defaults(handler=run_shared)
 
     shared_list = shared_subparsers.add_parser(
         "list",
@@ -316,14 +344,8 @@ def main():
         print(
             "  ankiops init --tutorial                      # Initialize with tutorial"
         )
-        print(
-            "  ankiops af                                   "
-            "# Sync Anki to files"
-        )
-        print(
-            "  ankiops fa                                   "
-            "# Sync files to Anki"
-        )
+        print("  ankiops af                                   # Sync Anki to files")
+        print("  ankiops fa                                   # Sync files to Anki")
         print(
             "  ankiops serialize -o my-deck.json            "
             "# Serialize collection to file"

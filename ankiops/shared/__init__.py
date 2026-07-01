@@ -5,6 +5,7 @@ from ankiops.shared.commands import (
     run_add,
     run_create,
     run_list,
+    run_status,
     run_submit,
     run_update,
 )
@@ -15,5 +16,6 @@ __all__ = [
     "run_create",
     "run_update",
     "run_list",
+    "run_status",
     "run_add",
 ]
