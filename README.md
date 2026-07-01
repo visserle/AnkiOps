@@ -2,14 +2,14 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/)
 
-AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor.
+AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways.
 
-There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors a full Anki collection in a folder of your choice, where each deck becomes a a Markdown file, and Media and note type definitions are stored along with it. Having your collection represented in the filesystem allows for straight-forward version control, automation, and collaboration.
 
-## Features at a Glance
+## Advantages
+There is a joke among software engineers that eventually every filesystem grows into a database, and every database grows into a filesystem. Both approaches have their merits. AnkiOps enables the filesystem solution for the Anki database. It mirrors a full collection in a folder of your choice, where each deck becomes a Markdown file, and media and note-type definitions are stored along with it. Having your collection represented in the filesystem enables straightforward version control, automation, and collaboration.
 
 - **User-friendly**: Edit Anki decks as highly readable Markdown files
-- **Synchronization**: Two-way synchronization of notes, note types, decks and media between Anki and the filesystem
+- **Full Anki support**: Two-way synchronization of notes, note types, decks and media between Anki and the filesystem
 - **Customization**: Define your own note types and card templates
 - **Performance**: AnkiOps can sync thousands of notes in under a second
 - **Collaboration**: Share decks on GitHub and collaborate with others
@@ -34,9 +34,13 @@ E: --> The cerebellum contains the majority, despite being only about 10% of bra
 <!-- tags: psychology brain -->
 T: The {{c1::corpus callosum}} connects the left and right cerebral hemispheres.
 E: Cutting it can stop information from passing directly between the hemispheres.
+
+---
+
+...
 ```
 
-You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold font, lists, tables, images, code blocks, math equations, and so on. AnkiOps automatically converts Markdown to HTML for Anki and back again.
+You can use any Markdown syntax (except a horizontal rule) in the note content, including italics, bold text, lists, tables, images, code blocks, math equations, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
 
 After the first sync, AnkiOps adds metadata comments for each note:
 
@@ -60,7 +64,7 @@ T: The {{c1::corpus callosum}} connects the left and right cerebral hemispheres.
 E: Cutting it can stop information from passing directly between the hemispheres.
 ```
 
-The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is solely added for the user's reference. Neither comment should be edited by hand (in contrast to the tags comment, which is user-editable and synced with Anki).
+The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is added just for the user's reference. Neither comment should be edited by hand (in contrast to the `tags` comment, which is user-editable and synced with Anki).
 
 ### Collection Structure
 
@@ -74,14 +78,14 @@ Deck1.md
 Deck1__Subdeck1.md      
 ```
 
-The file name maps to the Anki deck name, where `__` becomes the subdeck delimiter `::` in Anki. Common repository files such as `README.md` are ignored. The local `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` values in the Markdown files to Anki's internal note IDs, manages all media and note type definitions, and tracks the last sync state of the collection for fast updates.
+The `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` values in the Markdown files to Anki's internal note IDs.
 
 ### Note Types
 
-> [!NOTE]
+> [!TIP]
 > AnkiOps only acts on note types defined within the `note_types/` folder.
 
-AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. `Q:` for Question, `A:` for Answer). These labels are defined in `note_type.yaml` for each note type. Using the default, a note with `Q:` and `A:` labels is an `AnkiOpsQA` note type. `note_type.yaml` defines field names, field labels, card templates, and which labels identify the note type.
+AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. `Q:` for Question, `A:` for Answer). These labels are defined in `note_type.yaml` for each note type. By default, a note with `Q:` and `A:` labels is an `AnkiOpsQA` note type. `note_type.yaml` defines field names, field labels, card templates, and which labels identify the note type.
 
 ```text
 note_types/
@@ -99,40 +103,38 @@ note_types/
 
 Note types are fully customizable. Built-in note types include:
 
-| Note type | Identifying labels | Description |
-| --- | --- | --- |
-| `AnkiOpsQA` | `Q:`, `A:` | Question and Answer |
-| `AnkiOpsCloze` | `T:` | Cloze deletion |
-| `AnkiOpsClozeHideAll` | `THA:` | Cloze deletion with all fields hidden |
-| `AnkiOpsReversed` | `F:`, `B:` | Reversed (both directions) |
-| `AnkiOpsInput` | `Q:`, `I:` | Input (user-provided text) |
-| `AnkiOpsChoice` | `Q:`, choice labels such as `C1:`, plus `A:` | Single/multiple choice with rotating order of choices |
-| `AnkiOpsImageOcclusion` | `IO_*:` labels for image occlusion fields | For comprehensiveness (awkward to manage in Markdown) |
+| Note type | Identifying labels | 
+| --- | --- | 
+| `AnkiOpsQA` | `Q:`, `A:` | 
+| `AnkiOpsCloze` | `T:` | 
+| `AnkiOpsClozeHideAll` | `THA:`  |
+| `AnkiOpsReversed` | `F:`, `B:`  |
+| `AnkiOpsInput` | `Q:`, `I:` |
+| `AnkiOpsChoice` | `Q:`, choice labels such as `C1:`, plus `A:`  |
+| `AnkiOpsImageOcclusion` | `IO_*:` labels for image occlusion fields |
 
-Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` that stores the `note_key` value and should be left unchanged. Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually.
+Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` that stores the `note_key` value and should never be edited manually. Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually.
 
 ### Synchronization
 
-AnkiOps has two main sync commands:
+AnkiOps has two sync commands:
 
 | Command | Direction | Use it when |
 | --- | --- | --- |
 | `ankiops fa` | Files to Anki | After editing Markdown decks, media, or note types. |
 | `ankiops af` | Anki to files | After editing notes, tags, or decks in Anki. |
 
-`ankiops fa` pushes media, syncs note types, parses Markdown, creates new notes, updates existing notes, moves cards between decks, and deletes managed Anki notes that you removed from files.
-
-`ankiops af` reads managed notes from Anki, converts their HTML back to Markdown, writes deck files, preserves keyless local notes, and pulls referenced media into `media/`.
-
-Both commands create a automatic Git snapshot before syncing.
+Both sync operations can create update, move, and delete managed notes, and handle all media and note types. Before syncing, an automatic Git snapshot is created.
 
 ### Add-On
 
-The AnkiOps add-on provides toolbar buttons for `af` and `fa`, and it enables AnkiOpsConnect, which AnkiOps uses for operations needed for sharing. If you do not want to install the add-on, you can still use AnkiOps with AnkiConnect (though AnkiOpsConnect is faster).
+For basic usage, you can use AnkiOps without the add-on. One feature of the add-on are the toolbar buttons for `af` and `fa`:
 
 ![alt text](toolbar.png)
 
-The add-on is still experimental; to install it, download the folder and put it in your Anki add-ons directory.
+Furthermore, it enables AnkiOpsConnect, which AnkiOps needs for operations related to sharing. 
+
+If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). To install it, download the folder and put it in your Anki add-ons directory.
 
 ## How To Get Started
 
@@ -143,7 +145,7 @@ pipx install ankiops
 uv tool install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with Anki(Ops)Connect enabled. Run `ankiops init` in an empty collection directory. AnkiOps creates a Git repository, `.ankiops.db`, the `note_types/` folder, and recommended configurations for VS code. The tutorial flag further creates a sample Markdown deck.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. Run `ankiops init` in an empty collection directory. AnkiOps creates a Git repository, `.ankiops.db`, the `note_types/` folder, and recommended configurations for VS Code. The tutorial flag further creates a sample Markdown deck.
 
 ```bash
 cd my-collection
@@ -170,7 +172,7 @@ Most Markdown-to-Anki tools import one way: you write Markdown and push it to An
 
 ### Is it safe to use?
 
-Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected and you can safely mix managed and unmanaged notes within one deck. Further, AnkiOps only syncs if the activated profiles matches the one it was initialized with. Concerning the Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always roll your files back if needed.
+Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected, and you can safely mix managed and unmanaged notes within one deck. Additionally, AnkiOps only syncs if the activated profile matches the one it was initialized with. For Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always revert changes if needed.
 
 ### What is the recommended workflow?
 
@@ -180,16 +182,16 @@ We recommend VS Code because it has a stable Markdown previewer and handles imag
 
 If you want it simple, just prompt an LLM (Codex, Claude Code, etc.) to edit your Markdown files. If you want it integrated, AnkiOps has a dedicated LLM module that runs through your serialized (JSON) collection and applies edits to the Markdown files. Only works with OpenAI's response API.
 
-### What features are there else?
+### What other features are there?
 
 
 **Image Width Normalization**
 
-Handling multiple images in a singleAnki note often leads to inconsistent widths. AnkiOps can normalize close widths or force a width across a deck:
+Handling multiple images in a single Anki note often leads to inconsistent widths. AnkiOps can normalize similar widths or force a width across a deck:
 
 ```bash
 ankiops fix-image-widths  # normalize widths within 10px tolerance
-ankiops fix-image-widths --deck "Deckt1" --width 500  # fix width
+ankiops fix-image-widths --deck "Deck1" --width 500  # fix width
 ```
 
 **JSON serialization**
