@@ -7,7 +7,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 ## Advantages
 
 - **User-friendly**: Edit Anki decks as highly readable Markdown files
-- **Full Anki support**: Two-way synchronization of notes, note types, decks and media between Anki and the filesystem
+- **Full Anki support**: Two-way sync of notes, note types, decks and media files
 - **Customization**: Define your own note types and card templates
 - **Performance**: Sync thousands of notes in under a second
 - **Collaboration**: Share decks on GitHub and collaborate with others
@@ -117,22 +117,23 @@ Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` 
 
 AnkiOps has two sync commands:
 
-| Command | Direction | Use it when |
-| --- | --- | --- |
-| `ankiops fa` | Files to Anki | After editing Markdown decks, media, or note types. |
-| `ankiops af` | Anki to files | After editing notes, tags, or decks in Anki. |
+- `ankiops fa` (files to anki): After editing Markdown decks, media, or note types, and
+- `ankiops af` (anki to files): After editing notes, tags, or decks in Anki.
 
 Both sync operations can create update, move, and delete managed notes, and handle all media and note types. Before syncing, an automatic Git snapshot is created.
 
 ### Add-On
 
-For basic usage, you can use AnkiOps without the add-on. One feature of the add-on are the toolbar buttons for `af` and `fa`:
+For basic usage, you can use AnkiOps without the add-on. The add-on enables AnkiOpsConnect, which AnkiOps needs for operations related to sharing. If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). 
+
+
+
+Another feature of the add-on are the toolbar buttons for `af` and `fa`:
 
 ![alt text](toolbar.png)
 
-Furthermore, it enables AnkiOpsConnect, which AnkiOps needs for operations related to sharing. 
 
-If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). To install it, download the folder and put it in your Anki add-ons directory.
+To install the add-on, download the folder and put it in your Anki add-ons directory.
 
 ## How To Get Started
 
@@ -140,6 +141,7 @@ If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (
 
 ```bash
 pipx install ankiops
+# or
 uv tool install ankiops
 ```
 
@@ -222,15 +224,20 @@ ankiops shared update owner/psychology-deck --to-anki
 Submit local shared edits:
 
 ```bash
+ankiops shared status owner/psychology-deck
 ankiops shared submit owner/psychology-deck --from-anki \
-  --message "Clarify attention terminology"
+  --message "Clarify attention terminology" --commit
 ```
 
-The optional message becomes the Git commit subject and pull request title. When
-you omit it, AnkiOps uses `Update shared deck owner/psychology-deck`. Submitting
-an unchanged source creates no branch or pull request. With the GitHub CLI
-available, AnkiOps opens a pull request; otherwise it pushes the branch and tells
-you how to open one manually.
+`shared status` shows dirty shared and private files, compares committed shared
+history with GitHub, and explains exactly what `submit` will do. `submit` never
+commits dirty shared files unless you explicitly pass `--commit`; you can instead
+commit them yourself first. The optional message becomes the pull request title
+and, with `--commit`, the Git commit subject. When you omit it, AnkiOps uses
+`Update shared deck owner/psychology-deck`. Submitting an unchanged source
+creates no branch or pull request. With the GitHub CLI available, AnkiOps opens
+a pull request; otherwise it pushes the branch and tells you how to open one
+manually.
 
 Shared-source Git history created by older experimental AnkiOps versions is not
 compatible with this workflow. Recreate or re-add those sources before updating
@@ -277,7 +284,8 @@ Shared deck tools:
 - `ankiops shared create <deck> <owner>/<repo> [--public|--private]`
 - `ankiops shared add <owner>/<repo>`
 - `ankiops shared update [owner/repo] [--to-anki]`
-- `ankiops shared submit <owner>/<repo> [--from-anki] [-m|--message text]`
+- `ankiops shared status <owner>/<repo>`
+- `ankiops shared submit <owner>/<repo> [--from-anki] [--commit] [-m|--message text]`
 - `ankiops shared list`
 
 ## Contributing

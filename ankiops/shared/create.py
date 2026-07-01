@@ -61,9 +61,17 @@ def create_shared_deck(
             source_paths=[rendered.source_path for rendered in plan.files],
             message=f"AnkiOps: create {source.source_id} from {deck}",
         )
-        branch = repo.subtree_split(source)
+        split_sha = repo.split_subtree(source)
+        repo.rejoin_subtree(
+            source,
+            split_sha,
+            f"AnkiOps: initialize subtree history for {source.source_id}",
+        )
+        branch = repo.create_temp_branch(source, split_sha)
         if source.github_url:
             repo.push_ref(source.github_url, branch, SHARED_BRANCH)
+        repo.delete_branch_if_exists(branch)
+        branch = None
     except Exception:
         _cleanup_failed_create(repo, plan, initial_head=initial_head, branch=branch)
         raise

@@ -12,7 +12,12 @@ import pytest
 
 from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli import main
-from ankiops.cli_commands import run_deserialize, run_fix_image_widths, run_serialize
+from ankiops.cli_commands import (
+    run_deserialize,
+    run_fix_image_widths,
+    run_serialize,
+    run_shared,
+)
 from ankiops.image_widths import ImageWidthFixResult
 from tests.support.deck_files import DeckFileHarness
 
@@ -62,10 +67,7 @@ def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
     with caplog.at_level(logging.WARNING):
         world.run_fa()
 
-    assert (
-        "Protected 1 keyless Anki note(s) during files -> Anki sync."
-        in caplog.text
-    )
+    assert "Protected 1 keyless Anki note(s) during files -> Anki sync." in caplog.text
     assert "ProtectDeck" in caplog.text
     assert keyless_id in world.mock_anki.notes
 
@@ -303,6 +305,80 @@ def test_cli_shared_create_accepts_public_visibility_flag():
     assert captured[0].deck == "Deck"
     assert captured[0].repo == "owner/repo"
     assert captured[0].public is True
+
+
+def test_cli_shared_submit_accepts_custom_message():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_shared_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            [
+                "ankiops",
+                "shared",
+                "submit",
+                "owner/repo",
+                "--message",
+                "  Clarify shared history  ",
+                "--commit",
+            ],
+        ),
+    ):
+        main()
+
+    assert captured[0].message == "Clarify shared history"
+    assert captured[0].commit is True
+
+
+def test_cli_shared_status_accepts_repo():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_shared_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            ["ankiops", "shared", "status", "owner/repo"],
+        ),
+    ):
+        main()
+
+    assert captured[0].shared_command == "status"
+    assert captured[0].repo == "owner/repo"
+
+
+def test_shared_submit_from_anki_does_not_auto_commit():
+    args = SimpleNamespace(shared_command="submit", from_anki=True)
+
+    with (
+        patch("ankiops.cli_commands.run_af") as run_af,
+        patch("ankiops.cli_commands.run_shared_impl"),
+    ):
+        run_shared(args)
+
+    assert run_af.call_args.args[0].no_auto_commit is True
+
+
+@pytest.mark.parametrize("message", ["   ", "line one\nline two"])
+def test_cli_shared_submit_rejects_invalid_message(message):
+    with (
+        patch("ankiops.cli_commands.run_shared_impl") as run_shared,
+        patch(
+            "sys.argv",
+            ["ankiops", "shared", "submit", "owner/repo", "--message", message],
+        ),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 2
+    run_shared.assert_not_called()
 
 
 def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):

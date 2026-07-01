@@ -23,7 +23,7 @@ class CollectionGit:
         args: list[str],
         *,
         check: bool = True,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         logger.debug("git %s", " ".join(args))
         return subprocess.run(
             ["git", *args],
@@ -68,6 +68,12 @@ class CollectionGit:
     def refresh_index(self) -> None:
         self.run(["update-index", "-q", "--refresh"], check=False)
 
+    def status_lines(self, pathspec: list[str]) -> list[str]:
+        result = self.run(
+            ["status", "--short", "--untracked-files=all", "--", *pathspec]
+        )
+        return result.stdout.splitlines()
+
     def tracked(self, rel_path: str) -> bool:
         return (
             self.run(
@@ -77,13 +83,15 @@ class CollectionGit:
             == 0
         )
 
-    def commit_paths(self, paths: list[Path], message: str) -> None:
+    def commit_paths(self, paths: list[Path], message: str) -> bool:
         rel_paths = self._tracked_or_existing_paths(paths)
         if not rel_paths:
-            return
+            return False
         self.run(["add", "-A", "--", *rel_paths])
         if self.cached_diff_exists(rel_paths):
             self.run(["commit", "-m", message, "--", *rel_paths])
+            return True
+        return False
 
     def commit_create_move(
         self,
@@ -130,24 +138,133 @@ class CollectionGit:
             self.run(["rm", "-r", "--cached", "--ignore-unmatch", "--", *paths])
 
     def subtree_add(self, source: DeckSource) -> None:
-        self._run_subtree(source, "add")
-
-    def subtree_pull(self, source: DeckSource) -> None:
-        self._run_subtree(source, "pull")
-
-    def subtree_split(self, source: DeckSource) -> str:
-        branch = f"ankiops-{source.source_id.replace('/', '-')}-{uuid4().hex[:8]}"
-        self.run(
-            [
-                "subtree",
-                "split",
-                "--prefix",
-                self.source_prefix(source),
-                "-b",
-                branch,
-            ],
+        self._run_subtree(
+            source,
+            "add",
+            f"AnkiOps: add {source.source_id} from GitHub",
         )
+
+    def subtree_pull(self, source: DeckSource) -> bool:
+        old_head = self.head()
+        stashed = self._stash_non_source_changes(source)
+        try:
+            self._run_subtree(
+                source,
+                "pull",
+                f"AnkiOps: update {source.source_id} from GitHub",
+            )
+        finally:
+            if stashed:
+                self.run(["stash", "pop", "--index", "stash@{0}"])
+        return self.head() != old_head
+
+    def split_subtree(self, source: DeckSource) -> str:
+        result = self.run(["subtree", "split", "--prefix", self.source_prefix(source)])
+        split_sha = result.stdout.strip()
+        if not split_sha:
+            raise ValueError(f"Could not split {source.source_id}")
+        return split_sha
+
+    def create_temp_branch(self, source: DeckSource, commit_sha: str) -> str:
+        branch = f"ankiops-{source.source_id.replace('/', '-')}-{uuid4().hex[:8]}"
+        self.run(["branch", branch, commit_sha])
         return branch
+
+    def fetch_source_head(self, source: DeckSource) -> str:
+        if source.github_url is None:
+            raise ValueError(f"Cannot derive GitHub URL for {source.display_name}")
+        self.run(["fetch", source.github_url, SHARED_BRANCH])
+        return self.run(["rev-parse", "FETCH_HEAD"]).stdout.strip()
+
+    def has_subtree_metadata(self, source: DeckSource) -> bool:
+        prefix = self.source_prefix(source)
+        result = self.run(
+            [
+                "log",
+                "-1",
+                "--format=%B",
+                f"--grep=^git-subtree-dir: {prefix}/*$",
+                "HEAD",
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        trailers = {}
+        for line in result.stdout.splitlines():
+            key, separator, value = line.partition(":")
+            if separator and key in {"git-subtree-mainline", "git-subtree-split"}:
+                trailers[key] = value.strip()
+        if set(trailers) != {"git-subtree-mainline", "git-subtree-split"}:
+            return False
+        return all(
+            self.run(["cat-file", "-e", f"{sha}^{{commit}}"], check=False).returncode
+            == 0
+            for sha in trailers.values()
+        )
+
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        result = self.run(
+            ["merge-base", "--is-ancestor", ancestor, descendant],
+            check=False,
+        )
+        if result.returncode not in (0, 1):
+            result.check_returncode()
+        return result.returncode == 0
+
+    def has_common_ancestor(self, left: str, right: str) -> bool:
+        result = self.run(["merge-base", left, right], check=False)
+        if result.returncode not in (0, 1):
+            result.check_returncode()
+        return result.returncode == 0
+
+    def trees_equal(self, left: str, right: str) -> bool:
+        left_tree = self.run(["rev-parse", f"{left}^{{tree}}"]).stdout.strip()
+        right_tree = self.run(["rev-parse", f"{right}^{{tree}}"]).stdout.strip()
+        return left_tree == right_tree
+
+    def rejoin_subtree(
+        self,
+        source: DeckSource,
+        split_sha: str,
+        subject: str,
+    ) -> None:
+        head = self.head()
+        if head is None:
+            raise ValueError("Cannot rejoin a subtree without a git commit.")
+
+        prefix = self.source_prefix(source)
+        source_tree = self.run(["rev-parse", f"{head}:{prefix}"]).stdout.strip()
+        split_tree = self.run(["rev-parse", f"{split_sha}^{{tree}}"]).stdout.strip()
+        if source_tree != split_tree:
+            raise ValueError(
+                f"Cannot rejoin {source.source_id}: split tree does not match "
+                "the shared source."
+            )
+
+        head_tree = self.run(["rev-parse", f"{head}^{{tree}}"]).stdout.strip()
+        trailers = "\n".join(
+            [
+                f"git-subtree-dir: {prefix}",
+                f"git-subtree-mainline: {head}",
+                f"git-subtree-split: {split_sha}",
+            ]
+        )
+        commit = self.run(
+            [
+                "commit-tree",
+                head_tree,
+                "-p",
+                head,
+                "-p",
+                split_sha,
+                "-m",
+                subject,
+                "-m",
+                trailers,
+            ]
+        ).stdout.strip()
+        self.run(["update-ref", "-m", subject, "HEAD", commit, head])
 
     def remote_exists(self, url: str) -> bool:
         return self.run(["ls-remote", url], check=False).returncode == 0
@@ -159,7 +276,7 @@ class CollectionGit:
         target_ref: str,
         *,
         check: bool = True,
-    ) -> subprocess.CompletedProcess:
+    ) -> subprocess.CompletedProcess[str]:
         return self.run(["push", url, f"{source_ref}:{target_ref}"], check=check)
 
     def source_prefix(self, source: DeckSource) -> str:
@@ -180,7 +297,7 @@ class CollectionGit:
                 seen.add(rel_path)
         return rel_paths
 
-    def _run_subtree(self, source: DeckSource, action: str) -> None:
+    def _run_subtree(self, source: DeckSource, action: str, message: str) -> None:
         if source.github_url is None:
             raise ValueError(f"Cannot derive GitHub URL for {source.display_name}")
         self.refresh_index()
@@ -190,10 +307,33 @@ class CollectionGit:
                 action,
                 "--prefix",
                 self.source_prefix(source),
+                "--message",
+                message,
                 source.github_url,
                 SHARED_BRANCH,
             ],
         )
+
+    def _stash_non_source_changes(self, source: DeckSource) -> bool:
+        prefix = self.source_prefix(source)
+        pathspec = [".", f":(exclude){prefix}", f":(exclude){prefix}/**"]
+        status = self.run(
+            ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspec]
+        )
+        if not status.stdout:
+            return False
+        self.run(
+            [
+                "stash",
+                "push",
+                "--include-untracked",
+                "--message",
+                f"AnkiOps: preserve private changes while updating {source.source_id}",
+                "--",
+                *pathspec,
+            ]
+        )
+        return True
 
 
 def git_snapshot(

@@ -89,17 +89,16 @@ def ensure_create_repo(
     _create_github_repo(repo, source, public=public)
 
 
-def open_pr_if_possible(repo: CollectionGit, source: DeckSource, branch: str) -> None:
+def open_pr_if_possible(
+    repo: CollectionGit,
+    source: DeckSource,
+    branch: str,
+    *,
+    title: str,
+) -> bool:
     if source.github_url is None:
         logger.info("Prepared branch %s. Push it and open a PR manually.", branch)
-        return
-    if shutil.which("gh") is None:
-        logger.info(
-            "Prepared branch %s. Push it to %s and open a PR manually.",
-            branch,
-            source.github_url,
-        )
-        return
+        return False
     push = repo.push_ref(source.github_url, branch, branch, check=False)
     if push.returncode != 0:
         logger.info(
@@ -108,7 +107,15 @@ def open_pr_if_possible(repo: CollectionGit, source: DeckSource, branch: str) ->
             source.github_url,
         )
         logger.debug(push.stderr)
-        return
+        return False
+
+    if shutil.which("gh") is None:
+        logger.info(
+            "Pushed branch %s to %s. Open a PR manually.",
+            branch,
+            source.github_url,
+        )
+        return True
 
     gh = subprocess.run(
         [
@@ -121,7 +128,10 @@ def open_pr_if_possible(repo: CollectionGit, source: DeckSource, branch: str) ->
             branch,
             "--base",
             SHARED_BRANCH,
-            "--fill",
+            "--title",
+            title,
+            "--body",
+            f"Submitted by AnkiOps from {source.source_id}.",
         ],
         cwd=repo.collection_dir,
         text=True,
@@ -133,3 +143,4 @@ def open_pr_if_possible(repo: CollectionGit, source: DeckSource, branch: str) ->
     else:
         logger.info("Pushed branch %s. Open the PR manually.", branch)
         logger.debug(gh.stderr)
+    return True

@@ -83,6 +83,30 @@ def _ensure_submittable_note_keys(source: DeckSource) -> None:
         raise ValueError(format_missing_note_keys_error(len(missing)))
 
 
+def _ensure_compatible_history(repo: CollectionGit, source: DeckSource) -> None:
+    if not repo.has_subtree_metadata(source):
+        raise ValueError(
+            f"Shared source {source.source_id} has incompatible git history. "
+            "Recreate or re-add it with this AnkiOps version."
+        )
+
+
+def _remote_state(repo: CollectionGit, source: DeckSource) -> tuple[str, str, str]:
+    remote_head = repo.fetch_source_head(source)
+    split_sha = repo.split_subtree(source)
+    if split_sha == remote_head:
+        return remote_head, split_sha, "current"
+    if repo.is_ancestor(split_sha, remote_head):
+        return remote_head, split_sha, "remote_ahead"
+    if repo.trees_equal(split_sha, remote_head):
+        return remote_head, split_sha, "same_tree"
+    if repo.is_ancestor(remote_head, split_sha):
+        return remote_head, split_sha, "local_ahead"
+    if repo.has_common_ancestor(split_sha, remote_head):
+        return remote_head, split_sha, "diverged"
+    return remote_head, split_sha, "incompatible"
+
+
 def run_create(args) -> None:
     collection_dir = require_collection_dir()
     source = _source_for_slug(collection_dir, args.repo)
@@ -134,8 +158,15 @@ def run_update(args) -> None:
         logger.info("No shared sources found.")
         return
     for source in targets:
-        repo.subtree_pull(source)
-        logger.info("Updated %s", source.source_id)
+        _ensure_compatible_history(repo, source)
+    for source in targets:
+        if repo.subtree_pull(source):
+            logger.info("Updated %s", source.source_id)
+        else:
+            logger.info(
+                "%s is already up to date.",
+                source.github_slug or source.source_id,
+            )
 
 
 def run_submit(args) -> None:
@@ -146,12 +177,108 @@ def run_submit(args) -> None:
     if not source.root.exists():
         raise ValueError(f"Unknown shared source: {source.source_id}")
     _ensure_submittable_note_keys(source)
-    repo.commit_paths(
-        [source.root],
-        f"AnkiOps: submit {source.source_id}",
+    _ensure_compatible_history(repo, source)
+    title = getattr(args, "message", None) or f"Update shared deck {args.repo}"
+    shared_changes = repo.status_lines([repo.source_prefix(source)])
+    if shared_changes and not getattr(args, "commit", False):
+        raise ValueError(
+            f"Shared source {args.repo} has uncommitted changes. Review them with "
+            f"'ankiops shared status {args.repo}', commit them yourself, or re-run "
+            "with '--commit'."
+        )
+    if shared_changes:
+        repo.commit_paths(
+            [source.root],
+            f"AnkiOps: {title}",
+        )
+    _remote_head, split_sha, remote_state = _remote_state(repo, source)
+    if remote_state in {"current", "remote_ahead", "same_tree"}:
+        logger.info("No shared changes to submit for %s.", args.repo)
+        return
+    if remote_state == "incompatible":
+        raise ValueError(
+            f"Shared source {source.source_id} has incompatible git history. "
+            "Recreate or re-add it with this AnkiOps version."
+        )
+    repo.rejoin_subtree(
+        source,
+        split_sha,
+        f"AnkiOps: record submission history for {source.source_id}",
     )
-    branch = repo.subtree_split(source)
-    open_pr_if_possible(repo, source, branch)
+    branch = repo.create_temp_branch(source, split_sha)
+    pushed = open_pr_if_possible(repo, source, branch, title=title)
+    if pushed:
+        repo.delete_branch_if_exists(branch)
+
+
+def run_status(args) -> None:
+    collection_dir = require_collection_dir()
+    repo = CollectionGit(collection_dir)
+    source = _source_for_slug(collection_dir, args.repo)
+    repo.ensure_repo("Shared commands require a git-backed collection.")
+    if not source.root.exists():
+        raise ValueError(f"Unknown shared source: {source.source_id}")
+    _ensure_compatible_history(repo, source)
+
+    prefix = repo.source_prefix(source)
+    shared_changes = repo.status_lines([prefix])
+    private_changes = repo.status_lines(
+        [".", f":(exclude){prefix}", f":(exclude){prefix}/**"]
+    )
+    _remote_head, _split_sha, remote_state = _remote_state(repo, source)
+
+    logger.info("Shared source: %s", args.repo)
+    _log_status_changes("Shared changes", shared_changes)
+    _log_status_changes("Private changes", private_changes, preserved=True)
+    logger.info("Remote: %s", _remote_status_message(remote_state))
+    logger.info(
+        "Submit: %s",
+        _submit_status_message(args.repo, shared_changes, remote_state),
+    )
+
+
+def _log_status_changes(
+    label: str,
+    changes: list[str],
+    *,
+    preserved: bool = False,
+) -> None:
+    suffix = " (preserved)" if preserved and changes else ""
+    logger.info("%s: %d%s", label, len(changes), suffix)
+    for change in changes:
+        logger.info("  %s", change)
+
+
+def _remote_status_message(state: str) -> str:
+    return {
+        "current": "Committed shared state matches GitHub main.",
+        "remote_ahead": "GitHub main is ahead of the committed shared state.",
+        "same_tree": "Committed shared content matches GitHub main; history differs.",
+        "local_ahead": "Committed shared state has changes not on GitHub main.",
+        "diverged": "Committed shared state and GitHub main have both advanced.",
+        "incompatible": (
+            "Committed shared history has no common ancestor with GitHub main."
+        ),
+    }[state]
+
+
+def _submit_status_message(
+    slug: str,
+    shared_changes: list[str],
+    remote_state: str,
+) -> str:
+    if shared_changes:
+        return (
+            "blocked by uncommitted shared files; commit them yourself or run "
+            f"'ankiops shared submit {slug} --commit'."
+        )
+    if remote_state in {"current", "same_tree"}:
+        return "no-op; there are no shared changes to submit."
+    if remote_state == "remote_ahead":
+        return f"no-op; run 'ankiops shared update {slug}' to receive GitHub changes."
+    if remote_state in {"local_ahead", "diverged"}:
+        return "will open a pull request."
+    return "blocked by incompatible history; recreate or re-add this source."
 
 
 def run_list(args) -> None:
@@ -181,6 +308,8 @@ def run(args) -> None:
             run_update(args)
         case "submit":
             run_submit(args)
+        case "status":
+            run_status(args)
         case "list":
             run_list(args)
         case _:
