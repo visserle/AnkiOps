@@ -4,7 +4,9 @@
 
 AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor.
 
-## Features
+There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors a full Anki collection in a folder of your choice, where each deck becomes a a Markdown file, and Media and note type definitions are stored along with it. Having your collection represented in the filesystem allows for straight-forward version control, automation, and collaboration.
+
+## Features at a Glance
 
 - **User-friendly**: Edit Anki decks as highly readable Markdown files
 - **Synchronization**: Two-way synchronization of notes, note types, decks and media between Anki and the filesystem
@@ -13,8 +15,6 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 - **Collaboration**: Share decks on GitHub and collaborate with others
 
 ## How It Works
-
-There is a joke in software engineering that eventually every filesystem grows into a database, and every database grows into a filesystem, as both approaches have their merits. AnkiOps enables the filesystem solution for Anki. It mirrors a full Anki collection in a folder of your choice. Each deck becomes a a Markdown file. Media and note type definitions are stored along with it. Having your collection represented in the filesystem allows for straight-forward version control, automation, and collaboration.
 
 ### Markdown Files
 
@@ -128,7 +128,7 @@ Both commands create a automatic Git snapshot before syncing.
 
 ### Add-On
 
-The AnkiOps add-on provides toolbar buttons for `af` and `fa`, and it enables AnkiOpsConnect, which AnkiOps uses for operations that AnkiConnect cannot perform. If you do not want to install the add-on, you can still use AnkiOps with AnkiConnect (though AnkiOpsConnect is much faster).
+The AnkiOps add-on provides toolbar buttons for `af` and `fa`, and it enables AnkiOpsConnect, which AnkiOps uses for operations needed for sharing. If you do not want to install the add-on, you can still use AnkiOps with AnkiConnect (though AnkiOpsConnect is faster).
 
 ![alt text](toolbar.png)
 
