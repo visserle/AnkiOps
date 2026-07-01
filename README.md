@@ -4,14 +4,12 @@
 
 AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways.
 
-
 ## Advantages
-There is a joke among software engineers that eventually every filesystem grows into a database, and every database grows into a filesystem. Both approaches have their merits. AnkiOps enables the filesystem solution for the Anki database. It mirrors a full collection in a folder of your choice, where each deck becomes a Markdown file, and media and note-type definitions are stored along with it. Having your collection represented in the filesystem enables straightforward version control, automation, and collaboration.
 
 - **User-friendly**: Edit Anki decks as highly readable Markdown files
 - **Full Anki support**: Two-way synchronization of notes, note types, decks and media between Anki and the filesystem
 - **Customization**: Define your own note types and card templates
-- **Performance**: AnkiOps can sync thousands of notes in under a second
+- **Performance**: Sync thousands of notes in under a second
 - **Collaboration**: Share decks on GitHub and collaborate with others
 
 ## How It Works
@@ -165,6 +163,10 @@ ankiops af
 ```
 
 ## FAQ
+
+### Why should I use AnkiOps?
+
+There is a joke among software engineers that eventually every filesystem grows into a database, and every database grows into a filesystem. Both approaches have their merits. AnkiOps enables the filesystem solution for the Anki database. It mirrors a full collection in a folder of your choice, where each deck becomes a Markdown file, and media and note-type definitions are stored along with it. Having your collection represented in the filesystem enables straightforward version control, automation, and collaboration.
 
 ### How is this different from other Markdown tools?
 
