@@ -113,7 +113,7 @@ Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` 
 
 ### Synchronization
 
-AnkiOps has two main sync commands that run an automatic Git snapshot before writing changes:
+AnkiOps has two main sync commands:
 
 | Command | Direction | Use it when |
 | --- | --- | --- |
