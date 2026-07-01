@@ -78,6 +78,9 @@ The file name maps to the Anki deck name, where `__` becomes the subdeck delimit
 
 ### Note Types
 
+> [!NOTE]
+> AnkiOps only acts on note types defined within the `note_types/` folder.
+
 AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. `Q:` for Question, `A:` for Answer). These labels are defined in `note_type.yaml` for each note type. Using the default, a note with `Q:` and `A:` labels is an `AnkiOpsQA` note type. `note_type.yaml` defines field names, field labels, card templates, and which labels identify the note type.
 
 ```text
@@ -107,9 +110,6 @@ Note types are fully customizable. Built-in note types include:
 | `AnkiOpsImageOcclusion` | `IO_*:` labels for image occlusion fields | For comprehensiveness (awkward to manage in Markdown) |
 
 Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` that stores the `note_key` value and should be left unchanged. Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually.
-
-> [!NOTE]
-> AnkiOps only acts on note types defined within the `note_types/` folder.
 
 ### Synchronization
 
