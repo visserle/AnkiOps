@@ -19,23 +19,28 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 In a deck file, each note is separated by a blank line, three dashes, and another blank line:
 
 ```markdown
-Q: How are the 86 billion neurons distributed across the human brain?
-A: - Cerebellum: 80% (69 billion neurons)
-- Cerebral Cortex: 19% (16 billion neurons)
-- Subcortical Areas and Brainstem: 1% (<1 billion neurons)
-E: --> The cerebellum contains the majority, despite being only about 10% of brain mass.
-
-![human brain](media/human-brain.png){width=500}
-
----
-
-<!-- tags: psychology brain -->
-T: The {{c1::corpus callosum}} connects the left and right cerebral hemispheres.
-E: Cutting it can stop information from passing directly between the hemispheres.
+Q: Question text here
+A: Answer text here:
+- List item 1
+- List item 2
+E: Extra information (optional)
+M: Content behind a "more" button (optional)
 
 ---
 
-...
+T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
+E: Some *formatted* extra info.
+
+![image with set width](im.png){width=700}
+
+---
+
+<!-- tags: exam-question -->
+Q: What is this?
+C1: A multiple choice note
+C2: with
+C3: automatically randomized answers.
+A: 1, 3
 ```
 
 You can use any Markdown syntax (except a horizontal rule) in the note content, including italics, bold text, lists, tables, images, code blocks, math equations, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
@@ -43,26 +48,37 @@ You can use any Markdown syntax (except a horizontal rule) in the note content, 
 After the first sync, AnkiOps adds metadata comments for each note:
 
 ```markdown
-<!-- note_key: 1a2b3c4d5e6f -->
+<!-- note_key: 123487556abc -->
 <!-- note_type: AnkiOpsQA -->
-Q: How are the 86 billion neurons distributed across the human brain?
-A: - Cerebellum: 80% (69 billion neurons)
-- Cerebral Cortex: 19% (16 billion neurons)
-- Subcortical Areas and Brainstem: 1% (<1 billion neurons)
-E: --> The cerebellum contains the majority, despite being only about 10% of brain mass.
-
-![human brain](media/human-brain.png){width=500}
+Q: Question text here
+A: Answer text here:
+- List item 1
+- List item 2
+E: Extra information (optional)
+M: Content behind a "more" button (optional)
 
 ---
 
-<!-- note_key: 8f2c1a7b9d0e -->
+<!-- note_key: 123474567def -->
 <!-- note_type: AnkiOpsCloze -->
-<!-- tags: psychology brain -->
-T: The {{c1::corpus callosum}} connects the left and right cerebral hemispheres.
-E: Cutting it can stop information from passing directly between the hemispheres.
+T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
+E: Some *formatted* extra info.
+
+![image with set width](im.png){width=700}
+
+---
+
+<!-- note_key: 123473457ghi -->
+<!-- note_type: AnkiOpsChoice -->
+<!-- tags: exam-question -->
+Q: What is this?
+C1: A multiple choice note
+C2: with
+C3: automatically randomized answers.
+A: 1, 3
 ```
 
-The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is added just for the user's reference. Neither comment should be edited by hand (in contrast to the `tags` comment, which is user-editable and synced with Anki).
+The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is added just for the user's reference. Neither comment should be edited by hand. The `tags` comment  is user-editable and synced with Anki's tags.
 
 ### Collection Structure
 
@@ -83,25 +99,9 @@ The `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` value
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder.
 
-AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. `Q:` for Question, `A:` for Answer). These labels are defined in `note_type.yaml` for each note type. By default, a note with `Q:` and `A:` labels is an `AnkiOpsQA` note type. `note_type.yaml` defines field names, field labels, card templates, and which labels identify the note type.
+AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. `Q:` for Question, `A:` for Answer). These labels are defined in `note_type.yaml` for each note type. By default, a note with `Q:` and `A:` labels is an `AnkiOpsQA` note type. `note_type.yaml` defines field names, field labels, card templates, and which labels identify the note type. Note types are fully customizable. 
 
-```text
-note_types/
-  AnkiOpsQA/
-    Front.template.anki
-    Back.template.anki
-    note_type.yaml
-  AnkiOpsCloze/
-    Front.template.anki
-    Back.template.anki
-    note_type.yaml
-  AnkiOpsStyling.css
-  SyntaxHighlighting.css
-```
-
-Note types are fully customizable. Built-in note types include:
-
-| Note type | Identifying labels | 
+| Default note type | Identifying labels | 
 | --- | --- | 
 | `AnkiOpsQA` | `Q:`, `A:` | 
 | `AnkiOpsCloze` | `T:` | 
@@ -111,7 +111,7 @@ Note types are fully customizable. Built-in note types include:
 | `AnkiOpsChoice` | `Q:`, choice labels such as `C1:`, plus `A:`  |
 | `AnkiOpsImageOcclusion` | `IO_*:` labels for image occlusion fields |
 
-Every Anki note managed by AnkiOps has an additional field called `AnkiOps Key` that stores the `note_key` value and should never be edited manually. Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually.
+Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually. All notes managed by AnkiOps have an additional field called `AnkiOps Key` that stores the `note_key` in Anki. 
 
 ### Synchronization
 
