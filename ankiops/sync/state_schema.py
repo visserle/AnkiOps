@@ -3,10 +3,12 @@ DB_SCHEMA: dict[str, str] = {
 CREATE TABLE note_state (
     note_key TEXT PRIMARY KEY,
     note_id INTEGER NOT NULL UNIQUE,
+    source_id TEXT NOT NULL DEFAULT 'local',
     import_md_hash TEXT,
     import_anki_hash TEXT,
     export_md_hash TEXT,
     export_anki_hash TEXT,
+    CHECK (source_id <> ''),
     CHECK (
         (import_md_hash IS NULL) = (import_anki_hash IS NULL)
     ),
@@ -18,7 +20,10 @@ CREATE TABLE note_state (
     "deck_map": """
 CREATE TABLE deck_map (
     deck_id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    source_id TEXT NOT NULL DEFAULT 'local',
+    md_path TEXT,
+    CHECK (source_id <> '')
 )
 """,
     "app_state": """
@@ -36,6 +41,32 @@ CREATE TABLE app_state (
     )
 )
 """,
+    "source_sync_state": """
+CREATE TABLE source_sync_state (
+    source_id TEXT PRIMARY KEY,
+    applied_tree_hash TEXT,
+    applied_commit TEXT,
+    CHECK (source_id <> '')
+)
+""",
+    "shared_operations": """
+CREATE TABLE shared_operations (
+    source_id TEXT PRIMARY KEY,
+    operation_id TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    base_commit TEXT,
+    head_commit TEXT,
+    recovery_ref TEXT,
+    publish_branch TEXT,
+    pushed_sha TEXT,
+    pr_url TEXT,
+    last_error TEXT,
+    CHECK (operation_id <> ''),
+    CHECK (kind <> ''),
+    CHECK (state <> '')
+)
+""",
     "markdown_media_cache": """
 CREATE TABLE markdown_media_cache (
     md_path TEXT PRIMARY KEY,
@@ -46,12 +77,15 @@ CREATE TABLE markdown_media_cache (
 """,
     "media_files": """
 CREATE TABLE media_files (
-    name TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL DEFAULT 'local',
+    name TEXT NOT NULL,
     mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
     size INTEGER NOT NULL CHECK (size >= 0),
     digest TEXT NOT NULL CHECK (digest <> ''),
     hashed_name TEXT NOT NULL CHECK (hashed_name <> ''),
-    pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> '')
+    pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> ''),
+    PRIMARY KEY (source_id, name),
+    CHECK (source_id <> '')
 )
 """,
 }

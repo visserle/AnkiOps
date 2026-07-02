@@ -1,15 +1,18 @@
-"""Deck source discovery for local and GitHub-shared decks."""
+"""Deck source identity and collection source loading."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+
+from blake3 import blake3
 
 from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.note_types import NoteType, load_note_types
 
+LOCAL_SOURCE_ID = "local"
 SHARED_DIR = "shared"
-SHARED_BRANCH = "main"
 RESERVED_MARKDOWN_FILES = {
     "CHANGELOG.MD",
     "CODE_OF_CONDUCT.MD",
@@ -22,46 +25,53 @@ RESERVED_MARKDOWN_FILES = {
 }
 
 
+def _validate_shared_source_id(source_id: str) -> tuple[str, str]:
+    parts = source_id.split("/")
+    if len(parts) != 2 or any(not part or part in {".", ".."} for part in parts):
+        raise ValueError("Expected shared source as owner/repo")
+    if any("\\" in part for part in parts):
+        raise ValueError("Expected shared source as owner/repo")
+    return parts[0], parts[1]
+
+
 @dataclass(frozen=True)
 class DeckSource:
-    """A filesystem root that contributes decks to one logical collection."""
+    """One filesystem source participating in a logical collection."""
 
-    root: Path
+    collection_dir: Path
     source_id: str
-    note_types_dir: Path
-    is_shared: bool = False
 
     @classmethod
-    def local(cls, collection_dir: Path, note_types_dir: Path | None = None):
-        return cls(
-            root=collection_dir,
-            source_id="",
-            note_types_dir=note_types_dir or collection_dir / NOTE_TYPES_DIR,
-            is_shared=False,
-        )
+    def local(cls, collection_dir: Path) -> "DeckSource":
+        return cls(collection_dir=collection_dir, source_id=LOCAL_SOURCE_ID)
 
     @classmethod
-    def shared(cls, collection_dir: Path, owner: str, repo: str):
-        root = collection_dir / SHARED_DIR / owner / repo
-        return cls(
-            root=root,
-            source_id=f"{SHARED_DIR}/{owner}/{repo}",
-            note_types_dir=root / NOTE_TYPES_DIR,
-            is_shared=True,
-        )
+    def shared(cls, collection_dir: Path, source_id: str) -> "DeckSource":
+        _validate_shared_source_id(source_id)
+        return cls(collection_dir=collection_dir, source_id=source_id)
+
+    @property
+    def root(self) -> Path:
+        if not self.is_shared:
+            return self.collection_dir
+        owner, repo = _validate_shared_source_id(self.source_id)
+        return self.collection_dir / SHARED_DIR / owner / repo
+
+    @property
+    def note_types_dir(self) -> Path:
+        return self.root / NOTE_TYPES_DIR
+
+    @property
+    def is_shared(self) -> bool:
+        return self.source_id != LOCAL_SOURCE_ID
 
     @property
     def display_name(self) -> str:
-        return self.source_id or "local"
+        return self.source_id
 
     @property
     def github_slug(self) -> str | None:
-        if not self.is_shared:
-            return None
-        parts = self.source_id.split("/")
-        if len(parts) != 3:
-            return None
-        return f"{parts[1]}/{parts[2]}"
+        return self.source_id if self.is_shared else None
 
     @property
     def github_url(self) -> str | None:
@@ -71,13 +81,13 @@ class DeckSource:
     def scope_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{self.source_id}/"
+        prefix = f"{SHARED_DIR}/{self.source_id}/"
         return name if name.startswith(prefix) else f"{prefix}{name}"
 
     def unscoped_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{self.source_id}/"
+        prefix = f"{SHARED_DIR}/{self.source_id}/"
         return name[len(prefix) :] if name.startswith(prefix) else name
 
     def deck_files(self) -> list[Path]:
@@ -99,21 +109,23 @@ def discover_deck_sources(
     *,
     note_types_dir: Path | None = None,
 ) -> list[DeckSource]:
-    sources = [DeckSource.local(collection_dir, note_types_dir)]
+    """Discover valid nested repositories in the reserved shared directory."""
+    local = DeckSource.local(collection_dir)
     shared_root = collection_dir / SHARED_DIR
-    if not shared_root.exists():
-        return sources
+    if not shared_root.is_dir():
+        return [local]
 
+    shared = []
     for owner_dir in sorted(shared_root.iterdir(), key=lambda path: path.name):
         if not owner_dir.is_dir():
             continue
         for repo_dir in sorted(owner_dir.iterdir(), key=lambda path: path.name):
             if not repo_dir.is_dir():
                 continue
-            sources.append(
-                DeckSource.shared(collection_dir, owner_dir.name, repo_dir.name)
+            shared.append(
+                DeckSource.shared(collection_dir, f"{owner_dir.name}/{repo_dir.name}")
             )
-    return sources
+    return [local, *shared]
 
 
 def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
@@ -129,14 +141,32 @@ def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
 def load_note_types_for_collection(
     collection_dir: Path,
     *,
+    sources: Sequence[DeckSource] | None = None,
     note_types_dir: Path | None = None,
 ) -> list[NoteType]:
-    """Load all note types for a collection, with shared source names scoped."""
-    return [
-        note_type
-        for source in discover_deck_sources(
-            collection_dir,
-            note_types_dir=note_types_dir,
-        )
-        for note_type in load_note_types_for_source(source)
-    ]
+    """Load note types from the explicitly selected collection sources."""
+    selected = (
+        list(sources) if sources is not None else discover_deck_sources(collection_dir)
+    )
+    note_types = []
+    for source in selected:
+        if not source.is_shared and note_types_dir is not None:
+            note_types.extend(load_note_types(note_types_dir))
+        else:
+            note_types.extend(load_note_types_for_source(source))
+    return note_types
+
+
+def source_content_hash(source: DeckSource) -> str:
+    """Hash the visible source tree without reading repository metadata."""
+    digest = blake3()
+    for path in sorted(source.root.rglob("*")):
+        if not path.is_file() or ".git" in path.relative_to(source.root).parts:
+            continue
+        relative = path.relative_to(source.root).as_posix().encode()
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+    return digest.hexdigest()

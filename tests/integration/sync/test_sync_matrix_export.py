@@ -6,7 +6,6 @@ import logging
 
 import pytest
 
-from ankiops.collection import ANKIOPS_DB
 from ankiops.notes import note_fingerprint
 from ankiops.sync.state import SyncState
 from tests.support.assertions import assert_summary
@@ -335,7 +334,7 @@ def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
         assert db.resolve_note_keys([note_id]).get(note_id) == note_key
 
 
-def test_exp_corr_drift_001_recovers_from_corrupt_db_and_rebuilds_mapping(world):
+def test_exp_corr_drift_001_rejects_corrupt_db_without_rebuilding(world):
     """EXP-CORR-DRIFT-001."""
     note_key = "exp-corr-drift-001"
     note_id = world.add_qa_note(
@@ -350,14 +349,11 @@ def test_exp_corr_drift_001_recovers_from_corrupt_db_and_rebuilds_mapping(world)
 
     world.corrupt_db()
 
-    with world.db_session() as recovered_db:
-        result = world.sync_export(recovered_db)
+    with pytest.raises(ValueError, match="does not migrate or recreate"):
+        with world.db_session():
+            pass
 
-        assert_summary(result.summary, created=1, errors=0)
-        assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
-
-    with world.db_session() as check_db:
-        assert check_db.resolve_note_ids([note_key]).get(note_key) == note_id
+    assert note_id in world.mock_anki.notes
 
 
 def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):

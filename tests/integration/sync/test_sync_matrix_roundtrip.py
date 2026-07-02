@@ -145,7 +145,7 @@ def test_rt_run_update_003_directional_cache_isolation(world):
         assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Iso A2"
 
 
-def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_cleanly(world):
+def test_rt_corr_drift_001_corrupt_db_between_cycles_is_rejected(world):
     """RT-CORR-DRIFT-001."""
     world.write_qa_deck("RoundTripCorrupt", [("Corrupt Q", "Corrupt A", None)])
 
@@ -155,15 +155,12 @@ def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_cleanly(world):
 
     world.corrupt_db()
 
-    with world.db_session() as recovered_db:
-        export_result = world.sync_export(recovered_db)
-        assert_summary(export_result.summary, errors=0)
-
-        import_result = world.sync_import(recovered_db)
-        assert_summary(import_result.summary, errors=0)
+    with pytest.raises(ValueError, match="does not migrate or recreate"):
+        with world.db_session():
+            pass
 
     assert len(world.mock_anki.notes) == 1
-    assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
+    assert not (world.root / f"{ANKIOPS_DB}.corrupt").exists()
 
 
 def test_rt_run_delete_001_roundtrip_preserves_delete(world):
@@ -272,7 +269,7 @@ def test_rt_fresh_update_001_export_import_export_keeps_markdown_winner(world):
     ["update", "move"],
     ids=["RT-CORR-UPDATE-001", "RT-CORR-MOVE-001"],
 )
-def test_rt_corr_operations_recover_after_db_corruption(operation, world):
+def test_rt_corr_operations_stop_after_db_corruption(operation, world):
     world.write_qa_deck("RoundTripCorrA", [("Corr Q", "Corr A", None)])
 
     with world.db_session() as db:
@@ -291,20 +288,9 @@ def test_rt_corr_operations_recover_after_db_corruption(operation, world):
 
     world.corrupt_db()
 
-    with world.db_session() as recovered:
-        imp = world.sync_import(recovered)
-
-        if operation == "update":
-            assert_summary(
-                imp.summary, created=0, updated=1, moved=0, deleted=0, errors=0
-            )
-        else:
-            assert_summary(
-                imp.summary, created=0, updated=0, moved=1, deleted=0, errors=0
-            )
-
-        exp = world.sync_export(recovered)
-        assert_summary(exp.summary, errors=0)
+    with pytest.raises(ValueError, match="does not migrate or recreate"):
+        with world.db_session():
+            pass
 
 
 def test_rt_run_conflict_001_last_sync_direction_wins(world):

@@ -1,4 +1,4 @@
-"""Create GitHub shared sources from local decks."""
+"""Publish GitHub shared sources from local decks."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from pathlib import Path
 import yaml
 
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
-from ankiops.deck_sources import SHARED_BRANCH, DeckSource
-from ankiops.git import CollectionGit
+from ankiops.deck_sources import DeckSource
+from ankiops.git import RepositoryGit
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
 from ankiops.media import extract_media_references
 from ankiops.note_types import NoteType, load_note_types
 from ankiops.shared.errors import format_missing_note_keys_error
-from ankiops.shared.hosting import ensure_create_repo
+from ankiops.shared.hosting import GitHubHost
+from ankiops.sync.state import SyncState
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class _CreatePlan:
     files: list[_RenderedCreateFile]
     note_types_used: set[str]
     media_used: set[str]
+    note_keys: set[str]
 
 
 def create_shared_deck(
@@ -40,70 +42,82 @@ def create_shared_deck(
     *,
     public: bool,
 ) -> None:
-    repo = CollectionGit(collection_dir)
-    repo.ensure_repo("Shared commands require a git-backed collection.")
-    if source.root.exists():
-        raise ValueError(f"Shared source already exists: {source.source_id}")
+    root_repo = RepositoryGit(collection_dir)
+    root_repo.ensure_repo("AnkiOps collections require a Git repository at the root.")
+    existing_repo = RepositoryGit(source.root) if source.root.exists() else None
+    if existing_repo is not None and not existing_repo.is_repo():
+        raise ValueError(
+            f"Shared source path exists but is not a Git repository: {source.root}"
+        )
+    if existing_repo is not None:
+        try:
+            _selected_deck_files(collection_dir, deck)
+        except ValueError:
+            return
 
     plan = _prepare_create_plan(collection_dir, deck, source)
-    repo.ensure_clean_index(
-        "Shared create requires a clean git index. Commit or unstage "
-        "existing changes before creating a shared source."
-    )
-    ensure_create_repo(repo, source, public=public)
-
-    initial_head = repo.head()
-    branch: str | None = None
+    host = GitHubHost(collection_dir)
+    host.create_repo(source.source_id, public=public)
+    originals = {
+        rendered.source_path: rendered.source_path.read_bytes()
+        for rendered in plan.files
+    }
     try:
-        touched = _write_create_files(collection_dir, plan)
-        repo.commit_create_move(
-            touched_paths=touched,
-            source_paths=[rendered.source_path for rendered in plan.files],
-            message=f"AnkiOps: create {source.source_id} from {deck}",
+        if existing_repo is None:
+            _write_create_files(collection_dir, plan)
+            shared_repo = RepositoryGit(source.root)
+            shared_repo.init_repo(initial_branch="main")
+            _copy_git_identity(root_repo, shared_repo)
+            shared_repo.checkpoint(f"Publish shared deck {deck}")
+        else:
+            shared_repo = existing_repo
+        shared_repo.set_remote("upstream", str(source.github_url))
+        shared_repo.set_remote("publish", str(source.github_url))
+        shared_repo.push("upstream", "HEAD", "main")
+        shared_repo.ensure_work_branch("ankiops/work", "main")
+
+        _unlink_created_source_files(plan)
+        root_repo.commit_paths(
+            [rendered.source_path for rendered in plan.files],
+            f"Move {deck} into shared source {source.source_id}",
         )
-        split_sha = repo.split_subtree(source)
-        repo.rejoin_subtree(
-            source,
-            split_sha,
-            f"AnkiOps: initialize subtree history for {source.source_id}",
-        )
-        branch = repo.create_temp_branch(source, split_sha)
-        if source.github_url:
-            repo.push_ref(source.github_url, branch, SHARED_BRANCH)
-        repo.delete_branch_if_exists(branch)
-        branch = None
+        _transfer_sync_ownership(collection_dir, plan)
     except Exception:
-        _cleanup_failed_create(repo, plan, initial_head=initial_head, branch=branch)
+        for path, content in originals.items():
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
         raise
 
-    _unlink_created_source_files(plan)
+
+def _copy_git_identity(root_repo: RepositoryGit, shared_repo: RepositoryGit) -> None:
+    for key in ("user.name", "user.email"):
+        value = root_repo.run(["config", "--get", key], check=False).stdout.strip()
+        if value:
+            shared_repo.run(["config", key, value])
 
 
-def _cleanup_failed_create(
-    repo: CollectionGit,
-    plan: _CreatePlan,
-    *,
-    initial_head: str | None = None,
-    branch: str | None = None,
-) -> None:
-    repo.rollback_to(initial_head)
-    repo.delete_branch_if_exists(branch)
-    create_paths = [
-        repo.source_prefix(plan.source),
-        *[repo.rel_path(rendered.source_path) for rendered in plan.files],
-    ]
-    repo.unstage_or_untrack(create_paths)
-    _remove_create_source_root(plan)
-
-
-def _remove_create_source_root(plan: _CreatePlan) -> None:
-    if plan.source.root.exists():
-        shutil.rmtree(plan.source.root)
-    for parent in (plan.source.root.parent, plan.source.root.parent.parent):
-        try:
-            parent.rmdir()
-        except OSError:
-            pass
+def _transfer_sync_ownership(collection_dir: Path, plan: _CreatePlan) -> None:
+    db = SyncState.open(collection_dir)
+    try:
+        note_ids = db.resolve_note_ids(plan.note_keys)
+        db.upsert_note_links(
+            [(note_key, note_id) for note_key, note_id in note_ids.items()],
+            source_id=plan.source.source_id,
+        )
+        for rendered in plan.files:
+            deck_name = file_stem_to_deck_name(rendered.source_path.stem)
+            deck_id = db.resolve_deck_id(deck_name)
+            if deck_id is None:
+                continue
+            db.upsert_deck(
+                deck_name,
+                deck_id,
+                source_id=plan.source.source_id,
+                md_path=str(rendered.target_path.relative_to(collection_dir)),
+            )
+    finally:
+        db.close()
 
 
 def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
@@ -157,7 +171,7 @@ def _prepare_create_plan(
                 missing_note_keys.append(f"{md_file.name} note {index}")
             elif note.note_key in note_keys:
                 raise ValueError(
-                    f"Duplicate note_key in shared create set: {note.note_key}"
+                    f"Duplicate note_key in shared publish set: {note.note_key}"
                 )
             else:
                 note_keys.add(note.note_key)
@@ -171,7 +185,7 @@ def _prepare_create_plan(
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
         raise ValueError(
-            "Unknown note type(s) while creating shared source: "
+            "Unknown note type(s) while publishing shared deck: "
             + ", ".join(unknown_note_types)
         )
 
@@ -182,7 +196,7 @@ def _prepare_create_plan(
     )
     if missing_media:
         raise ValueError(
-            "Cannot create shared source: referenced media file(s) missing: "
+            "Cannot publish shared deck: referenced media file(s) missing: "
             + ", ".join(missing_media)
         )
 
@@ -206,6 +220,7 @@ def _prepare_create_plan(
         files=rendered_files,
         note_types_used=note_types_used,
         media_used=media_used,
+        note_keys=note_keys,
     )
 
 

@@ -1,6 +1,7 @@
 """Collection-level Markdown-to-Anki sync."""
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,12 +43,17 @@ class _SourceDeckFile:
 def _load_source_deck_files(
     collection_dir: Path,
     note_types_dir: Path,
+    sources: Sequence[DeckSource] | None = None,
 ) -> tuple[list[_SourceDeckFile], dict[str, NoteType]]:
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    selected_sources = (
+        list(sources)
+        if sources is not None
+        else discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    )
     note_types_by_name: dict[str, NoteType] = {}
 
     source_deck_files: list[_SourceDeckFile] = []
-    for source in sources:
+    for source in selected_sources:
         note_types = load_note_types_for_source(source)
         note_types_by_name.update(
             {note_type.name: note_type for note_type in note_types}
@@ -115,10 +121,13 @@ def sync_collection_to_anki(
     db_port: SyncState,
     collection_dir: Path,
     note_types_dir: Path,
+    *,
+    sources: Sequence[DeckSource] | None = None,
 ) -> CollectionReport:
     source_deck_files, note_types_by_name = _load_source_deck_files(
         collection_dir,
         note_types_dir,
+        sources,
     )
     _check_deck_ownership(source_deck_files)
 
@@ -130,6 +139,23 @@ def sync_collection_to_anki(
     note_import_fingerprints_by_note_key = db_port.resolve_import_hashes(
         global_note_keys
     )
+    source_by_note_key = {
+        note.note_key: source_deck_file.source.source_id
+        for source_deck_file in source_deck_files
+        for note in source_deck_file.file_state.notes
+        if note.note_key
+    }
+    recorded_sources = db_port.resolve_note_sources(global_note_keys)
+    ownership_conflicts = [
+        f"{note_key}: {recorded_sources[note_key]} -> {source_id}"
+        for note_key, source_id in source_by_note_key.items()
+        if note_key in recorded_sources and recorded_sources[note_key] != source_id
+    ]
+    if ownership_conflicts:
+        raise ValueError(
+            "Cross-source note moves require an explicit sharing operation: "
+            + "; ".join(sorted(ownership_conflicts))
+        )
     pending_import_fingerprints: list[tuple[str, str, str]] = []
 
     with db_port.write_tx():
@@ -219,10 +245,35 @@ def sync_collection_to_anki(
 
         if pending_note_mappings:
             db_port.upsert_note_links(pending_note_mappings)
+        source_links: dict[str, list[tuple[str, int]]] = {}
+        for source_deck_file in source_deck_files:
+            source_id = source_deck_file.source.source_id
+            for note in source_deck_file.file_state.notes:
+                if not note.note_key:
+                    continue
+                note_id = note_ids_by_note_key.get(note.note_key)
+                if note_id:
+                    source_links.setdefault(source_id, []).append(
+                        (note.note_key, note_id)
+                    )
+        for source_id, mappings in source_links.items():
+            db_port.upsert_note_links(mappings, source_id=source_id)
         if pending_import_fingerprints:
             db_port.upsert_import_hashes(pending_import_fingerprints)
 
         flush_deck_metadata_writes(pending_writes)
+
+        for source_deck_file in source_deck_files:
+            deck_file = source_deck_file.file_state
+            deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
+            deck_id = deck_ids_by_name.get(deck_name)
+            if deck_id is not None:
+                db_port.upsert_deck(
+                    deck_name,
+                    deck_id,
+                    source_id=source_deck_file.source.source_id,
+                    md_path=str(deck_file.file_path.relative_to(collection_dir)),
+                )
 
         affected_note_ids = collect_membership_affected_note_ids(results)
         refresh_membership_for_affected_notes(

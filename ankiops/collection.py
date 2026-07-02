@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import shlex
+import sys
 from importlib import resources
 from pathlib import Path
 from urllib.parse import unquote
@@ -92,6 +94,15 @@ def require_collection_dir(active_profile: str | None = None) -> Path:
         )
         raise SystemExit(1)
 
+    from ankiops.git import RepositoryGit
+
+    if not RepositoryGit(collection_dir).is_repo():
+        logger.error(
+            f"AnkiOps collection root is not a Git repository: {collection_dir}. "
+            "Run 'git init' in that directory or initialize a fresh collection."
+        )
+        raise SystemExit(1)
+
     if active_profile is None:
         return collection_dir
 
@@ -109,8 +120,8 @@ def require_collection_dir(active_profile: str | None = None) -> Path:
             logger.error(
                 f"Profile mismatch: collection in {collection_dir} is linked to "
                 f"'{expected_profile}', but Anki has '{active_profile}' "
-                f"open. Switch profiles in Anki, or re-run "
-                f"'ankiops init' to re-link."
+                "open. Nothing was changed. Switch Anki to the linked profile, "
+                f"then retry: {shlex.join(sys.argv)}"
             )
             raise SystemExit(1)
     finally:
@@ -212,6 +223,8 @@ def _setup_gitignore(collection_dir: Path) -> None:
         ANKIOPS_DB,
         f"{ANKIOPS_DB}-shm",
         f"{ANKIOPS_DB}-wal",
+        ".ankiops/",
+        "/shared/",
     ]
     missing = [entry for entry in entries if entry not in content]
     if missing:

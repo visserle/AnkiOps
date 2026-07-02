@@ -143,10 +143,10 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
     decks = {(deck["source"], deck["name"]): deck for deck in result["decks"]}
     assert ("local", "TestDeck") in decks
     assert ("local", "README") not in decks
-    assert ("shared/owner/repo", "Shared") in decks
-    assert ("shared/owner/repo", "README") not in decks
-    assert ("shared/owner/repo", "_draft") in decks
-    shared_note = decks[("shared/owner/repo", "Shared")]["notes"][0]
+    assert ("owner/repo", "Shared") in decks
+    assert ("owner/repo", "README") not in decks
+    assert ("owner/repo", "_draft") in decks
+    shared_note = decks[("owner/repo", "Shared")]["notes"][0]
     assert shared_note["note_type"] == "shared/owner/repo/AnkiOpsQA"
 
 
@@ -171,8 +171,8 @@ def test_serialize_orders_local_before_sorted_shared_sources(
 
     assert [(deck["source"], deck["name"]) for deck in result["decks"]] == [
         ("local", "TestDeck"),
-        ("shared/a-owner/deck", "A"),
-        ("shared/z-owner/deck", "B"),
+        ("a-owner/deck", "A"),
+        ("z-owner/deck", "B"),
     ]
 
 
@@ -521,10 +521,7 @@ def test_deserialize_writes_final_newline(tmp_path, fs):
     )
 
     assert (tmp_path / "NewlineDeck.md").read_text(encoding="utf-8") == (
-        "<!-- note_key: nk-newline -->\n"
-        "<!-- note_type: AnkiOpsQA -->\n"
-        "Q: Q\n"
-        "A: A\n"
+        "<!-- note_key: nk-newline -->\n<!-- note_type: AnkiOpsQA -->\nQ: Q\nA: A\n"
     )
 
 
@@ -537,7 +534,7 @@ def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs)
             {
                 "decks": [
                     _serialized_deck(
-                        source="shared/owner/repo",
+                        source="owner/repo",
                         name="Shared",
                         note_type="shared/owner/repo/AnkiOpsQA",
                     )
@@ -561,7 +558,7 @@ def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, f
             "decks": [
                 _serialized_deck(name="LocalDeck", note_key="local-1"),
                 _serialized_deck(
-                    source="shared/owner/repo",
+                    source="owner/repo",
                     name="SharedDeck",
                     note_key="shared-1",
                     note_type="shared/owner/repo/AnkiOpsQA",

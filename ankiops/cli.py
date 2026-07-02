@@ -190,104 +190,84 @@ def main():
 
     shared_parser = subparsers.add_parser(
         "shared",
-        help="Create, add, update, submit, and list GitHub shared decks",
+        help="Publish, subscribe to, update, and contribute to shared decks",
     )
     shared_subparsers = shared_parser.add_subparsers(
         dest="shared_command",
         required=True,
     )
 
-    shared_create = shared_subparsers.add_parser(
-        "create",
-        help="Create a GitHub shared source from a local deck tree",
+    shared_publish = shared_subparsers.add_parser(
+        "publish",
+        help="Publish an existing local deck as a new GitHub repository",
     )
-    shared_create.add_argument("deck", help="Deck to share (includes subdecks)")
-    shared_create.add_argument(
+    shared_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
+    shared_publish.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    create_visibility = shared_create.add_mutually_exclusive_group()
-    create_visibility.add_argument(
+    publish_visibility = shared_publish.add_mutually_exclusive_group()
+    publish_visibility.add_argument(
         "--public",
         action="store_true",
         help="Create the GitHub repo as public when it does not exist",
     )
-    create_visibility.add_argument(
+    publish_visibility.add_argument(
         "--private",
         action="store_false",
         dest="public",
         help="Create the GitHub repo as private when it does not exist (default)",
     )
-    shared_create.set_defaults(public=False)
-    shared_create.set_defaults(handler=run_shared)
+    shared_publish.set_defaults(public=False)
+    shared_publish.set_defaults(handler=run_shared)
 
-    shared_add = shared_subparsers.add_parser(
-        "add",
-        help="Add a GitHub shared source to this collection",
+    shared_subscribe = shared_subparsers.add_parser(
+        "subscribe",
+        help="Subscribe to a shared deck on GitHub",
     )
-    shared_add.add_argument(
+    shared_subscribe.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    shared_add.set_defaults(handler=run_shared)
+    shared_subscribe.set_defaults(handler=run_shared)
 
     shared_update = shared_subparsers.add_parser(
         "update",
-        help="Update one or all shared sources from GitHub",
+        help="Bring available GitHub changes into shared Markdown files",
     )
     shared_update.add_argument(
         "repo",
         nargs="?",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
-    shared_update.add_argument(
-        "--to-anki",
-        action="store_true",
-        help="Run files -> Anki after updating files",
-    )
     shared_update.set_defaults(handler=run_shared)
 
     shared_submit = shared_subparsers.add_parser(
         "submit",
-        help="Prepare a GitHub PR from local shared source edits",
+        help="Submit a contribution as a GitHub pull request",
     )
     shared_submit.add_argument(
         "repo",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
-    )
-    shared_submit.add_argument(
-        "--from-anki",
-        action="store_true",
-        help="Run Anki -> files before preparing the submission",
     )
     shared_submit.add_argument(
         "--message",
         "-m",
         type=_single_line_text,
-        help="Pull request title; also the commit message with --commit",
-    )
-    shared_submit.add_argument(
-        "--commit",
-        action="store_true",
-        help="Commit dirty shared files before preparing the pull request",
+        help="Pull request title and commit message for new changes",
     )
     shared_submit.set_defaults(handler=run_shared)
 
     shared_status = shared_subparsers.add_parser(
         "status",
-        help="Show local changes, remote state, and the next submit action",
+        help="Preview changes, updates, submissions, and recovery state",
     )
     shared_status.add_argument(
         "repo",
+        nargs="?",
         help="GitHub repo as owner/repo (letters, digits, hyphens)",
     )
     shared_status.set_defaults(handler=run_shared)
-
-    shared_list = shared_subparsers.add_parser(
-        "list",
-        help="Show known shared sources",
-    )
-    shared_list.set_defaults(handler=run_shared)
 
     note_types_parser = subparsers.add_parser(
         "note-types",
@@ -337,7 +317,9 @@ def main():
         print("  deserialize       Deserialize JSON file to Markdown decks")
         print("  fix-image-widths  Normalize or force Markdown image widths")
         print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
-        print("  shared            Create, add, update, submit, and list shared decks")
+        print(
+            "  shared            Publish, subscribe to, update, and contribute to decks"
+        )
         print("  note-types        List note type labels or add note types from Anki")
         print()
         print("Usage examples:")
@@ -368,7 +350,7 @@ def main():
             "  ankiops llm --job latest                     # Show most recent LLM job"
         )
         print("  ankiops llm --job <job_id>                   # Show one LLM job")
-        print("  ankiops shared list                          # Show shared sources")
+        print("  ankiops shared status                        # Check shared decks")
         print(
             "  ankiops note-types                           "
             "# Show note types and label registry"

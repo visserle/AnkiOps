@@ -233,12 +233,9 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
 
     surface = {(item.source, item.note_type): item for item in plan.field_surface}
     assert ("local", "AnkiOpsQA") in surface
-    assert ("shared/owner/repo", "shared/owner/repo/AnkiOpsQA") in surface
+    assert ("owner/repo", "shared/owner/repo/AnkiOpsQA") in surface
     assert surface[("local", "AnkiOpsQA")].candidate_notes == 1
-    assert (
-        surface[("shared/owner/repo", "shared/owner/repo/AnkiOpsQA")].candidate_notes
-        == 1
-    )
+    assert surface[("owner/repo", "shared/owner/repo/AnkiOpsQA")].candidate_notes == 1
 
 
 def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(

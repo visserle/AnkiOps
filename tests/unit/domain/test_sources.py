@@ -20,8 +20,8 @@ def test_discover_deck_sources_includes_local_and_shared(tmp_path):
 
     assert [source.display_name for source in sources] == [
         "local",
-        "shared/other/deck",
-        "shared/owner/repo",
+        "other/deck",
+        "owner/repo",
     ]
     assert sources[1].github_url == "https://github.com/other/deck.git"
     assert sources[2].github_url == "https://github.com/owner/repo.git"
@@ -29,7 +29,7 @@ def test_discover_deck_sources_includes_local_and_shared(tmp_path):
 
 def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path):
     local_source = DeckSource.local(tmp_path)
-    shared_source = DeckSource.shared(tmp_path, "owner", "repo")
+    shared_source = DeckSource.shared(tmp_path, "owner/repo")
     shared_source.root.mkdir(parents=True)
 
     for root in [local_source.root, shared_source.root]:
@@ -59,7 +59,7 @@ def test_ambiguous_deck_file_names_raise(tmp_path):
 
 
 def test_shared_configs_are_scoped_by_source(tmp_path):
-    source = DeckSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner/repo")
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
 
     names = {config.name for config in load_note_types_for_source(source)}
@@ -71,7 +71,7 @@ def test_shared_configs_are_scoped_by_source(tmp_path):
 def test_collection_note_types_include_local_and_scoped_shared_configs(tmp_path):
     harness = DeckFileHarness()
     harness.eject_default_note_types(tmp_path / "note_types")
-    shared_source = DeckSource.shared(tmp_path, "owner", "repo")
+    shared_source = DeckSource.shared(tmp_path, "owner/repo")
     harness.eject_default_note_types(shared_source.note_types_dir)
 
     names = {config.name for config in load_note_types_for_collection(tmp_path)}
@@ -81,7 +81,7 @@ def test_collection_note_types_include_local_and_scoped_shared_configs(tmp_path)
 
 
 def test_shared_note_type_names_are_path_like(tmp_path):
-    source = DeckSource.shared(tmp_path, "owner", "repo")
+    source = DeckSource.shared(tmp_path, "owner/repo")
 
     assert source.scope_note_type_name("AnkiOpsQA") == ("shared/owner/repo/AnkiOpsQA")
     assert source.scope_note_type_name("shared/owner/repo/AnkiOpsQA") == (
@@ -90,3 +90,15 @@ def test_shared_note_type_names_are_path_like(tmp_path):
     assert source.unscoped_note_type_name("shared/owner/repo/AnkiOpsQA") == (
         "AnkiOpsQA"
     )
+
+
+def test_source_location_and_kind_are_derived_from_identity(tmp_path):
+    local = DeckSource.local(tmp_path)
+    shared = DeckSource.shared(tmp_path, "owner/repo")
+
+    assert vars(local) == {"collection_dir": tmp_path, "source_id": "local"}
+    assert vars(shared) == {"collection_dir": tmp_path, "source_id": "owner/repo"}
+    assert local.root == tmp_path
+    assert not local.is_shared
+    assert shared.root == tmp_path / "shared" / "owner" / "repo"
+    assert shared.is_shared

@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -200,6 +201,7 @@ def hash_and_update_references(
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
+    source_id: str = "local",
 ) -> tuple[set[str], dict[str, str]]:
     """Hash files, rename them locally, and update markdown."""
     media_root = collection_dir / LOCAL_MEDIA_DIR
@@ -230,7 +232,9 @@ def hash_and_update_references(
         and not file_path.name.startswith(".")
         and (file_path.name in referenced or file_path.name.startswith("_"))
     ]
-    cached_fingerprints = db_port.resolve_media_fingerprints(cache_candidates)
+    cached_fingerprints = db_port.resolve_media_fingerprints(
+        cache_candidates, source_id=source_id
+    )
 
     # 2. Hash referenced (or already hashed) files
     for file_path in media_files:
@@ -299,9 +303,9 @@ def hash_and_update_references(
             result.errors.append(str(error))
 
     if fingerprint_updates:
-        db_port.upsert_media_fingerprints(fingerprint_updates)
+        db_port.upsert_media_fingerprints(fingerprint_updates, source_id=source_id)
     if fingerprint_removals:
-        db_port.delete_media_files(fingerprint_removals)
+        db_port.delete_media_files(fingerprint_removals, source_id=source_id)
 
     if cache_candidates:
         logger.debug(
@@ -334,6 +338,7 @@ def sync_media_to_anki(
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
+    source_id: str = "local",
 ) -> SyncReport:
     """Push local media to Anki."""
     result = SyncReport.for_media()
@@ -353,6 +358,7 @@ def sync_media_to_anki(
         cache_root=cache_root,
         md_files=md_files,
         prune_cache=prune_cache,
+        source_id=source_id,
     )
     if not media_root.exists():
         return result
@@ -384,8 +390,12 @@ def sync_media_to_anki(
         and (file_path.name in active_refs or file_path.name.startswith("_"))
     ]
     result.checked = len(active_refs)
-    cached_push_state = db_port.resolve_media_push_digests(push_candidates)
-    cached_fingerprints = db_port.resolve_media_fingerprints(push_candidates)
+    cached_push_state = db_port.resolve_media_push_digests(
+        push_candidates, source_id=source_id
+    )
+    cached_fingerprints = db_port.resolve_media_fingerprints(
+        push_candidates, source_id=source_id
+    )
 
     push_state_updates: list[tuple[str, str]] = []
     fingerprint_updates: list[tuple[str, int, int, str, str]] = []
@@ -452,11 +462,11 @@ def sync_media_to_anki(
                 result.errors.append(str(error))
 
     if fingerprint_updates:
-        db_port.upsert_media_fingerprints(fingerprint_updates)
+        db_port.upsert_media_fingerprints(fingerprint_updates, source_id=source_id)
     if push_state_updates:
-        db_port.upsert_media_push_digests(push_state_updates)
+        db_port.upsert_media_push_digests(push_state_updates, source_id=source_id)
     if removed_names:
-        db_port.delete_media_files(removed_names)
+        db_port.delete_media_files(removed_names, source_id=source_id)
 
     if skipped_pushes:
         noun = "file" if skipped_pushes == 1 else "files"
@@ -538,12 +548,17 @@ def sync_all_media_to_anki(
     anki_port: Anki,
     collection_dir: Path,
     db_port: SyncState,
+    *,
+    sources: Sequence[DeckSource] | None = None,
 ) -> SyncReport:
     """Push media from all active sync sources to Anki."""
-    sources = discover_deck_sources(collection_dir)
-    _prune_media_cache_for_sources(db_port, collection_dir, sources)
+    selected_sources = (
+        list(sources) if sources is not None else discover_deck_sources(collection_dir)
+    )
+    _prune_media_cache_for_sources(db_port, collection_dir, selected_sources)
+    managed_before = db_port.list_managed_media()
     combined = SyncReport.for_media()
-    for source in sources:
+    for source in selected_sources:
         source_result = sync_media_to_anki(
             anki_port,
             source.root,
@@ -551,8 +566,36 @@ def sync_all_media_to_anki(
             cache_root=collection_dir,
             md_files=source.deck_files(),
             prune_cache=False,
+            source_id=source.source_id,
         )
         _combine_media_result(combined, source_result)
+
+    active_names: set[str] = set()
+    for source in selected_sources:
+        active_names.update(
+            _collect_referenced_media(
+                db_port,
+                source.root,
+                cache_root=collection_dir,
+                md_files=source.deck_files(),
+                prune_cache=False,
+            )
+        )
+    selected_ids = {source.source_id for source in selected_sources}
+    for source_id, name, pushed_digest in managed_before:
+        if (
+            source_id not in selected_ids
+            or pushed_digest is None
+            or name in active_names
+        ):
+            continue
+        anki_port.delete_media(name)
+        db_port.delete_media_files([name], source_id=source_id)
+        if not any(
+            change.change_type is ChangeType.DELETE and change.entity_repr == name
+            for change in combined.changes
+        ):
+            combined.add_change(Change(ChangeType.DELETE, name, name))
     return combined
 
 
@@ -560,12 +603,16 @@ def sync_all_media_from_anki(
     anki_port: Anki,
     collection_dir: Path,
     db_port: SyncState,
+    *,
+    sources: Sequence[DeckSource] | None = None,
 ) -> SyncReport:
     """Pull referenced media for all active sync sources from Anki."""
-    sources = discover_deck_sources(collection_dir)
-    _prune_media_cache_for_sources(db_port, collection_dir, sources)
+    selected_sources = (
+        list(sources) if sources is not None else discover_deck_sources(collection_dir)
+    )
+    _prune_media_cache_for_sources(db_port, collection_dir, selected_sources)
     combined = SyncReport.for_media()
-    for source in sources:
+    for source in selected_sources:
         source_result = sync_media_from_anki(
             anki_port,
             source.root,

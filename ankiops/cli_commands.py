@@ -6,7 +6,6 @@ import logging
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-from types import SimpleNamespace
 
 from rich.markup import escape as rich_escape
 
@@ -25,8 +24,9 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     load_note_types_for_collection,
+    source_content_hash,
 )
-from ankiops.git import CollectionGit, git_snapshot
+from ankiops.git import CollectionGit, RepositoryGit, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
     apply_deserialization_plan,
@@ -58,31 +58,62 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def _sync_note_types(anki_port, collection_dir, note_types_dir, db_port):
+def _sync_note_types(anki_port, collection_dir, note_types_dir, db_port, sources):
     return sync_note_type_configs(
         anki_port,
-        load_note_types_for_collection(collection_dir, note_types_dir=note_types_dir),
+        load_note_types_for_collection(
+            collection_dir,
+            note_types_dir=note_types_dir,
+            sources=sources,
+        ),
         sync_state=db_port,
     )
-
-
-def _has_shared_sources(collection_dir: Path) -> bool:
-    sources = discover_deck_sources(
-        collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
-    return any(source.is_shared for source in sources)
 
 
 def _snapshot_paths(
     collection_dir: Path,
     scoped_paths: Sequence[Path],
-    *,
-    has_shared_scope: bool = False,
 ) -> list[Path]:
-    if has_shared_scope or _has_shared_sources(collection_dir):
-        return [collection_dir]
     return list(scoped_paths)
+
+
+def _validated_sources(collection_dir: Path) -> list[DeckSource]:
+    sources = discover_deck_sources(collection_dir)
+    for source in sources[1:]:
+        if not RepositoryGit(source.root).is_repo():
+            raise ValueError(
+                f"Shared source directory {source.root} is not an independent Git "
+                "repository. Leave it untouched for inspection and subscribe to "
+                f"{source.source_id} again in a fresh collection path."
+            )
+    return sources
+
+
+def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> None:
+    for source in sources:
+        if not source.is_shared:
+            continue
+        commit = RepositoryGit(source.root).checkpoint(
+            f"AnkiOps: snapshot before {action}"
+        )
+        if commit:
+            logger.info("Auto-committed %s checkpoint %s", source.source_id, commit[:7])
+
+
+def _record_applied_sources(
+    db: SyncState,
+    sources: Sequence[DeckSource],
+) -> None:
+    for source in sources:
+        if not source.is_shared:
+            continue
+        repo = RepositoryGit(source.root)
+        clean_commit = repo.head() if not repo.status_lines() else None
+        db.set_source_applied_state(
+            source.source_id,
+            source_content_hash(source),
+            clean_commit,
+        )
 
 
 def _local_markdown_paths(collection_dir: Path) -> list[Path]:
@@ -144,6 +175,7 @@ def run_af(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+    sources = _validated_sources(collection_dir)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-anki-to-files git snapshot")
@@ -157,7 +189,9 @@ def run_af(args):
                     collection_dir / LOCAL_MEDIA_DIR,
                 ],
             ),
+            strict=True,
         )
+        _checkpoint_shared_sources(sources, "anki-to-files")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     db = SyncState.open(collection_dir)
@@ -169,6 +203,7 @@ def run_af(args):
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
+        sources=sources,
     )
     note_summary = export_summary.summary
     deck_count = len(export_summary.results)
@@ -206,8 +241,9 @@ def run_af(args):
     # Sync referenced media from Anki to local
     try:
         logger.debug("Starting media pull (Anki -> local)")
-        media_result = sync_media_from_anki(anki, collection_dir, db)
+        media_result = sync_media_from_anki(anki, collection_dir, db, sources=sources)
         logger.info(format_media_status(media_result, from_anki=True))
+        _record_applied_sources(db, sources)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -240,6 +276,7 @@ def run_fa(args):
 
     collection_dir = require_collection_dir(active_profile)
     logger.debug(f"Collection directory: {collection_dir}")
+    sources = _validated_sources(collection_dir)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-files-to-anki git snapshot")
@@ -254,7 +291,9 @@ def run_fa(args):
                     collection_dir / NOTE_TYPES_DIR,
                 ],
             ),
+            strict=True,
         )
+        _checkpoint_shared_sources(sources, "files-to-anki")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
@@ -263,13 +302,13 @@ def run_fa(args):
 
     try:
         logger.debug("Starting media push (local -> Anki)")
-        media_result = sync_media_to_anki(anki, collection_dir, db)
+        media_result = sync_media_to_anki(anki, collection_dir, db, sources=sources)
         logger.info(format_media_status(media_result, from_anki=False))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
-    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, db)
+    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, db, sources)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
@@ -279,6 +318,7 @@ def run_fa(args):
         db_port=db,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
+        sources=sources,
     )
     note_summary = import_summary.summary
     deck_count = len(import_summary.results)
@@ -328,6 +368,8 @@ def run_fa(args):
             "Review and resolve errors above, then re-run files -> Anki — "
             "or you risk losing notes with the next Anki -> files sync."
         )
+    else:
+        _record_applied_sources(db, sources)
 
 
 def run_serialize(args):
@@ -385,7 +427,6 @@ def run_deserialize(args):
             paths=_snapshot_paths(
                 collection_dir,
                 deserialize_plan.target_paths,
-                has_shared_scope=deserialize_plan.has_shared_sources,
             ),
         )
     else:
@@ -482,11 +523,7 @@ def run_note_type(args):
 
 def run_shared(args):
     try:
-        if getattr(args, "shared_command", None) == "submit" and args.from_anki:
-            run_af(SimpleNamespace(no_auto_commit=True))
         run_shared_impl(args)
-        if getattr(args, "shared_command", None) == "update" and args.to_anki:
-            run_fa(SimpleNamespace(no_auto_commit=False))
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error

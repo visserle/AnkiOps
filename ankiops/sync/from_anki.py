@@ -1,6 +1,7 @@
 """Use Case: Export Anki Notes to Markdown."""
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from ankiops.anki import Anki
@@ -535,12 +536,18 @@ def sync_collection_from_anki(
     db_port: SyncState,
     collection_dir: Path,
     note_types_dir: Path,
+    *,
+    sources: Sequence[DeckSource] | None = None,
 ) -> CollectionReport:
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    local_source = sources[0]
+    selected_sources = (
+        list(sources)
+        if sources is not None
+        else discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    )
+    local_source = selected_sources[0]
     configs = [
         config
-        for source in sources
+        for source in selected_sources
         for config in load_note_types_for_source(source)
     ]
     config_by_name = {config.name: config for config in configs}
@@ -588,7 +595,7 @@ def sync_collection_from_anki(
         source_by_file: dict[Path, DeckSource] = {}
         file_map_by_deck_name: dict[str, tuple[DeckSource, Path]] = {}
         deck_conflicts: list[str] = []
-        for source in sources:
+        for source in selected_sources:
             for md_file in source.deck_files():
                 md_files.append(md_file)
                 source_by_file[md_file] = source
@@ -608,7 +615,47 @@ def sync_collection_from_anki(
                 + "; ".join(deck_conflicts)
             )
 
+        source_by_id = {source.source_id: source for source in selected_sources}
+        ownership_conflicts = []
+        all_anki_note_keys = {
+            note_keys_by_id.get(note.note_id)
+            or note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+            for notes in notes_by_deck.values()
+            for note in notes
+        }
+        recorded_sources = db_port.resolve_note_sources(
+            key for key in all_anki_note_keys if key
+        )
+        for deck_name, notes in notes_by_deck.items():
+            deck_id = deck_ids_by_name[deck_name]
+            current_entry = file_map_by_deck_name.get(deck_name)
+            target_source = current_entry[0] if current_entry else None
+            if target_source is None:
+                old_name = db_port.resolve_deck_name(deck_id)
+                old_entry = file_map_by_deck_name.get(old_name or "")
+                target_source = old_entry[0] if old_entry else None
+            if target_source is None:
+                recorded_deck_source = db_port.resolve_deck_source(deck_id)
+                target_source = source_by_id.get(recorded_deck_source or "")
+            target_source = target_source or local_source
+            for note in notes:
+                note_key = (
+                    note_keys_by_id.get(note.note_id)
+                    or note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+                )
+                owner = recorded_sources.get(note_key)
+                if note_key and owner and owner != target_source.source_id:
+                    ownership_conflicts.append(
+                        f"{note_key}: {owner} -> {target_source.source_id}"
+                    )
+        if ownership_conflicts:
+            raise ValueError(
+                "Cross-source note moves require an explicit sharing operation: "
+                + "; ".join(sorted(ownership_conflicts))
+            )
+
         results = []
+        source_by_deck_name: dict[str, DeckSource] = {}
         protected_note_groups: list[ProtectedNoteGroup] = []
 
         for deck_name, notes in notes_by_deck.items():
@@ -636,6 +683,7 @@ def sync_collection_from_anki(
                 deck_name,
                 (local_source, None),
             )
+            source_by_deck_name[deck_name] = target_source
 
             sync_result = _sync_deck(
                 deck_name,
@@ -650,7 +698,16 @@ def sync_collection_from_anki(
                 note_export_fingerprints_by_note_key,
                 pending_export_fingerprints,
             )
-            db_port.upsert_deck(deck_name, deck_id)
+            db_port.upsert_deck(
+                deck_name,
+                deck_id,
+                source_id=target_source.source_id,
+                md_path=(
+                    str(sync_result.file_path.relative_to(collection_dir))
+                    if sync_result.file_path
+                    else None
+                ),
+            )
             results.append(sync_result)
             if sync_result.protected_keyless_notes:
                 protected_note_groups.append(
@@ -662,6 +719,20 @@ def sync_collection_from_anki(
 
         if pending_note_mappings:
             db_port.upsert_note_links(pending_note_mappings)
+        pending_by_key = dict(pending_note_mappings)
+        for deck_name, notes in notes_by_deck.items():
+            owner_source = source_by_deck_name.get(deck_name)
+            if owner_source is None:
+                continue
+            mappings: list[tuple[str, int]] = []
+            for note in notes:
+                note_key = note_keys_by_id.get(note.note_id)
+                if not note_key:
+                    note_key = note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+                if note_key:
+                    note_id = pending_by_key.get(note_key, note.note_id)
+                    mappings.append((note_key, note_id))
+            db_port.upsert_note_links(mappings, source_id=owner_source.source_id)
         if pending_export_fingerprints:
             db_port.upsert_export_hashes(pending_export_fingerprints)
 

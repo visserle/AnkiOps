@@ -35,6 +35,9 @@ class _FakeMediaAnki:
         local_path.write_bytes(source.read_bytes())
         return True
 
+    def delete_media(self, remote_filename: str) -> None:
+        (self._media_dir / remote_filename).unlink(missing_ok=True)
+
 
 def _sync_to_anki(collection_dir: Path, anki: _FakeMediaAnki):
     db = SyncState.open(collection_dir)
@@ -84,6 +87,29 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path)
     assert f"media/{shared_names[0]}" in (shared_root / "SharedDeck.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_sync_all_media_deletes_unreferenced_managed_anki_media(tmp_path):
+    media_dir = tmp_path / LOCAL_MEDIA_DIR
+    media_dir.mkdir()
+    (media_dir / "remove.png").write_bytes(b"managed image")
+    deck = tmp_path / "Deck.md"
+    deck.write_text("Q: media\nA: ![remove](media/remove.png)\n", encoding="utf-8")
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
+    db = SyncState.open(tmp_path)
+    try:
+        sync_all_media_to_anki(anki, tmp_path, db)
+        managed_name = next(path.name for path in anki_media_dir.iterdir())
+        deck.write_text("Q: media\nA: removed\n", encoding="utf-8")
+
+        result = sync_all_media_to_anki(anki, tmp_path, db)
+    finally:
+        db.close()
+
+    assert not (anki_media_dir / managed_name).exists()
+    assert result.summary.deleted == 1
 
 
 def test_sync_media_to_anki_does_not_rewrite_readme_references(tmp_path):

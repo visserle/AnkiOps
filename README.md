@@ -204,44 +204,46 @@ Serialize a collection (or one deck tree) to portable JSON and deserialize it ba
 
 ## How does sharing work? (experimental)
 
-Shared decks are experimental. They use Git subtree operations and GitHub repositories.
+Shared decks are ordinary GitHub repositories cloned inside the collection. The
+collection root remains one VS Code workspace, while VS Code shows each shared
+source as its own repository.
 
-Create a shared source from a local deck tree:
+Publish a local deck tree:
 
 ```bash
-ankiops shared create "Psychology" owner/psychology-deck
+ankiops shared publish "Psychology" owner/psychology-deck
 ```
 
-`shared create` requires a Git-backed collection, a clean Git index, and `note_key` metadata on every selected note. It copies the selected deck files, referenced media, and used note types into `shared/<owner>/<repo>/`, scopes the note types, commits the move, and pushes the subtree to GitHub. New GitHub repositories are private unless you pass `--public`.
+`shared publish` requires stable `note_key` metadata and authenticated GitHub CLI.
+It moves the selected deck tree into `shared/<owner>/<repo>/`, copies referenced
+media and note types, creates an independent repository, and pushes it to GitHub.
+New repositories are private unless you pass `--public`.
 
-Add and update a shared source:
+Subscribe to and update a shared deck:
 
 ```bash
-ankiops shared add owner/psychology-deck
-ankiops shared update owner/psychology-deck --to-anki
+ankiops shared subscribe owner/psychology-deck
+ankiops shared update owner/psychology-deck
+ankiops fa
 ```
 
 Submit local shared edits:
 
 ```bash
 ankiops shared status owner/psychology-deck
-ankiops shared submit owner/psychology-deck --from-anki \
-  --message "Clarify attention terminology" --commit
+ankiops shared submit owner/psychology-deck \
+  --message "Clarify attention terminology"
 ```
 
-`shared status` shows dirty shared and private files, compares committed shared
-history with GitHub, and explains exactly what `submit` will do. `submit` never
-commits dirty shared files unless you explicitly pass `--commit`; you can instead
-commit them yourself first. The optional message becomes the pull request title
-and, with `--commit`, the Git commit subject. When you omit it, AnkiOps uses
-`Update shared deck owner/psychology-deck`. Submitting an unchanged source
-creates no branch or pull request. With the GitHub CLI available, AnkiOps opens
-a pull request; otherwise it pushes the branch and tells you how to open one
-manually.
+`shared update` changes files only; run `ankiops fa` after reviewing them.
+`shared submit` commits changes only inside the selected source and opens a pull
+request. Contributors without write permission use an authenticated fork
+automatically. If local and upstream edits overlap, the subscribed deck remains
+unchanged. AnkiOps preserves editable base, local, and upstream copies; edit the
+marked Markdown it reports and rerun `shared update`.
 
-Shared-source Git history created by older experimental AnkiOps versions is not
-compatible with this workflow. Recreate or re-add those sources before updating
-or submitting them.
+This architecture supports fresh collections only. Older databases and
+subtree-based collections are rejected without migration or automatic recovery.
 
 ## Command Reference
 
@@ -281,12 +283,11 @@ LLM tools:
 
 Shared deck tools:
 
-- `ankiops shared create <deck> <owner>/<repo> [--public|--private]`
-- `ankiops shared add <owner>/<repo>`
-- `ankiops shared update [owner/repo] [--to-anki]`
-- `ankiops shared status <owner>/<repo>`
-- `ankiops shared submit <owner>/<repo> [--from-anki] [--commit] [-m|--message text]`
-- `ankiops shared list`
+- `ankiops shared publish <deck> <owner>/<repo> [--public|--private]`
+- `ankiops shared subscribe <owner>/<repo>`
+- `ankiops shared status [owner/repo]`
+- `ankiops shared update [owner/repo]`
+- `ankiops shared submit <owner>/<repo> [-m|--message text]`
 
 ## Contributing
 

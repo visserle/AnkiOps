@@ -27,6 +27,19 @@ class _FailingProfileAnki:
         raise AnkiConnectionError("Connection reset by peer")
 
 
+def test_connect_failure_says_nothing_changed_and_gives_retry(monkeypatch, caplog):
+    monkeypatch.setattr("ankiops.console.Anki", lambda: _FailingProfileAnki())
+    monkeypatch.setattr("sys.argv", ["ankiops", "fa"])
+
+    from ankiops.console import connect_or_exit
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit):
+        connect_or_exit()
+
+    assert "Nothing was changed" in caplog.text
+    assert "retry: ankiops fa" in caplog.text
+
+
 def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
     world.add_anki_note(
         deck_name="AnkiOnlyDeck",
@@ -287,7 +300,7 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
-def test_cli_shared_create_accepts_public_visibility_flag():
+def test_cli_shared_publish_accepts_public_visibility_flag():
     captured = []
 
     with (
@@ -297,7 +310,7 @@ def test_cli_shared_create_accepts_public_visibility_flag():
         ),
         patch(
             "sys.argv",
-            ["ankiops", "shared", "create", "Deck", "owner/repo", "--public"],
+            ["ankiops", "shared", "publish", "Deck", "owner/repo", "--public"],
         ),
     ):
         main()
@@ -324,14 +337,13 @@ def test_cli_shared_submit_accepts_custom_message():
                 "owner/repo",
                 "--message",
                 "  Clarify shared history  ",
-                "--commit",
             ],
         ),
     ):
         main()
 
     assert captured[0].message == "Clarify shared history"
-    assert captured[0].commit is True
+    assert not hasattr(captured[0], "commit")
 
 
 def test_cli_shared_status_accepts_repo():
@@ -353,8 +365,40 @@ def test_cli_shared_status_accepts_repo():
     assert captured[0].repo == "owner/repo"
 
 
-def test_shared_submit_from_anki_does_not_auto_commit():
-    args = SimpleNamespace(shared_command="submit", from_anki=True)
+def test_cli_shared_subscribe_accepts_repo():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_shared_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            ["ankiops", "shared", "subscribe", "owner/repo"],
+        ),
+    ):
+        main()
+
+    assert captured[0].shared_command == "subscribe"
+    assert captured[0].repo == "owner/repo"
+
+
+def test_cli_shared_help_exposes_only_intention_commands(capsys):
+    with patch("sys.argv", ["ankiops", "shared", "--help"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    for command in ("publish", "subscribe", "status", "update", "submit"):
+        assert command in output
+    for command in ("create", "add", "doctor", "resolve", "abort", "list"):
+        assert command not in output
+
+
+def test_shared_submit_does_not_run_collection_export():
+    args = SimpleNamespace(shared_command="submit")
 
     with (
         patch("ankiops.cli_commands.run_af") as run_af,
@@ -362,7 +406,35 @@ def test_shared_submit_from_anki_does_not_auto_commit():
     ):
         run_shared(args)
 
-    assert run_af.call_args.args[0].no_auto_commit is True
+    run_af.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["ankiops", "shared", "submit", "owner/repo", "--commit"],
+        ["ankiops", "shared", "submit", "owner/repo", "--from-anki"],
+        ["ankiops", "shared", "update", "owner/repo", "--to-anki"],
+    ],
+)
+def test_removed_shared_flags_are_rejected(argv):
+    with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "command", ["create", "add", "doctor", "resolve", "abort", "list"]
+)
+def test_removed_shared_commands_are_rejected(command):
+    with (
+        patch("sys.argv", ["ankiops", "shared", command]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 2
 
 
 @pytest.mark.parametrize("message", ["   ", "line one\nline two"])
@@ -601,7 +673,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     assert "ankiops fa" in caplog.text
 
 
-def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
+def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path):
     (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
     (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
     args = SimpleNamespace(
@@ -625,7 +697,7 @@ def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
     snapshot_mock.assert_called_once_with(
         tmp_path,
         action="fixing image widths",
-        paths=[tmp_path],
+        paths=[tmp_path / "Deck.md"],
     )
 
 

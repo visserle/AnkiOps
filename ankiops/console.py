@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import logging.config
+import shlex
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -130,7 +131,8 @@ def connect_or_exit() -> Anki:
     except Exception as error:
         logger.error(
             "Error connecting to Anki. Make sure Anki is running and either "
-            "AnkiOpsConnect or AnkiConnect is enabled."
+            "AnkiOpsConnect or AnkiConnect is enabled. Nothing was changed. "
+            f"After starting Anki, retry: {shlex.join(sys.argv)}"
         )
         logger.debug("Connection error details: %s", error)
         raise SystemExit(1)
