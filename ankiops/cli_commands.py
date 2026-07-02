@@ -26,7 +26,7 @@ from ankiops.deck_sources import (
     load_note_types_for_collection,
     source_content_hash,
 )
-from ankiops.git import CollectionGit, RepositoryGit, git_snapshot
+from ankiops.git import GitRepository, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
     apply_deserialization_plan,
@@ -80,7 +80,7 @@ def _snapshot_paths(
 def _validated_sources(collection_dir: Path) -> list[DeckSource]:
     sources = discover_deck_sources(collection_dir)
     for source in sources[1:]:
-        if not RepositoryGit(source.root).is_repo():
+        if not GitRepository(source.root).is_repo():
             raise ValueError(
                 f"Shared source directory {source.root} is not an independent Git "
                 "repository. Leave it untouched for inspection and subscribe to "
@@ -93,7 +93,7 @@ def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> No
     for source in sources:
         if not source.is_shared:
             continue
-        commit = RepositoryGit(source.root).checkpoint(
+        commit = GitRepository(source.root).checkpoint(
             f"AnkiOps: snapshot before {action}"
         )
         if commit:
@@ -101,15 +101,15 @@ def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> No
 
 
 def _record_applied_sources(
-    db: SyncState,
+    state: SyncState,
     sources: Sequence[DeckSource],
 ) -> None:
     for source in sources:
         if not source.is_shared:
             continue
-        repo = RepositoryGit(source.root)
-        clean_commit = repo.head() if not repo.status_lines() else None
-        db.set_source_applied_state(
+        source_git = GitRepository(source.root)
+        clean_commit = source_git.head() if not source_git.status_lines() else None
+        state.set_source_applied_state(
             source.source_id,
             source_content_hash(source),
             clean_commit,
@@ -124,7 +124,7 @@ def _local_markdown_paths(collection_dir: Path) -> list[Path]:
 
 def _deleted_local_markdown_paths(collection_dir: Path) -> list[Path]:
     try:
-        result = CollectionGit(collection_dir).run(
+        result = GitRepository(collection_dir).run(
             ["ls-files", "-z", "--deleted"],
             check=False,
         )
@@ -194,13 +194,13 @@ def run_af(args):
         _checkpoint_shared_sources(sources, "anki-to-files")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
-    db = SyncState.open(collection_dir)
+    state = SyncState.open(collection_dir)
     note_types_dir = collection_dir / NOTE_TYPES_DIR
 
     logger.debug("Starting note sync (Anki -> files)")
     export_summary: CollectionReport = sync_collection_from_anki(
         anki_port=anki,
-        db_port=db,
+        db_port=state,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
         sources=sources,
@@ -241,9 +241,11 @@ def run_af(args):
     # Sync referenced media from Anki to local
     try:
         logger.debug("Starting media pull (Anki -> local)")
-        media_result = sync_media_from_anki(anki, collection_dir, db, sources=sources)
+        media_result = sync_media_from_anki(
+            anki, collection_dir, state, sources=sources
+        )
         logger.info(format_media_status(media_result, from_anki=True))
-        _record_applied_sources(db, sources)
+        _record_applied_sources(state, sources)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -297,25 +299,25 @@ def run_fa(args):
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-    db = SyncState.open(collection_dir)
+    state = SyncState.open(collection_dir)
     note_types_dir = collection_dir / NOTE_TYPES_DIR
 
     try:
         logger.debug("Starting media push (local -> Anki)")
-        media_result = sync_media_to_anki(anki, collection_dir, db, sources=sources)
+        media_result = sync_media_to_anki(anki, collection_dir, state, sources=sources)
         logger.info(format_media_status(media_result, from_anki=False))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
-    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, db, sources)
+    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, state, sources)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
     logger.debug("Starting note sync (files -> Anki)")
     import_summary: CollectionReport = sync_collection_to_anki(
         anki_port=anki,
-        db_port=db,
+        db_port=state,
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
         sources=sources,
@@ -369,7 +371,7 @@ def run_fa(args):
             "or you risk losing notes with the next Anki -> files sync."
         )
     else:
-        _record_applied_sources(db, sources)
+        _record_applied_sources(state, sources)
 
 
 def run_serialize(args):

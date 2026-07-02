@@ -316,7 +316,7 @@ def test_cli_shared_publish_accepts_public_visibility_flag():
         main()
 
     assert captured[0].deck == "Deck"
-    assert captured[0].repo == "owner/repo"
+    assert captured[0].source_id == "owner/repo"
     assert captured[0].public is True
 
 
@@ -362,7 +362,7 @@ def test_cli_shared_status_accepts_repo():
         main()
 
     assert captured[0].shared_command == "status"
-    assert captured[0].repo == "owner/repo"
+    assert captured[0].source_id == "owner/repo"
 
 
 def test_cli_shared_subscribe_accepts_repo():
@@ -381,7 +381,7 @@ def test_cli_shared_subscribe_accepts_repo():
         main()
 
     assert captured[0].shared_command == "subscribe"
-    assert captured[0].repo == "owner/repo"
+    assert captured[0].source_id == "owner/repo"
 
 
 def test_cli_shared_help_exposes_only_intention_commands(capsys):

@@ -94,9 +94,9 @@ def require_collection_dir(active_profile: str | None = None) -> Path:
         )
         raise SystemExit(1)
 
-    from ankiops.git import RepositoryGit
+    from ankiops.git import GitRepository
 
-    if not RepositoryGit(collection_dir).is_repo():
+    if not GitRepository(collection_dir).is_repo():
         logger.error(
             f"AnkiOps collection root is not a Git repository: {collection_dir}. "
             "Run 'git init' in that directory or initialize a fresh collection."
@@ -238,9 +238,9 @@ def _setup_gitignore(collection_dir: Path) -> None:
 
 def _setup_git(collection_dir: Path) -> None:
     """Ensure the collection directory is inside a git repository."""
-    from ankiops.git import CollectionGit
+    from ankiops.git import GitRepository
 
-    if CollectionGit(collection_dir).init_repo():
+    if GitRepository(collection_dir).init_repo():
         logger.info(f"Initialized git repository in {collection_dir}")
 
 

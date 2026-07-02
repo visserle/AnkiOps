@@ -54,8 +54,8 @@ class DeckSource:
     def root(self) -> Path:
         if not self.is_shared:
             return self.collection_dir
-        owner, repo = _validate_shared_source_id(self.source_id)
-        return self.collection_dir / SHARED_DIR / owner / repo
+        owner, repository_name = _validate_shared_source_id(self.source_id)
+        return self.collection_dir / SHARED_DIR / owner / repository_name
 
     @property
     def note_types_dir(self) -> Path:

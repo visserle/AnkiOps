@@ -12,15 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class RepositoryGit:
-    """Operate on exactly one Git working tree."""
+class GitRepository:
+    """Run Git commands in one repository directory."""
 
     root: Path
-
-    @property
-    def collection_dir(self) -> Path:
-        """Compatibility name for root-collection callers."""
-        return self.root
 
     def run(
         self,
@@ -40,7 +35,7 @@ class RepositoryGit:
     @classmethod
     def clone(
         cls, url: str, target: Path, *, remote: str = "upstream"
-    ) -> "RepositoryGit":
+    ) -> "GitRepository":
         target.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(
             ["git", "clone", "--origin", remote, url, str(target)],
@@ -228,10 +223,6 @@ class RepositoryGit:
         return rel_paths
 
 
-# Root-collection callers use the same repository-scoped implementation.
-CollectionGit = RepositoryGit
-
-
 def git_snapshot(
     collection_dir: Path,
     *,
@@ -240,16 +231,16 @@ def git_snapshot(
     strict: bool = False,
 ) -> bool:
     """Commit pending changes for explicit paths in one repository."""
-    repo = RepositoryGit(collection_dir)
+    collection_git = GitRepository(collection_dir)
     try:
-        repo.ensure_repo("AnkiOps collections require a Git repository.")
-        rel_paths = repo._tracked_or_existing_paths(list(paths))
+        collection_git.ensure_repo("AnkiOps collections require a Git repository.")
+        rel_paths = collection_git._tracked_or_existing_paths(list(paths))
         if not rel_paths:
             return False
-        repo.run(["add", "-A", "--", *rel_paths])
-        if not repo.cached_diff_exists(rel_paths):
+        collection_git.run(["add", "-A", "--", *rel_paths])
+        if not collection_git.cached_diff_exists(rel_paths):
             return False
-        repo.run(
+        collection_git.run(
             [
                 "commit",
                 "-m",

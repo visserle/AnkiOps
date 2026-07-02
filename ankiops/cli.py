@@ -203,8 +203,9 @@ def main():
     )
     shared_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
     shared_publish.add_argument(
-        "repo",
-        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+        "source_id",
+        metavar="OWNER/REPO",
+        help="Shared deck identity (letters, digits, hyphens)",
     )
     publish_visibility = shared_publish.add_mutually_exclusive_group()
     publish_visibility.add_argument(
@@ -226,8 +227,9 @@ def main():
         help="Subscribe to a shared deck on GitHub",
     )
     shared_subscribe.add_argument(
-        "repo",
-        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+        "source_id",
+        metavar="OWNER/REPO",
+        help="Shared deck identity (letters, digits, hyphens)",
     )
     shared_subscribe.set_defaults(handler=run_shared)
 
@@ -236,9 +238,10 @@ def main():
         help="Bring available GitHub changes into shared Markdown files",
     )
     shared_update.add_argument(
-        "repo",
+        "source_id",
+        metavar="OWNER/REPO",
         nargs="?",
-        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+        help="Shared deck identity (letters, digits, hyphens)",
     )
     shared_update.set_defaults(handler=run_shared)
 
@@ -247,8 +250,9 @@ def main():
         help="Submit a contribution as a GitHub pull request",
     )
     shared_submit.add_argument(
-        "repo",
-        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+        "source_id",
+        metavar="OWNER/REPO",
+        help="Shared deck identity (letters, digits, hyphens)",
     )
     shared_submit.add_argument(
         "--message",
@@ -263,9 +267,10 @@ def main():
         help="Preview changes, updates, submissions, and recovery state",
     )
     shared_status.add_argument(
-        "repo",
+        "source_id",
+        metavar="OWNER/REPO",
         nargs="?",
-        help="GitHub repo as owner/repo (letters, digits, hyphens)",
+        help="Shared deck identity (letters, digits, hyphens)",
     )
     shared_status.set_defaults(handler=run_shared)
 

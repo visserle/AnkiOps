@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ankiops.git import RepositoryGit
+from ankiops.git import GitRepository
 from ankiops.shared.commands import (
     run_publish,
     run_status,
@@ -109,7 +109,7 @@ def test_update_noop_creates_no_commit(shared_world):
     _collection, source, _remote = shared_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
 
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert _git(source, "branch", "--list", "ankiops/recovery/*").stdout == ""
@@ -125,7 +125,7 @@ def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypat
     )
     assert publish is None
 
-    run_submit(SimpleNamespace(repo="owner/repo", message=None))
+    run_submit(SimpleNamespace(source_id="owner/repo", message=None))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before_head
     assert _git(source, "branch", "--format=%(refname)").stdout == before_branches
@@ -141,13 +141,13 @@ def test_subscribe_clones_independent_repository(tmp_path, monkeypatch):
     _source, remote = _setup_source(tmp_path, collection)
     shutil_source = collection / "shared" / "owner" / "repo"
     shutil.rmtree(shutil_source)
-    original_clone = RepositoryGit.clone.__func__
+    original_clone = GitRepository.clone.__func__
 
     def local_clone(cls, _url, target, *, remote="upstream"):
         return original_clone(cls, str(remote_path), target, remote=remote)
 
     remote_path = remote
-    monkeypatch.setattr(RepositoryGit, "clone", classmethod(local_clone))
+    monkeypatch.setattr(GitRepository, "clone", classmethod(local_clone))
     monkeypatch.setattr(
         "ankiops.shared.commands.require_collection_dir", lambda: collection
     )
@@ -159,9 +159,9 @@ def test_subscribe_clones_independent_repository(tmp_path, monkeypatch):
         lambda *_: {"default_branch": "main"},
     )
 
-    run_subscribe(SimpleNamespace(repo="owner/repo"))
+    run_subscribe(SimpleNamespace(source_id="owner/repo"))
 
-    assert RepositoryGit(shutil_source).is_repo()
+    assert GitRepository(shutil_source).is_repo()
     assert _git(shutil_source, "branch", "--show-current").stdout.strip() == (
         "ankiops/work"
     )
@@ -183,24 +183,24 @@ def test_publish_moves_deck_into_independent_repository(tmp_path, monkeypatch):
     db.close()
     remote = tmp_path / "created.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
-    original_set_remote = RepositoryGit.set_remote
+    original_set_remote = GitRepository.set_remote
 
-    def local_remote(repo, name, _url):
-        original_set_remote(repo, name, str(remote))
+    def local_remote(source_git, name, _url):
+        original_set_remote(source_git, name, str(remote))
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_remote)
+    monkeypatch.setattr(GitRepository, "set_remote", local_remote)
     monkeypatch.setattr(
-        "ankiops.shared.create.GitHubHost.create_repo", lambda *_args, **_kwargs: None
+        "ankiops.shared.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         "ankiops.shared.commands.require_collection_dir", lambda: collection
     )
 
-    run_publish(SimpleNamespace(deck="Deck", repo="owner/repo", public=False))
+    run_publish(SimpleNamespace(deck="Deck", source_id="owner/repo", public=False))
 
     source = collection / "shared" / "owner" / "repo"
     assert not deck.exists()
-    assert RepositoryGit(source).is_repo()
+    assert GitRepository(source).is_repo()
     assert "shared/owner/repo/AnkiOpsQA" in (source / "Deck.md").read_text(
         encoding="utf-8"
     )
@@ -227,29 +227,29 @@ def test_publish_retry_reuses_local_repository_after_push_failure(
     _commit(collection, "Add retry deck")
     remote = tmp_path / "retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
-    original_set_remote = RepositoryGit.set_remote
-    original_push = RepositoryGit.push
+    original_set_remote = GitRepository.set_remote
+    original_push = GitRepository.push
     attempts = 0
 
-    def local_remote(repo, name, _url):
-        original_set_remote(repo, name, str(remote))
+    def local_remote(source_git, name, _url):
+        original_set_remote(source_git, name, str(remote))
 
-    def fail_once(repo, remote_name, source_ref, branch):
+    def fail_once(source_git, remote_name, source_ref, branch):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise subprocess.CalledProcessError(1, ["git", "push"])
-        original_push(repo, remote_name, source_ref, branch)
+        original_push(source_git, remote_name, source_ref, branch)
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_remote)
-    monkeypatch.setattr(RepositoryGit, "push", fail_once)
+    monkeypatch.setattr(GitRepository, "set_remote", local_remote)
+    monkeypatch.setattr(GitRepository, "push", fail_once)
     monkeypatch.setattr(
-        "ankiops.shared.create.GitHubHost.create_repo", lambda *_args, **_kwargs: None
+        "ankiops.shared.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         "ankiops.shared.commands.require_collection_dir", lambda: collection
     )
-    args = SimpleNamespace(deck="Deck", repo="owner/repo", public=False)
+    args = SimpleNamespace(deck="Deck", source_id="owner/repo", public=False)
 
     with pytest.raises(ValueError, match="Retrying is safe"):
         run_publish(args)
@@ -270,7 +270,7 @@ def test_update_checkpoints_local_edit_and_integrates_remote(shared_world, tmp_p
     )
     _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
 
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert (source / "Local.md").exists()
     assert "remote answer" in (source / "Deck.md").read_text(encoding="utf-8")
@@ -298,7 +298,7 @@ def test_conflict_preserves_versions_and_leaves_source_unchanged(
     _upstream_edit(tmp_path, remote, "upstream answer", "github answer")
 
     with pytest.raises(ValueError, match="failure"):
-        run_update(SimpleNamespace(repo="owner/repo"))
+        run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert deck.read_bytes() == before_deck
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before_head
@@ -321,16 +321,16 @@ def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_upd
     )
     _upstream_edit(tmp_path, remote, "upstream answer", "github answer")
     with pytest.raises(ValueError):
-        run_update(SimpleNamespace(repo="owner/repo"))
+        run_update(SimpleNamespace(source_id="owner/repo"))
     conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     conflict_file.write_text(
         "<!-- note_key: shared-key -->\nQ: shared question\nA: combined answer\n",
         encoding="utf-8",
     )
 
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
-    assert not RepositoryGit(source).unmerged_paths()
+    assert not GitRepository(source).unmerged_paths()
     assert "combined answer" in deck.read_text(encoding="utf-8")
     assert not list((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     db = SyncState.open(collection)
@@ -352,14 +352,14 @@ def test_submit_conflict_is_resumed_with_update(shared_world, tmp_path):
     _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
 
     with pytest.raises(ValueError, match="shared update owner/repo"):
-        run_submit(SimpleNamespace(repo="owner/repo", message=None))
+        run_submit(SimpleNamespace(source_id="owner/repo", message=None))
 
     conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     conflict_file.write_text(
         "<!-- note_key: shared-key -->\nQ: shared question\nA: combined\n",
         encoding="utf-8",
     )
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert "combined" in deck.read_text(encoding="utf-8")
     db = SyncState.open(collection)
@@ -383,7 +383,7 @@ def test_failed_update_fetch_leaves_repository_exactly_unchanged(
     before_status = _git(source, "status", "--porcelain=v1").stdout
     before_bytes = deck.read_bytes()
     monkeypatch.setattr(
-        RepositoryGit,
+        GitRepository,
         "fetch",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             subprocess.CalledProcessError(1, ["git", "fetch"])
@@ -391,7 +391,7 @@ def test_failed_update_fetch_leaves_repository_exactly_unchanged(
     )
 
     with pytest.raises(ValueError, match="Retrying is safe"):
-        run_update(SimpleNamespace(repo="owner/repo"))
+        run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout == before_head
     assert _git(source, "status", "--porcelain=v1").stdout == before_status
@@ -420,12 +420,12 @@ def test_submit_commits_only_source_and_reuses_operation(
         encoding="utf-8",
     )
 
-    original_set_remote = RepositoryGit.set_remote
+    original_set_remote = GitRepository.set_remote
 
-    def local_publish(repo, name, _url):
-        original_set_remote(repo, name, str(publish))
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_publish)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
         "ankiops.shared.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
@@ -441,7 +441,7 @@ def test_submit_commits_only_source_and_reuses_operation(
         create_pr,
     )
 
-    args = SimpleNamespace(repo="owner/repo", message="Clarify shared answer")
+    args = SimpleNamespace(source_id="owner/repo", message="Clarify shared answer")
     run_submit(args)
     first_head = _git(source, "rev-parse", "HEAD").stdout.strip()
     first_refs = _git(publish, "for-each-ref", "--format=%(refname)").stdout
@@ -473,10 +473,10 @@ def test_submit_retry_after_failed_pr_reuses_pushed_branch(
         deck.read_text(encoding="utf-8").replace("upstream answer", "PR retry answer"),
         encoding="utf-8",
     )
-    original_set_remote = RepositoryGit.set_remote
+    original_set_remote = GitRepository.set_remote
 
-    def local_publish(repo, name, _url):
-        original_set_remote(repo, name, str(publish))
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
 
     calls = 0
 
@@ -487,13 +487,13 @@ def test_submit_retry_after_failed_pr_reuses_pushed_branch(
             raise ValueError("simulated PR failure")
         return "https://github.test/owner/repo/pull/2"
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_publish)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
         "ankiops.shared.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr("ankiops.shared.commands.GitHubHost.create_pr", fail_once)
-    args = SimpleNamespace(repo="owner/repo", message="Retry PR")
+    args = SimpleNamespace(source_id="owner/repo", message="Retry PR")
 
     with pytest.raises(ValueError, match="reached GitHub"):
         run_submit(args)
@@ -531,22 +531,22 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
         ),
         encoding="utf-8",
     )
-    original_set_remote = RepositoryGit.set_remote
-    original_push = RepositoryGit.push
+    original_set_remote = GitRepository.set_remote
+    original_push = GitRepository.push
     pushes = 0
 
-    def local_publish(repo, name, _url):
-        original_set_remote(repo, name, str(publish))
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
 
-    def fail_once(repo, remote_name, source_ref, branch):
+    def fail_once(source_git, remote_name, source_ref, branch):
         nonlocal pushes
         pushes += 1
         if pushes == 1:
             raise subprocess.CalledProcessError(1, ["git", "push"])
-        original_push(repo, remote_name, source_ref, branch)
+        original_push(source_git, remote_name, source_ref, branch)
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_publish)
-    monkeypatch.setattr(RepositoryGit, "push", fail_once)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(GitRepository, "push", fail_once)
     monkeypatch.setattr(
         "ankiops.shared.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
@@ -555,7 +555,7 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
         "ankiops.shared.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/3",
     )
-    args = SimpleNamespace(repo="owner/repo", message="Retry push")
+    args = SimpleNamespace(source_id="owner/repo", message="Retry push")
 
     with pytest.raises(ValueError, match="did not reach GitHub"):
         run_submit(args)
@@ -592,12 +592,12 @@ def test_update_after_squash_merge_cleans_submission_state(
         deck.read_text(encoding="utf-8").replace("upstream answer", "merged answer"),
         encoding="utf-8",
     )
-    original_set_remote = RepositoryGit.set_remote
+    original_set_remote = GitRepository.set_remote
 
-    def local_publish(repo, name, _url):
-        original_set_remote(repo, name, str(publish))
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
 
-    monkeypatch.setattr(RepositoryGit, "set_remote", local_publish)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
         "ankiops.shared.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
@@ -606,7 +606,7 @@ def test_update_after_squash_merge_cleans_submission_state(
         "ankiops.shared.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/4",
     )
-    run_submit(SimpleNamespace(repo="owner/repo", message="Merged change"))
+    run_submit(SimpleNamespace(source_id="owner/repo", message="Merged change"))
 
     merged = tmp_path / "squash-merge"
     _git(tmp_path, "clone", str(upstream_remote), str(merged))
@@ -615,7 +615,7 @@ def test_update_after_squash_merge_cleans_submission_state(
     _commit(merged, "Squash merged contribution")
     _git(merged, "push", "origin", "main")
 
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
     db = SyncState.open(collection)
     try:
@@ -630,14 +630,14 @@ def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, 
     _collection, source, _remote = shared_world
     (source / "Draft.md").write_text("draft\n", encoding="utf-8")
     monkeypatch.setattr(
-        RepositoryGit,
+        GitRepository,
         "fetch",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             subprocess.CalledProcessError(1, ["git", "fetch"])
         ),
     )
 
-    run_status(SimpleNamespace(repo="owner/repo"))
+    run_status(SimpleNamespace(source_id="owner/repo"))
 
     assert "Local shared changes: 1" in caplog.text
     assert "local files were not changed" in caplog.text

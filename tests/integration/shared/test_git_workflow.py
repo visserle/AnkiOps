@@ -76,7 +76,7 @@ def test_concurrent_shared_update_preserves_private_root(tmp_path, monkeypatch):
         "ankiops.shared.commands.require_collection_dir", lambda: collection
     )
 
-    run_update(SimpleNamespace(repo="owner/repo"))
+    run_update(SimpleNamespace(source_id="owner/repo"))
 
     assert "remote edit" in (source / "Deck.md").read_text(encoding="utf-8")
     assert (source / "Local.md").exists()

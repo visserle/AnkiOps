@@ -1,4 +1,4 @@
-"""Publish GitHub shared sources from local decks."""
+"""Publish local decks as GitHub shared sources."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import yaml
 
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
 from ankiops.deck_sources import DeckSource
-from ankiops.git import RepositoryGit
+from ankiops.git import GitRepository
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
 from ankiops.media import extract_media_references
 from ankiops.note_types import NoteType, load_note_types
@@ -20,64 +20,64 @@ from ankiops.sync.state import SyncState
 
 
 @dataclass(frozen=True)
-class _RenderedCreateFile:
+class _RenderedPublishFile:
     source_path: Path
     target_path: Path
     content: str
 
 
 @dataclass(frozen=True)
-class _CreatePlan:
+class _PublishPlan:
     source: DeckSource
-    files: list[_RenderedCreateFile]
+    files: list[_RenderedPublishFile]
     note_types_used: set[str]
     media_used: set[str]
     note_keys: set[str]
 
 
-def create_shared_deck(
+def publish_shared_deck(
     collection_dir: Path,
     deck: str,
     source: DeckSource,
     *,
     public: bool,
 ) -> None:
-    root_repo = RepositoryGit(collection_dir)
-    root_repo.ensure_repo("AnkiOps collections require a Git repository at the root.")
-    existing_repo = RepositoryGit(source.root) if source.root.exists() else None
-    if existing_repo is not None and not existing_repo.is_repo():
+    collection_git = GitRepository(collection_dir)
+    collection_git.ensure_repo(
+        "AnkiOps collections require a Git repository at the root."
+    )
+    source_git = GitRepository(source.root) if source.root.exists() else None
+    if source_git is not None and not source_git.is_repo():
         raise ValueError(
             f"Shared source path exists but is not a Git repository: {source.root}"
         )
-    if existing_repo is not None:
+    if source_git is not None:
         try:
             _selected_deck_files(collection_dir, deck)
         except ValueError:
             return
 
-    plan = _prepare_create_plan(collection_dir, deck, source)
-    host = GitHubHost(collection_dir)
-    host.create_repo(source.source_id, public=public)
+    plan = _prepare_publish_plan(collection_dir, deck, source)
+    github = GitHubHost(collection_dir)
+    github.create_repo(source.source_id, public=public)
     originals = {
         rendered.source_path: rendered.source_path.read_bytes()
         for rendered in plan.files
     }
     try:
-        if existing_repo is None:
-            _write_create_files(collection_dir, plan)
-            shared_repo = RepositoryGit(source.root)
-            shared_repo.init_repo(initial_branch="main")
-            _copy_git_identity(root_repo, shared_repo)
-            shared_repo.checkpoint(f"Publish shared deck {deck}")
-        else:
-            shared_repo = existing_repo
-        shared_repo.set_remote("upstream", str(source.github_url))
-        shared_repo.set_remote("publish", str(source.github_url))
-        shared_repo.push("upstream", "HEAD", "main")
-        shared_repo.ensure_work_branch("ankiops/work", "main")
+        if source_git is None:
+            _write_publish_files(collection_dir, plan)
+            source_git = GitRepository(source.root)
+            source_git.init_repo(initial_branch="main")
+            _copy_git_identity(collection_git, source_git)
+            source_git.checkpoint(f"Publish shared deck {deck}")
+        source_git.set_remote("upstream", str(source.github_url))
+        source_git.set_remote("publish", str(source.github_url))
+        source_git.push("upstream", "HEAD", "main")
+        source_git.ensure_work_branch("ankiops/work", "main")
 
-        _unlink_created_source_files(plan)
-        root_repo.commit_paths(
+        _remove_published_local_files(plan)
+        collection_git.commit_paths(
             [rendered.source_path for rendered in plan.files],
             f"Move {deck} into shared source {source.source_id}",
         )
@@ -90,34 +90,37 @@ def create_shared_deck(
         raise
 
 
-def _copy_git_identity(root_repo: RepositoryGit, shared_repo: RepositoryGit) -> None:
+def _copy_git_identity(
+    collection_git: GitRepository,
+    source_git: GitRepository,
+) -> None:
     for key in ("user.name", "user.email"):
-        value = root_repo.run(["config", "--get", key], check=False).stdout.strip()
+        value = collection_git.run(["config", "--get", key], check=False).stdout.strip()
         if value:
-            shared_repo.run(["config", key, value])
+            source_git.run(["config", key, value])
 
 
-def _transfer_sync_ownership(collection_dir: Path, plan: _CreatePlan) -> None:
-    db = SyncState.open(collection_dir)
+def _transfer_sync_ownership(collection_dir: Path, plan: _PublishPlan) -> None:
+    state = SyncState.open(collection_dir)
     try:
-        note_ids = db.resolve_note_ids(plan.note_keys)
-        db.upsert_note_links(
+        note_ids = state.resolve_note_ids(plan.note_keys)
+        state.upsert_note_links(
             [(note_key, note_id) for note_key, note_id in note_ids.items()],
             source_id=plan.source.source_id,
         )
         for rendered in plan.files:
             deck_name = file_stem_to_deck_name(rendered.source_path.stem)
-            deck_id = db.resolve_deck_id(deck_name)
+            deck_id = state.resolve_deck_id(deck_name)
             if deck_id is None:
                 continue
-            db.upsert_deck(
+            state.upsert_deck(
                 deck_name,
                 deck_id,
                 source_id=plan.source.source_id,
                 md_path=str(rendered.target_path.relative_to(collection_dir)),
             )
     finally:
-        db.close()
+        state.close()
 
 
 def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
@@ -144,11 +147,11 @@ def _scoped_configs(
     ]
 
 
-def _prepare_create_plan(
+def _prepare_publish_plan(
     collection_dir: Path,
     deck: str,
     source: DeckSource,
-) -> _CreatePlan:
+) -> _PublishPlan:
     root_configs = load_note_types(collection_dir / NOTE_TYPES_DIR)
     root_config_by_name = {config.name: config for config in root_configs}
 
@@ -203,19 +206,19 @@ def _prepare_create_plan(
     used_configs = [root_config_by_name[name] for name in sorted(note_types_used)]
     scoped_configs = _scoped_configs(source, used_configs)
     scoped_config_by_name = {config.name: config for config in scoped_configs}
-    rendered_files: list[_RenderedCreateFile] = []
+    rendered_files: list[_RenderedPublishFile] = []
     for md_file, parsed in parsed_files:
         for note in parsed.notes:
             note.note_type = source.scope_note_type_name(note.note_type)
         rendered_files.append(
-            _RenderedCreateFile(
+            _RenderedPublishFile(
                 source_path=md_file,
                 target_path=source.root / md_file.name,
                 content=render_notes_to_markdown(parsed.notes, scoped_config_by_name),
             )
         )
 
-    return _CreatePlan(
+    return _PublishPlan(
         source=source,
         files=rendered_files,
         note_types_used=note_types_used,
@@ -290,7 +293,7 @@ def _copy_note_type_styling_assets(
     return touched
 
 
-def _write_create_files(collection_dir: Path, plan: _CreatePlan) -> list[Path]:
+def _write_publish_files(collection_dir: Path, plan: _PublishPlan) -> list[Path]:
     source = plan.source
     source.root.mkdir(parents=True, exist_ok=False)
     (source.root / LOCAL_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
@@ -326,6 +329,6 @@ def _write_create_files(collection_dir: Path, plan: _CreatePlan) -> list[Path]:
     return touched
 
 
-def _unlink_created_source_files(plan: _CreatePlan) -> None:
+def _remove_published_local_files(plan: _PublishPlan) -> None:
     for rendered in plan.files:
         rendered.source_path.unlink()
