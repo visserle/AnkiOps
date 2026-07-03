@@ -85,7 +85,7 @@ The `note_key` is a stable identifier independent of Anki's note IDs and it is u
 
 ### Collection Structure
 
-The basic structure of an AnkiOps collection is:
+This is the basic structure of an AnkiOps collection:
 
 ````
 ├── note_types/
