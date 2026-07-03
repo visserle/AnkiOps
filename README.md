@@ -6,18 +6,18 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ## Advantages
 
-- **User-friendly**: Edit Anki decks as highly readable Markdown files
-- **Full Anki support**: Two-way sync of notes, note types, decks and media files
-- **Performance**: Sync thousands of notes in under a second
-- **Customization**: Define your own note types and card templates
-- **Automation**: Improve your flashcards with programmable LLM tasks
-- **Collaboration**: Share decks on GitHub and collaborate with others
+- ✏️ Edit Anki decks as highly readable Markdown files
+- 🔄 Two-way sync of notes, note types, decks and media files
+- ⚡ Sync thousands of notes in under a second
+- ⚙️ Define your own note types and card templates
+- ✨ Improve your flashcards with programmable LLM tasks
+- 👥 Share decks on GitHub and collaborate with others
 
 ## How It Works
 
 ### Markdown Files
 
-In a deck file, each note is separated by a blank line, three dashes, and another blank line:
+One Markdown file is one deck. Each note is separated by a blank line, three dashes, and another blank line:
 
 ```markdown
 Q: Question text here
@@ -45,9 +45,9 @@ C3: automatically randomized answers
 A: 1, 3
 ```
 
-You can use any Markdown syntax (except a horizontal rule) in the note content, including italics, bold text, lists, tables, images, code blocks, math equations, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
+You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, code blocks with highlighting, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
 
-After the first sync, AnkiOps adds metadata comments for each note:
+After the first sync with Anki, AnkiOps adds metadata comments for each note:
 
 ```markdown
 <!-- note_key: 2fd62bcaa861 -->
@@ -193,11 +193,25 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### What is the recommended workflow?
 
-We recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder perfectly.
+We recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder well.
+
+### How can I migrate my existing notes into AnkiOps?
+
+You can migrate existing notes in three ways: write matching note type files in `note_types/`, copy note types from Anki with `ankiops note-types --add <name>`, or convert notes to the default AnkiOps note types with `Change Note Type…` in the Anki browser.
+
+For Anki browser conversion, use this workflow:
+
+1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
+2. Export your notes from Anki to Markdown using `ankiops am`.
+3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting slightly. Formatting issues can be fixed by hand or via the LLM task fix-html.
 
 ### How can I make use of LLMs with AnkiOps?
 
 If you want it simple, just prompt an LLM (Codex, Claude Code, etc.) to edit your Markdown files. If you want it integrated, AnkiOps has a dedicated LLM module that runs through your serialized (JSON) collection and applies edits to the Markdown files. Only works with OpenAI's response API.
+
+### How do I upgrade AnkiOps to the latest version?
+
+AnkiOps is in early development, so breaking changes are expected. Use `pipx upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. If your collection is in Git, inspect the diff before you continue syncing.
 
 ### What other features are there?
 
