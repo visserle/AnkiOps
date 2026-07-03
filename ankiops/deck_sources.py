@@ -1,15 +1,18 @@
-"""Deck source discovery for local and GitHub-shared decks."""
+"""Deck source identity and collection source loading."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from blake3 import blake3
+
 from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.git import GitRepository
 from ankiops.note_types import NoteType, load_note_types
 
+LOCAL_SOURCE_PATH = Path(".")
 SHARED_DIR = "shared"
-SHARED_BRANCH = "main"
 RESERVED_MARKDOWN_FILES = {
     "CHANGELOG.MD",
     "CODE_OF_CONDUCT.MD",
@@ -22,46 +25,71 @@ RESERVED_MARKDOWN_FILES = {
 }
 
 
+def _parse_github_slug(github_slug: str) -> tuple[str, str]:
+    parts = github_slug.split("/")
+    if len(parts) != 2 or any(not part or part in {".", ".."} for part in parts):
+        raise ValueError("Expected shared source as owner/repo")
+    if any("\\" in part for part in parts):
+        raise ValueError("Expected shared source as owner/repo")
+    return parts[0], parts[1]
+
+
 @dataclass(frozen=True)
 class DeckSource:
-    """A filesystem root that contributes decks to one logical collection."""
+    """A canonical filesystem source for one or more decks and their assets."""
 
-    root: Path
-    source_id: str
-    note_types_dir: Path
-    is_shared: bool = False
+    collection_root: Path
+    relative_path: Path
+
+    def __post_init__(self) -> None:
+        parts = self.relative_path.parts
+        if self.relative_path == LOCAL_SOURCE_PATH:
+            return
+        if (
+            self.relative_path.is_absolute()
+            or len(parts) != 3
+            or parts[0] != SHARED_DIR
+        ):
+            raise ValueError("Expected source path as . or shared/owner/repo")
+        _parse_github_slug("/".join(parts[1:]))
 
     @classmethod
-    def local(cls, collection_dir: Path, note_types_dir: Path | None = None):
-        return cls(
-            root=collection_dir,
-            source_id="",
-            note_types_dir=note_types_dir or collection_dir / NOTE_TYPES_DIR,
-            is_shared=False,
-        )
+    def local(cls, collection_root: Path) -> "DeckSource":
+        return cls(collection_root=collection_root, relative_path=LOCAL_SOURCE_PATH)
 
     @classmethod
-    def shared(cls, collection_dir: Path, owner: str, repo: str):
-        root = collection_dir / SHARED_DIR / owner / repo
+    def shared(cls, collection_root: Path, github_slug: str) -> "DeckSource":
+        owner, repository = _parse_github_slug(github_slug)
         return cls(
-            root=root,
-            source_id=f"{SHARED_DIR}/{owner}/{repo}",
-            note_types_dir=root / NOTE_TYPES_DIR,
-            is_shared=True,
+            collection_root=collection_root,
+            relative_path=Path(SHARED_DIR) / owner / repository,
         )
 
     @property
+    def root(self) -> Path:
+        return self.collection_root / self.relative_path
+
+    @property
+    def source_path(self) -> str:
+        return self.relative_path.as_posix()
+
+    @property
+    def note_types_dir(self) -> Path:
+        return self.root / NOTE_TYPES_DIR
+
+    @property
+    def is_shared(self) -> bool:
+        return self.relative_path != LOCAL_SOURCE_PATH
+
+    @property
     def display_name(self) -> str:
-        return self.source_id or "local"
+        return self.github_slug or "local"
 
     @property
     def github_slug(self) -> str | None:
         if not self.is_shared:
             return None
-        parts = self.source_id.split("/")
-        if len(parts) != 3:
-            return None
-        return f"{parts[1]}/{parts[2]}"
+        return "/".join(self.relative_path.parts[1:])
 
     @property
     def github_url(self) -> str | None:
@@ -71,13 +99,13 @@ class DeckSource:
     def scope_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{self.source_id}/"
+        prefix = f"{self.source_path}/"
         return name if name.startswith(prefix) else f"{prefix}{name}"
 
     def unscoped_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{self.source_id}/"
+        prefix = f"{self.source_path}/"
         return name[len(prefix) :] if name.startswith(prefix) else name
 
     def deck_files(self) -> list[Path]:
@@ -95,25 +123,32 @@ class DeckSource:
 
 
 def discover_deck_sources(
-    collection_dir: Path,
-    *,
-    note_types_dir: Path | None = None,
+    collection_root: Path,
 ) -> list[DeckSource]:
-    sources = [DeckSource.local(collection_dir, note_types_dir)]
-    shared_root = collection_dir / SHARED_DIR
-    if not shared_root.exists():
-        return sources
+    """Parse the canonical filesystem registry into deterministic deck sources."""
+    local = DeckSource.local(collection_root)
+    shared_root = collection_root / SHARED_DIR
+    if not shared_root.is_dir():
+        return [local]
 
+    shared = []
     for owner_dir in sorted(shared_root.iterdir(), key=lambda path: path.name):
         if not owner_dir.is_dir():
             continue
         for repo_dir in sorted(owner_dir.iterdir(), key=lambda path: path.name):
             if not repo_dir.is_dir():
                 continue
-            sources.append(
-                DeckSource.shared(collection_dir, owner_dir.name, repo_dir.name)
+            source = DeckSource.shared(
+                collection_root, f"{owner_dir.name}/{repo_dir.name}"
             )
-    return sources
+            if not GitRepository(source.root).is_repo():
+                raise ValueError(
+                    f"Shared source directory {source.root} is not an independent "
+                    "Git repository. Leave it untouched for inspection and subscribe "
+                    f"to {source.github_slug} again in a fresh collection path."
+                )
+            shared.append(source)
+    return [local, *shared]
 
 
 def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
@@ -127,16 +162,25 @@ def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
 
 
 def load_note_types_for_collection(
-    collection_dir: Path,
-    *,
-    note_types_dir: Path | None = None,
+    collection_root: Path,
 ) -> list[NoteType]:
-    """Load all note types for a collection, with shared source names scoped."""
-    return [
-        note_type
-        for source in discover_deck_sources(
-            collection_dir,
-            note_types_dir=note_types_dir,
-        )
-        for note_type in load_note_types_for_source(source)
-    ]
+    """Load note types from every source in the collection filesystem."""
+    note_types = []
+    for source in discover_deck_sources(collection_root):
+        note_types.extend(load_note_types_for_source(source))
+    return note_types
+
+
+def source_content_hash(source: DeckSource) -> str:
+    """Hash the visible source tree without reading repository metadata."""
+    digest = blake3()
+    for path in sorted(source.root.rglob("*")):
+        if not path.is_file() or ".git" in path.relative_to(source.root).parts:
+            continue
+        relative = path.relative_to(source.root).as_posix().encode()
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+    return digest.hexdigest()

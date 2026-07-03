@@ -40,14 +40,13 @@ class _SourceDeckFile:
 
 
 def _load_source_deck_files(
-    collection_dir: Path,
-    note_types_dir: Path,
-) -> tuple[list[_SourceDeckFile], dict[str, NoteType]]:
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    collection_root: Path,
+) -> tuple[list[_SourceDeckFile], dict[str, NoteType], list[DeckSource]]:
+    selected_sources = discover_deck_sources(collection_root)
     note_types_by_name: dict[str, NoteType] = {}
 
     source_deck_files: list[_SourceDeckFile] = []
-    for source in sources:
+    for source in selected_sources:
         note_types = load_note_types_for_source(source)
         note_types_by_name.update(
             {note_type.name: note_type for note_type in note_types}
@@ -64,7 +63,39 @@ def _load_source_deck_files(
                 )
             )
 
-    return source_deck_files, note_types_by_name
+    return source_deck_files, note_types_by_name, selected_sources
+
+
+def _add_deleted_deck_files(
+    collection_root: Path,
+    state: SyncState,
+    source_deck_files: list[_SourceDeckFile],
+    sources: list[DeckSource],
+) -> set[Path]:
+    source_by_path = {source.source_path: source for source in sources}
+    existing_paths = {
+        source_deck_file.file_state.file_path for source_deck_file in source_deck_files
+    }
+    deleted_paths: set[Path] = set()
+    for _deck_id, _name, source_path, md_path in state.list_decks():
+        source = source_by_path.get(source_path)
+        if source is None or not md_path:
+            continue
+        path = collection_root / md_path
+        if (
+            path in existing_paths
+            or path.exists()
+            or not path.is_relative_to(source.root)
+        ):
+            continue
+        source_deck_files.append(
+            _SourceDeckFile(
+                source=source,
+                file_state=DeckFile(file_path=path, raw_content="", notes=[]),
+            )
+        )
+        deleted_paths.add(path)
+    return deleted_paths
 
 
 def _check_deck_ownership(source_deck_files: list[_SourceDeckFile]) -> None:
@@ -111,14 +142,18 @@ def _collect_global_note_keys(deck_files: list[DeckFile]) -> set[str]:
 
 
 def sync_collection_to_anki(
-    anki_port: Anki,
-    db_port: SyncState,
-    collection_dir: Path,
-    note_types_dir: Path,
+    anki: Anki,
+    state: SyncState,
+    collection_root: Path,
 ) -> CollectionReport:
-    source_deck_files, note_types_by_name = _load_source_deck_files(
-        collection_dir,
-        note_types_dir,
+    source_deck_files, note_types_by_name, selected_sources = _load_source_deck_files(
+        collection_root,
+    )
+    deleted_deck_paths = _add_deleted_deck_files(
+        collection_root,
+        state,
+        source_deck_files,
+        selected_sources,
     )
     _check_deck_ownership(source_deck_files)
 
@@ -127,21 +162,36 @@ def sync_collection_to_anki(
     required_note_types = sorted(note_types_by_name)
     markdown_to_html = MarkdownToHTML()
 
-    note_import_fingerprints_by_note_key = db_port.resolve_import_hashes(
-        global_note_keys
-    )
+    note_import_fingerprints_by_note_key = state.resolve_import_hashes(global_note_keys)
+    source_by_note_key = {
+        note.note_key: source_deck_file.source.source_path
+        for source_deck_file in source_deck_files
+        for note in source_deck_file.file_state.notes
+        if note.note_key
+    }
+    recorded_sources = state.resolve_note_sources(global_note_keys)
+    ownership_conflicts = [
+        f"{note_key}: {recorded_sources[note_key]} -> {source_path}"
+        for note_key, source_path in source_by_note_key.items()
+        if note_key in recorded_sources and recorded_sources[note_key] != source_path
+    ]
+    if ownership_conflicts:
+        raise ValueError(
+            "Cross-source note moves require an explicit sharing operation: "
+            + "; ".join(sorted(ownership_conflicts))
+        )
     pending_import_fingerprints: list[tuple[str, str, str]] = []
 
-    with db_port.write_tx():
-        deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
+    with state.write_tx():
+        deck_ids_by_name = anki.fetch_deck_names_and_ids()
         initial_deck_names = set(deck_ids_by_name)
         deck_names_by_id = {
             deck_id: deck_name for deck_name, deck_id in deck_ids_by_name.items()
         }
 
         identity = resolve_import_note_identity(
-            anki_port=anki_port,
-            db_port=db_port,
+            anki=anki,
+            state=state,
             note_keys=global_note_keys,
             required_note_types=required_note_types,
         )
@@ -159,7 +209,7 @@ def sync_collection_to_anki(
         all_card_ids = []
         for anki_note in anki_notes.values():
             all_card_ids.extend(anki_note.card_ids)
-        anki_cards = anki_port.fetch_cards_info(all_card_ids)
+        anki_cards = anki.fetch_cards_info(all_card_ids)
         note_ids_by_deck_name = group_note_ids_by_deck_name(anki_cards)
 
         results = []
@@ -178,8 +228,8 @@ def sync_collection_to_anki(
             sync_result, pending_write, moved_from_decks = sync_deck_to_anki(
                 deck_file,
                 note_types_by_name,
-                anki_port,
-                db_port,
+                anki,
+                state,
                 markdown_to_html,
                 deck_names_by_id,
                 deck_ids_by_name,
@@ -208,7 +258,11 @@ def sync_collection_to_anki(
                 ):
                     rename_candidates.add((source_deck, sync_result.name))
 
-            if sync_result.name and sync_result.name in deck_ids_by_name:
+            if (
+                deck_file.file_path not in deleted_deck_paths
+                and sync_result.name
+                and sync_result.name in deck_ids_by_name
+            ):
                 markdown_deck_ids.add(deck_ids_by_name[sync_result.name])
 
             results.append(sync_result)
@@ -218,16 +272,44 @@ def sync_collection_to_anki(
                 logger.debug(f"File '{deck_file.file_path.name}': {summary.format()}")
 
         if pending_note_mappings:
-            db_port.upsert_note_links(pending_note_mappings)
+            state.upsert_note_links(pending_note_mappings)
+        source_links: dict[str, list[tuple[str, int]]] = {}
+        for source_deck_file in source_deck_files:
+            source_path = source_deck_file.source.source_path
+            for note in source_deck_file.file_state.notes:
+                if not note.note_key:
+                    continue
+                note_id = note_ids_by_note_key.get(note.note_key)
+                if note_id:
+                    source_links.setdefault(source_path, []).append(
+                        (note.note_key, note_id)
+                    )
+        for source_path, mappings in source_links.items():
+            state.upsert_note_links(mappings, source_path=source_path)
         if pending_import_fingerprints:
-            db_port.upsert_import_hashes(pending_import_fingerprints)
+            state.upsert_import_hashes(pending_import_fingerprints)
 
         flush_deck_metadata_writes(pending_writes)
+
+        for source_deck_file in source_deck_files:
+            deck_file = source_deck_file.file_state
+            deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
+            if deck_file.file_path in deleted_deck_paths:
+                state.delete_deck(deck_name)
+                continue
+            deck_id = deck_ids_by_name.get(deck_name)
+            if deck_id is not None:
+                state.upsert_deck(
+                    deck_name,
+                    deck_id,
+                    source_path=source_deck_file.source.source_path,
+                    md_path=str(deck_file.file_path.relative_to(collection_root)),
+                )
 
         affected_note_ids = collect_membership_affected_note_ids(results)
         refresh_membership_for_affected_notes(
             affected_note_ids=affected_note_ids,
-            anki_port=anki_port,
+            anki=anki,
             note_ids_by_deck_name=note_ids_by_deck_name,
         )
 
@@ -236,7 +318,10 @@ def sync_collection_to_anki(
         for source_deck, target_deck in sorted(rename_candidates):
             if source_deck in note_ids_by_deck_name:
                 continue
-            db_port.delete_deck(source_deck)
+            if anki.fetch_card_ids_in_deck(source_deck):
+                continue
+            anki.delete_empty_deck(source_deck)
+            state.delete_deck(source_deck)
             logger.info(
                 f"Deck renamed from markdown file: '{source_deck}' -> '{target_deck}'"
             )

@@ -13,7 +13,9 @@ import pytest
 from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli import main
 from ankiops.cli_commands import (
+    run_af,
     run_deserialize,
+    run_fa,
     run_fix_image_widths,
     run_serialize,
     run_shared,
@@ -25,6 +27,52 @@ from tests.support.deck_files import DeckFileHarness
 class _FailingProfileAnki:
     def get_active_profile(self):
         raise AnkiConnectionError("Connection reset by peer")
+
+
+def test_connect_failure_is_concise(monkeypatch, caplog):
+    monkeypatch.setattr("ankiops.console.Anki", lambda: _FailingProfileAnki())
+    monkeypatch.setattr("sys.argv", ["ankiops", "fa"])
+
+    from ankiops.console import connect_or_exit
+
+    with caplog.at_level(logging.ERROR), pytest.raises(SystemExit):
+        connect_or_exit()
+
+    assert "Make sure Anki is running" in caplog.text
+    assert "Nothing was changed" not in caplog.text
+    assert "retry:" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("command", "sync_helper"),
+    [
+        (run_af, "ankiops.cli_commands._run_af_with_state"),
+        (run_fa, "ankiops.cli_commands._run_fa_with_state"),
+    ],
+)
+def test_sync_commands_close_state_when_sync_fails(tmp_path, command, sync_helper):
+    class FakeAnki:
+        def get_active_profile(self):
+            return "Test"
+
+    class FakeState:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    state = FakeState()
+    with (
+        patch("ankiops.cli_commands.connect_or_exit", return_value=FakeAnki()),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
+        patch("ankiops.cli_commands.discover_deck_sources", return_value=[]),
+        patch("ankiops.cli_commands.SyncState.open", return_value=state),
+        patch(sync_helper, side_effect=RuntimeError("sync failed")),
+        pytest.raises(RuntimeError, match="sync failed"),
+    ):
+        command(SimpleNamespace(no_auto_commit=True))
+
+    assert state.closed
 
 
 def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
@@ -287,7 +335,7 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
-def test_cli_shared_create_accepts_public_visibility_flag():
+def test_cli_shared_publish_uses_public_only_contract():
     captured = []
 
     with (
@@ -297,14 +345,14 @@ def test_cli_shared_create_accepts_public_visibility_flag():
         ),
         patch(
             "sys.argv",
-            ["ankiops", "shared", "create", "Deck", "owner/repo", "--public"],
+            ["ankiops", "shared", "publish", "Deck", "owner/repo"],
         ),
     ):
         main()
 
     assert captured[0].deck == "Deck"
-    assert captured[0].repo == "owner/repo"
-    assert captured[0].public is True
+    assert captured[0].repository == "owner/repo"
+    assert not hasattr(captured[0], "public")
 
 
 def test_cli_shared_submit_accepts_custom_message():
@@ -324,14 +372,13 @@ def test_cli_shared_submit_accepts_custom_message():
                 "owner/repo",
                 "--message",
                 "  Clarify shared history  ",
-                "--commit",
             ],
         ),
     ):
         main()
 
     assert captured[0].message == "Clarify shared history"
-    assert captured[0].commit is True
+    assert not hasattr(captured[0], "commit")
 
 
 def test_cli_shared_status_accepts_repo():
@@ -350,11 +397,43 @@ def test_cli_shared_status_accepts_repo():
         main()
 
     assert captured[0].shared_command == "status"
-    assert captured[0].repo == "owner/repo"
+    assert captured[0].repository == "owner/repo"
 
 
-def test_shared_submit_from_anki_does_not_auto_commit():
-    args = SimpleNamespace(shared_command="submit", from_anki=True)
+def test_cli_shared_subscribe_accepts_repo():
+    captured = []
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_shared_impl",
+            side_effect=lambda args: captured.append(args),
+        ),
+        patch(
+            "sys.argv",
+            ["ankiops", "shared", "subscribe", "owner/repo"],
+        ),
+    ):
+        main()
+
+    assert captured[0].shared_command == "subscribe"
+    assert captured[0].repository == "owner/repo"
+
+
+def test_cli_shared_help_exposes_only_intention_commands(capsys):
+    with patch("sys.argv", ["ankiops", "shared", "--help"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    for command in ("publish", "subscribe", "status", "update", "submit"):
+        assert command in output
+    for command in ("create", "add", "doctor", "resolve", "abort", "list"):
+        assert command not in output
+
+
+def test_shared_submit_does_not_run_collection_export():
+    args = SimpleNamespace(shared_command="submit")
 
     with (
         patch("ankiops.cli_commands.run_af") as run_af,
@@ -362,7 +441,35 @@ def test_shared_submit_from_anki_does_not_auto_commit():
     ):
         run_shared(args)
 
-    assert run_af.call_args.args[0].no_auto_commit is True
+    run_af.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["ankiops", "shared", "submit", "owner/repo", "--commit"],
+        ["ankiops", "shared", "submit", "owner/repo", "--from-anki"],
+        ["ankiops", "shared", "update", "owner/repo", "--to-anki"],
+    ],
+)
+def test_removed_shared_flags_are_rejected(argv):
+    with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "command", ["create", "add", "doctor", "resolve", "abort", "list"]
+)
+def test_removed_shared_commands_are_rejected(command):
+    with (
+        patch("sys.argv", ["ankiops", "shared", command]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 2
 
 
 @pytest.mark.parametrize("message", ["   ", "line one\nline two"])
@@ -432,7 +539,7 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
@@ -453,7 +560,7 @@ def test_run_serialize_defaults_output_to_deck_name(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.serialize_to_file") as serialize_mock,
     ):
         run_serialize(args)
@@ -486,7 +593,7 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch("ankiops.cli_commands.apply_deserialization_plan") as deserialize_mock,
     ):
@@ -502,7 +609,7 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     deserialize_mock.assert_called_once_with(
         plan,
         overwrite=True,
-        collection_dir=tmp_path,
+        collection_root=tmp_path,
     )
 
 
@@ -516,7 +623,7 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch("ankiops.cli_commands.apply_deserialization_plan") as deserialize_mock,
     ):
@@ -528,7 +635,7 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     deserialize_mock.assert_called_once_with(
         plan,
         overwrite=False,
-        collection_dir=tmp_path,
+        collection_root=tmp_path,
     )
 
 
@@ -553,7 +660,7 @@ def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch(
             "ankiops.cli_commands.fix_image_widths_collection",
@@ -589,7 +696,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     result = ImageWidthFixResult(images_changed=2)
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch("ankiops.cli_commands.fix_image_widths_collection", return_value=result),
         caplog.at_level(logging.INFO),
@@ -601,7 +708,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     assert "ankiops fa" in caplog.text
 
 
-def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
+def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path):
     (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
     (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
     args = SimpleNamespace(
@@ -613,7 +720,7 @@ def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
     )
 
     with (
-        patch("ankiops.cli_commands.require_collection_dir", return_value=tmp_path),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
         patch("ankiops.cli_commands.git_snapshot") as snapshot_mock,
         patch(
             "ankiops.cli_commands.fix_image_widths_collection",
@@ -625,7 +732,7 @@ def test_run_fix_image_widths_uses_broad_snapshot_with_shared_sources(tmp_path):
     snapshot_mock.assert_called_once_with(
         tmp_path,
         action="fixing image widths",
-        paths=[tmp_path],
+        paths=[tmp_path / "Deck.md"],
     )
 
 

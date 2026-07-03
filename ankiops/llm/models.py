@@ -98,12 +98,12 @@ class ModelRegistry:
         return ", ".join(self._models_by_model)
 
 
-def model_registry_path(*, collection_dir: Path) -> Path:
-    return collection_dir / LLM_DIR / MODEL_REGISTRY_FILE_NAME
+def model_registry_path(*, collection_root: Path) -> Path:
+    return collection_root / LLM_DIR / MODEL_REGISTRY_FILE_NAME
 
 
-def load_model_registry(*, collection_dir: Path) -> ModelRegistry:
-    path = model_registry_path(collection_dir=collection_dir)
+def load_model_registry(*, collection_root: Path) -> ModelRegistry:
+    path = model_registry_path(collection_root=collection_root)
     if not path.exists():
         raise ModelRegistryError(
             f"{path}: model registry file not found. "
@@ -120,13 +120,13 @@ def load_model_registry(*, collection_dir: Path) -> ModelRegistry:
 def parse_model(
     value: str,
     *,
-    collection_dir: Path,
+    collection_root: Path,
 ) -> ModelSpec | None:
-    return load_model_registry(collection_dir=collection_dir).parse(value)
+    return load_model_registry(collection_root=collection_root).parse(value)
 
 
-def format_supported_models(*, collection_dir: Path) -> str:
-    return load_model_registry(collection_dir=collection_dir).format_models()
+def format_supported_models(*, collection_root: Path) -> str:
+    return load_model_registry(collection_root=collection_root).format_models()
 
 
 def format_usd_cents(amount: Decimal) -> str:

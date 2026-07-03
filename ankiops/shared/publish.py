@@ -1,4 +1,4 @@
-"""Create GitHub shared sources from local decks."""
+"""Publish local decks as GitHub shared sources."""
 
 from __future__ import annotations
 
@@ -9,108 +9,123 @@ from pathlib import Path
 import yaml
 
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
-from ankiops.deck_sources import SHARED_BRANCH, DeckSource
-from ankiops.git import CollectionGit
+from ankiops.deck_sources import DeckSource
+from ankiops.git import GitRepository
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
 from ankiops.media import extract_media_references
 from ankiops.note_types import NoteType, load_note_types
 from ankiops.shared.errors import format_missing_note_keys_error
-from ankiops.shared.hosting import ensure_create_repo
+from ankiops.shared.hosting import GitHubHost
+from ankiops.sync.state import SyncState
 
 
 @dataclass(frozen=True)
-class _RenderedCreateFile:
+class _RenderedPublishFile:
     source_path: Path
     target_path: Path
     content: str
 
 
 @dataclass(frozen=True)
-class _CreatePlan:
+class _PublishPlan:
     source: DeckSource
-    files: list[_RenderedCreateFile]
+    files: list[_RenderedPublishFile]
     note_types_used: set[str]
     media_used: set[str]
+    note_keys: set[str]
 
 
-def create_shared_deck(
-    collection_dir: Path,
+def publish_shared_deck(
+    collection_root: Path,
     deck: str,
     source: DeckSource,
-    *,
-    public: bool,
 ) -> None:
-    repo = CollectionGit(collection_dir)
-    repo.ensure_repo("Shared commands require a git-backed collection.")
-    if source.root.exists():
-        raise ValueError(f"Shared source already exists: {source.source_id}")
-
-    plan = _prepare_create_plan(collection_dir, deck, source)
-    repo.ensure_clean_index(
-        "Shared create requires a clean git index. Commit or unstage "
-        "existing changes before creating a shared source."
+    collection_git = GitRepository(collection_root)
+    collection_git.ensure_repo(
+        "AnkiOps collections require a Git repository at the root."
     )
-    ensure_create_repo(repo, source, public=public)
+    source_git = GitRepository(source.root) if source.root.exists() else None
+    if source_git is not None and not source_git.is_repo():
+        raise ValueError(
+            f"Shared source path exists but is not a Git repository: {source.root}"
+        )
+    if source_git is not None:
+        try:
+            _selected_deck_files(collection_root, deck)
+        except ValueError:
+            return
 
-    initial_head = repo.head()
-    branch: str | None = None
+    plan = _prepare_publish_plan(collection_root, deck, source)
+    github = GitHubHost(collection_root)
+    github.create_repo(source.display_name)
+    originals = {
+        rendered.source_path: rendered.source_path.read_bytes()
+        for rendered in plan.files
+    }
     try:
-        touched = _write_create_files(collection_dir, plan)
-        repo.commit_create_move(
-            touched_paths=touched,
-            source_paths=[rendered.source_path for rendered in plan.files],
-            message=f"AnkiOps: create {source.source_id} from {deck}",
+        if source_git is None:
+            _write_publish_files(collection_root, plan)
+            source_git = GitRepository(source.root)
+            source_git.init_repo(initial_branch="main")
+            _copy_git_identity(collection_git, source_git)
+            source_git.checkpoint(f"Publish shared deck {deck}")
+        source_git.set_remote("upstream", str(source.github_url))
+        source_git.set_remote("publish", str(source.github_url))
+        source_git.push("upstream", "HEAD", "main")
+        source_git.checkout_or_create_branch("ankiops/work", "main")
+
+        _remove_published_local_files(plan)
+        collection_git.commit_paths(
+            [rendered.source_path for rendered in plan.files],
+            f"Move {deck} into shared source {source.source_path}",
         )
-        split_sha = repo.split_subtree(source)
-        repo.rejoin_subtree(
-            source,
-            split_sha,
-            f"AnkiOps: initialize subtree history for {source.source_id}",
-        )
-        branch = repo.create_temp_branch(source, split_sha)
-        if source.github_url:
-            repo.push_ref(source.github_url, branch, SHARED_BRANCH)
-        repo.delete_branch_if_exists(branch)
-        branch = None
+        _transfer_sync_ownership(collection_root, plan)
     except Exception:
-        _cleanup_failed_create(repo, plan, initial_head=initial_head, branch=branch)
+        for path, content in originals.items():
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
         raise
 
-    _unlink_created_source_files(plan)
 
-
-def _cleanup_failed_create(
-    repo: CollectionGit,
-    plan: _CreatePlan,
-    *,
-    initial_head: str | None = None,
-    branch: str | None = None,
+def _copy_git_identity(
+    collection_git: GitRepository,
+    source_git: GitRepository,
 ) -> None:
-    repo.rollback_to(initial_head)
-    repo.delete_branch_if_exists(branch)
-    create_paths = [
-        repo.source_prefix(plan.source),
-        *[repo.rel_path(rendered.source_path) for rendered in plan.files],
-    ]
-    repo.unstage_or_untrack(create_paths)
-    _remove_create_source_root(plan)
+    for key in ("user.name", "user.email"):
+        value = collection_git.run(["config", "--get", key], check=False).stdout.strip()
+        if value:
+            source_git.run(["config", key, value])
 
 
-def _remove_create_source_root(plan: _CreatePlan) -> None:
-    if plan.source.root.exists():
-        shutil.rmtree(plan.source.root)
-    for parent in (plan.source.root.parent, plan.source.root.parent.parent):
-        try:
-            parent.rmdir()
-        except OSError:
-            pass
+def _transfer_sync_ownership(collection_root: Path, plan: _PublishPlan) -> None:
+    state = SyncState.open(collection_root)
+    try:
+        note_ids = state.resolve_note_ids(plan.note_keys)
+        state.upsert_note_links(
+            [(note_key, note_id) for note_key, note_id in note_ids.items()],
+            source_path=plan.source.source_path,
+        )
+        for rendered in plan.files:
+            deck_name = file_stem_to_deck_name(rendered.source_path.stem)
+            deck_id = state.resolve_deck_id(deck_name)
+            if deck_id is None:
+                continue
+            state.upsert_deck(
+                deck_name,
+                deck_id,
+                source_path=plan.source.source_path,
+                md_path=str(rendered.target_path.relative_to(collection_root)),
+            )
+    finally:
+        state.close()
 
 
-def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
+def _selected_deck_files(collection_root: Path, deck: str) -> list[Path]:
     deck_filter = deck.strip()
     subdeck_scope = f"{deck_filter}::"
     files = []
-    local_source = DeckSource.local(collection_dir)
+    local_source = DeckSource.local(collection_root)
     for md_file in local_source.deck_files():
         deck_name = file_stem_to_deck_name(md_file.stem)
         if deck_name == deck_filter or deck_name.startswith(subdeck_scope):
@@ -130,15 +145,15 @@ def _scoped_configs(
     ]
 
 
-def _prepare_create_plan(
-    collection_dir: Path,
+def _prepare_publish_plan(
+    collection_root: Path,
     deck: str,
     source: DeckSource,
-) -> _CreatePlan:
-    root_configs = load_note_types(collection_dir / NOTE_TYPES_DIR)
+) -> _PublishPlan:
+    root_configs = load_note_types(collection_root / NOTE_TYPES_DIR)
     root_config_by_name = {config.name: config for config in root_configs}
 
-    selected_files = _selected_deck_files(collection_dir, deck)
+    selected_files = _selected_deck_files(collection_root, deck)
     parsed_files: list[tuple[Path, DeckFile]] = []
     note_types_used: set[str] = set()
     media_used: set[str] = set()
@@ -149,7 +164,7 @@ def _prepare_create_plan(
         parsed = read_deck_file(
             md_file,
             note_types=root_configs,
-            context_root=collection_dir,
+            context_root=collection_root,
         )
         parsed_files.append((md_file, parsed))
         for index, note in enumerate(parsed.notes, start=1):
@@ -157,7 +172,7 @@ def _prepare_create_plan(
                 missing_note_keys.append(f"{md_file.name} note {index}")
             elif note.note_key in note_keys:
                 raise ValueError(
-                    f"Duplicate note_key in shared create set: {note.note_key}"
+                    f"Duplicate note_key in shared publish set: {note.note_key}"
                 )
             else:
                 note_keys.add(note.note_key)
@@ -171,41 +186,42 @@ def _prepare_create_plan(
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
         raise ValueError(
-            "Unknown note type(s) while creating shared source: "
+            "Unknown note type(s) while publishing shared deck: "
             + ", ".join(unknown_note_types)
         )
 
     missing_media = sorted(
         media_name
         for media_name in media_used
-        if not (collection_dir / LOCAL_MEDIA_DIR / media_name).exists()
+        if not (collection_root / LOCAL_MEDIA_DIR / media_name).exists()
     )
     if missing_media:
         raise ValueError(
-            "Cannot create shared source: referenced media file(s) missing: "
+            "Cannot publish shared deck: referenced media file(s) missing: "
             + ", ".join(missing_media)
         )
 
     used_configs = [root_config_by_name[name] for name in sorted(note_types_used)]
     scoped_configs = _scoped_configs(source, used_configs)
     scoped_config_by_name = {config.name: config for config in scoped_configs}
-    rendered_files: list[_RenderedCreateFile] = []
+    rendered_files: list[_RenderedPublishFile] = []
     for md_file, parsed in parsed_files:
         for note in parsed.notes:
             note.note_type = source.scope_note_type_name(note.note_type)
         rendered_files.append(
-            _RenderedCreateFile(
+            _RenderedPublishFile(
                 source_path=md_file,
                 target_path=source.root / md_file.name,
                 content=render_notes_to_markdown(parsed.notes, scoped_config_by_name),
             )
         )
 
-    return _CreatePlan(
+    return _PublishPlan(
         source=source,
         files=rendered_files,
         note_types_used=note_types_used,
         media_used=media_used,
+        note_keys=note_keys,
     )
 
 
@@ -275,7 +291,7 @@ def _copy_note_type_styling_assets(
     return touched
 
 
-def _write_create_files(collection_dir: Path, plan: _CreatePlan) -> list[Path]:
+def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path]:
     source = plan.source
     source.root.mkdir(parents=True, exist_ok=False)
     (source.root / LOCAL_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
@@ -287,19 +303,19 @@ def _write_create_files(collection_dir: Path, plan: _CreatePlan) -> list[Path]:
         touched.extend([rendered.target_path, rendered.source_path])
 
     for note_type in sorted(plan.note_types_used):
-        src = collection_dir / NOTE_TYPES_DIR / note_type
+        src = collection_root / NOTE_TYPES_DIR / note_type
         dst = source.note_types_dir / note_type
         shutil.copytree(src, dst, dirs_exist_ok=True)
         touched.append(dst)
         touched.extend(
             _copy_note_type_styling_assets(
-                collection_dir / NOTE_TYPES_DIR,
+                collection_root / NOTE_TYPES_DIR,
                 source.note_types_dir,
                 note_type,
             )
         )
 
-    root_media = collection_dir / LOCAL_MEDIA_DIR
+    root_media = collection_root / LOCAL_MEDIA_DIR
     shared_media = source.root / LOCAL_MEDIA_DIR
     for media_name in sorted(plan.media_used):
         src = root_media / media_name
@@ -311,6 +327,6 @@ def _write_create_files(collection_dir: Path, plan: _CreatePlan) -> list[Path]:
     return touched
 
 
-def _unlink_created_source_files(plan: _CreatePlan) -> None:
+def _remove_published_local_files(plan: _PublishPlan) -> None:
     for rendered in plan.files:
         rendered.source_path.unlink()

@@ -9,7 +9,7 @@ from ankiops.note_types import ANKIOPS_KEY_FIELD
 from ankiops.notes import AnkiNote
 
 
-class AnkiIdentityPort(Protocol):
+class AnkiIdentityReader(Protocol):
     def fetch_all_note_ids(self, required_types: list[str]) -> list[int]: ...
 
     def fetch_note_ids_by_note_keys(
@@ -20,7 +20,7 @@ class AnkiIdentityPort(Protocol):
     def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]: ...
 
 
-class DbIdentityPort(Protocol):
+class NoteIdentityState(Protocol):
     def resolve_note_ids(self, note_keys: set[str]) -> dict[str, int]: ...
 
 
@@ -142,25 +142,25 @@ def _resolve_note_ids_by_key(
 
 def resolve_import_note_identity(
     *,
-    anki_port: AnkiIdentityPort,
-    db_port: DbIdentityPort,
+    anki: AnkiIdentityReader,
+    state: NoteIdentityState,
     note_keys: set[str],
     required_note_types: list[str],
 ) -> ImportNoteIdentity:
     """Resolve keyed Markdown notes to Anki notes before creating anything."""
     if not note_keys:
-        all_note_ids = set(anki_port.fetch_all_note_ids(required_note_types))
-        anki_notes = anki_port.fetch_notes_info(sorted(all_note_ids))
+        all_note_ids = set(anki.fetch_all_note_ids(required_note_types))
+        anki_notes = anki.fetch_notes_info(sorted(all_note_ids))
         return ImportNoteIdentity(
             anki_notes=anki_notes,
             note_ids_by_note_key={},
             pending_note_mappings=[],
         )
 
-    db_mappings = db_port.resolve_note_ids(note_keys)
-    all_note_ids = set(anki_port.fetch_all_note_ids(required_note_types))
+    db_mappings = state.resolve_note_ids(note_keys)
+    all_note_ids = set(anki.fetch_all_note_ids(required_note_types))
     all_note_ids.update(db_mappings.values())
-    anki_notes = anki_port.fetch_notes_info(sorted(all_note_ids))
+    anki_notes = anki.fetch_notes_info(sorted(all_note_ids))
 
     embedded_note_ids = _embedded_note_ids_by_key(anki_notes, note_keys)
     key_field_lookup_note_keys = {
@@ -180,7 +180,7 @@ def resolve_import_note_identity(
     }
 
     key_field_note_ids_by_key = (
-        anki_port.fetch_note_ids_by_note_keys(key_field_lookup_note_keys)
+        anki.fetch_note_ids_by_note_keys(key_field_lookup_note_keys)
         if key_field_lookup_note_keys
         else {}
     )
@@ -193,7 +193,7 @@ def resolve_import_note_identity(
     if missing_key_field_note_ids:
         _merge_notes(
             anki_notes,
-            anki_port.fetch_notes_info(sorted(missing_key_field_note_ids)),
+            anki.fetch_notes_info(sorted(missing_key_field_note_ids)),
         )
 
     embedded_note_ids = _embedded_note_ids_by_key(anki_notes, note_keys)

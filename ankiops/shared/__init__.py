@@ -2,20 +2,18 @@
 
 from ankiops.shared.commands import (
     run,
-    run_add,
-    run_create,
-    run_list,
+    run_publish,
     run_status,
     run_submit,
+    run_subscribe,
     run_update,
 )
 
 __all__ = [
     "run",
     "run_submit",
-    "run_create",
+    "run_publish",
     "run_update",
-    "run_list",
     "run_status",
-    "run_add",
+    "run_subscribe",
 ]

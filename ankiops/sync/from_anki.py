@@ -93,7 +93,7 @@ def _from_html(
 def _load_deck_markdown_state(
     deck_name: str,
     existing_file_path: Path | None,
-    collection_dir: Path,
+    collection_root: Path,
     note_types: list[NoteType],
 ) -> tuple[Path, DeckFile, bool]:
     if existing_file_path and existing_file_path.exists():
@@ -102,19 +102,19 @@ def _load_deck_markdown_state(
             read_deck_file(
                 existing_file_path,
                 note_types=note_types,
-                context_root=collection_dir,
+                context_root=collection_root,
             ),
             False,
         )
 
-    file_path = collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
+    file_path = collection_root / f"{deck_name_to_file_stem(deck_name)}.md"
     if file_path.exists():
         return (
             file_path,
             read_deck_file(
                 file_path,
                 note_types=note_types,
-                context_root=collection_dir,
+                context_root=collection_root,
             ),
             False,
         )
@@ -122,7 +122,7 @@ def _load_deck_markdown_state(
     write_deck_file(file_path, "")
     return (
         file_path,
-        read_deck_file(file_path, note_types=note_types, context_root=collection_dir),
+        read_deck_file(file_path, note_types=note_types, context_root=collection_root),
         True,
     )
 
@@ -131,7 +131,7 @@ def _resolve_deck_notes(
     anki_notes: list[AnkiNote],
     config_by_name: dict[str, NoteType],
     html_to_markdown: HTMLToMarkdown,
-    db_port: SyncState,
+    state: SyncState,
     result: SyncReport,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
@@ -214,7 +214,7 @@ def _resolve_deck_notes(
                 note_key = match.note_key
                 _queue_note_mapping(note_key, anki_note.note_id)
             else:
-                note_key = db_port.generate_note_key()
+                note_key = state.generate_note_key()
                 _queue_note_mapping(note_key, anki_note.note_id)
 
         domain_note.note_key = note_key
@@ -412,9 +412,9 @@ def _sync_deck(
     anki_notes: list[AnkiNote],
     config_by_name: dict[str, NoteType],
     existing_file_path: Path | None,
-    collection_dir: Path,
+    collection_root: Path,
     html_to_markdown: HTMLToMarkdown,
-    db_port: SyncState,
+    state: SyncState,
     note_keys_by_id: dict[int, str],
     pending_note_mappings: list[tuple[str, int]],
     note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
@@ -424,7 +424,7 @@ def _sync_deck(
     file_path, fs, is_first_export = _load_deck_markdown_state(
         deck_name=deck_name,
         existing_file_path=existing_file_path,
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         note_types=list(config_by_name.values()),
     )
     result.file_path = file_path
@@ -444,7 +444,7 @@ def _sync_deck(
         anki_notes=anki_notes,
         config_by_name=config_by_name,
         html_to_markdown=html_to_markdown,
-        db_port=db_port,
+        state=state,
         result=result,
         note_keys_by_id=note_keys_by_id,
         pending_note_mappings=pending_note_mappings,
@@ -490,7 +490,7 @@ def _sync_deck(
     for old_note in fs.notes:
         if old_note.note_key and old_note.note_key not in final_note_keys:
             # Note was deleted in Anki
-            db_port.delete_note_links_by_keys([old_note.note_key])
+            state.delete_note_links_by_keys([old_note.note_key])
             result.add_change(Change(ChangeType.DELETE, None, old_note.identifier))
             logger.debug(
                 "  Delete markdown note for removed Anki note (note_key=%s)",
@@ -504,14 +504,14 @@ def _sync_deck(
 def _split_orphan_file_notes(
     *,
     md_file: Path,
-    collection_dir: Path,
+    collection_root: Path,
     note_types: list[NoteType],
 ) -> tuple[list[Note], list[Note]] | None:
     try:
         file_state = read_deck_file(
             md_file,
             note_types=note_types,
-            context_root=collection_dir,
+            context_root=collection_root,
         )
     except Exception as error:  # pragma: no cover - defensive fail-safe
         logger.warning(
@@ -531,26 +531,23 @@ def _split_orphan_file_notes(
 
 
 def sync_collection_from_anki(
-    anki_port: Anki,
-    db_port: SyncState,
-    collection_dir: Path,
-    note_types_dir: Path,
+    anki: Anki,
+    state: SyncState,
+    collection_root: Path,
 ) -> CollectionReport:
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    sources = discover_deck_sources(collection_root)
     local_source = sources[0]
     configs = [
-        config
-        for source in sources
-        for config in load_note_types_for_source(source)
+        config for source in sources for config in load_note_types_for_source(source)
     ]
     config_by_name = {config.name: config for config in configs}
     html_to_markdown = HTMLToMarkdown()
-    with db_port.write_tx():
-        deck_ids_by_name = anki_port.fetch_deck_names_and_ids()
+    with state.write_tx():
+        deck_ids_by_name = anki.fetch_deck_names_and_ids()
 
-        all_note_ids = anki_port.fetch_all_note_ids([config.name for config in configs])
-        anki_notes = anki_port.fetch_notes_info(all_note_ids)
-        note_keys_by_id = db_port.resolve_note_keys(all_note_ids)
+        all_note_ids = anki.fetch_all_note_ids([config.name for config in configs])
+        anki_notes = anki.fetch_notes_info(all_note_ids)
+        note_keys_by_id = state.resolve_note_keys(all_note_ids)
         assert_unique_export_note_keys(
             anki_notes=anki_notes,
             note_keys_by_id=note_keys_by_id,
@@ -561,7 +558,7 @@ def sync_collection_from_anki(
             embedded_note_key = anki_note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
             if embedded_note_key:
                 note_key_candidates.add(embedded_note_key)
-        note_export_fingerprints_by_note_key = db_port.resolve_export_hashes(
+        note_export_fingerprints_by_note_key = state.resolve_export_hashes(
             note_key_candidates
         )
         pending_export_fingerprints: list[tuple[str, str, str]] = []
@@ -570,7 +567,7 @@ def sync_collection_from_anki(
         all_card_ids = []
         for anki_note in anki_notes.values():
             all_card_ids.extend(anki_note.card_ids)
-        anki_cards = anki_port.fetch_cards_info(all_card_ids)
+        anki_cards = anki.fetch_cards_info(all_card_ids)
 
         notes_by_deck = {}
         for note_id, anki_note in anki_notes.items():
@@ -608,7 +605,47 @@ def sync_collection_from_anki(
                 + "; ".join(deck_conflicts)
             )
 
+        source_by_path = {source.source_path: source for source in sources}
+        ownership_conflicts = []
+        all_anki_note_keys = {
+            note_keys_by_id.get(note.note_id)
+            or note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+            for notes in notes_by_deck.values()
+            for note in notes
+        }
+        recorded_sources = state.resolve_note_sources(
+            key for key in all_anki_note_keys if key
+        )
+        for deck_name, notes in notes_by_deck.items():
+            deck_id = deck_ids_by_name[deck_name]
+            current_entry = file_map_by_deck_name.get(deck_name)
+            target_source = current_entry[0] if current_entry else None
+            if target_source is None:
+                old_name = state.resolve_deck_name(deck_id)
+                old_entry = file_map_by_deck_name.get(old_name or "")
+                target_source = old_entry[0] if old_entry else None
+            if target_source is None:
+                recorded_deck_source = state.resolve_deck_source(deck_id)
+                target_source = source_by_path.get(recorded_deck_source or "")
+            target_source = target_source or local_source
+            for note in notes:
+                note_key = (
+                    note_keys_by_id.get(note.note_id)
+                    or note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+                )
+                owner = recorded_sources.get(note_key)
+                if note_key and owner and owner != target_source.source_path:
+                    ownership_conflicts.append(
+                        f"{note_key}: {owner} -> {target_source.source_path}"
+                    )
+        if ownership_conflicts:
+            raise ValueError(
+                "Cross-source note moves require an explicit sharing operation: "
+                + "; ".join(sorted(ownership_conflicts))
+            )
+
         results = []
+        source_by_deck_name: dict[str, DeckSource] = {}
         protected_note_groups: list[ProtectedNoteGroup] = []
 
         for deck_name, notes in notes_by_deck.items():
@@ -618,7 +655,7 @@ def sync_collection_from_anki(
             deck_id = deck_ids_by_name[deck_name]
 
             # Rename detection: does this deck_id exist under a different name?
-            old_name = db_port.resolve_deck_name(deck_id)
+            old_name = state.resolve_deck_name(deck_id)
             safe_name = deck_name_to_file_stem(deck_name)
             if old_name and old_name != deck_name:
                 old_entry = file_map_by_deck_name.get(old_name)
@@ -636,6 +673,7 @@ def sync_collection_from_anki(
                 deck_name,
                 (local_source, None),
             )
+            source_by_deck_name[deck_name] = target_source
 
             sync_result = _sync_deck(
                 deck_name,
@@ -644,13 +682,22 @@ def sync_collection_from_anki(
                 target_file,
                 target_source.root,
                 html_to_markdown,
-                db_port,
+                state,
                 note_keys_by_id,
                 pending_note_mappings,
                 note_export_fingerprints_by_note_key,
                 pending_export_fingerprints,
             )
-            db_port.upsert_deck(deck_name, deck_id)
+            state.upsert_deck(
+                deck_name,
+                deck_id,
+                source_path=target_source.source_path,
+                md_path=(
+                    str(sync_result.file_path.relative_to(collection_root))
+                    if sync_result.file_path
+                    else None
+                ),
+            )
             results.append(sync_result)
             if sync_result.protected_keyless_notes:
                 protected_note_groups.append(
@@ -661,9 +708,23 @@ def sync_collection_from_anki(
                 logger.debug(f"Deck '{deck_name}': {summary.format()}")
 
         if pending_note_mappings:
-            db_port.upsert_note_links(pending_note_mappings)
+            state.upsert_note_links(pending_note_mappings)
+        pending_by_key = dict(pending_note_mappings)
+        for deck_name, notes in notes_by_deck.items():
+            owner_source = source_by_deck_name.get(deck_name)
+            if owner_source is None:
+                continue
+            mappings: list[tuple[str, int]] = []
+            for note in notes:
+                note_key = note_keys_by_id.get(note.note_id)
+                if not note_key:
+                    note_key = note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
+                if note_key:
+                    note_id = pending_by_key.get(note_key, note.note_id)
+                    mappings.append((note_key, note_id))
+            state.upsert_note_links(mappings, source_path=owner_source.source_path)
         if pending_export_fingerprints:
-            db_port.upsert_export_hashes(pending_export_fingerprints)
+            state.upsert_export_hashes(pending_export_fingerprints)
 
         extra_changes = []
         active_files = {
@@ -681,11 +742,11 @@ def sync_collection_from_anki(
                 source = source_by_file.get(md_file, local_source)
                 orphan_split = _split_orphan_file_notes(
                     md_file=md_file,
-                    collection_dir=source.root,
+                    collection_root=source.root,
                     note_types=configs,
                 )
                 if orphan_split is None:
-                    db_port.delete_deck(deck_name)
+                    state.delete_deck(deck_name)
                     continue
                 keyless_notes, keyed_notes = orphan_split
                 stale_orphan_note_keys = sorted(
@@ -696,11 +757,11 @@ def sync_collection_from_anki(
                     }
                 )
                 if stale_orphan_note_keys:
-                    db_port.delete_note_links_by_keys(stale_orphan_note_keys)
+                    state.delete_note_links_by_keys(stale_orphan_note_keys)
                 protected_note_count = len(keyless_notes)
 
                 if protected_note_count:
-                    db_port.delete_deck(deck_name)
+                    state.delete_deck(deck_name)
                     protected_note_groups.append(
                         ProtectedNoteGroup(deck_name, protected_note_count)
                     )
@@ -716,7 +777,7 @@ def sync_collection_from_anki(
                         )
                     continue
 
-                db_port.delete_deck(deck_name)
+                state.delete_deck(deck_name)
                 md_file.unlink()
                 if not keyed_notes:
                     logger.info(

@@ -17,48 +17,46 @@ _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
 
 @contextmanager
-def _ports(collection_dir, mock_anki, *, preload_configs: bool):
+def _ports(collection_root, mock_anki, *, preload_configs: bool):
     anki = Anki(invoke_func=mock_anki.invoke)
     fs = DeckFileHarness()
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
+    note_types_dir = collection_root / NOTE_TYPES_DIR
     if not note_types_dir.exists():
         fs.eject_default_note_types(note_types_dir)
     if preload_configs:
         fs.set_note_types(fs.load_note_types(note_types_dir))
-    db = SyncState.open(collection_dir)
+    db = SyncState.open(collection_root)
     try:
         yield anki, fs, db, note_types_dir
     finally:
         db.close()
 
 
-def _run_import(collection_dir, mock_anki, *, preload_configs: bool = True):
-    with _ports(collection_dir, mock_anki, preload_configs=preload_configs) as (
+def _run_import(collection_root, mock_anki, *, preload_configs: bool = True):
+    with _ports(collection_root, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
         db,
         note_types_dir,
     ):
         return sync_collection_to_anki(
-            anki_port=anki,
-            db_port=db,
-            collection_dir=collection_dir,
-            note_types_dir=note_types_dir,
+            anki=anki,
+            state=db,
+            collection_root=collection_root,
         )
 
 
-def _run_export(collection_dir, mock_anki, *, preload_configs: bool = False):
-    with _ports(collection_dir, mock_anki, preload_configs=preload_configs) as (
+def _run_export(collection_root, mock_anki, *, preload_configs: bool = False):
+    with _ports(collection_root, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
         db,
         note_types_dir,
     ):
         return sync_collection_from_anki(
-            anki_port=anki,
-            db_port=db,
-            collection_dir=collection_dir,
-            note_types_dir=note_types_dir,
+            anki=anki,
+            state=db,
+            collection_root=collection_root,
         )
 
 

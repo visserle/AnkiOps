@@ -277,4 +277,3 @@ class _WriteFakeCollection(_FakeCollection):
 
     def get_card(self, card_id: int):
         return self.cards[card_id]
-

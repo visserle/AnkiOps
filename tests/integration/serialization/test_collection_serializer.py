@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ankiops.collection import deck_name_to_file_stem
+from ankiops.git import GitRepository
 from ankiops.interchange import (
     deserialize,
     deserialize_from_file,
@@ -14,22 +15,24 @@ from ankiops.interchange import (
 from ankiops.sync.state import SyncState
 
 
-def _set_collection_paths(monkeypatch, collection_dir):
-    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: collection_dir)
+def _set_collection_paths(monkeypatch, collection_root):
     monkeypatch.setattr(
-        "ankiops.interchange.get_collection_dir",
-        lambda: collection_dir,
+        "ankiops.collection.get_collection_root", lambda: collection_root
+    )
+    monkeypatch.setattr(
+        "ankiops.interchange.get_collection_root",
+        lambda: collection_root,
     )
 
 
-def _init_collection(collection_dir, fs):
-    db = SyncState.open(collection_dir)
+def _init_collection(collection_root, fs):
+    db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
 
-    note_types_dir = collection_dir / "note_types"
+    note_types_dir = collection_root / "note_types"
     fs.eject_default_note_types(note_types_dir)
     return note_types_dir
 
@@ -126,6 +129,7 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
     )
     shared_root = collection / "shared" / "owner" / "repo"
     fs.eject_default_note_types(shared_root / "note_types")
+    GitRepository(shared_root).init_repo()
     (shared_root / "README.md").write_text("# docs", encoding="utf-8")
     (shared_root / "LICENSE.md").write_text("# license", encoding="utf-8")
     (shared_root / "CHANGELOG.md").write_text("# changes", encoding="utf-8")
@@ -143,10 +147,10 @@ def test_serialize_includes_shared_sources_and_ignores_reserved_docs(
     decks = {(deck["source"], deck["name"]): deck for deck in result["decks"]}
     assert ("local", "TestDeck") in decks
     assert ("local", "README") not in decks
-    assert ("shared/owner/repo", "Shared") in decks
-    assert ("shared/owner/repo", "README") not in decks
-    assert ("shared/owner/repo", "_draft") in decks
-    shared_note = decks[("shared/owner/repo", "Shared")]["notes"][0]
+    assert ("owner/repo", "Shared") in decks
+    assert ("owner/repo", "README") not in decks
+    assert ("owner/repo", "_draft") in decks
+    shared_note = decks[("owner/repo", "Shared")]["notes"][0]
     assert shared_note["note_type"] == "shared/owner/repo/AnkiOpsQA"
 
 
@@ -158,6 +162,8 @@ def test_serialize_orders_local_before_sorted_shared_sources(
     shared_a = collection / "shared" / "a-owner" / "deck"
     fs.eject_default_note_types(shared_b / "note_types")
     fs.eject_default_note_types(shared_a / "note_types")
+    GitRepository(shared_b).init_repo()
+    GitRepository(shared_a).init_repo()
     (shared_b / "B.md").write_text(
         "<!-- note_key: shared-b -->\nQ: b\nA: b",
         encoding="utf-8",
@@ -171,8 +177,8 @@ def test_serialize_orders_local_before_sorted_shared_sources(
 
     assert [(deck["source"], deck["name"]) for deck in result["decks"]] == [
         ("local", "TestDeck"),
-        ("shared/a-owner/deck", "A"),
-        ("shared/z-owner/deck", "B"),
+        ("a-owner/deck", "A"),
+        ("z-owner/deck", "B"),
     ]
 
 
@@ -182,6 +188,7 @@ def test_serialize_global_validation_rejects_duplicate_deck_names(
     _set_collection_paths(monkeypatch, collection)
     shared_root = collection / "shared" / "owner" / "repo"
     fs.eject_default_note_types(shared_root / "note_types")
+    GitRepository(shared_root).init_repo()
     (shared_root / "TestDeck.md").write_text(
         "<!-- note_key: shared-1 -->\nQ: shared question\nA: shared answer",
         encoding="utf-8",
@@ -346,12 +353,11 @@ def test_roundtrip_in_memory(collection, tmp_path, fs, monkeypatch):
     fresh_dir = tmp_path / "fresh-in-memory"
     fresh_dir.mkdir()
     _set_collection_paths(monkeypatch, fresh_dir)
-    note_types_dst = _init_collection(fresh_dir, fs)
+    _init_collection(fresh_dir, fs)
 
     deserialize(
         serialized_data,
-        collection_dir=fresh_dir,
-        note_types_dir=note_types_dst,
+        collection_root=fresh_dir,
         overwrite=True,
     )
 
@@ -379,12 +385,11 @@ def test_roundtrip_preserves_tags(collection, tmp_path, fs, monkeypatch):
     fresh_dir = tmp_path / "fresh-tags"
     fresh_dir.mkdir()
     _set_collection_paths(monkeypatch, fresh_dir)
-    note_types_dst = _init_collection(fresh_dir, fs)
+    _init_collection(fresh_dir, fs)
 
     deserialize(
         serialized_data,
-        collection_dir=fresh_dir,
-        note_types_dir=note_types_dst,
+        collection_root=fresh_dir,
         overwrite=True,
     )
 
@@ -401,8 +406,7 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
     with pytest.raises(ValueError, match="Not an initialized AnkiOps collection"):
         deserialize(
             {"decks": [_serialized_deck()]},
-            collection_dir=tmp_path,
-            note_types_dir=note_types_dir,
+            collection_root=tmp_path,
             overwrite=True,
         )
 
@@ -481,13 +485,12 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
     ],
 )
 def test_deserialize_rejects_invalid_data_before_writes(tmp_path, fs, data, message):
-    note_types_dir = _init_collection(tmp_path, fs)
+    _init_collection(tmp_path, fs)
 
     with pytest.raises(ValueError, match=message):
         deserialize(
             data,
-            collection_dir=tmp_path,
-            note_types_dir=note_types_dir,
+            collection_root=tmp_path,
             overwrite=True,
         )
 
@@ -495,12 +498,11 @@ def test_deserialize_rejects_invalid_data_before_writes(tmp_path, fs, data, mess
 
 
 def test_deserialize_accepts_null_note_key(tmp_path, fs):
-    note_types_dir = _init_collection(tmp_path, fs)
+    _init_collection(tmp_path, fs)
 
     deserialize(
         {"decks": [_serialized_deck(name="DraftDeck", note_key=None)]},
-        collection_dir=tmp_path,
-        note_types_dir=note_types_dir,
+        collection_root=tmp_path,
         overwrite=True,
     )
 
@@ -511,40 +513,37 @@ def test_deserialize_accepts_null_note_key(tmp_path, fs):
 
 
 def test_deserialize_writes_final_newline(tmp_path, fs):
-    note_types_dir = _init_collection(tmp_path, fs)
+    _init_collection(tmp_path, fs)
 
     deserialize(
         {"decks": [_serialized_deck(name="NewlineDeck", note_key="nk-newline")]},
-        collection_dir=tmp_path,
-        note_types_dir=note_types_dir,
+        collection_root=tmp_path,
         overwrite=True,
     )
 
     assert (tmp_path / "NewlineDeck.md").read_text(encoding="utf-8") == (
-        "<!-- note_key: nk-newline -->\n"
-        "<!-- note_type: AnkiOpsQA -->\n"
-        "Q: Q\n"
-        "A: A\n"
+        "<!-- note_key: nk-newline -->\n<!-- note_type: AnkiOpsQA -->\nQ: Q\nA: A\n"
     )
 
 
 def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs):
-    note_types_dir = _init_collection(tmp_path, fs)
-    (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
+    _init_collection(tmp_path, fs)
+    shared_root = tmp_path / "shared" / "owner" / "repo"
+    shared_root.mkdir(parents=True)
+    GitRepository(shared_root).init_repo()
 
     with pytest.raises(ValueError, match="note_types/ cannot be loaded"):
         deserialize(
             {
                 "decks": [
                     _serialized_deck(
-                        source="shared/owner/repo",
+                        source="owner/repo",
                         name="Shared",
                         note_type="shared/owner/repo/AnkiOpsQA",
                     )
                 ]
             },
-            collection_dir=tmp_path,
-            note_types_dir=note_types_dir,
+            collection_root=tmp_path,
             overwrite=True,
         )
 
@@ -552,16 +551,17 @@ def test_deserialize_rejects_shared_source_with_missing_note_types(tmp_path, fs)
 
 
 def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, fs):
-    note_types_dir = _init_collection(tmp_path, fs)
+    _init_collection(tmp_path, fs)
     shared_root = tmp_path / "shared" / "owner" / "repo"
     fs.eject_default_note_types(shared_root / "note_types")
+    GitRepository(shared_root).init_repo()
 
     deserialize(
         {
             "decks": [
                 _serialized_deck(name="LocalDeck", note_key="local-1"),
                 _serialized_deck(
-                    source="shared/owner/repo",
+                    source="owner/repo",
                     name="SharedDeck",
                     note_key="shared-1",
                     note_type="shared/owner/repo/AnkiOpsQA",
@@ -569,8 +569,7 @@ def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, f
                 ),
             ]
         },
-        collection_dir=tmp_path,
-        note_types_dir=note_types_dir,
+        collection_root=tmp_path,
         overwrite=True,
     )
 
@@ -583,14 +582,13 @@ def test_deserialize_writes_local_and_shared_decks_to_owning_sources(tmp_path, f
 
 
 def test_deserialize_skips_existing_targets_without_overwrite(tmp_path, fs):
-    note_types_dir = _init_collection(tmp_path, fs)
+    _init_collection(tmp_path, fs)
     target = tmp_path / "Existing.md"
     target.write_text("keep me", encoding="utf-8")
 
     deserialize(
         {"decks": [_serialized_deck(name="Existing", note_key="nk-existing")]},
-        collection_dir=tmp_path,
-        note_types_dir=note_types_dir,
+        collection_root=tmp_path,
         overwrite=False,
     )
 

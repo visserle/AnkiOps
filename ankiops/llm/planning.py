@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.collection import deck_name_to_file_stem
 from ankiops.deck_sources import discover_deck_sources, load_note_types_for_collection
 from ankiops.interchange import serialize
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
@@ -146,13 +146,13 @@ class EligibleBatch:
 
 def plan_task(
     *,
-    collection_dir: Path,
+    collection_root: Path,
     task_name: str,
     model_override: str | None = None,
     deck_override: str | None = None,
 ) -> TaskPlanResult:
     context = materialize_task_context(
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         task_name=task_name,
         model_override=model_override,
         deck_override=deck_override,
@@ -166,29 +166,28 @@ def plan_task(
 
 def materialize_task_context(
     *,
-    collection_dir: Path,
+    collection_root: Path,
     task_name: str,
     model_override: str | None,
     deck_override: str | None,
 ) -> MaterializedTaskContext:
     task, note_type_configs = _load_task(
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         task_name=task_name,
     )
     if deck_override is not None:
         task = replace(task, decks=DeckScope(deck_root=deck_override))
     if model_override is not None:
-        model = parse_model(model_override, collection_dir=collection_dir)
+        model = parse_model(model_override, collection_root=collection_root)
         if model is None:
             raise ValueError(f"Unknown model '{model_override}'")
         task = replace(task, model=model)
 
     deck, no_subdecks = _resolve_serializer_scope(task)
     serialized_data = serialize(
-        collection_dir,
+        collection_root,
         deck=deck,
         no_subdecks=no_subdecks,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
     )
     discovery_snapshot = _discover_candidates(
         data=serialized_data,
@@ -205,15 +204,12 @@ def materialize_task_context(
 
 def _load_task(
     *,
-    collection_dir: Path,
+    collection_root: Path,
     task_name: str,
 ) -> tuple[TaskConfig, dict[str, NoteType]]:
-    note_type_configs = load_note_types_for_collection(
-        collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
+    note_type_configs = load_note_types_for_collection(collection_root)
     catalog = load_llm_task_catalog(
-        collection_dir,
+        collection_root,
         note_type_configs=note_type_configs,
     )
     task = catalog.tasks_by_name.get(task_name)
@@ -241,21 +237,18 @@ def _load_task(
 
 
 def snapshot_paths_for_task(
-    collection_dir: Path,
+    collection_root: Path,
     task_context: MaterializedTaskContext,
 ) -> list[Path]:
-    sources = discover_deck_sources(
-        collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
-    )
+    sources = discover_deck_sources(collection_root)
     if any(source.is_shared for source in sources):
-        return [collection_dir]
+        return [collection_root]
 
     if any(
         item.item_status is LlmItemStatus.QUEUED and item.source != "local"
         for item in task_context.discovery_snapshot.items
     ):
-        return [collection_dir]
+        return [collection_root]
 
     deck_names = {
         item.deck_name
@@ -263,7 +256,7 @@ def snapshot_paths_for_task(
         if item.item_status is LlmItemStatus.QUEUED and item.source == "local"
     }
     return [
-        collection_dir / f"{deck_name_to_file_stem(deck_name)}.md"
+        collection_root / f"{deck_name_to_file_stem(deck_name)}.md"
         for deck_name in sorted(deck_names)
     ]
 

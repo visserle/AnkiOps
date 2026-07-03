@@ -10,10 +10,9 @@ from typing import Any, cast
 
 from ankiops.collection import (
     ANKIOPS_DB,
-    NOTE_TYPES_DIR,
     deck_name_to_file_stem,
     file_stem_to_deck_name,
-    get_collection_dir,
+    get_collection_root,
 )
 from ankiops.console import clickable_path
 from ankiops.deck_sources import (
@@ -61,23 +60,22 @@ class DeserializationPlan:
 
 
 def _source_name(source: DeckSource) -> str:
-    return source.source_id or LOCAL_SOURCE_NAME
+    return source.display_name
 
 
 def serialize(
-    collection_dir: Path,
+    collection_root: Path,
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
-    note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Serialize markdown decks into an in-memory JSON-compatible mapping."""
-    db_path = collection_dir / ANKIOPS_DB
+    db_path = collection_root / ANKIOPS_DB
     if not db_path.exists():
-        raise ValueError(f"Not an AnkiOps collection: {collection_dir}")
+        raise ValueError(f"Not an AnkiOps collection: {collection_root}")
 
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    parsed_decks = _parse_sources(collection_dir, sources)
+    sources = discover_deck_sources(collection_root)
+    parsed_decks = _parse_sources(collection_root, sources)
     _validate_parsed_decks(parsed_decks)
 
     serialized_data: dict[str, Any] = {
@@ -137,7 +135,7 @@ def serialize(
 
 
 def _parse_sources(
-    collection_dir: Path,
+    collection_root: Path,
     sources: list[DeckSource],
 ) -> list[_ParsedDeck]:
     parsed_decks: list[_ParsedDeck] = []
@@ -151,7 +149,7 @@ def _parse_sources(
                     context_root=source.root,
                 )
             except Exception as error:
-                display = _display_source_path(collection_dir, source, md_file)
+                display = _display_source_path(collection_root, source, md_file)
                 raise ValueError(f"Error parsing {display}: {error}") from error
             parsed_decks.append(
                 _ParsedDeck(
@@ -210,12 +208,12 @@ def _validate_parsed_decks(parsed_decks: list[_ParsedDeck]) -> None:
         raise ValueError("Cannot serialize collection:\n- " + "\n- ".join(errors))
 
 
-def _display_source_path(collection_dir: Path, source: DeckSource, path: Path) -> str:
+def _display_source_path(collection_root: Path, source: DeckSource, path: Path) -> str:
     try:
         relative = path.resolve().relative_to(source.root.resolve())
     except ValueError:
         try:
-            relative = path.resolve().relative_to(collection_dir.resolve())
+            relative = path.resolve().relative_to(collection_root.resolve())
         except ValueError:
             return str(path)
     return f"{_source_name(source)}:{relative}"
@@ -235,17 +233,16 @@ def _deck_matches_filter(
 
 
 def serialize_to_file(
-    collection_dir: Path,
+    collection_root: Path,
     output_file: Path,
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
-    note_types_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Serialize markdown decks to a JSON file.
 
     Args:
-        collection_dir: Path to the markdown decks directory
+        collection_root: Path to the markdown decks directory
         output_file: Path where JSON file will be written
         deck: Optional deck name scope for serialization, otherswise serializes the
               entire collection
@@ -255,10 +252,9 @@ def serialize_to_file(
         Dictionary containing the serialized data
     """
     serialized_data = serialize(
-        collection_dir,
+        collection_root,
         deck=deck,
         no_subdecks=no_subdecks,
-        note_types_dir=note_types_dir,
     )
     total_notes = sum(
         len(deck.get("notes", []))
@@ -280,26 +276,24 @@ def serialize_to_file(
 def deserialize(
     data: dict[str, Any],
     *,
-    collection_dir: Path,
-    note_types_dir: Path,
+    collection_root: Path,
     overwrite: bool = False,
     quiet: bool = False,
 ) -> None:
     """Deserialize markdown decks from an in-memory JSON-compatible mapping."""
-    logger.debug(f"Target directory: {collection_dir}")
+    logger.debug(f"Target directory: {collection_root}")
 
-    db_path = collection_dir / ANKIOPS_DB
+    db_path = collection_root / ANKIOPS_DB
     if not db_path.exists():
-        raise ValueError(f"Not an initialized AnkiOps collection: {collection_dir}")
+        raise ValueError(f"Not an initialized AnkiOps collection: {collection_root}")
 
     decks = _validate_serialized_data(
         data,
-        collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
+        collection_root=collection_root,
     )
     _write_validated_decks(
         decks,
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         overwrite=overwrite,
         quiet=quiet,
     )
@@ -308,20 +302,20 @@ def deserialize(
 def apply_deserialization_plan(
     plan: DeserializationPlan,
     *,
-    collection_dir: Path,
+    collection_root: Path,
     overwrite: bool = False,
     quiet: bool = False,
 ) -> None:
     """Write a previously validated deserialization plan."""
-    logger.debug(f"Target directory: {collection_dir}")
+    logger.debug(f"Target directory: {collection_root}")
 
-    db_path = collection_dir / ANKIOPS_DB
+    db_path = collection_root / ANKIOPS_DB
     if not db_path.exists():
-        raise ValueError(f"Not an initialized AnkiOps collection: {collection_dir}")
+        raise ValueError(f"Not an initialized AnkiOps collection: {collection_root}")
 
     _write_validated_decks(
         plan.decks,
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         overwrite=overwrite,
         quiet=quiet,
     )
@@ -330,7 +324,7 @@ def apply_deserialization_plan(
 def _write_validated_decks(
     decks: Sequence[_ValidatedDeck],
     *,
-    collection_dir: Path,
+    collection_root: Path,
     overwrite: bool,
     quiet: bool,
 ) -> None:
@@ -374,7 +368,7 @@ def _write_validated_decks(
     summary_message = (
         "Deserialized "
         f"{total_decks} deck(s), {total_notes} note(s), "
-        f"{len({deck.source_name for deck in decks})} source(s) to {collection_dir}"
+        f"{len({deck.source_name for deck in decks})} source(s) to {collection_root}"
     )
     if quiet:
         logger.debug(summary_message)
@@ -389,8 +383,7 @@ def _deserialize_target_path(deck: _ValidatedDeck) -> Path:
 def _validate_serialized_data(
     data: dict[str, Any],
     *,
-    collection_dir: Path,
-    note_types_dir: Path,
+    collection_root: Path,
 ) -> list[_ValidatedDeck]:
     errors: list[str] = []
     if not isinstance(data, dict):
@@ -400,7 +393,7 @@ def _validate_serialized_data(
     if not isinstance(raw_decks, list):
         raise ValueError("Serialized data must contain a top-level 'decks' list")
 
-    sources = discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
+    sources = discover_deck_sources(collection_root)
     source_by_name = {_source_name(source): source for source in sources}
     configs_by_source: dict[str, dict[str, NoteType]] = {}
     referenced_sources = {
@@ -559,8 +552,7 @@ def _validate_serialized_data(
 def plan_deserialize_from_file(
     json_file: Path,
     *,
-    collection_dir: Path,
-    note_types_dir: Path,
+    collection_root: Path,
 ) -> DeserializationPlan:
     with json_file.open("r", encoding="utf-8") as input_handle:
         data = json.load(input_handle)
@@ -568,8 +560,7 @@ def plan_deserialize_from_file(
     logger.debug(f"Importing serialized data from: {json_file}")
     decks = _validate_serialized_data(
         data,
-        collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
+        collection_root=collection_root,
     )
     return DeserializationPlan(
         decks=tuple(decks),
@@ -582,27 +573,21 @@ def deserialize_from_file(
     json_file: Path,
     overwrite: bool = False,
     *,
-    collection_dir: Path | None = None,
-    note_types_dir: Path | None = None,
+    collection_root: Path | None = None,
 ) -> None:
     """Deserialize markdown decks from a JSON file.
-
-    In development mode (pyproject.toml with name="ankiops" in cwd),
-    unpacks to ./collection. Otherwise, unpacks to the current working directory.
 
     Args:
         json_file: Path to JSON file to deserialize
         overwrite: If True, overwrite existing markdown files; if False, skip
     """
-    collection_dir = collection_dir or get_collection_dir()
-    resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
+    collection_root = collection_root or get_collection_root()
     plan = plan_deserialize_from_file(
         json_file,
-        collection_dir=collection_dir,
-        note_types_dir=resolved_note_types_dir,
+        collection_root=collection_root,
     )
     apply_deserialization_plan(
         plan,
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         overwrite=overwrite,
     )

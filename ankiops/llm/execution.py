@@ -20,7 +20,6 @@ from openai.types.responses import (
 )
 from pydantic import ConfigDict, create_model
 
-from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.git import git_snapshot
 from ankiops.interchange import deserialize
 from ankiops.note_types import NoteType
@@ -168,12 +167,12 @@ class LlmTaskExecutor:
     def __init__(
         self,
         *,
-        collection_dir: Path,
+        collection_root: Path,
         materialized_context: MaterializedTaskContext,
         no_auto_commit: bool,
         progress_callback: ProgressReporter | None = None,
     ) -> None:
-        self.collection_dir = collection_dir
+        self.collection_root = collection_root
         self.materialized_context = materialized_context
         self.no_auto_commit = no_auto_commit
         self.progress_callback = progress_callback
@@ -185,23 +184,23 @@ class LlmTaskExecutor:
             "Starting LLM task '%s' (model=%s, collection=%s, deck_scope=%s)",
             task.name,
             task.model,
-            self.collection_dir,
+            self.collection_root,
             format_deck_scope(task),
         )
         if not self.no_auto_commit:
             logger.debug("Creating pre-LLM git snapshot")
             git_snapshot(
-                self.collection_dir,
+                self.collection_root,
                 action=f"LLM task {task.name}",
                 paths=snapshot_paths_for_task(
-                    self.collection_dir,
+                    self.collection_root,
                     task_context,
                 ),
             )
         else:
             logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-        db = LlmJobStore.open(self.collection_dir)
+        db = LlmJobStore.open(self.collection_root)
         try:
             job_id = db.start_job(
                 task_name=task.name,
@@ -247,7 +246,7 @@ class LlmTaskExecutor:
                     db=db,
                     job_id=job_id,
                     data=task_context.serialized_data,
-                    collection_dir=self.collection_dir,
+                    collection_root=self.collection_root,
                 )
 
             db.finalize_job(
@@ -488,7 +487,7 @@ class LlmTaskExecutor:
 
 async def run_task_async(
     *,
-    collection_dir: Path,
+    collection_root: Path,
     task_name: str,
     model_override: str | None = None,
     deck_override: str | None = None,
@@ -496,13 +495,13 @@ async def run_task_async(
     progress_callback: ProgressReporter | None = None,
 ) -> LlmJobResult:
     context = materialize_task_context(
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         task_name=task_name,
         model_override=model_override,
         deck_override=deck_override,
     )
     return await LlmTaskExecutor(
-        collection_dir=collection_dir,
+        collection_root=collection_root,
         materialized_context=context,
         no_auto_commit=no_auto_commit,
         progress_callback=progress_callback,
@@ -511,7 +510,7 @@ async def run_task_async(
 
 def run_task(
     *,
-    collection_dir: Path,
+    collection_root: Path,
     task_name: str,
     model_override: str | None = None,
     deck_override: str | None = None,
@@ -520,7 +519,7 @@ def run_task(
 ) -> LlmJobResult:
     return asyncio.run(
         run_task_async(
-            collection_dir=collection_dir,
+            collection_root=collection_root,
             task_name=task_name,
             model_override=model_override,
             deck_override=deck_override,
@@ -940,7 +939,7 @@ def _persist_updates(
     db: LlmJobStore,
     job_id: int,
     data: dict[str, Any],
-    collection_dir: Path,
+    collection_root: Path,
 ) -> bool:
     aggregate = db.aggregate_job(job_id)
     if aggregate.summary.updated <= 0:
@@ -948,8 +947,7 @@ def _persist_updates(
 
     deserialize(
         data,
-        collection_dir=collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+        collection_root=collection_root,
         overwrite=True,
         quiet=True,
     )

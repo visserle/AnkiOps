@@ -75,8 +75,8 @@ def test_resolves_healthy_db_mapping_without_key_field_lookup():
     db = FakeDbIdentity({"key-1": 101})
 
     identity = resolve_import_note_identity(
-        anki_port=anki,
-        db_port=db,
+        anki=anki,
+        state=db,
         note_keys={"key-1"},
         required_note_types=["AnkiOpsQA"],
     )
@@ -94,8 +94,8 @@ def test_indexes_missing_db_mapping_from_configured_model_snapshot():
     db = FakeDbIdentity({})
 
     identity = resolve_import_note_identity(
-        anki_port=anki,
-        db_port=db,
+        anki=anki,
+        state=db,
         note_keys={"key-1"},
         required_note_types=["AnkiOpsQA"],
     )
@@ -113,8 +113,8 @@ def test_uses_db_mapped_note_even_when_old_model_is_not_configured():
     db = FakeDbIdentity({"key-1": 101})
 
     identity = resolve_import_note_identity(
-        anki_port=anki,
-        db_port=db,
+        anki=anki,
+        state=db,
         note_keys={"key-1"},
         required_note_types=["NewQA"],
     )
@@ -133,8 +133,8 @@ def test_uses_key_field_lookup_only_for_unresolved_identity():
     db = FakeDbIdentity({})
 
     identity = resolve_import_note_identity(
-        anki_port=anki,
-        db_port=db,
+        anki=anki,
+        state=db,
         note_keys={"key-1"},
         required_note_types=["NewQA"],
     )
@@ -157,8 +157,8 @@ def test_blocks_when_key_field_lookup_would_duplicate_existing_key():
 
     with pytest.raises(ValueError, match="Duplicate AnkiOps Key 'key-1'"):
         resolve_import_note_identity(
-            anki_port=anki,
-            db_port=db,
+            anki=anki,
+            state=db,
             note_keys={"key-1"},
             required_note_types=["AnkiOpsQA"],
         )

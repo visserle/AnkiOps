@@ -8,7 +8,7 @@ import yaml
 from rich import get_console as rich_get_console
 from rich.table import Table
 
-from ankiops.collection import NOTE_TYPES_DIR, require_collection_dir
+from ankiops.collection import NOTE_TYPES_DIR, require_collection_root
 from ankiops.console import clickable_path, connect_or_exit
 from ankiops.markdown import FIELD_LABEL_NAME_RE
 from ankiops.note_types import NoteField, NoteType, load_note_types
@@ -252,8 +252,8 @@ def run(args) -> None:
         raise SystemExit(2)
 
     if action == "list":
-        collection_dir = require_collection_dir()
-        note_types_dir = collection_dir / NOTE_TYPES_DIR
+        collection_root = require_collection_root()
+        note_types_dir = collection_root / NOTE_TYPES_DIR
         try:
             note_type_configs = load_note_types(note_types_dir)
         except ValueError as error:
@@ -269,9 +269,9 @@ def run(args) -> None:
 
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
-    collection_dir = require_collection_dir(active_profile)
-    logger.debug(f"Collection directory: {collection_dir}")
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
+    collection_root = require_collection_root(active_profile)
+    logger.debug(f"Collection directory: {collection_root}")
+    note_types_dir = collection_root / NOTE_TYPES_DIR
 
     destination_dir = note_types_dir / note_type_name
     if destination_dir.exists():

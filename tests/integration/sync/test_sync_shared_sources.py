@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ankiops.git import GitRepository
 from ankiops.markdown import NOTE_SEPARATOR
 from tests.support.deck_files import DeckFileHarness
 
@@ -10,6 +11,7 @@ def _setup_shared_root(world):
     shared_root = world.root / "shared" / "owner" / "repo"
     DeckFileHarness().eject_default_note_types(shared_root / "note_types")
     shared_root.mkdir(parents=True, exist_ok=True)
+    GitRepository(shared_root).init_repo()
     return shared_root
 
 
@@ -67,6 +69,14 @@ def test_import_syncs_root_and_shared_sources_as_one_collection(world):
 
     with world.db_session() as db:
         result = world.sync_import(db)
+        assert db.resolve_note_sources(["root-key-1", "shared-key-1"]) == {
+            "root-key-1": ".",
+            "shared-key-1": "shared/owner/repo",
+        }
+        assert (
+            db.resolve_deck_source(world.mock_anki.decks["SharedDeck"])
+            == "shared/owner/repo"
+        )
 
     assert result.summary.deleted == 0
     assert root_id in world.mock_anki.notes
@@ -111,6 +121,26 @@ def test_import_converts_root_note_to_scoped_shared_type_without_duplicate(world
             "newNoteType": "shared/owner/repo/AnkiOpsQA",
         },
     ) in world.mock_anki.calls
+
+
+def test_import_rejects_implicit_cross_source_move(world):
+    shared_root = _setup_shared_root(world)
+    note_key = "cross-source-key"
+    _write_shared_qa_deck(
+        shared_root,
+        "SharedDeck",
+        "Shared Q",
+        "Shared A",
+        note_key,
+    )
+    with world.db_session() as db:
+        world.sync_import(db)
+
+        (shared_root / "SharedDeck.md").write_text("", encoding="utf-8")
+        world.write_qa_deck("PrivateDeck", [("Shared Q", "Shared A", note_key)])
+
+        with pytest.raises(ValueError, match="Cross-source note moves"):
+            world.sync_import(db)
 
 
 def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(world):
@@ -234,7 +264,7 @@ def test_import_rejects_duplicate_ankiops_key_across_root_and_shared_models(worl
     )
 
     with world.db_session() as db:
-        db.upsert_note_links([(note_key, shared_id)])
+        db.upsert_note_links([(note_key, shared_id)], source_path="shared/owner/repo")
         with pytest.raises(ValueError, match=f"Duplicate AnkiOps Key '{note_key}'"):
             world.sync_import(db)
 
@@ -302,11 +332,9 @@ def test_import_deletes_root_orphan_without_deleting_shared_note(world):
     )
 
     with world.db_session() as db:
+        db.upsert_note_links([("root-delete-key", root_id)])
         db.upsert_note_links(
-            [
-                ("root-delete-key", root_id),
-                ("shared-keep-key", shared_id),
-            ]
+            [("shared-keep-key", shared_id)], source_path="shared/owner/repo"
         )
         result = world.sync_import(db)
 
@@ -338,11 +366,9 @@ def test_import_deletes_shared_orphan_without_deleting_root_note(world):
     (shared_root / "SharedDeck.md").write_text("", encoding="utf-8")
 
     with world.db_session() as db:
+        db.upsert_note_links([("root-keep-key", root_id)])
         db.upsert_note_links(
-            [
-                ("root-keep-key", root_id),
-                ("shared-delete-key", shared_id),
-            ]
+            [("shared-delete-key", shared_id)], source_path="shared/owner/repo"
         )
         result = world.sync_import(db)
 
@@ -372,7 +398,9 @@ def test_export_writes_anki_edits_back_to_shared_source(world):
     shared_id = max(world.mock_anki.notes.keys())
 
     with world.db_session() as db:
-        db.upsert_note_links([("shared-export-key", shared_id)])
+        db.upsert_note_links(
+            [("shared-export-key", shared_id)], source_path="shared/owner/repo"
+        )
         result = world.sync_export(db)
 
     assert result.summary.updated == 1
@@ -405,7 +433,7 @@ def test_export_blocks_pending_shared_note_type_conversion(world):
     note_id = max(world.mock_anki.notes.keys())
 
     with world.db_session() as db:
-        db.upsert_note_links([(note_key, note_id)])
+        db.upsert_note_links([(note_key, note_id)], source_path="shared/owner/repo")
         result = world.sync_export(db)
 
     assert result.summary.errors == 1
