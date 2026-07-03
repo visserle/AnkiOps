@@ -61,13 +61,6 @@ class GitHubHost:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
             raise ValueError(f"Could not create GitHub repository {slug}: {detail}")
 
-    def default_branch(self, slug: str) -> str:
-        info = self.repo_info(slug)
-        branch = (info or {}).get("default_branch")
-        if not isinstance(branch, str) or not branch:
-            raise ValueError(f"Cannot determine the default branch for {slug}.")
-        return branch
-
     def login(self) -> str:
         result = self._gh(["api", "user", "--jq", ".login"], check=False)
         login = result.stdout.strip()

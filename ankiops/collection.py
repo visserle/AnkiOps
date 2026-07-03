@@ -223,7 +223,6 @@ def _setup_gitignore(collection_dir: Path) -> None:
         ANKIOPS_DB,
         f"{ANKIOPS_DB}-shm",
         f"{ANKIOPS_DB}-wal",
-        ".ankiops/",
         "/shared/",
     ]
     missing = [entry for entry in entries if entry not in content]

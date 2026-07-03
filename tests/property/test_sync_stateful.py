@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from ankiops.anki import Anki
 from ankiops.collection import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.deck_sources import discover_deck_sources
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
@@ -76,7 +77,9 @@ def _sync_export(anki, fs, db, collection_dir: Path):
         anki_port=anki,
         db_port=db,
         collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
+        sources=discover_deck_sources(
+            collection_dir, note_types_dir=note_types_dir
+        ),
     )
 
 

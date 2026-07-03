@@ -250,6 +250,43 @@ def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
         assert note_id not in world.mock_anki.notes
 
 
+def test_imp_run_delete_002_deleted_deck_file_removes_only_managed_notes(world):
+    note_key = "imp-run-delete-file-002"
+    managed_note_id = world.add_qa_note(
+        deck_name="DeletedFileDeck",
+        question="Managed Q",
+        answer="Managed A",
+        note_key=note_key,
+    )
+    unmanaged_note_id = world.add_qa_note(
+        deck_name="DeletedFileDeck",
+        question="Unmanaged Q",
+        answer="Unmanaged A",
+        note_key=None,
+    )
+    deck_path = world.write_qa_deck(
+        "DeletedFileDeck", [("Managed Q", "Managed A", note_key)]
+    )
+    deck_path.unlink()
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, managed_note_id)])
+        db.upsert_deck(
+            "DeletedFileDeck",
+            world.mock_anki.decks["DeletedFileDeck"],
+            md_path=deck_path.name,
+        )
+
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=0, deleted=1, errors=0
+        )
+        assert managed_note_id not in world.mock_anki.notes
+        assert unmanaged_note_id in world.mock_anki.notes
+        assert db.resolve_deck_id("DeletedFileDeck") is None
+
+
 def test_imp_run_protect_001_keeps_keyless_orphaned_anki_note(world):
     """IMP-RUN-PROTECT-001."""
     note_id = world.add_qa_note(

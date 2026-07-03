@@ -44,7 +44,7 @@ def _load_source_deck_files(
     collection_dir: Path,
     note_types_dir: Path,
     sources: Sequence[DeckSource] | None = None,
-) -> tuple[list[_SourceDeckFile], dict[str, NoteType]]:
+) -> tuple[list[_SourceDeckFile], dict[str, NoteType], list[DeckSource]]:
     selected_sources = (
         list(sources)
         if sources is not None
@@ -70,7 +70,39 @@ def _load_source_deck_files(
                 )
             )
 
-    return source_deck_files, note_types_by_name
+    return source_deck_files, note_types_by_name, selected_sources
+
+
+def _add_deleted_deck_files(
+    collection_dir: Path,
+    db_port: SyncState,
+    source_deck_files: list[_SourceDeckFile],
+    selected_sources: list[DeckSource],
+) -> set[Path]:
+    source_by_id = {source.source_id: source for source in selected_sources}
+    existing_paths = {
+        source_deck_file.file_state.file_path for source_deck_file in source_deck_files
+    }
+    deleted_paths: set[Path] = set()
+    for _deck_id, _name, source_id, md_path in db_port.list_decks():
+        source = source_by_id.get(source_id)
+        if source is None or not md_path:
+            continue
+        path = collection_dir / md_path
+        if (
+            path in existing_paths
+            or path.exists()
+            or not path.is_relative_to(source.root)
+        ):
+            continue
+        source_deck_files.append(
+            _SourceDeckFile(
+                source=source,
+                file_state=DeckFile(file_path=path, raw_content="", notes=[]),
+            )
+        )
+        deleted_paths.add(path)
+    return deleted_paths
 
 
 def _check_deck_ownership(source_deck_files: list[_SourceDeckFile]) -> None:
@@ -124,10 +156,16 @@ def sync_collection_to_anki(
     *,
     sources: Sequence[DeckSource] | None = None,
 ) -> CollectionReport:
-    source_deck_files, note_types_by_name = _load_source_deck_files(
+    source_deck_files, note_types_by_name, selected_sources = _load_source_deck_files(
         collection_dir,
         note_types_dir,
         sources,
+    )
+    deleted_deck_paths = _add_deleted_deck_files(
+        collection_dir,
+        db_port,
+        source_deck_files,
+        selected_sources,
     )
     _check_deck_ownership(source_deck_files)
 
@@ -234,7 +272,11 @@ def sync_collection_to_anki(
                 ):
                     rename_candidates.add((source_deck, sync_result.name))
 
-            if sync_result.name and sync_result.name in deck_ids_by_name:
+            if (
+                deck_file.file_path not in deleted_deck_paths
+                and sync_result.name
+                and sync_result.name in deck_ids_by_name
+            ):
                 markdown_deck_ids.add(deck_ids_by_name[sync_result.name])
 
             results.append(sync_result)
@@ -266,6 +308,9 @@ def sync_collection_to_anki(
         for source_deck_file in source_deck_files:
             deck_file = source_deck_file.file_state
             deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
+            if deck_file.file_path in deleted_deck_paths:
+                db_port.delete_deck(deck_name)
+                continue
             deck_id = deck_ids_by_name.get(deck_name)
             if deck_id is not None:
                 db_port.upsert_deck(

@@ -126,12 +126,9 @@ Both sync operations can create update, move, and delete managed notes, and hand
 
 For basic usage, you can use AnkiOps without the add-on. The add-on enables AnkiOpsConnect, which AnkiOps needs for operations related to sharing. If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). 
 
-
-
 Another feature of the add-on are the toolbar buttons for `af` and `fa`:
 
-![alt text](toolbar.png)
-
+<img src="toolbar.png" alt="alt text" width="450" />
 
 To install the add-on, download the folder and put it in your Anki add-ons directory.
 
@@ -241,9 +238,6 @@ request. Contributors without write permission use an authenticated fork
 automatically. If local and upstream edits overlap, the subscribed deck remains
 unchanged. AnkiOps preserves editable base, local, and upstream copies; edit the
 marked Markdown it reports and rerun `shared update`.
-
-This architecture supports fresh collections only. Older databases and
-subtree-based collections are rejected without migration or automatic recovery.
 
 ## Command Reference
 

@@ -63,12 +63,6 @@ def _require_collection_git(collection_dir: Path) -> GitRepository:
             "This collection is not configured to keep shared decks separate. "
             "Add /shared/ to the root .gitignore, then retry the command."
         )
-    if collection_git.run(["ls-files", "shared"], check=False).stdout.splitlines():
-        raise ValueError(
-            "The collection repository contains shared deck files from the old "
-            "layout. This experimental version has no migration path; use a fresh "
-            "collection."
-        )
     return collection_git
 
 
@@ -798,13 +792,17 @@ def _status_one(
             )
         if pending_action.get("pr_url"):
             logger.info("Pull request: %s", pending_action["pr_url"])
-    if pending_action and pending_action["state"] == "conflict":
+    if update_state.startswith("could not check GitHub"):
+        next_command = f"ankiops shared status {source.source_id}"
+    elif pending_action and pending_action["state"] == "conflict":
         next_command = f"ankiops shared update {source.source_id}"
     elif pending_action and pending_action["kind"] == "update":
         next_command = f"ankiops shared update {source.source_id}"
     elif pending_action and pending_action.get("pr_url"):
         next_command = f"review pull request {pending_action['pr_url']}"
-    elif "available" in update_state or "both local" in update_state:
+    elif pending_action and pending_action["kind"] == "submit":
+        next_command = f"ankiops shared submit {source.source_id}"
+    elif update_state == "an update is available" or "both local" in update_state:
         next_command = f"ankiops shared update {source.source_id}"
     elif local_changes or "unpublished" in update_state:
         next_command = f"ankiops shared submit {source.source_id}"

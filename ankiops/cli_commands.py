@@ -195,14 +195,12 @@ def run_af(args):
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     state = SyncState.open(collection_dir)
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
 
     logger.debug("Starting note sync (Anki -> files)")
     export_summary: CollectionReport = sync_collection_from_anki(
         anki_port=anki,
         db_port=state,
         collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
         sources=sources,
     )
     note_summary = export_summary.summary

@@ -467,6 +467,15 @@ class SyncState:
         ).fetchone()
         return row[0] if row else None
 
+    def list_decks(self) -> list[tuple[int, str, str, str | None]]:
+        rows = self._conn.execute(
+            "SELECT deck_id, name, source_id, md_path FROM deck_map"
+        ).fetchall()
+        return [
+            (deck_id, name, source_id, md_path)
+            for deck_id, name, source_id, md_path in rows
+        ]
+
     def upsert_deck(
         self,
         name: str,

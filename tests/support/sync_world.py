@@ -18,6 +18,7 @@ from ankiops.collection import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
 )
+from ankiops.deck_sources import discover_deck_sources
 from ankiops.markdown import NOTE_SEPARATOR, format_tags_comment
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
@@ -97,7 +98,9 @@ class SyncWorld:
             anki_port=self.anki,
             db_port=db,
             collection_dir=self.root,
-            note_types_dir=self.note_types_dir,
+            sources=discover_deck_sources(
+                self.root, note_types_dir=self.note_types_dir
+            ),
         )
 
     def sync_media_to_anki(self, db: SyncState):

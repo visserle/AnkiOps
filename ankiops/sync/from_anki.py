@@ -11,7 +11,6 @@ from ankiops.collection import (
 )
 from ankiops.deck_sources import (
     DeckSource,
-    discover_deck_sources,
     load_note_types_for_source,
 )
 from ankiops.html_to_markdown import HTMLToMarkdown
@@ -535,19 +534,13 @@ def sync_collection_from_anki(
     anki_port: Anki,
     db_port: SyncState,
     collection_dir: Path,
-    note_types_dir: Path,
     *,
-    sources: Sequence[DeckSource] | None = None,
+    sources: Sequence[DeckSource],
 ) -> CollectionReport:
-    selected_sources = (
-        list(sources)
-        if sources is not None
-        else discover_deck_sources(collection_dir, note_types_dir=note_types_dir)
-    )
-    local_source = selected_sources[0]
+    local_source = sources[0]
     configs = [
         config
-        for source in selected_sources
+        for source in sources
         for config in load_note_types_for_source(source)
     ]
     config_by_name = {config.name: config for config in configs}
@@ -595,7 +588,7 @@ def sync_collection_from_anki(
         source_by_file: dict[Path, DeckSource] = {}
         file_map_by_deck_name: dict[str, tuple[DeckSource, Path]] = {}
         deck_conflicts: list[str] = []
-        for source in selected_sources:
+        for source in sources:
             for md_file in source.deck_files():
                 md_files.append(md_file)
                 source_by_file[md_file] = source
@@ -615,7 +608,7 @@ def sync_collection_from_anki(
                 + "; ".join(deck_conflicts)
             )
 
-        source_by_id = {source.source_id: source for source in selected_sources}
+        source_by_id = {source.source_id: source for source in sources}
         ownership_conflicts = []
         all_anki_note_keys = {
             note_keys_by_id.get(note.note_id)

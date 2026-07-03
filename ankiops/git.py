@@ -166,22 +166,10 @@ class GitRepository:
         return self.head() != old_head
 
     def unmerged_paths(self) -> list[str]:
-        result = self.run(["diff", "--name-only", "--diff-filter=U"], check=False)
-        return [line for line in result.stdout.splitlines() if line]
-
-    def merge_in_progress(self) -> bool:
-        result = self.run(["rev-parse", "-q", "--verify", "MERGE_HEAD"], check=False)
-        return result.returncode == 0
-
-    def create_recovery_ref(self, name: str, ref: str = "HEAD") -> None:
-        self.run(["branch", "-f", name, ref])
-
-    def delete_branch(self, name: str) -> None:
-        self.run(["branch", "-D", name], check=False)
-
-    def abort_merge(self) -> None:
-        if self.merge_in_progress():
-            self.run(["merge", "--abort"])
+        result = self.run(
+            ["diff", "--name-only", "--diff-filter=U", "-z"], check=False
+        )
+        return [path for path in result.stdout.split("\0") if path]
 
     def reset_hard(self, ref: str) -> None:
         self.run(["reset", "--hard", ref])

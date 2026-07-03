@@ -310,6 +310,48 @@ def test_conflict_preserves_versions_and_leaves_source_unchanged(
     assert list(conflicts.rglob("Deck.md.base"))
 
 
+def test_conflict_preserves_versions_for_unicode_deck_path(shared_world, tmp_path):
+    collection, source, remote = shared_world
+    deck_name = "Déck Ω — punctuation!.md"
+    _git(source, "mv", "Deck.md", deck_name)
+    _commit(source, "Rename shared deck with Unicode")
+    _git(source, "push", "upstream", "HEAD:main")
+
+    deck = source / deck_name
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "local Unicode answer"
+        ),
+        encoding="utf-8",
+    )
+    upstream = tmp_path / "unicode-upstream-edit"
+    _git(tmp_path, "clone", str(remote), str(upstream))
+    _configure(upstream, "Unicode Upstream")
+    upstream_deck = upstream / deck_name
+    upstream_deck.write_text(
+        upstream_deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "upstream Unicode answer"
+        ),
+        encoding="utf-8",
+    )
+    _commit(upstream, "Edit Unicode deck upstream")
+    _git(upstream, "push", "origin", "main")
+
+    with pytest.raises(ValueError, match=deck_name):
+        run_update(SimpleNamespace(source_id="owner/repo"))
+
+    db = SyncState.open(collection)
+    try:
+        operation = db.get_shared_operation("owner/repo")
+        assert operation is not None
+        conflict_root = Path(str(operation["recovery_ref"]))
+    finally:
+        db.close()
+    assert (conflict_root / deck_name).read_text(encoding="utf-8")
+    for suffix in ("base", "local", "upstream"):
+        assert (conflict_root / f"{deck_name}.{suffix}").read_text(encoding="utf-8")
+
+
 def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_update(
     shared_world, tmp_path
 ):
@@ -642,3 +684,30 @@ def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, 
     assert "Local shared changes: 1" in caplog.text
     assert "local files were not changed" in caplog.text
     assert "Private deck changes: 0" in caplog.text
+    assert "Next: ankiops shared status owner/repo" in caplog.text
+
+
+@pytest.mark.parametrize("state", ["push_failed", "pr_failed"])
+def test_status_gives_submit_retry_as_next_command(shared_world, caplog, state):
+    caplog.set_level(logging.INFO)
+    collection, source, _remote = shared_world
+    db = SyncState.open(collection)
+    try:
+        db.save_shared_operation(
+            "owner/repo",
+            "retry-operation",
+            "submit",
+            state,
+            base_commit=_git(
+                source, "rev-parse", "upstream/main^{tree}"
+            ).stdout.strip(),
+            head_commit=_git(source, "rev-parse", "HEAD").stdout.strip(),
+            publish_branch="ankiops/retry-operation",
+        )
+    finally:
+        db.close()
+
+    run_status(SimpleNamespace(source_id="owner/repo"))
+
+    assert "retrying submit is safe" in caplog.text
+    assert "Next: ankiops shared submit owner/repo" in caplog.text

@@ -53,8 +53,5 @@ rerun the same `shared update` command. Failed uploads and failed pull-request
 creation retain one reusable submission; rerunning `shared submit` does not
 duplicate the contribution or pull request.
 
-## Deliberate compatibility policy
-
-There is no migration path. Unexpected database schemas, corrupt databases, and
-old subtree layouts are rejected without moving, backing up, recreating, or
-transforming them. Initialize a fresh collection and subscribe again.
+Unexpected database schemas and corrupt databases are rejected without mutation.
+Initialize a fresh collection instead.

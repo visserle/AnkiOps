@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 from ankiops.anki import Anki
 from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.deck_sources import discover_deck_sources
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
@@ -58,7 +59,9 @@ def _run_export(collection_dir, mock_anki, *, preload_configs: bool = False):
             anki_port=anki,
             db_port=db,
             collection_dir=collection_dir,
-            note_types_dir=note_types_dir,
+            sources=discover_deck_sources(
+                collection_dir, note_types_dir=note_types_dir
+            ),
         )
 
 
