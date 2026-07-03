@@ -187,6 +187,7 @@ def _setup_vscode_settings(collection_root: Path) -> None:
             pass
     settings.update(
         {
+            "git.repositoryScanMaxDepth": 3,  # detect git repos from shared subfolders
             "[markdown]": {
                 "editor.formatOnSave": False,
                 "editor.wordWrap": "wordWrapColumn",

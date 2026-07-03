@@ -8,6 +8,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
+from enum import Enum, auto
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -30,6 +32,20 @@ logger = logging.getLogger(__name__)
 
 WORK_BRANCH = "ankiops/work"
 _SAFE_SLUG_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")
+
+
+class _RepositoryRelation(Enum):
+    CURRENT = auto()
+    AHEAD = auto()
+    BEHIND = auto()
+    DIVERGED = auto()
+
+
+@dataclass(frozen=True)
+class _RepositoryState:
+    relation: _RepositoryRelation
+    local_commits: int
+    upstream_commits: int
 
 
 def _parse_github_slug(repository: str) -> str:
@@ -94,25 +110,35 @@ def _ensure_submittable_note_keys(source: DeckSource) -> None:
         raise ValueError(format_missing_note_keys_error(len(missing)))
 
 
-def _log_outcome(
+def _log_result(
+    action: str,
     source: DeckSource,
+    summary: str,
     *,
-    files: str,
-    local: str,
-    github: str,
-    retry: str,
-    next_command: str,
-    pr_url: str | None = None,
+    details: list[str] | None = None,
+    next_steps: list[str] | None = None,
 ) -> None:
-    logger.info("Shared deck: %s", source.display_name)
-    logger.info("Shared files: %s", files)
-    logger.info("Local result: %s", local)
-    logger.info("Private decks: not touched")
-    logger.info("GitHub: %s", github)
-    if pr_url:
-        logger.info("Pull request: %s", pr_url)
-    logger.info("Safe to retry: %s", retry)
-    logger.info("Next: %s", next_command)
+    logger.info("Shared %s: %s — %s", action, source.display_name, summary)
+    for detail in details or []:
+        logger.info("  %s", detail)
+    _log_next_steps(next_steps or [])
+
+
+def _log_next_steps(steps: list[str]) -> None:
+    if not steps:
+        return
+    logger.info("Next:")
+    for step in steps:
+        logger.info("  %s", step)
+
+
+def _source_is_applied(source: DeckSource, state: SyncState) -> bool:
+    applied_state = state.get_source_applied_state(source.source_path)
+    return bool(applied_state and applied_state[0] == source_content_hash(source))
+
+
+def _counted(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 def _source_operation(
@@ -457,13 +483,12 @@ def run_subscribe(args: SimpleNamespace) -> None:
         if source.root.exists():
             shutil.rmtree(source.root)
         raise
-    _log_outcome(
+    _log_result(
+        "subscribe",
         source,
-        files=f"subscribed at {source.root}",
-        local="the shared Markdown is ready for review",
-        github="downloaded the shared deck; nothing was sent",
-        retry="not needed; subscription completed",
-        next_command="ankiops fa",
+        "downloaded",
+        details=[f"Local repository: {source.root}"],
+        next_steps=["Apply to Anki: ankiops fa"],
     )
 
 
@@ -503,13 +528,16 @@ def run_publish(args: SimpleNamespace) -> None:
         state.clear_shared_operation(source.source_path)
     finally:
         state.close()
-    _log_outcome(
+    github_url = str(source.github_url).removesuffix(".git")
+    _log_result(
+        "publish",
         source,
-        files=f"published deck '{args.deck}' from {source.root}",
-        local="the deck is now an independent shared deck",
-        github="created the repository and uploaded the deck",
-        retry="not needed; publishing completed",
-        next_command="ankiops fa",
+        f"published '{args.deck}'",
+        details=[
+            f"Local repository: {source.root}",
+            f"GitHub repository: {github_url}",
+        ],
+        next_steps=["Apply to Anki: ankiops fa"],
     )
 
 
@@ -558,13 +586,15 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
             _restore_operation(state, source, pending_action)
         raise
     after_commit = source_git.head()
+    upstream_changed = bool(
+        after_commit and after_commit != (saved_commit or before_commit)
+    )
+    changed_paths: list[str] = []
     if files_changed and before_commit and after_commit:
-        files = source_git.run(
+        changed_paths = source_git.run(
             ["diff", "--name-status", before_commit, after_commit]
         ).stdout.splitlines()
-        file_summary = f"{len(files)} path(s) updated"
-    else:
-        file_summary = "already current"
+    local_contribution = source_git.tree("HEAD") != upstream_tree
     if (
         pending_action
         and pending_action["kind"] == "submit"
@@ -582,25 +612,43 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
             _restore_operation(state, source, pending_action)
     else:
         state.clear_shared_operation(source.source_path)
-    _log_outcome(
+    remaining_action = state.get_shared_operation(source.source_path)
+
+    if upstream_changed:
+        summary = "integrated upstream changes"
+    elif saved_commit:
+        summary = "committed local changes; upstream already current"
+    elif local_contribution:
+        summary = "no upstream changes"
+    else:
+        summary = "already up to date"
+
+    details = []
+    if upstream_changed:
+        details.append(f"Files changed: {_counted(len(changed_paths), 'path')}")
+    if local_contribution:
+        details.append("Local contribution: ready to submit")
+
+    next_steps = []
+    if not _source_is_applied(source, state):
+        next_steps.append("Apply to Anki: ankiops fa")
+    if remaining_action and remaining_action.get("pr_url"):
+        next_steps.append(f"Review pull request: {remaining_action['pr_url']}")
+    elif remaining_action and remaining_action["kind"] == "submit":
+        next_steps.append(
+            f"Retry submission: ankiops shared submit {source.display_name}"
+        )
+    elif local_contribution:
+        next_steps.append(
+            f"Submit contribution: ankiops shared submit {source.display_name}"
+        )
+
+    _log_result(
+        "update",
         source,
-        files=file_summary,
-        local=(
-            "saved local deck edits and applied available updates"
-            if saved_commit
-            else (
-                "applied available updates without changing private decks"
-                if files_changed
-                else "no local or upstream changes"
-            )
-        ),
-        github="checked for updates; nothing was sent",
-        retry=(
-            "yes; the update completed transactionally"
-            if files_changed or saved_commit
-            else "not needed; the deck is already current"
-        ),
-        next_command="ankiops fa" if files_changed or saved_commit else "none",
+        summary,
+        details=details,
+        next_steps=next_steps,
     )
 
 
@@ -614,7 +662,8 @@ def run_update(args: SimpleNamespace) -> None:
             raise ValueError(f"Unknown shared source: {requested_source.display_name}")
         sources = [requested_source]
     if not sources:
-        logger.info("No shared sources found.")
+        logger.info("Shared update: no subscribed decks")
+        _log_next_steps(["Subscribe to a deck: ankiops shared subscribe OWNER/REPO"])
         return
     state = SyncState.open(collection_root)
     failures = []
@@ -660,14 +709,13 @@ def run_submit(args: SimpleNamespace) -> None:
             and pending_action["kind"] == "submit"
             and pending_action.get("pr_url")
         ):
-            _log_outcome(
+            pr_url = str(pending_action["pr_url"])
+            _log_result(
+                "submit",
                 source,
-                files="the existing contribution is unchanged",
-                local="no new contribution was created",
-                github="the contribution and pull request already exist",
-                retry="yes; retrying reuses the same pull request",
-                next_command=f"review pull request {pending_action['pr_url']}",
-                pr_url=str(pending_action["pr_url"]),
+                "pull request already open",
+                details=[f"Pull request: {pr_url}"],
+                next_steps=[f"Review pull request: {pr_url}"],
             )
             return
 
@@ -686,17 +734,19 @@ def run_submit(args: SimpleNamespace) -> None:
                 collection_root, source, source_git, state, kind="submit"
             )
             if source_git.tree("HEAD") == upstream_tree:
-                _log_outcome(
+                next_steps = []
+                if not _source_is_applied(source, state):
+                    next_steps.append("Apply to Anki: ankiops fa")
+                _log_result(
+                    "submit",
                     source,
-                    files="no contribution to submit",
-                    local=(
-                        "saved local deck edits; their content already matches GitHub"
+                    "nothing to submit",
+                    details=(
+                        ["Local changes: committed; content matches upstream"]
                         if saved_commit
-                        else "no local changes were committed"
+                        else None
                     ),
-                    github="nothing was sent and no pull request was created",
-                    retry="yes; this was a no-op",
-                    next_command="none",
+                    next_steps=next_steps,
                 )
                 state.clear_shared_operation(source.source_path)
                 return
@@ -823,34 +873,43 @@ def run_submit(args: SimpleNamespace) -> None:
             pr_url=pr_url,
             last_error=None,
         )
-        _log_outcome(
+        _log_result(
+            "submit",
             source,
-            files="shared deck changes submitted",
-            local=(
-                "committed changes belonging only to this shared deck"
-                if saved_commit
-                else "reused the existing local contribution"
-            ),
-            github=f"uploaded the contribution to {contribution_slug}",
-            retry="yes; retrying reuses this contribution and pull request",
-            next_command=f"review pull request {pr_url}",
-            pr_url=pr_url,
+            "pull request opened",
+            details=[
+                (
+                    "Local contribution: committed and uploaded"
+                    if saved_commit
+                    else "Local contribution: uploaded existing commit"
+                ),
+                f"GitHub repository: https://github.com/{contribution_slug}",
+                f"Pull request: {pr_url}",
+            ],
+            next_steps=[f"Review and merge: {pr_url}"],
         )
     finally:
         state.close()
 
 
-def _github_update_state(source_git: GitRepository) -> str:
+def _repository_state(source_git: GitRepository) -> _RepositoryState:
     _default_branch, upstream_ref = _upstream_ref(source_git)
     if source_git.trees_equal("HEAD", upstream_ref):
-        return "current; no update is available"
-    local_commit = source_git.head()
-    upstream_commit = source_git.run(["rev-parse", upstream_ref]).stdout.strip()
-    if local_commit and source_git.is_ancestor(local_commit, upstream_commit):
-        return "an update is available"
-    if local_commit and source_git.is_ancestor(upstream_commit, local_commit):
-        return "local contributions have not been accepted upstream"
-    return "both local contributions and upstream updates are present"
+        return _RepositoryState(_RepositoryRelation.CURRENT, 0, 0)
+
+    counts = source_git.run(
+        ["rev-list", "--left-right", "--count", f"{upstream_ref}...HEAD"]
+    ).stdout.split()
+    upstream_commits, local_commits = (int(value) for value in counts)
+    if local_commits and upstream_commits:
+        relation = _RepositoryRelation.DIVERGED
+    elif local_commits:
+        relation = _RepositoryRelation.AHEAD
+    elif upstream_commits:
+        relation = _RepositoryRelation.BEHIND
+    else:
+        relation = _RepositoryRelation.CURRENT
+    return _RepositoryState(relation, local_commits, upstream_commits)
 
 
 def _status_one(
@@ -859,69 +918,121 @@ def _status_one(
 ) -> None:
     source_git = _require_source_git(source)
     local_changes = source_git.status_lines()
+    repository_state: _RepositoryState | None = None
     try:
         source_git.fetch("upstream")
-        update_state = _github_update_state(source_git)
+        repository_state = _repository_state(source_git)
     except (ValueError, subprocess.CalledProcessError) as error:
         logger.debug("Could not check GitHub for %s: %s", source.display_name, error)
-        update_state = "could not check GitHub; local files were not changed"
     pending_action = state.get_shared_operation(source.source_path)
-    applied_state = state.get_source_applied_state(source.source_path)
-    logger.info("Shared deck: %s", source.display_name)
-    logger.info("Local shared changes: %d", len(local_changes))
-    for line in local_changes:
-        logger.info("  %s", line[3:] if len(line) > 3 else line)
-    logger.info("Available updates: %s", update_state)
-    logger.info(
-        "Anki: %s",
-        (
-            "current source tree has been applied"
-            if applied_state and applied_state[0] == source_content_hash(source)
-            else "current source tree has not been applied; run ankiops fa"
-        ),
+    is_applied = _source_is_applied(source, state)
+    submission_accepted = bool(
+        not local_changes
+        and repository_state
+        and repository_state.relation is _RepositoryRelation.CURRENT
+        and pending_action
+        and pending_action["kind"] == "submit"
     )
+
+    logger.info("Shared status: %s", source.display_name)
+    working_tree = (
+        "clean" if not local_changes else _counted(len(local_changes), "changed path")
+    )
+    logger.info("  Working tree: %s", working_tree)
+    for line in local_changes:
+        logger.info("    %s", line)
+
+    if repository_state is None:
+        logger.info("  Local contribution: unknown")
+        logger.info("  Upstream: unavailable")
+    elif repository_state.relation is _RepositoryRelation.CURRENT:
+        logger.info("  Local contribution: none")
+        logger.info("  Upstream: up to date")
+    elif repository_state.relation is _RepositoryRelation.AHEAD:
+        logger.info(
+            "  Local contribution: %s ready to submit",
+            _counted(repository_state.local_commits, "commit"),
+        )
+        logger.info("  Upstream: up to date")
+    elif repository_state.relation is _RepositoryRelation.BEHIND:
+        logger.info("  Local contribution: none")
+        logger.info(
+            "  Upstream: %s available",
+            _counted(repository_state.upstream_commits, "commit"),
+        )
+    else:
+        logger.info(
+            "  Local contribution: %s ready to submit",
+            _counted(repository_state.local_commits, "commit"),
+        )
+        logger.info(
+            "  Upstream: %s available; update before submitting",
+            _counted(repository_state.upstream_commits, "commit"),
+        )
+
+    logger.info("  Anki: %s", "up to date" if is_applied else "changes not applied")
     if pending_action:
         if pending_action["state"] == "conflict":
             logger.info(
-                "Interrupted update: the subscribed deck is unchanged; editable "
-                "conflicts are preserved at %s",
+                "  Update: conflict requires resolution at %s",
                 pending_action.get("recovery_ref"),
             )
         elif pending_action["kind"] == "submit":
-            submission_state = {
-                "push_failed": "not uploaded",
-                "pushed": "uploaded; pull request not yet confirmed",
-                "pr_failed": "uploaded; pull request creation did not finish",
-                "pr_open": "pull request open",
-            }.get(str(pending_action["state"]), "not finished")
-            logger.info(
-                "Pending submission: %s; retrying submit is safe",
-                submission_state,
+            submission_state = (
+                "accepted upstream; cleanup pending"
+                if submission_accepted
+                else {
+                    "ready": "ready to upload",
+                    "push_failed": "not uploaded",
+                    "pushed": "uploaded; pull request not confirmed",
+                    "pr_failed": "uploaded; pull request not created",
+                    "pr_open": "pull request open",
+                }.get(str(pending_action["state"]), "interrupted")
             )
+            logger.info("  Submission: %s", submission_state)
         else:
             logger.info(
-                "Previous action: did not finish; the shared deck was unchanged "
-                "and retrying is safe"
+                "  Interrupted action: %s %s",
+                pending_action["kind"],
+                pending_action["state"],
             )
         if pending_action.get("pr_url"):
-            logger.info("Pull request: %s", pending_action["pr_url"])
-    if update_state.startswith("could not check GitHub"):
-        next_command = f"ankiops shared status {source.display_name}"
-    elif pending_action and pending_action["state"] == "conflict":
-        next_command = f"ankiops shared update {source.display_name}"
-    elif pending_action and pending_action["kind"] == "update":
-        next_command = f"ankiops shared update {source.display_name}"
-    elif pending_action and pending_action.get("pr_url"):
-        next_command = f"review pull request {pending_action['pr_url']}"
-    elif pending_action and pending_action["kind"] == "submit":
-        next_command = f"ankiops shared submit {source.display_name}"
-    elif update_state == "an update is available" or "both local" in update_state:
-        next_command = f"ankiops shared update {source.display_name}"
-    elif local_changes or "unpublished" in update_state:
-        next_command = f"ankiops shared submit {source.display_name}"
+            logger.info("  Pull request: %s", pending_action["pr_url"])
+
+    next_steps = []
+    if repository_state is None:
+        next_steps.append(f"Retry status: ankiops shared status {source.display_name}")
+    elif pending_action and (
+        pending_action["state"] == "conflict" or pending_action["kind"] == "update"
+    ):
+        next_steps.append(f"Resume update: ankiops shared update {source.display_name}")
+    elif repository_state.relation in {
+        _RepositoryRelation.BEHIND,
+        _RepositoryRelation.DIVERGED,
+    }:
+        next_steps.append(
+            f"Integrate upstream: ankiops shared update {source.display_name}"
+        )
+    elif submission_accepted:
+        if not is_applied:
+            next_steps.append("Apply to Anki: ankiops fa")
+        next_steps.append(
+            f"Finalize submission: ankiops shared update {source.display_name}"
+        )
     else:
-        next_command = "none"
-    logger.info("Next: %s", next_command)
+        if not is_applied:
+            next_steps.append("Apply to Anki: ankiops fa")
+        if pending_action and pending_action.get("pr_url"):
+            next_steps.append(f"Review pull request: {pending_action['pr_url']}")
+        elif pending_action and pending_action["kind"] == "submit":
+            next_steps.append(
+                f"Retry submission: ankiops shared submit {source.display_name}"
+            )
+        elif local_changes or repository_state.relation is _RepositoryRelation.AHEAD:
+            next_steps.append(
+                f"Submit contribution: ankiops shared submit {source.display_name}"
+            )
+    _log_next_steps(next_steps)
 
 
 def run_status(args: SimpleNamespace) -> None:
@@ -934,8 +1045,8 @@ def run_status(args: SimpleNamespace) -> None:
             raise ValueError(f"Unknown shared source: {source.display_name}")
         sources = [source]
     if not sources:
-        logger.info("No shared deck subscriptions found.")
-        logger.info("Next: ankiops shared subscribe OWNER/REPO")
+        logger.info("Shared status: no subscribed decks")
+        _log_next_steps(["Subscribe to a deck: ankiops shared subscribe OWNER/REPO"])
         return
     state = SyncState.open(collection_root)
     try:

@@ -138,7 +138,9 @@ def run_init(args):
 
     logger.info(
         f"Initialized AnkiOps collection in {collection_root} (profile: {profile}). "
-        f"For the Anki add-on, set ankiops_dir to: {collection_root}"
+    )
+    logger.info(
+        f"If the AnkiOps add-on is installed, set ankiops_dir to: {collection_root}"
     )
 
 
