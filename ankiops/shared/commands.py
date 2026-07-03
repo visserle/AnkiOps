@@ -243,31 +243,57 @@ def _integrate_upstream(
     state: SyncState,
     *,
     kind: str,
-) -> tuple[bool, str | None, str, str]:
+) -> tuple[str, bool, str | None, str, str]:
     operation_id, existing = _source_operation(state, source, kind)
     original_commit = source_git.head()
     if original_commit is None:
         raise ValueError(f"Shared source {source.display_name} has no commits.")
     original_fingerprint = _repository_fingerprint(source_git)
-    if (
-        existing
-        and existing.get("state") in {"fetching", "failed", "conflict"}
-        and existing.get("head_commit")
-        and existing["head_commit"] != original_fingerprint
-    ):
-        raise ValueError(
-            f"The subscribed deck changed after its interrupted update. Its "
-            f"files were left untouched. Review ankiops shared status "
-            f"{source.display_name} before retrying."
-        )
+
+    if existing and existing["state"] == "applying":
+        prepared_head = existing.get("prepared_head")
+        upstream_tree = existing.get("upstream_tree")
+        expected_head = existing.get("expected_head")
+        if (
+            prepared_head
+            and upstream_tree
+            and original_commit == prepared_head
+            and not source_git.status_lines()
+        ):
+            if existing.get("recovery_ref"):
+                shutil.rmtree(str(existing["recovery_ref"]), ignore_errors=True)
+            return (
+                operation_id,
+                prepared_head != expected_head,
+                None,
+                str(upstream_tree),
+                source_git.default_branch("upstream"),
+            )
+
+    if existing and existing["state"] in {"integrating", "conflict", "applying"}:
+        if (
+            existing.get("expected_head") != original_commit
+            or existing.get("expected_fingerprint") != original_fingerprint
+        ):
+            raise ValueError(
+                f"The subscribed deck changed after its interrupted update. Its "
+                f"files were left untouched. Review ankiops shared status "
+                f"{source.display_name} before retrying."
+            )
+    else:
+        existing = None
+
     state.save_shared_operation(
         source.source_path,
         operation_id,
         kind,
-        "fetching",
-        base_commit=original_commit,
-        head_commit=original_fingerprint,
+        "integrating",
+        expected_head=original_commit,
+        expected_fingerprint=original_fingerprint,
+        prepared_head=None,
+        upstream_tree=None,
         recovery_ref=str(existing.get("recovery_ref") or "") if existing else None,
+        last_error=None,
     )
     transaction_parent = collection_root / ".ankiops" / "transactions"
     transaction_parent.mkdir(parents=True, exist_ok=True)
@@ -337,8 +363,10 @@ def _integrate_upstream(
                     operation_id,
                     kind,
                     "conflict",
-                    base_commit=original_commit,
-                    head_commit=original_fingerprint,
+                    expected_head=original_commit,
+                    expected_fingerprint=original_fingerprint,
+                    prepared_head=None,
+                    upstream_tree=None,
                     recovery_ref=str(conflict_root),
                     last_error=str(error),
                 )
@@ -354,9 +382,11 @@ def _integrate_upstream(
                 source.source_path,
                 operation_id,
                 kind,
-                "failed",
-                base_commit=original_commit,
-                head_commit=original_fingerprint,
+                "integrating",
+                expected_head=original_commit,
+                expected_fingerprint=original_fingerprint,
+                prepared_head=None,
+                upstream_tree=None,
                 last_error=str(error),
             )
             shutil.rmtree(transaction_path.parent, ignore_errors=True)
@@ -371,9 +401,11 @@ def _integrate_upstream(
             source.source_path,
             operation_id,
             kind,
-            "failed",
-            base_commit=original_commit,
-            head_commit=original_fingerprint,
+            "integrating",
+            expected_head=original_commit,
+            expected_fingerprint=original_fingerprint,
+            prepared_head=None,
+            upstream_tree=None,
             last_error=str(error),
         )
         shutil.rmtree(transaction_path.parent, ignore_errors=True)
@@ -382,17 +414,28 @@ def _integrate_upstream(
     transaction_commit = transaction_git.head()
     if transaction_commit is None:
         raise ValueError(f"Could not prepare the update for {source.display_name}.")
+    state.save_shared_operation(
+        source.source_path,
+        operation_id,
+        kind,
+        "applying",
+        expected_head=original_commit,
+        expected_fingerprint=original_fingerprint,
+        prepared_head=transaction_commit,
+        upstream_tree=upstream_tree,
+        recovery_ref=str(conflict_root) if conflict_root else None,
+        last_error=None,
+    )
     source_git.run(["fetch", str(transaction_git.root), transaction_commit])
     source_git.reset_hard("FETCH_HEAD")
     shutil.rmtree(transaction_path.parent, ignore_errors=True)
     if conflict_root:
         shutil.rmtree(conflict_root, ignore_errors=True)
-    state.clear_shared_operation(source.source_path)
     if upstream_tree is None:
         raise ValueError(
             f"Could not read the available update for {source.display_name}."
         )
-    return files_changed, saved_commit, upstream_tree, default_branch
+    return operation_id, files_changed, saved_commit, upstream_tree, default_branch
 
 
 def run_subscribe(args: SimpleNamespace) -> None:
@@ -480,8 +523,10 @@ def _restore_operation(
         str(operation["operation_id"]),
         str(operation["kind"]),
         str(operation["state"]),
-        base_commit=operation.get("base_commit"),
-        head_commit=operation.get("head_commit"),
+        expected_head=operation.get("expected_head"),
+        expected_fingerprint=operation.get("expected_fingerprint"),
+        prepared_head=operation.get("prepared_head"),
+        upstream_tree=operation.get("upstream_tree"),
         recovery_ref=operation.get("recovery_ref"),
         publish_branch=operation.get("publish_branch"),
         pushed_sha=operation.get("pushed_sha"),
@@ -495,9 +540,23 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
     before_commit = source_git.head()
     pending_action = state.get_shared_operation(source.source_path)
     operation_kind = str(pending_action["kind"]) if pending_action else "update"
-    files_changed, saved_commit, upstream_tree, _default_branch = _integrate_upstream(
-        collection_root, source, source_git, state, kind=operation_kind
-    )
+    post_submission_states = {"ready", "push_failed", "pushed", "pr_failed", "pr_open"}
+    try:
+        _operation_id, files_changed, saved_commit, upstream_tree, _default_branch = (
+            _integrate_upstream(
+                collection_root, source, source_git, state, kind=operation_kind
+            )
+        )
+    except (ValueError, subprocess.CalledProcessError):
+        current_action = state.get_shared_operation(source.source_path)
+        if (
+            pending_action
+            and pending_action["state"] in post_submission_states
+            and current_action
+            and current_action["state"] != "conflict"
+        ):
+            _restore_operation(state, source, pending_action)
+        raise
     after_commit = source_git.head()
     if files_changed and before_commit and after_commit:
         files = source_git.run(
@@ -509,7 +568,7 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
     if (
         pending_action
         and pending_action["kind"] == "submit"
-        and pending_action["state"] in {"push_failed", "pushed", "pr_failed", "pr_open"}
+        and pending_action["state"] in post_submission_states
     ):
         if source_git.tree("HEAD") == upstream_tree:
             if pending_action.get("publish_branch") and source_git.remote_url(
@@ -518,8 +577,11 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
                 source_git.delete_remote_branch(
                     "publish", str(pending_action["publish_branch"])
                 )
+            state.clear_shared_operation(source.source_path)
         else:
             _restore_operation(state, source, pending_action)
+    else:
+        state.clear_shared_operation(source.source_path)
     _log_outcome(
         source,
         files=file_summary,
@@ -588,6 +650,11 @@ def run_submit(args: SimpleNamespace) -> None:
                 f"An update for {source.display_name} still needs attention. Run: "
                 f"ankiops shared update {source.display_name}"
             )
+        if pending_action and pending_action["state"] == "conflict":
+            raise ValueError(
+                f"A contribution for {source.display_name} has unresolved upstream "
+                f"changes. Run: ankiops shared update {source.display_name}"
+            )
         if (
             pending_action
             and pending_action["kind"] == "submit"
@@ -605,11 +672,18 @@ def run_submit(args: SimpleNamespace) -> None:
             return
 
         saved_commit: str | None = None
-        if pending_action is None:
-            _files_changed, saved_commit, upstream_tree, target_branch = (
-                _integrate_upstream(
-                    collection_root, source, source_git, state, kind="submit"
-                )
+        if pending_action is None or pending_action["state"] in {
+            "integrating",
+            "applying",
+        }:
+            (
+                operation_id,
+                _files_changed,
+                saved_commit,
+                upstream_tree,
+                target_branch,
+            ) = _integrate_upstream(
+                collection_root, source, source_git, state, kind="submit"
             )
             if source_git.tree("HEAD") == upstream_tree:
                 _log_outcome(
@@ -624,12 +698,27 @@ def run_submit(args: SimpleNamespace) -> None:
                     retry="yes; this was a no-op",
                     next_command="none",
                 )
+                state.clear_shared_operation(source.source_path)
                 return
-            operation_id, _existing = _source_operation(state, source, "submit")
             contribution_branch = f"ankiops/{operation_id}"
+            local_commit = source_git.head()
+            if local_commit is None:
+                raise ValueError(f"Shared source {source.display_name} has no commits.")
+            state.save_shared_operation(
+                source.source_path,
+                operation_id,
+                "submit",
+                "ready",
+                prepared_head=local_commit,
+                upstream_tree=upstream_tree,
+                publish_branch=contribution_branch,
+                pushed_sha=None,
+                pr_url=None,
+                last_error=None,
+            )
         else:
             if source_git.status_lines() or source_git.head() != pending_action.get(
-                "head_commit"
+                "prepared_head"
             ):
                 raise ValueError(
                     f"A contribution for {source.display_name} is waiting to finish, "
@@ -638,7 +727,7 @@ def run_submit(args: SimpleNamespace) -> None:
                 )
             operation_id = str(pending_action["operation_id"])
             contribution_branch = str(pending_action["publish_branch"])
-            upstream_tree = str(pending_action["base_commit"])
+            upstream_tree = str(pending_action["upstream_tree"])
             target_branch = source_git.default_branch("upstream")
 
         local_commit = source_git.head()
@@ -648,6 +737,13 @@ def run_submit(args: SimpleNamespace) -> None:
         try:
             contribution_slug, contributor = github.publish_target(source.display_name)
         except ValueError as error:
+            state.save_shared_operation(
+                source.source_path,
+                operation_id,
+                "submit",
+                "ready",
+                last_error=str(error),
+            )
             raise ValueError(
                 f"Your contribution for {source.display_name} was committed locally "
                 "but GitHub setup did not finish. Nothing was uploaded and private "
@@ -665,8 +761,8 @@ def run_submit(args: SimpleNamespace) -> None:
                     operation_id,
                     "submit",
                     "push_failed",
-                    base_commit=upstream_tree,
-                    head_commit=local_commit,
+                    prepared_head=local_commit,
+                    upstream_tree=upstream_tree,
                     publish_branch=contribution_branch,
                     last_error=str(error),
                 )
@@ -682,10 +778,11 @@ def run_submit(args: SimpleNamespace) -> None:
             operation_id,
             "submit",
             "pushed",
-            base_commit=upstream_tree,
-            head_commit=local_commit,
+            prepared_head=local_commit,
+            upstream_tree=upstream_tree,
             publish_branch=contribution_branch,
             pushed_sha=local_commit,
+            last_error=None,
         )
         contribution_head = f"{contributor}:{contribution_branch}"
         try:
@@ -702,8 +799,8 @@ def run_submit(args: SimpleNamespace) -> None:
                 operation_id,
                 "submit",
                 "pr_failed",
-                base_commit=upstream_tree,
-                head_commit=local_commit,
+                prepared_head=local_commit,
+                upstream_tree=upstream_tree,
                 publish_branch=contribution_branch,
                 pushed_sha=local_commit,
                 last_error=str(error),
@@ -719,11 +816,12 @@ def run_submit(args: SimpleNamespace) -> None:
             operation_id,
             "submit",
             "pr_open",
-            base_commit=upstream_tree,
-            head_commit=local_commit,
+            prepared_head=local_commit,
+            upstream_tree=upstream_tree,
             publish_branch=contribution_branch,
             pushed_sha=local_commit,
             pr_url=pr_url,
+            last_error=None,
         )
         _log_outcome(
             source,

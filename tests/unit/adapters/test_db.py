@@ -147,6 +147,10 @@ def test_source_sync_and_operation_state(db):
         "op-1",
         "submit",
         "pushed",
+        expected_head="before",
+        expected_fingerprint="fingerprint",
+        prepared_head="after",
+        upstream_tree="tree",
         publish_branch="ankiops/op-1",
         pushed_sha="abc",
     )
@@ -154,6 +158,10 @@ def test_source_sync_and_operation_state(db):
     assert db.get_source_applied_state("shared/owner/repo") == ("tree", "commit")
     operation = db.get_shared_operation("shared/owner/repo")
     assert operation is not None
+    assert operation["expected_head"] == "before"
+    assert operation["expected_fingerprint"] == "fingerprint"
+    assert operation["prepared_head"] == "after"
+    assert operation["upstream_tree"] == "tree"
     assert operation["publish_branch"] == "ankiops/op-1"
     assert operation["pushed_sha"] == "abc"
 

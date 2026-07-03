@@ -28,10 +28,12 @@ M: Content behind a "more" button (optional)
 
 ---
 
-T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
-E: Some *formatted* extra info.
+T: Text with
+- {{c1::multiple}}
+- {{c2::cloze deletions}}.
+E: Some *extra* info:
 
-![image with set width](im.png){width=700}
+![image with set width](media/im.png){width=700}
 
 ---
 
@@ -60,10 +62,12 @@ M: Content behind a "more" button (optional)
 
 <!-- note_key: ef0108255d7d -->
 <!-- note_type: AnkiOpsCloze -->
-T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
-E: Some *formatted* extra info.
+T: Text with
+- {{c1::multiple}}
+- {{c2::cloze deletions}}.
+E: Some *extra* info:
 
-![image with set width](im.png){width=700}
+![image with set width](media/im.png){width=700}
 
 ---
 
@@ -142,15 +146,13 @@ To install the add-on, download the folder and put it in your Anki add-ons direc
 
 ## How To Get Started
 
-1. Install AnkiOps with [pipx](https://github.com/pypa/pipx) or via [uv](https://github.com/astral-sh/uv). This will make the `ankiops` command available in your shell.
+1. Install AnkiOps via [uv](https://docs.astral.sh/uv/getting-started/installation/) from PyPI. This will make the `ankiops` command available in your shell in an isolated virtual environment. No need to get Python separately.
 
 ```bash
-pipx install ankiops
-# or
 uv tool install ankiops
 ```
 
-2. **Initialize AnkiOps**: Make sure that Anki is running, with AnkiOpsConnect enabled. Run `ankiops init` in an empty collection directory. AnkiOps creates a Git repository, `.ankiops.db`, the `note_types/` folder, and recommended configurations for VS Code. The tutorial flag further creates a sample Markdown deck.
+2. **Initialize AnkiOps**: Make sure that Anki is running, with Anki(Ops)Connect enabled. Run `ankiops init` in an empty directory of your choice. AnkiOps creates a Git repository, `.ankiops.db`, the `note_types/` folder, and recommended configurations for VS Code. The tutorial flag further creates a sample Markdown deck.
 
 ```bash
 cd my-collection
@@ -168,6 +170,12 @@ ankiops fa
 ```bash
 ankiops af
 ```
+
+5. **Upgrade AnkiOps**: To upgrade to the latest version, run:
+
+```bash
+uv tool upgrade ankiops
+``` 
 
 ## FAQ
 

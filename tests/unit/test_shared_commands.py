@@ -469,7 +469,7 @@ def test_failed_update_fetch_leaves_repository_exactly_unchanged(
     try:
         operation = db.get_shared_operation("shared/owner/repo")
         assert operation is not None
-        assert operation["state"] == "failed"
+        assert operation["state"] == "integrating"
     finally:
         db.close()
 
@@ -532,6 +532,105 @@ def test_submit_commits_only_source_and_reuses_operation(
         assert operation["pr_url"] == "https://github.test/owner/repo/pull/1"
     finally:
         db.close()
+
+
+def test_submit_retry_after_failed_integration(shared_world, tmp_path, monkeypatch):
+    _collection, source, _remote = shared_world
+    publish = tmp_path / "integration-retry.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "integration retry answer"
+        ),
+        encoding="utf-8",
+    )
+    original_fetch = GitRepository.fetch
+    original_set_remote = GitRepository.set_remote
+    fetches = 0
+
+    def fail_once(source_git, remote_name):
+        nonlocal fetches
+        fetches += 1
+        if fetches == 1:
+            raise subprocess.CalledProcessError(1, ["git", "fetch"])
+        original_fetch(source_git, remote_name)
+
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
+
+    monkeypatch.setattr(GitRepository, "fetch", fail_once)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.publish_target",
+        lambda *_args: ("contributor/repo", "contributor"),
+    )
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.create_pr",
+        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/integration",
+    )
+    args = SimpleNamespace(repository="owner/repo", message="Retry integration")
+
+    with pytest.raises(ValueError, match="Retrying is safe"):
+        run_submit(args)
+    run_submit(args)
+
+    assert fetches == 2
+    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout.strip()
+
+
+def test_submit_retry_after_interruption_while_applying(
+    shared_world, tmp_path, monkeypatch
+):
+    collection, source, _remote = shared_world
+    publish = tmp_path / "apply-retry.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "apply retry answer"
+        ),
+        encoding="utf-8",
+    )
+    original_reset_hard = GitRepository.reset_hard
+    original_set_remote = GitRepository.set_remote
+    interrupted = False
+
+    def interrupt_after_reset(source_git, ref):
+        nonlocal interrupted
+        original_reset_hard(source_git, ref)
+        if source_git.root == source and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
+
+    monkeypatch.setattr(GitRepository, "reset_hard", interrupt_after_reset)
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.publish_target",
+        lambda *_args: ("contributor/repo", "contributor"),
+    )
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.create_pr",
+        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/apply",
+    )
+    args = SimpleNamespace(repository="owner/repo", message="Retry apply")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_submit(args)
+    db = SyncState.open(collection)
+    try:
+        operation = db.get_shared_operation("shared/owner/repo")
+        assert operation is not None
+        assert operation["state"] == "applying"
+    finally:
+        db.close()
+
+    run_submit(args)
+
+    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout.strip()
 
 
 def test_submit_retry_after_failed_pr_reuses_pushed_branch(
@@ -653,6 +752,105 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
         db.close()
 
 
+def test_submit_retry_after_interruption_after_push(
+    shared_world, tmp_path, monkeypatch
+):
+    _collection, source, _remote = shared_world
+    publish = tmp_path / "pushed-retry.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "pushed retry answer"
+        ),
+        encoding="utf-8",
+    )
+    original_set_remote = GitRepository.set_remote
+    original_push = GitRepository.push
+    pushes = 0
+
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
+
+    def interrupt_after_push(source_git, remote_name, source_ref, branch):
+        nonlocal pushes
+        pushes += 1
+        original_push(source_git, remote_name, source_ref, branch)
+        if pushes == 1:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(GitRepository, "push", interrupt_after_push)
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.publish_target",
+        lambda *_args: ("contributor/repo", "contributor"),
+    )
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.create_pr",
+        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/pushed",
+    )
+    args = SimpleNamespace(repository="owner/repo", message="Retry pushed commit")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_submit(args)
+    run_submit(args)
+
+    assert pushes == 1
+
+
+def test_submit_retry_after_interruption_after_pr_creation(
+    shared_world, tmp_path, monkeypatch
+):
+    collection, source, _remote = shared_world
+    publish = tmp_path / "pr-created-retry.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "PR-created retry answer"
+        ),
+        encoding="utf-8",
+    )
+    original_set_remote = GitRepository.set_remote
+    pr_calls = 0
+    created_pr = None
+
+    def local_publish(source_git, name, _url):
+        original_set_remote(source_git, name, str(publish))
+
+    def interrupt_after_pr(*_args, **_kwargs):
+        nonlocal created_pr, pr_calls
+        pr_calls += 1
+        if created_pr is None:
+            created_pr = "https://github.test/owner/repo/pull/existing"
+            raise KeyboardInterrupt
+        return created_pr
+
+    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.publish_target",
+        lambda *_args: ("contributor/repo", "contributor"),
+    )
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.create_pr", interrupt_after_pr
+    )
+    args = SimpleNamespace(repository="owner/repo", message="Retry created PR")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_submit(args)
+    run_submit(args)
+
+    assert pr_calls == 2
+    db = SyncState.open(collection)
+    try:
+        operation = db.get_shared_operation("shared/owner/repo")
+        assert operation is not None
+        assert operation["state"] == "pr_open"
+        assert operation["pr_url"] == "https://github.test/owner/repo/pull/existing"
+    finally:
+        db.close()
+
+
 def test_update_after_squash_merge_cleans_submission_state(
     shared_world, tmp_path, monkeypatch
 ):
@@ -722,7 +920,9 @@ def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
     assert "Retrying is safe: ankiops shared submit owner/repo" in message
     db = SyncState.open(collection)
     try:
-        assert db.get_shared_operation("shared/owner/repo") is None
+        operation = db.get_shared_operation("shared/owner/repo")
+        assert operation is not None
+        assert operation["state"] == "ready"
     finally:
         db.close()
     assert _git(source, "branch", "--list", "ankiops/*").stdout.strip() == (
@@ -789,10 +989,10 @@ def test_status_gives_submit_retry_as_next_command(shared_world, caplog, state):
             "retry-operation",
             "submit",
             state,
-            base_commit=_git(
+            upstream_tree=_git(
                 source, "rev-parse", "upstream/main^{tree}"
             ).stdout.strip(),
-            head_commit=_git(source, "rev-parse", "HEAD").stdout.strip(),
+            prepared_head=_git(source, "rev-parse", "HEAD").stdout.strip(),
             publish_branch="ankiops/retry-operation",
         )
     finally:

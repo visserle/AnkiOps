@@ -111,9 +111,10 @@ class SyncState:
                     "FROM source_sync_state LIMIT 0"
                 )
                 conn.execute(
-                    "SELECT source_path, operation_id, kind, state, base_commit, "
-                    "head_commit, recovery_ref, publish_branch, pushed_sha, pr_url, "
-                    "last_error FROM shared_operations LIMIT 0"
+                    "SELECT source_path, operation_id, kind, state, expected_head, "
+                    "expected_fingerprint, prepared_head, upstream_tree, "
+                    "recovery_ref, publish_branch, pushed_sha, pr_url, last_error "
+                    "FROM shared_operations LIMIT 0"
                 )
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError) as error:
@@ -818,8 +819,10 @@ class SyncState:
             "operation_id",
             "kind",
             "state",
-            "base_commit",
-            "head_commit",
+            "expected_head",
+            "expected_fingerprint",
+            "prepared_head",
+            "upstream_tree",
             "recovery_ref",
             "publish_branch",
             "pushed_sha",
@@ -844,8 +847,10 @@ class SyncState:
         **values: str | None,
     ) -> None:
         fields = (
-            "base_commit",
-            "head_commit",
+            "expected_head",
+            "expected_fingerprint",
+            "prepared_head",
+            "upstream_tree",
             "recovery_ref",
             "publish_branch",
             "pushed_sha",
@@ -858,11 +863,13 @@ class SyncState:
             "INSERT INTO shared_operations "
             "(source_path, operation_id, kind, state, "
             + ", ".join(fields)
-            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(source_path) DO UPDATE SET "
             "operation_id = excluded.operation_id, kind = excluded.kind, "
-            "state = excluded.state, base_commit = excluded.base_commit, "
-            "head_commit = excluded.head_commit, "
+            "state = excluded.state, expected_head = excluded.expected_head, "
+            "expected_fingerprint = excluded.expected_fingerprint, "
+            "prepared_head = excluded.prepared_head, "
+            "upstream_tree = excluded.upstream_tree, "
             "recovery_ref = excluded.recovery_ref, "
             "publish_branch = excluded.publish_branch, "
             "pushed_sha = excluded.pushed_sha, pr_url = excluded.pr_url, "
