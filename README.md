@@ -45,7 +45,7 @@ C3: automatically randomized answers
 A: 1, 3
 ```
 
-You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, code blocks with highlighting, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
+You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, syntax-highlighted code blocks, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
 
 After the first sync with Anki, AnkiOps adds metadata comments for each note:
 
@@ -171,12 +171,6 @@ ankiops fa
 ankiops af
 ```
 
-5. **Upgrade AnkiOps**: To upgrade to the latest version, run:
-
-```bash
-uv tool upgrade ankiops
-``` 
-
 ## FAQ
 
 ### Why should I use AnkiOps?
@@ -211,7 +205,7 @@ If you want it simple, just prompt an LLM (Codex, Claude Code, etc.) to edit you
 
 ### How do I upgrade AnkiOps to the latest version?
 
-AnkiOps is in early development, so breaking changes are expected. Use `pipx upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. If your collection is in Git, inspect the diff before you continue syncing.
+AnkiOps is in early development, so breaking changes are expected. Use `uv upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. Since all files are git-tracked, you can easily spot any changes and roll back if needed.
 
 ### What other features are there?
 
