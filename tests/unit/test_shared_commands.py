@@ -134,8 +134,29 @@ def test_update_noop_creates_no_commit(shared_world, caplog):
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert _git(source, "branch", "--list", "ankiops/recovery/*").stdout == ""
-    assert "Local result: no local or upstream changes" in caplog.text
-    assert "Next: none" in caplog.text
+    assert "Shared update: owner/repo — already up to date" in caplog.text
+    assert "Apply to Anki: ankiops fa" in caplog.text
+
+
+def test_update_reports_preserved_local_contribution(shared_world, caplog):
+    caplog.set_level(logging.INFO)
+    _collection, source, _remote = shared_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "locally committed answer"
+        ),
+        encoding="utf-8",
+    )
+    before = _commit(source, "Local contribution")
+
+    run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
+    assert "Shared update: owner/repo — no upstream changes" in caplog.text
+    assert "Local contribution: ready to submit" in caplog.text
+    assert "Apply to Anki: ankiops fa" in caplog.text
+    assert "Submit contribution: ankiops shared submit owner/repo" in caplog.text
 
 
 def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypatch):
@@ -944,10 +965,96 @@ def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, 
 
     run_status(SimpleNamespace(repository="owner/repo"))
 
-    assert "Local shared changes: 1" in caplog.text
-    assert "local files were not changed" in caplog.text
+    assert "Working tree: 1 changed path" in caplog.text
+    assert "Upstream: unavailable" in caplog.text
     assert "collection changes" not in caplog.text.lower()
-    assert "Next: ankiops shared status owner/repo" in caplog.text
+    assert "Retry status: ankiops shared status owner/repo" in caplog.text
+
+
+def test_status_reports_committed_local_contribution(shared_world, caplog):
+    caplog.set_level(logging.INFO)
+    _collection, source, _remote = shared_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "locally committed answer"
+        ),
+        encoding="utf-8",
+    )
+    _commit(source, "Local contribution")
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert "Shared status: owner/repo" in caplog.text
+    assert "Working tree: clean" in caplog.text
+    assert "Local contribution: 1 commit ready to submit" in caplog.text
+    assert "Upstream: up to date" in caplog.text
+    assert "Anki: changes not applied" in caplog.text
+    assert "Apply to Anki: ankiops fa" in caplog.text
+    assert "Submit contribution: ankiops shared submit owner/repo" in caplog.text
+
+
+def test_status_reports_available_upstream_update(shared_world, tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    _collection, _source, remote = shared_world
+    _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert "Local contribution: none" in caplog.text
+    assert "Upstream: 1 commit available" in caplog.text
+    assert "Integrate upstream: ankiops shared update owner/repo" in caplog.text
+    assert "Submit contribution:" not in caplog.text
+
+
+def test_status_reports_diverged_contributions(shared_world, tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    _collection, source, remote = shared_world
+    (source / "Local.md").write_text("local\n", encoding="utf-8")
+    _commit(source, "Local contribution")
+    _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert "Local contribution: 1 commit ready to submit" in caplog.text
+    assert "Upstream: 1 commit available; update before submitting" in caplog.text
+    assert "Integrate upstream: ankiops shared update owner/repo" in caplog.text
+    assert "Submit contribution:" not in caplog.text
+
+
+def test_status_reports_contribution_accepted_upstream(shared_world, tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    collection, source, remote = shared_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "accepted answer"),
+        encoding="utf-8",
+    )
+    prepared_head = _commit(source, "Local contribution")
+    upstream_tree = _git(source, "rev-parse", "upstream/main^{tree}").stdout.strip()
+    _upstream_edit(tmp_path, remote, "upstream answer", "accepted answer")
+    db = SyncState.open(collection)
+    try:
+        db.save_shared_operation(
+            "shared/owner/repo",
+            "accepted-operation",
+            "submit",
+            "pr_open",
+            prepared_head=prepared_head,
+            upstream_tree=upstream_tree,
+            publish_branch="ankiops/accepted-operation",
+            pr_url="https://github.test/owner/repo/pull/1",
+        )
+    finally:
+        db.close()
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert "Local contribution: none" in caplog.text
+    assert "Upstream: up to date" in caplog.text
+    assert "Submission: accepted upstream; cleanup pending" in caplog.text
+    assert "Finalize submission: ankiops shared update owner/repo" in caplog.text
+    assert "Review pull request:" not in caplog.text
 
 
 def test_status_omits_unrelated_collection_changes(shared_world, caplog):
@@ -978,10 +1085,26 @@ def test_status_prints_unicode_shared_paths_without_git_quoting(shared_world, ca
     assert "\\303" not in caplog.text
 
 
-@pytest.mark.parametrize("state", ["push_failed", "pr_failed"])
-def test_status_gives_submit_retry_as_next_command(shared_world, caplog, state):
+@pytest.mark.parametrize(
+    ("state", "submission_status"),
+    [
+        ("push_failed", "not uploaded"),
+        ("pr_failed", "uploaded; pull request not created"),
+    ],
+)
+def test_status_gives_submit_retry_as_next_command(
+    shared_world, caplog, state, submission_status
+):
     caplog.set_level(logging.INFO)
     collection, source, _remote = shared_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "local contribution"
+        ),
+        encoding="utf-8",
+    )
+    prepared_head = _commit(source, "Local contribution")
     db = SyncState.open(collection)
     try:
         db.save_shared_operation(
@@ -992,7 +1115,7 @@ def test_status_gives_submit_retry_as_next_command(shared_world, caplog, state):
             upstream_tree=_git(
                 source, "rev-parse", "upstream/main^{tree}"
             ).stdout.strip(),
-            prepared_head=_git(source, "rev-parse", "HEAD").stdout.strip(),
+            prepared_head=prepared_head,
             publish_branch="ankiops/retry-operation",
         )
     finally:
@@ -1000,5 +1123,5 @@ def test_status_gives_submit_retry_as_next_command(shared_world, caplog, state):
 
     run_status(SimpleNamespace(repository="owner/repo"))
 
-    assert "retrying submit is safe" in caplog.text
-    assert "Next: ankiops shared submit owner/repo" in caplog.text
+    assert f"Submission: {submission_status}" in caplog.text
+    assert "Retry submission: ankiops shared submit owner/repo" in caplog.text
