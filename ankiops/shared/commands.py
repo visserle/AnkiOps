@@ -614,7 +614,9 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
         state.clear_shared_operation(source.source_path)
     remaining_action = state.get_shared_operation(source.source_path)
 
-    if upstream_changed:
+    if upstream_changed and saved_commit:
+        summary = "committed local changes and integrated upstream changes"
+    elif upstream_changed:
         summary = "integrated upstream changes"
     elif saved_commit:
         summary = "committed local changes; upstream already current"
