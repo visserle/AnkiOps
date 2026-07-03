@@ -258,7 +258,7 @@ def collect_membership_affected_note_ids(results: list[SyncReport]) -> set[int]:
 def refresh_membership_for_affected_notes(
     *,
     affected_note_ids: set[int],
-    anki_port: Anki,
+    anki: Anki,
     note_ids_by_deck_name: dict[str, set[int]],
 ) -> None:
     if not affected_note_ids:
@@ -267,12 +267,12 @@ def refresh_membership_for_affected_notes(
     # Clear stale memberships first, then rebuild only for surviving notes.
     _remove_note_ids_from_deck_membership(note_ids_by_deck_name, affected_note_ids)
 
-    refreshed_notes = anki_port.fetch_notes_info(sorted(affected_note_ids))
+    refreshed_notes = anki.fetch_notes_info(sorted(affected_note_ids))
     refreshed_card_ids: list[int] = []
     for refreshed_note in refreshed_notes.values():
         refreshed_card_ids.extend(refreshed_note.card_ids)
 
-    refreshed_cards = anki_port.fetch_cards_info(refreshed_card_ids)
+    refreshed_cards = anki.fetch_cards_info(refreshed_card_ids)
     refreshed_grouped = group_note_ids_by_deck_name(refreshed_cards)
     for deck_name, note_ids in refreshed_grouped.items():
         note_ids_by_deck_name.setdefault(deck_name, set()).update(note_ids)
@@ -287,14 +287,14 @@ class _DeckContext:
 def _resolve_deck_context(
     fs: DeckFile,
     deck_ids_by_name: dict[str, int],
-    db_port: SyncState,
+    state: SyncState,
 ) -> _DeckContext:
     deck_name = file_stem_to_deck_name(fs.file_path.stem)
     resolved_id = deck_ids_by_name.get(deck_name)
     if not resolved_id:
         return _DeckContext(deck_name=deck_name, needs_create_deck=True)
 
-    db_port.upsert_deck(deck_name, resolved_id)
+    state.upsert_deck(deck_name, resolved_id)
     return _DeckContext(deck_name=deck_name, needs_create_deck=False)
 
 
@@ -484,11 +484,11 @@ def _sync_new_note(
     parsed_note: Note,
     cfg: NoteType,
     md_hash: str,
-    db_port: SyncState,
+    state: SyncState,
     markdown_to_html: MarkdownToHTML,
     result: SyncReport,
 ) -> None:
-    new_note_key = db_port.generate_note_key()
+    new_note_key = state.generate_note_key()
     html_fields = _to_html(parsed_note, cfg, markdown_to_html)
     html_fields[ANKIOPS_KEY_FIELD.name] = new_note_key
     result.add_change(
@@ -523,7 +523,7 @@ def _collect_orphan_deletes(
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
     anki_notes: dict[int, AnkiNote],
-    db_port: SyncState,
+    state: SyncState,
     result: SyncReport,
 ) -> None:
     md_anki_ids = set()
@@ -538,7 +538,7 @@ def _collect_orphan_deletes(
     if global_mapped_note_ids:
         orphaned -= global_mapped_note_ids
 
-    orphan_note_keys = db_port.resolve_note_keys(orphaned)
+    orphan_note_keys = state.resolve_note_keys(orphaned)
     for note_id in sorted(orphaned):
         if note_id:
             orphan_note = anki_notes.get(note_id)
@@ -590,7 +590,7 @@ def _collect_orphan_deletes(
 
 def _apply_note_type_conversions(
     *,
-    anki_port: Anki,
+    anki: Anki,
     conversions: list[_NoteTypeConversion],
     queue_import_fingerprint,
 ) -> list[str]:
@@ -606,7 +606,7 @@ def _apply_note_type_conversions(
 
     try:
         for (old_model, new_model), grouped in sorted(by_model_pair.items()):
-            anki_port.convert_notes_to_note_type(
+            anki.convert_notes_to_note_type(
                 sorted(conversion.note_id for conversion in grouped),
                 old_model,
                 new_model,
@@ -627,8 +627,8 @@ def _apply_note_type_conversions(
 def _apply_changes_and_update_state(
     *,
     deck_context: _DeckContext,
-    anki_port: Anki,
-    db_port: SyncState,
+    anki: Anki,
+    state: SyncState,
     result: SyncReport,
     cards_to_move: list[int],
     note_type_conversions: list[_NoteTypeConversion],
@@ -646,7 +646,7 @@ def _apply_changes_and_update_state(
         return []
 
     conversion_errors = _apply_note_type_conversions(
-        anki_port=anki_port,
+        anki=anki,
         conversions=note_type_conversions,
         queue_import_fingerprint=queue_import_fingerprint,
     )
@@ -657,7 +657,7 @@ def _apply_changes_and_update_state(
     creates = result.changes_for(ChangeType.CREATE)
     updates = result.changes_for(ChangeType.UPDATE)
     deletes = result.changes_for(ChangeType.DELETE)
-    created_ids, errors = anki_port.apply_note_changes(
+    created_ids, errors = anki.apply_note_changes(
         deck_context.deck_name,
         deck_context.needs_create_deck,
         creates,
@@ -700,7 +700,7 @@ def _apply_changes_and_update_state(
         delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
         if delete_note_keys:
             # note_state row deletion also clears export-direction fingerprints.
-            db_port.delete_note_links_by_keys(delete_note_keys)
+            state.delete_note_links_by_keys(delete_note_keys)
             for note_key in delete_note_keys:
                 removed_note_id = note_ids_by_note_key.pop(note_key, None)
                 if note_key in global_note_keys and removed_note_id is not None:
@@ -713,27 +713,27 @@ def _apply_changes_and_update_state(
 def _recover_created_deck_mapping(
     *,
     deck_context: _DeckContext,
-    anki_port: Anki,
+    anki: Anki,
     deck_ids_by_name: dict[str, int],
     deck_names_by_id: dict[int, str],
-    db_port: SyncState,
+    state: SyncState,
 ) -> None:
     if not deck_context.needs_create_deck or not deck_context.deck_name:
         return
 
-    new_deck_ids = anki_port.fetch_deck_names_and_ids()
+    new_deck_ids = anki.fetch_deck_names_and_ids()
     if deck_context.deck_name in new_deck_ids:
         new_id = new_deck_ids[deck_context.deck_name]
         deck_ids_by_name[deck_context.deck_name] = new_id
         deck_names_by_id[new_id] = deck_context.deck_name
-        db_port.upsert_deck(deck_context.deck_name, new_id)
+        state.upsert_deck(deck_context.deck_name, new_id)
 
 
 def sync_deck_to_anki(
     fs: DeckFile,
     config_by_name: dict[str, NoteType],
-    anki_port: Anki,
-    db_port: SyncState,
+    anki: Anki,
+    state: SyncState,
     markdown_to_html: MarkdownToHTML,
     deck_names_by_id: dict[int, str],
     deck_ids_by_name: dict[str, int],
@@ -747,7 +747,7 @@ def sync_deck_to_anki(
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
 ) -> tuple[SyncReport, PendingDeckWrite, set[str]]:
-    deck_context = _resolve_deck_context(fs, deck_ids_by_name, db_port)
+    deck_context = _resolve_deck_context(fs, deck_ids_by_name, state)
     result = SyncReport.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
     cards_to_move: list[int] = []
     moved_from_decks: set[str] = set()
@@ -772,7 +772,7 @@ def sync_deck_to_anki(
             global_mapped_note_ids.discard(existing_note_id)
         note_import_fingerprints_by_note_key.pop(note_key, None)
         # note_state row deletion also clears export-direction fingerprints.
-        db_port.delete_note_links_by_keys([note_key])
+        state.delete_note_links_by_keys([note_key])
 
     def _queue_import_fingerprint(note_key: str, md_hash: str, anki_hash: str) -> None:
         if note_import_fingerprints_by_note_key.get(note_key) == (md_hash, anki_hash):
@@ -812,7 +812,7 @@ def sync_deck_to_anki(
                 parsed_note=parsed_note,
                 cfg=cfg,
                 md_hash=md_hash,
-                db_port=db_port,
+                state=state,
                 markdown_to_html=markdown_to_html,
                 result=result,
             )
@@ -823,14 +823,14 @@ def sync_deck_to_anki(
         global_mapped_note_ids=global_mapped_note_ids,
         all_anki_note_ids=all_anki_note_ids,
         anki_notes=anki_notes,
-        db_port=db_port,
+        state=state,
         result=result,
     )
 
     note_key_assignments = _apply_changes_and_update_state(
         deck_context=deck_context,
-        anki_port=anki_port,
-        db_port=db_port,
+        anki=anki,
+        state=state,
         result=result,
         cards_to_move=cards_to_move,
         note_type_conversions=note_type_conversions,
@@ -844,10 +844,10 @@ def sync_deck_to_anki(
 
     _recover_created_deck_mapping(
         deck_context=deck_context,
-        anki_port=anki_port,
+        anki=anki,
         deck_ids_by_name=deck_ids_by_name,
         deck_names_by_id=deck_names_by_id,
-        db_port=db_port,
+        state=state,
     )
 
     result.order_changes()

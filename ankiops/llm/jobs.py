@@ -174,8 +174,8 @@ class LlmJobStore:
         self._tx_depth = 0
 
     @classmethod
-    def open(cls, collection_dir: Path) -> "LlmJobStore":
-        llm_dir = collection_dir / LLM_DIR
+    def open(cls, collection_root: Path) -> "LlmJobStore":
+        llm_dir = collection_root / LLM_DIR
         llm_dir.mkdir(parents=True, exist_ok=True)
         db_path = llm_dir / LLM_DB_FILENAME
         conn = sqlite3.connect(db_path)
@@ -410,7 +410,7 @@ class LlmJobStore:
             raise ValueError(f"Unknown LLM job id {job_id}")
 
         model = _resolve_model_for_summary(
-            row, collection_dir=self._db_path.parent.parent
+            row, collection_root=self._db_path.parent.parent
         )
         summary = TaskRunSummary(
             task_name=str(row["task_name"]),
@@ -771,16 +771,16 @@ class LlmJobStore:
             return self._conn.execute(sql, params)
 
 
-def list_jobs(*, collection_dir: Path) -> list[LlmJobListItem]:
-    store = LlmJobStore.open(collection_dir)
+def list_jobs(*, collection_root: Path) -> list[LlmJobListItem]:
+    store = LlmJobStore.open(collection_root)
     try:
         return store.list_jobs()
     finally:
         store.close()
 
 
-def show_job(*, collection_dir: Path, job_id: str | int) -> LlmJobDetail | None:
-    store = LlmJobStore.open(collection_dir)
+def show_job(*, collection_root: Path, job_id: str | int) -> LlmJobDetail | None:
+    store = LlmJobStore.open(collection_root)
     try:
         resolved_job_id = (
             store.resolve_job_id(job_id) if isinstance(job_id, str) else int(job_id)
@@ -792,9 +792,9 @@ def show_job(*, collection_dir: Path, job_id: str | int) -> LlmJobDetail | None:
         store.close()
 
 
-def _resolve_model_for_summary(row: sqlite3.Row, *, collection_dir: Path) -> ModelSpec:
+def _resolve_model_for_summary(row: sqlite3.Row, *, collection_root: Path) -> ModelSpec:
     try:
-        model = parse_model(str(row["model"]), collection_dir=collection_dir)
+        model = parse_model(str(row["model"]), collection_root=collection_root)
     except Exception:
         model = None
     if model is not None:

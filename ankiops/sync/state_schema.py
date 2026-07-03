@@ -3,12 +3,12 @@ DB_SCHEMA: dict[str, str] = {
 CREATE TABLE note_state (
     note_key TEXT PRIMARY KEY,
     note_id INTEGER NOT NULL UNIQUE,
-    source_id TEXT NOT NULL DEFAULT 'local',
+    source_path TEXT NOT NULL DEFAULT '.',
     import_md_hash TEXT,
     import_anki_hash TEXT,
     export_md_hash TEXT,
     export_anki_hash TEXT,
-    CHECK (source_id <> ''),
+    CHECK (source_path <> ''),
     CHECK (
         (import_md_hash IS NULL) = (import_anki_hash IS NULL)
     ),
@@ -21,9 +21,9 @@ CREATE TABLE note_state (
 CREATE TABLE deck_map (
     deck_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    source_id TEXT NOT NULL DEFAULT 'local',
+    source_path TEXT NOT NULL DEFAULT '.',
     md_path TEXT,
-    CHECK (source_id <> '')
+    CHECK (source_path <> '')
 )
 """,
     "app_state": """
@@ -43,15 +43,15 @@ CREATE TABLE app_state (
 """,
     "source_sync_state": """
 CREATE TABLE source_sync_state (
-    source_id TEXT PRIMARY KEY,
+    source_path TEXT PRIMARY KEY,
     applied_tree_hash TEXT,
     applied_commit TEXT,
-    CHECK (source_id <> '')
+    CHECK (source_path <> '')
 )
 """,
     "shared_operations": """
 CREATE TABLE shared_operations (
-    source_id TEXT PRIMARY KEY,
+    source_path TEXT PRIMARY KEY,
     operation_id TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL,
     state TEXT NOT NULL,
@@ -77,15 +77,15 @@ CREATE TABLE markdown_media_cache (
 """,
     "media_files": """
 CREATE TABLE media_files (
-    source_id TEXT NOT NULL DEFAULT 'local',
+    source_path TEXT NOT NULL DEFAULT '.',
     name TEXT NOT NULL,
     mtime_ns INTEGER NOT NULL CHECK (mtime_ns >= 0),
     size INTEGER NOT NULL CHECK (size >= 0),
     digest TEXT NOT NULL CHECK (digest <> ''),
     hashed_name TEXT NOT NULL CHECK (hashed_name <> ''),
     pushed_digest TEXT CHECK (pushed_digest IS NULL OR pushed_digest <> ''),
-    PRIMARY KEY (source_id, name),
-    CHECK (source_id <> '')
+    PRIMARY KEY (source_path, name),
+    CHECK (source_path <> '')
 )
 """,
 }

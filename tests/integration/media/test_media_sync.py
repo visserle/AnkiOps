@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ankiops.collection import LOCAL_MEDIA_DIR
+from ankiops.deck_sources import DeckSource
+from ankiops.git import GitRepository
 from ankiops.media import (
     sync_all_media_to_anki,
     sync_media_to_anki,
@@ -35,14 +37,14 @@ class _FakeMediaAnki:
         local_path.write_bytes(source.read_bytes())
         return True
 
-    def delete_media(self, remote_filename: str) -> None:
+    def delete_media_file(self, remote_filename: str) -> None:
         (self._media_dir / remote_filename).unlink(missing_ok=True)
 
 
-def _sync_to_anki(collection_dir: Path, anki: _FakeMediaAnki):
-    db = SyncState.open(collection_dir)
+def _sync_to_anki(collection_root: Path, anki: _FakeMediaAnki):
+    db = SyncState.open(collection_root)
     try:
-        return sync_media_to_anki(anki, collection_dir, db)
+        return sync_media_to_anki(anki, DeckSource.local(collection_root), db)
     finally:
         db.close()
 
@@ -58,6 +60,7 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path)
     shared_root = tmp_path / "shared" / "owner" / "repo"
     shared_media = shared_root / LOCAL_MEDIA_DIR
     shared_media.mkdir(parents=True)
+    GitRepository(shared_root).init_repo()
     (shared_media / "image.png").write_bytes(b"shared image")
     (shared_root / "SharedDeck.md").write_text(
         "Q: Shared\nA: ![img](media/image.png)", encoding="utf-8"
@@ -184,13 +187,13 @@ def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path):
 
     db = SyncState.open(tmp_path)
     try:
-        first = sync_media_to_anki(anki, tmp_path, db)
+        first = sync_media_to_anki(anki, DeckSource.local(tmp_path), db)
     finally:
         db.close()
 
     db = SyncState.open(tmp_path)
     try:
-        second = sync_media_to_anki(anki, tmp_path, db)
+        second = sync_media_to_anki(anki, DeckSource.local(tmp_path), db)
     finally:
         db.close()
 
@@ -214,11 +217,11 @@ def test_sync_media_prunes_deleted_markdown_cache_rows(tmp_path):
 
     db = SyncState.open(tmp_path)
     try:
-        sync_media_to_anki(anki, tmp_path, db)
+        sync_all_media_to_anki(anki, tmp_path, db)
         assert db.list_markdown_media_paths() == {"DeckA.md", "DeckB.md"}
 
         deck_a.unlink()
-        sync_media_to_anki(anki, tmp_path, db)
+        sync_all_media_to_anki(anki, tmp_path, db)
         assert db.list_markdown_media_paths() == {"DeckB.md"}
     finally:
         db.close()
@@ -243,7 +246,7 @@ def test_sync_media_to_anki_reports_missing_local_references(tmp_path):
 
     db = SyncState.open(tmp_path)
     try:
-        result = sync_media_to_anki(anki, tmp_path, db)
+        result = sync_media_to_anki(anki, DeckSource.local(tmp_path), db)
     finally:
         db.close()
 

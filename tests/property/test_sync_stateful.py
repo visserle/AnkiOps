@@ -12,7 +12,6 @@ from hypothesis import strategies as st
 
 from ankiops.anki import Anki
 from ankiops.collection import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
-from ankiops.deck_sources import discover_deck_sources
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
@@ -61,30 +60,24 @@ def _assert_db_bijection(db_path: Path) -> None:
     assert len(ids) == len(set(ids))
 
 
-def _sync_import(anki, fs, db, collection_dir: Path):
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
+def _sync_import(anki, fs, db, collection_root: Path):
     return sync_collection_to_anki(
-        anki_port=anki,
-        db_port=db,
-        collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
+        anki=anki,
+        state=db,
+        collection_root=collection_root,
     )
 
 
-def _sync_export(anki, fs, db, collection_dir: Path):
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
+def _sync_export(anki, fs, db, collection_root: Path):
     return sync_collection_from_anki(
-        anki_port=anki,
-        db_port=db,
-        collection_dir=collection_dir,
-        sources=discover_deck_sources(
-            collection_dir, note_types_dir=note_types_dir
-        ),
+        anki=anki,
+        state=db,
+        collection_root=collection_root,
     )
 
 
 def _assert_mapping_invariants(
-    deck_file: Path, mock_anki: MockAnki, collection_dir: Path
+    deck_file: Path, mock_anki: MockAnki, collection_root: Path
 ) -> None:
     if deck_file.exists():
         keys = _NOTE_KEY_RE.findall(deck_file.read_text(encoding="utf-8"))
@@ -97,24 +90,24 @@ def _assert_mapping_invariants(
             anki_keys.append(key_val)
     assert_unique(anki_keys)
 
-    _assert_db_bijection(collection_dir / ANKIOPS_DB)
+    _assert_db_bijection(collection_root / ANKIOPS_DB)
 
 
 @given(ops=_OPS)
 @settings(max_examples=40, deadline=None)
 def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
     with tempfile.TemporaryDirectory() as tdir:
-        collection_dir = Path(tdir)
-        deck_file = collection_dir / f"{deck_name_to_file_stem('StatefulDeck')}.md"
+        collection_root = Path(tdir)
+        deck_file = collection_root / f"{deck_name_to_file_stem('StatefulDeck')}.md"
 
         mock_anki = MockAnki()
         anki = Anki(invoke_func=mock_anki.invoke)
         fs = DeckFileHarness()
-        note_types_dir = collection_dir / NOTE_TYPES_DIR
+        note_types_dir = collection_root / NOTE_TYPES_DIR
         if not note_types_dir.exists():
             fs.eject_default_note_types(note_types_dir)
         fs.set_note_types(fs.load_note_types(note_types_dir))
-        db = SyncState.open(collection_dir)
+        db = SyncState.open(collection_root)
 
         question_idx = 0
 
@@ -150,12 +143,12 @@ def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
                         }
 
                 elif op == "sync_import":
-                    _sync_import(anki, fs, db, collection_dir)
+                    _sync_import(anki, fs, db, collection_root)
 
                 elif op == "sync_export":
-                    _sync_export(anki, fs, db, collection_dir)
+                    _sync_export(anki, fs, db, collection_root)
 
                 if op in {"sync_import", "sync_export"}:
-                    _assert_mapping_invariants(deck_file, mock_anki, collection_dir)
+                    _assert_mapping_invariants(deck_file, mock_anki, collection_root)
         finally:
             db.close()

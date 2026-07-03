@@ -27,8 +27,17 @@ class SyncState:
         self._tx_depth = 0
 
     @classmethod
-    def open(cls, collection_dir: Path) -> "SyncState":
-        db_path = collection_dir / ANKIOPS_DB
+    def open(cls, collection_root: Path) -> "SyncState":
+        return cls._open(collection_root, allow_recovery=True)
+
+    @classmethod
+    def _open(
+        cls,
+        collection_root: Path,
+        *,
+        allow_recovery: bool,
+    ) -> "SyncState":
+        db_path = collection_root / ANKIOPS_DB
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         conn = None
@@ -77,12 +86,12 @@ class SyncState:
                 )
 
                 conn.execute(
-                    "SELECT note_key, note_id, source_id, import_md_hash, "
+                    "SELECT note_key, note_id, source_path, import_md_hash, "
                     "import_anki_hash, export_md_hash, export_anki_hash "
                     "FROM note_state LIMIT 0"
                 )
                 conn.execute(
-                    "SELECT deck_id, name, source_id, md_path FROM deck_map LIMIT 0"
+                    "SELECT deck_id, name, source_path, md_path FROM deck_map LIMIT 0"
                 )
                 conn.execute(
                     "SELECT id, profile_name, note_type_sync_hash, "
@@ -94,15 +103,15 @@ class SyncState:
                     "FROM markdown_media_cache LIMIT 0"
                 )
                 conn.execute(
-                    "SELECT source_id, name, mtime_ns, size, digest, hashed_name, "
+                    "SELECT source_path, name, mtime_ns, size, digest, hashed_name, "
                     "pushed_digest FROM media_files LIMIT 0"
                 )
                 conn.execute(
-                    "SELECT source_id, applied_tree_hash, applied_commit "
+                    "SELECT source_path, applied_tree_hash, applied_commit "
                     "FROM source_sync_state LIMIT 0"
                 )
                 conn.execute(
-                    "SELECT source_id, operation_id, kind, state, base_commit, "
+                    "SELECT source_path, operation_id, kind, state, base_commit, "
                     "head_commit, recovery_ref, publish_branch, pushed_sha, pr_url, "
                     "last_error FROM shared_operations LIMIT 0"
                 )
@@ -110,29 +119,32 @@ class SyncState:
         except (sqlite3.DatabaseError, sqlite3.OperationalError) as error:
             if conn:
                 conn.close()
-            raise ValueError(
-                f"Database at {db_path} does not use the current AnkiOps schema. "
-                "This version does not migrate or recreate collections; initialize "
-                "a fresh collection."
-            ) from error
+            if not allow_recovery:
+                raise ValueError(
+                    f"Database at {db_path} could not be recreated with the current "
+                    "AnkiOps schema."
+                ) from error
 
-            # todo: implement the old simple recreation logic here:
+            backup_path = db_path.with_name(f"{db_path.name}.corrupt")
+            logger.error(
+                "Database at %s is corrupt or uses an unsupported schema. "
+                "Backing it up to %s and recreating it. Run 'ankiops init' "
+                "afterward to relink the Anki profile.",
+                db_path,
+                backup_path,
+            )
+            if db_path.exists():
+                try:
+                    db_path.replace(backup_path)
+                    for suffix in ("-wal", "-shm"):
+                        db_path.with_name(f"{db_path.name}{suffix}").unlink(
+                            missing_ok=True
+                        )
+                except OSError as backup_error:
+                    logger.error("Failed to back up corrupt database: %s", backup_error)
+                    raise
 
-            #         except (sqlite3.DatabaseError, sqlite3.OperationalError):
-            # if conn:
-            #     conn.close()
-            # logger.error(
-            #     f"Database at {db_path} is invalid or corrupt. "
-            #     "Backing up and recreating."
-            # )
-            # if db_path.exists():
-            #     try:
-            #         db_path.replace(db_path.with_name(f"{db_path.name}.corrupt"))
-            #     except OSError as error:
-            #         logger.error(f"Failed to back up corrupt database: {error}")
-            #         raise
-
-            # return cls.open(collection_dir)
+            return cls._open(collection_root, allow_recovery=False)
 
         return cls(conn, db_path)
 
@@ -249,8 +261,8 @@ class SyncState:
     def upsert_note_links(
         self,
         mappings: Iterable[tuple[str, int]],
-        *,  # todo: why the keyword-only argument? looks a bit arbitrary
-        source_id: str = "local",
+        *,
+        source_path: str = ".",
     ) -> None:
         rows = [(note_key, note_id) for note_key, note_id in mappings]
         if not rows:
@@ -274,11 +286,14 @@ class SyncState:
                 [(note_id, note_key) for note_key, note_id in ordered_rows],
             )
             self._executemany(
-                "INSERT INTO note_state (note_key, note_id, source_id) "
+                "INSERT INTO note_state (note_key, note_id, source_path) "
                 "VALUES (?, ?, ?) "
                 "ON CONFLICT(note_key) DO UPDATE SET "
-                "note_id = excluded.note_id, source_id = excluded.source_id",
-                [(note_key, note_id, source_id) for note_key, note_id in ordered_rows],
+                "note_id = excluded.note_id, source_path = excluded.source_path",
+                [
+                    (note_key, note_id, source_path)
+                    for note_key, note_id in ordered_rows
+                ],
             )
 
     def resolve_note_sources(self, note_keys: Iterable[str]) -> dict[str, str]:
@@ -289,11 +304,11 @@ class SyncState:
         for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
-                "SELECT note_key, source_id FROM note_state "
+                "SELECT note_key, source_path FROM note_state "
                 f"WHERE note_key IN ({placeholders})",
                 tuple(chunk),
             ).fetchall()
-            out.update({note_key: source_id for note_key, source_id in rows})
+            out.update({note_key: source_path for note_key, source_path in rows})
         return out
 
     def delete_note_links_by_keys(self, note_keys: Iterable[str]) -> None:
@@ -479,17 +494,17 @@ class SyncState:
 
     def resolve_deck_source(self, deck_id: int) -> str | None:
         row = self._conn.execute(
-            "SELECT source_id FROM deck_map WHERE deck_id = ?", (deck_id,)
+            "SELECT source_path FROM deck_map WHERE deck_id = ?", (deck_id,)
         ).fetchone()
         return row[0] if row else None
 
     def list_decks(self) -> list[tuple[int, str, str, str | None]]:
         rows = self._conn.execute(
-            "SELECT deck_id, name, source_id, md_path FROM deck_map"
+            "SELECT deck_id, name, source_path, md_path FROM deck_map"
         ).fetchall()
         return [
-            (deck_id, name, source_id, md_path)
-            for deck_id, name, source_id, md_path in rows
+            (deck_id, name, source_path, md_path)
+            for deck_id, name, source_path, md_path in rows
         ]
 
     def upsert_deck(
@@ -497,7 +512,7 @@ class SyncState:
         name: str,
         deck_id: int,
         *,
-        source_id: str = "local",
+        source_path: str = ".",
         md_path: str | None = None,
     ) -> None:
         with self.write_tx():
@@ -506,9 +521,9 @@ class SyncState:
                 (name, deck_id),
             )
             self._write(
-                "INSERT INTO deck_map (deck_id, name, source_id, md_path) "
+                "INSERT INTO deck_map (deck_id, name, source_path, md_path) "
                 "VALUES (?, ?, ?, ?)",
-                (deck_id, name, source_id, md_path),
+                (deck_id, name, source_path, md_path),
             )
 
     def delete_deck(self, name: str) -> None:
@@ -610,7 +625,7 @@ class SyncState:
         self,
         names: Iterable[str],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> dict[str, tuple[int, int, str, str]]:
         name_list = list(names)
         if not name_list:
@@ -621,9 +636,9 @@ class SyncState:
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT name, mtime_ns, size, digest, hashed_name "
-                f"FROM media_files WHERE source_id = ? "
+                f"FROM media_files WHERE source_path = ? "
                 f"AND name IN ({placeholders})",
-                (source_id, *chunk),
+                (source_path, *chunk),
             ).fetchall()
             out.update(
                 {
@@ -637,7 +652,7 @@ class SyncState:
         self,
         rows: Iterable[tuple[str, int, int, str, str]],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> None:
         entries = list(rows)
         if not entries:
@@ -654,21 +669,21 @@ class SyncState:
 
         self._executemany(
             "INSERT INTO media_files "
-            "(source_id, name, mtime_ns, size, digest, hashed_name, pushed_digest) "
+            "(source_path, name, mtime_ns, size, digest, hashed_name, pushed_digest) "
             "VALUES (?, ?, ?, ?, ?, ?, NULL) "
-            "ON CONFLICT(source_id, name) DO UPDATE SET "
+            "ON CONFLICT(source_path, name) DO UPDATE SET "
             "mtime_ns = excluded.mtime_ns, "
             "size = excluded.size, "
             "digest = excluded.digest, "
             "hashed_name = excluded.hashed_name",
-            [(source_id, *entry) for entry in deduped],
+            [(source_path, *entry) for entry in deduped],
         )
 
-    def delete_media_files(
+    def delete_media_records(
         self,
         names: Iterable[str],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> None:
         name_list = list(names)
         if not name_list:
@@ -678,9 +693,9 @@ class SyncState:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    "DELETE FROM media_files WHERE source_id = ? "
+                    "DELETE FROM media_files WHERE source_path = ? "
                     f"AND name IN ({placeholders})",
-                    (source_id, *chunk),
+                    (source_path, *chunk),
                 )
             )
         self._write_many(statements)
@@ -689,7 +704,7 @@ class SyncState:
         self,
         names: Iterable[str],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> dict[str, str]:
         name_list = list(names)
         if not name_list:
@@ -700,10 +715,10 @@ class SyncState:
             placeholders = ",".join("?" * len(chunk))
             rows = self._conn.execute(
                 "SELECT name, pushed_digest "
-                f"FROM media_files WHERE source_id = ? "
+                f"FROM media_files WHERE source_path = ? "
                 f"AND name IN ({placeholders}) "
                 "AND pushed_digest IS NOT NULL",
-                (source_id, *chunk),
+                (source_path, *chunk),
             ).fetchall()
             out.update({name: pushed_digest for name, pushed_digest in rows})
         return out
@@ -712,7 +727,7 @@ class SyncState:
         self,
         rows: Iterable[tuple[str, str]],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> None:
         entries = list(rows)
         if not entries:
@@ -731,8 +746,8 @@ class SyncState:
             for name, digest in deduped:
                 cursor = self._conn.execute(
                     "UPDATE media_files SET pushed_digest = ? "
-                    "WHERE source_id = ? AND name = ?",
-                    (digest, source_id, name),
+                    "WHERE source_path = ? AND name = ?",
+                    (digest, source_path, name),
                 )
                 if cursor.rowcount == 0:
                     raise sqlite3.IntegrityError(
@@ -743,7 +758,7 @@ class SyncState:
         self,
         names: Iterable[str],
         *,
-        source_id: str = "local",
+        source_path: str = ".",
     ) -> None:
         name_list = list(names)
         if not name_list:
@@ -753,49 +768,52 @@ class SyncState:
             placeholders = ",".join("?" * len(chunk))
             statements.append(
                 (
-                    "UPDATE media_files SET pushed_digest = NULL WHERE source_id = ? "
+                    "UPDATE media_files SET pushed_digest = NULL WHERE source_path = ? "
                     f"AND name IN ({placeholders})",
-                    (source_id, *chunk),
+                    (source_path, *chunk),
                 )
             )
         self._write_many(statements)
 
     def list_managed_media(self) -> list[tuple[str, str, str | None]]:
         rows = self._conn.execute(
-            "SELECT source_id, name, pushed_digest FROM media_files"
+            "SELECT source_path, name, pushed_digest FROM media_files"
         ).fetchall()
         return [
-            (source_id, name, pushed_digest) for source_id, name, pushed_digest in rows
+            (source_path, name, pushed_digest)
+            for source_path, name, pushed_digest in rows
         ]
 
     # -- Source sync state -------------------------------------------------
 
     def set_source_applied_state(
         self,
-        source_id: str,
+        source_path: str,
         tree_hash: str,
         commit: str | None,
     ) -> None:
         self._write(
             "INSERT INTO source_sync_state "
-            "(source_id, applied_tree_hash, applied_commit) VALUES (?, ?, ?) "
-            "ON CONFLICT(source_id) DO UPDATE SET "
+            "(source_path, applied_tree_hash, applied_commit) VALUES (?, ?, ?) "
+            "ON CONFLICT(source_path) DO UPDATE SET "
             "applied_tree_hash = excluded.applied_tree_hash, "
             "applied_commit = excluded.applied_commit",
-            (source_id, tree_hash, commit),
+            (source_path, tree_hash, commit),
         )
 
-    def get_source_applied_state(self, source_id: str) -> tuple[str, str | None] | None:
+    def get_source_applied_state(
+        self, source_path: str
+    ) -> tuple[str, str | None] | None:
         row = self._conn.execute(
             "SELECT applied_tree_hash, applied_commit FROM source_sync_state "
-            "WHERE source_id = ?",
-            (source_id,),
+            "WHERE source_path = ?",
+            (source_path,),
         ).fetchone()
         return (row[0], row[1]) if row else None
 
     # -- Interrupted shared operations ------------------------------------
 
-    def get_shared_operation(self, source_id: str) -> dict[str, str | None] | None:
+    def get_shared_operation(self, source_path: str) -> dict[str, str | None] | None:
         columns = (
             "operation_id",
             "kind",
@@ -810,8 +828,8 @@ class SyncState:
         )
         row = self._conn.execute(
             "SELECT " + ", ".join(columns) + " FROM shared_operations "
-            "WHERE source_id = ?",
-            (source_id,),
+            "WHERE source_path = ?",
+            (source_path,),
         ).fetchone()
         if row is None:
             return None
@@ -819,7 +837,7 @@ class SyncState:
 
     def save_shared_operation(
         self,
-        source_id: str,
+        source_path: str,
         operation_id: str,
         kind: str,
         state: str,
@@ -834,14 +852,14 @@ class SyncState:
             "pr_url",
             "last_error",
         )
-        current = self.get_shared_operation(source_id) or {}
+        current = self.get_shared_operation(source_path) or {}
         row = [values.get(field, current.get(field)) for field in fields]
         self._write(
             "INSERT INTO shared_operations "
-            "(source_id, operation_id, kind, state, "
+            "(source_path, operation_id, kind, state, "
             + ", ".join(fields)
             + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(source_id) DO UPDATE SET "
+            "ON CONFLICT(source_path) DO UPDATE SET "
             "operation_id = excluded.operation_id, kind = excluded.kind, "
             "state = excluded.state, base_commit = excluded.base_commit, "
             "head_commit = excluded.head_commit, "
@@ -849,11 +867,13 @@ class SyncState:
             "publish_branch = excluded.publish_branch, "
             "pushed_sha = excluded.pushed_sha, pr_url = excluded.pr_url, "
             "last_error = excluded.last_error",
-            (source_id, operation_id, kind, state, *row),
+            (source_path, operation_id, kind, state, *row),
         )
 
-    def clear_shared_operation(self, source_id: str) -> None:
-        self._write("DELETE FROM shared_operations WHERE source_id = ?", (source_id,))
+    def clear_shared_operation(self, source_path: str) -> None:
+        self._write(
+            "DELETE FROM shared_operations WHERE source_path = ?", (source_path,)
+        )
 
     # -- Singleton metadata -------------------------------------------------
 

@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.interchange import deserialize, serialize
 
 logger = logging.getLogger(__name__)
@@ -164,29 +163,25 @@ def fix_image_widths_in_data(
 
 
 def fix_image_widths_collection(
-    collection_dir: Path,
+    collection_root: Path,
     *,
     deck: str | None = None,
     no_subdecks: bool = False,
     tolerance: int = 5,
     width: int | None = None,
-    note_types_dir: Path | None = None,
 ) -> ImageWidthFixResult:
     """Serialize, fix image widths, and rewrite changed scoped decks."""
-    resolved_note_types_dir = note_types_dir or (collection_dir / NOTE_TYPES_DIR)
     data = serialize(
-        collection_dir,
+        collection_root,
         deck=deck,
         no_subdecks=no_subdecks,
-        note_types_dir=resolved_note_types_dir,
     )
     result = fix_image_widths_in_data(data, tolerance=tolerance, width=width)
 
     if result.changed:
         deserialize(
             data,
-            collection_dir=collection_dir,
-            note_types_dir=resolved_note_types_dir,
+            collection_root=collection_root,
             overwrite=True,
             quiet=True,
         )

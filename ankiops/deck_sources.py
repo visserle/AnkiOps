@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from blake3 import blake3
 
 from ankiops.collection import NOTE_TYPES_DIR
+from ankiops.git import GitRepository
 from ankiops.note_types import NoteType, load_note_types
 
-LOCAL_SOURCE_ID = "local"
+LOCAL_SOURCE_PATH = Path(".")
 SHARED_DIR = "shared"
 RESERVED_MARKDOWN_FILES = {
     "CHANGELOG.MD",
@@ -25,8 +25,8 @@ RESERVED_MARKDOWN_FILES = {
 }
 
 
-def _validate_shared_source_id(source_id: str) -> tuple[str, str]:
-    parts = source_id.split("/")
+def _parse_github_slug(github_slug: str) -> tuple[str, str]:
+    parts = github_slug.split("/")
     if len(parts) != 2 or any(not part or part in {".", ".."} for part in parts):
         raise ValueError("Expected shared source as owner/repo")
     if any("\\" in part for part in parts):
@@ -36,34 +36,42 @@ def _validate_shared_source_id(source_id: str) -> tuple[str, str]:
 
 @dataclass(frozen=True)
 class DeckSource:
-    """One filesystem source participating in a logical collection."""
+    """A canonical filesystem source for one or more decks and their assets."""
 
-    collection_dir: Path
-    source_id: str
+    collection_root: Path
+    relative_path: Path
+
+    def __post_init__(self) -> None:
+        parts = self.relative_path.parts
+        if self.relative_path == LOCAL_SOURCE_PATH:
+            return
+        if (
+            self.relative_path.is_absolute()
+            or len(parts) != 3
+            or parts[0] != SHARED_DIR
+        ):
+            raise ValueError("Expected source path as . or shared/owner/repo")
+        _parse_github_slug("/".join(parts[1:]))
 
     @classmethod
-    def local(cls, collection_dir: Path) -> "DeckSource":
-        return cls(collection_dir=collection_dir, source_id=LOCAL_SOURCE_ID)
-
-    # todo: please explain the meaning of collection_dir and source_id in the context of DeckSource. What do they represent?
-    # in the past, collection dir was the root of the anki collection. Is this still the case? And more importantly, do we still need it at all?
-    # for source id, what does it mean? the variable name it not easy to understand. Can we find a better name once we have a clear conceptual understanding of what it represents?
-    # please note that changes here have to applied to the rest of the codebase with the highest care.
+    def local(cls, collection_root: Path) -> "DeckSource":
+        return cls(collection_root=collection_root, relative_path=LOCAL_SOURCE_PATH)
 
     @classmethod
-    def shared(cls, collection_dir: Path, source_id: str) -> "DeckSource":
-        _validate_shared_source_id(source_id)
-        return cls(collection_dir=collection_dir, source_id=source_id)
+    def shared(cls, collection_root: Path, github_slug: str) -> "DeckSource":
+        owner, repository = _parse_github_slug(github_slug)
+        return cls(
+            collection_root=collection_root,
+            relative_path=Path(SHARED_DIR) / owner / repository,
+        )
 
     @property
     def root(self) -> Path:
-        if not self.is_shared:
-            return self.collection_dir
-        owner, repository_name = _validate_shared_source_id(self.source_id)
-        return self.collection_dir / SHARED_DIR / owner / repository_name
-        # again, shared_dir together with shared_id, etc., gets confusing
+        return self.collection_root / self.relative_path
 
-    # todo: why another property for root? can we simplify this aggressively?
+    @property
+    def source_path(self) -> str:
+        return self.relative_path.as_posix()
 
     @property
     def note_types_dir(self) -> Path:
@@ -71,16 +79,17 @@ class DeckSource:
 
     @property
     def is_shared(self) -> bool:
-        return self.source_id != LOCAL_SOURCE_ID
-        # todo: awkward. the file system is our registry, simple as that.
+        return self.relative_path != LOCAL_SOURCE_PATH
 
     @property
     def display_name(self) -> str:
-        return self.source_id
+        return self.github_slug or "local"
 
     @property
     def github_slug(self) -> str | None:
-        return self.source_id if self.is_shared else None
+        if not self.is_shared:
+            return None
+        return "/".join(self.relative_path.parts[1:])
 
     @property
     def github_url(self) -> str | None:
@@ -90,13 +99,13 @@ class DeckSource:
     def scope_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{SHARED_DIR}/{self.source_id}/"
+        prefix = f"{self.source_path}/"
         return name if name.startswith(prefix) else f"{prefix}{name}"
 
     def unscoped_note_type_name(self, name: str) -> str:
         if not self.is_shared:
             return name
-        prefix = f"{SHARED_DIR}/{self.source_id}/"
+        prefix = f"{self.source_path}/"
         return name[len(prefix) :] if name.startswith(prefix) else name
 
     def deck_files(self) -> list[Path]:
@@ -114,13 +123,11 @@ class DeckSource:
 
 
 def discover_deck_sources(
-    collection_dir: Path,
-    *,
-    note_types_dir: Path | None = None,
+    collection_root: Path,
 ) -> list[DeckSource]:
-    """Discover valid nested repositories in the reserved shared directory."""
-    local = DeckSource.local(collection_dir)
-    shared_root = collection_dir / SHARED_DIR
+    """Parse the canonical filesystem registry into deterministic deck sources."""
+    local = DeckSource.local(collection_root)
+    shared_root = collection_root / SHARED_DIR
     if not shared_root.is_dir():
         return [local]
 
@@ -131,9 +138,16 @@ def discover_deck_sources(
         for repo_dir in sorted(owner_dir.iterdir(), key=lambda path: path.name):
             if not repo_dir.is_dir():
                 continue
-            shared.append(
-                DeckSource.shared(collection_dir, f"{owner_dir.name}/{repo_dir.name}")
+            source = DeckSource.shared(
+                collection_root, f"{owner_dir.name}/{repo_dir.name}"
             )
+            if not GitRepository(source.root).is_repo():
+                raise ValueError(
+                    f"Shared source directory {source.root} is not an independent "
+                    "Git repository. Leave it untouched for inspection and subscribe "
+                    f"to {source.github_slug} again in a fresh collection path."
+                )
+            shared.append(source)
     return [local, *shared]
 
 
@@ -148,23 +162,12 @@ def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
 
 
 def load_note_types_for_collection(
-    collection_dir: Path,
-    *,
-    sources: Sequence[DeckSource]
-    | None = None,  # todo: big question: why Sequence? why we don't just use set?
-    note_types_dir: Path | None = None,
+    collection_root: Path,
 ) -> list[NoteType]:
-    """Load note types from the explicitly selected collection sources."""
-    # todo: looks super awkward. our filesystem is the registry, so we should be able to simplify this aggressively?
-    selected = (
-        list(sources) if sources is not None else discover_deck_sources(collection_dir)
-    )
+    """Load note types from every source in the collection filesystem."""
     note_types = []
-    for source in selected:
-        if not source.is_shared and note_types_dir is not None:
-            note_types.extend(load_note_types(note_types_dir))
-        else:
-            note_types.extend(load_note_types_for_source(source))
+    for source in discover_deck_sources(collection_root):
+        note_types.extend(load_note_types_for_source(source))
     return note_types
 
 

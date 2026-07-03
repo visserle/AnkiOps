@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ankiops.git import GitRepository
 from ankiops.markdown import NOTE_SEPARATOR
 from tests.support.deck_files import DeckFileHarness
 
@@ -10,6 +11,7 @@ def _setup_shared_root(world):
     shared_root = world.root / "shared" / "owner" / "repo"
     DeckFileHarness().eject_default_note_types(shared_root / "note_types")
     shared_root.mkdir(parents=True, exist_ok=True)
+    GitRepository(shared_root).init_repo()
     return shared_root
 
 
@@ -68,11 +70,12 @@ def test_import_syncs_root_and_shared_sources_as_one_collection(world):
     with world.db_session() as db:
         result = world.sync_import(db)
         assert db.resolve_note_sources(["root-key-1", "shared-key-1"]) == {
-            "root-key-1": "local",
-            "shared-key-1": "owner/repo",
+            "root-key-1": ".",
+            "shared-key-1": "shared/owner/repo",
         }
         assert (
-            db.resolve_deck_source(world.mock_anki.decks["SharedDeck"]) == "owner/repo"
+            db.resolve_deck_source(world.mock_anki.decks["SharedDeck"])
+            == "shared/owner/repo"
         )
 
     assert result.summary.deleted == 0
@@ -261,7 +264,7 @@ def test_import_rejects_duplicate_ankiops_key_across_root_and_shared_models(worl
     )
 
     with world.db_session() as db:
-        db.upsert_note_links([(note_key, shared_id)], source_id="owner/repo")
+        db.upsert_note_links([(note_key, shared_id)], source_path="shared/owner/repo")
         with pytest.raises(ValueError, match=f"Duplicate AnkiOps Key '{note_key}'"):
             world.sync_import(db)
 
@@ -330,7 +333,9 @@ def test_import_deletes_root_orphan_without_deleting_shared_note(world):
 
     with world.db_session() as db:
         db.upsert_note_links([("root-delete-key", root_id)])
-        db.upsert_note_links([("shared-keep-key", shared_id)], source_id="owner/repo")
+        db.upsert_note_links(
+            [("shared-keep-key", shared_id)], source_path="shared/owner/repo"
+        )
         result = world.sync_import(db)
 
     assert result.summary.deleted == 1
@@ -362,7 +367,9 @@ def test_import_deletes_shared_orphan_without_deleting_root_note(world):
 
     with world.db_session() as db:
         db.upsert_note_links([("root-keep-key", root_id)])
-        db.upsert_note_links([("shared-delete-key", shared_id)], source_id="owner/repo")
+        db.upsert_note_links(
+            [("shared-delete-key", shared_id)], source_path="shared/owner/repo"
+        )
         result = world.sync_import(db)
 
     assert result.summary.deleted == 1
@@ -391,7 +398,9 @@ def test_export_writes_anki_edits_back_to_shared_source(world):
     shared_id = max(world.mock_anki.notes.keys())
 
     with world.db_session() as db:
-        db.upsert_note_links([("shared-export-key", shared_id)], source_id="owner/repo")
+        db.upsert_note_links(
+            [("shared-export-key", shared_id)], source_path="shared/owner/repo"
+        )
         result = world.sync_export(db)
 
     assert result.summary.updated == 1
@@ -424,7 +433,7 @@ def test_export_blocks_pending_shared_note_type_conversion(world):
     note_id = max(world.mock_anki.notes.keys())
 
     with world.db_session() as db:
-        db.upsert_note_links([(note_key, note_id)], source_id="owner/repo")
+        db.upsert_note_links([(note_key, note_id)], source_path="shared/owner/repo")
         result = world.sync_export(db)
 
     assert result.summary.errors == 1

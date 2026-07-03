@@ -1,4 +1,5 @@
 from ankiops.collection import deck_name_to_file_stem
+from ankiops.git import GitRepository
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
@@ -28,7 +29,7 @@ def _write_qa_deck(tmp_path, deck_name: str, answer: str):
 
 
 def test_fix_image_widths_collection_includes_subdecks_by_default(tmp_path):
-    note_types_dir = _make_collection(tmp_path)
+    _make_collection(tmp_path)
     parent = _write_qa_deck(
         tmp_path,
         "Parent",
@@ -50,7 +51,6 @@ def test_fix_image_widths_collection_includes_subdecks_by_default(tmp_path):
         deck="Parent",
         no_subdecks=False,
         tolerance=5,
-        note_types_dir=note_types_dir,
     )
 
     assert result.decks_checked == 2
@@ -60,7 +60,7 @@ def test_fix_image_widths_collection_includes_subdecks_by_default(tmp_path):
 
 
 def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
-    note_types_dir = _make_collection(tmp_path)
+    _make_collection(tmp_path)
     parent = _write_qa_deck(
         tmp_path,
         "Parent",
@@ -77,7 +77,6 @@ def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
         deck="Parent",
         no_subdecks=True,
         tolerance=5,
-        note_types_dir=note_types_dir,
     )
 
     assert result.decks_checked == 1
@@ -86,9 +85,11 @@ def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
 
 
 def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
-    note_types_dir = _make_collection(tmp_path)
+    _make_collection(tmp_path)
     fs = DeckFileHarness()
     shared_root = tmp_path / "shared" / "owner" / "repo"
+    shared_root.mkdir(parents=True)
+    GitRepository(shared_root).init_repo()
     fs.eject_default_note_types(shared_root / "note_types")
     shared_file = shared_root / "Shared.md"
     shared_file.write_text(
@@ -103,7 +104,6 @@ def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
         deck="Shared",
         no_subdecks=True,
         tolerance=5,
-        note_types_dir=note_types_dir,
     )
 
     assert result.decks_checked == 1
@@ -111,7 +111,7 @@ def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
 
 
 def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
-    note_types_dir = _make_collection(tmp_path)
+    _make_collection(tmp_path)
     deck_file = _write_qa_deck(
         tmp_path,
         "Deck",
@@ -127,7 +127,6 @@ def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
         tmp_path,
         width=500,
         tolerance=5,
-        note_types_dir=note_types_dir,
     )
 
     assert result.decks_checked == 1
@@ -136,7 +135,7 @@ def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
 
 
 def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path):
-    note_types_dir = _make_collection(tmp_path)
+    _make_collection(tmp_path)
     deck_file = tmp_path / "Broken.md"
     deck_file.write_text(
         "Q: Question\nA: ![a](a.png){width=400}",
@@ -147,7 +146,6 @@ def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path):
         tmp_path,
         width=500,
         tolerance=5,
-        note_types_dir=note_types_dir,
     )
 
     assert result.images_changed == 1

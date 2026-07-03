@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-from ankiops.collection import require_collection_dir
+from ankiops.collection import require_collection_root
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
@@ -32,25 +32,25 @@ WORK_BRANCH = "ankiops/work"
 _SAFE_SLUG_PART_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")
 
 
-def _parse_source_id(source_id: str) -> str:
-    value = source_id.strip().removesuffix(".git")
+def _parse_github_slug(repository: str) -> str:
+    value = repository.strip().removesuffix(".git")
     parts = value.split("/")
     if len(parts) != 2 or not all(parts):
         raise ValueError("Expected GitHub repository as owner/repo")
     if not all(_SAFE_SLUG_PART_RE.fullmatch(part) for part in parts):
         raise ValueError(
-            f"Invalid shared deck identity '{source_id}': owner and repository may use "
-            "ASCII letters, digits, and hyphens."
+            f"Invalid shared deck identity '{repository}': owner and repository "
+            "may use ASCII letters, digits, and hyphens."
         )
     return value
 
 
-def _shared_source(collection_dir: Path, source_id: str) -> DeckSource:
-    return DeckSource.shared(collection_dir, _parse_source_id(source_id))
+def _shared_source(collection_root: Path, repository: str) -> DeckSource:
+    return DeckSource.shared(collection_root, _parse_github_slug(repository))
 
 
-def _require_collection_git(collection_dir: Path) -> GitRepository:
-    collection_git = GitRepository(collection_dir)
+def _require_collection_git(collection_root: Path) -> GitRepository:
+    collection_git = GitRepository(collection_root)
     collection_git.ensure_repo(
         "AnkiOps collections require a Git repository at the root."
     )
@@ -69,15 +69,15 @@ def _require_collection_git(collection_dir: Path) -> GitRepository:
 def _require_source_git(source: DeckSource) -> GitRepository:
     source_git = GitRepository(source.root)
     source_git.ensure_repo(
-        f"The subscribed deck {source.source_id} is not a valid independent "
+        f"The subscribed deck {source.display_name} is not a valid independent "
         f"repository at {source.root}. Leave the directory untouched for "
         "inspection and subscribe in a fresh collection path."
     )
     if source_git.remote_url("upstream") is None:
         raise ValueError(
-            f"The subscribed deck {source.source_id} has no GitHub source. "
+            f"The subscribed deck {source.display_name} has no GitHub source. "
             f"Subscribe to it again in a fresh collection path: ankiops shared "
-            f"subscribe {source.source_id}"
+            f"subscribe {source.display_name}"
         )
     return source_git
 
@@ -104,7 +104,7 @@ def _log_outcome(
     next_command: str,
     pr_url: str | None = None,
 ) -> None:
-    logger.info("Shared deck: %s", source.source_id)
+    logger.info("Shared deck: %s", source.display_name)
     logger.info("Shared files: %s", files)
     logger.info("Local result: %s", local)
     logger.info("Private decks: not touched")
@@ -118,25 +118,25 @@ def _log_outcome(
 def _source_operation(
     state: SyncState, source: DeckSource, kind: str
 ) -> tuple[str, dict[str, str | None] | None]:
-    existing = state.get_shared_operation(source.source_id)
+    existing = state.get_shared_operation(source.source_path)
     if existing and existing["kind"] != kind:
         raise ValueError(
-            f"{source.source_id} has an unfinished {existing['kind']} action. "
-            f"Run ankiops shared status {source.source_id} for the exact next step."
+            f"{source.display_name} has an unfinished {existing['kind']} action. "
+            f"Run ankiops shared status {source.display_name} for the exact next step."
         )
     operation_id = str(existing["operation_id"]) if existing else uuid4().hex[:12]
     return operation_id, existing
 
 
 def _save_conflict_copies(
-    collection_dir: Path,
+    collection_root: Path,
     source: DeckSource,
     source_git: GitRepository,
     operation_id: str,
 ) -> Path:
-    owner, repo_name = source.source_id.split("/", 1)
+    owner, repo_name = source.display_name.split("/", 1)
     conflict_root = (
-        collection_dir / ".ankiops" / "conflicts" / owner / repo_name / operation_id
+        collection_root / ".ankiops" / "conflicts" / owner / repo_name / operation_id
     )
     for rel_path in source_git.unmerged_paths():
         versions: dict[str, bytes] = {}
@@ -237,7 +237,7 @@ def _apply_preserved_resolutions(
 
 
 def _integrate_upstream(
-    collection_dir: Path,
+    collection_root: Path,
     source: DeckSource,
     source_git: GitRepository,
     state: SyncState,
@@ -247,7 +247,7 @@ def _integrate_upstream(
     operation_id, existing = _source_operation(state, source, kind)
     original_commit = source_git.head()
     if original_commit is None:
-        raise ValueError(f"Shared source {source.source_id} has no commits.")
+        raise ValueError(f"Shared source {source.display_name} has no commits.")
     original_fingerprint = _repository_fingerprint(source_git)
     if (
         existing
@@ -258,10 +258,10 @@ def _integrate_upstream(
         raise ValueError(
             f"The subscribed deck changed after its interrupted update. Its "
             f"files were left untouched. Review ankiops shared status "
-            f"{source.source_id} before retrying."
+            f"{source.display_name} before retrying."
         )
     state.save_shared_operation(
-        source.source_id,
+        source.source_path,
         operation_id,
         kind,
         "fetching",
@@ -269,7 +269,7 @@ def _integrate_upstream(
         head_commit=original_fingerprint,
         recovery_ref=str(existing.get("recovery_ref") or "") if existing else None,
     )
-    transaction_parent = collection_dir / ".ankiops" / "transactions"
+    transaction_parent = collection_root / ".ankiops" / "transactions"
     transaction_parent.mkdir(parents=True, exist_ok=True)
     transaction_path = (
         Path(tempfile.mkdtemp(prefix=f"{operation_id}-", dir=transaction_parent))
@@ -283,25 +283,27 @@ def _integrate_upstream(
         _copy_git_identity(source_git, transaction_git)
         _copy_repository_files(source.root, transaction_git.root)
         saved_commit = transaction_git.checkpoint(
-            f"Save local deck changes for {source.source_id}"
+            f"Save local deck changes for {source.display_name}"
         )
         upstream_url = source_git.remote_url("upstream")
         if upstream_url is None:
-            raise ValueError(f"No GitHub source is configured for {source.source_id}.")
+            raise ValueError(
+                f"No GitHub source is configured for {source.display_name}."
+            )
         transaction_git.run(["remote", "add", "upstream", upstream_url])
         transaction_git.fetch("upstream")
         default_branch, upstream_ref = _upstream_ref(transaction_git)
         upstream_tree = transaction_git.tree(upstream_ref)
         if upstream_tree is None:
             raise ValueError(
-                f"Could not read the available update for {source.source_id}."
+                f"Could not read the available update for {source.display_name}."
             )
         if transaction_git.trees_equal("HEAD", upstream_ref):
             files_changed = transaction_git.head() != original_commit
         else:
             files_changed = (
                 transaction_git.integrate(
-                    upstream_ref, f"Merge upstream changes for {source.source_id}"
+                    upstream_ref, f"Merge upstream changes for {source.display_name}"
                 )
                 or transaction_git.head() != original_commit
             )
@@ -320,18 +322,18 @@ def _integrate_upstream(
                     if upstream_tree is None:
                         raise ValueError(
                             "Could not read the available update for "
-                            f"{source.source_id}."
+                            f"{source.display_name}."
                         )
                 else:
                     conflict_root = Path(str(existing["recovery_ref"]))
             else:
                 conflict_root = _save_conflict_copies(
-                    collection_dir, source, transaction_git, operation_id
+                    collection_root, source, transaction_git, operation_id
                 )
             if transaction_git.unmerged_paths():
                 paths = ", ".join(transaction_git.unmerged_paths())
                 state.save_shared_operation(
-                    source.source_id,
+                    source.source_path,
                     operation_id,
                     kind,
                     "conflict",
@@ -345,11 +347,11 @@ def _integrate_upstream(
                     f"Local and upstream edits overlap in: {paths}. The subscribed "
                     f"deck was not changed. Edit the preserved Markdown in "
                     f"{conflict_root}, remove its conflict markers, then retry: "
-                    f"ankiops shared update {source.source_id}"
+                    f"ankiops shared update {source.display_name}"
                 ) from error
         else:
             state.save_shared_operation(
-                source.source_id,
+                source.source_path,
                 operation_id,
                 kind,
                 "failed",
@@ -359,13 +361,14 @@ def _integrate_upstream(
             )
             shutil.rmtree(transaction_path.parent, ignore_errors=True)
             raise ValueError(
-                f"GitHub could not be reached for {source.source_id}. The subscribed "
-                f"deck was not changed and nothing was sent. Retrying is safe: "
-                f"ankiops shared {kind} {source.source_id}"
+                f"GitHub could not be reached for {source.display_name}. The "
+                "subscribed deck was not changed and nothing was sent. "
+                "Retrying is safe: "
+                f"ankiops shared {kind} {source.display_name}"
             ) from error
     except ValueError as error:
         state.save_shared_operation(
-            source.source_id,
+            source.source_path,
             operation_id,
             kind,
             "failed",
@@ -378,32 +381,34 @@ def _integrate_upstream(
 
     transaction_commit = transaction_git.head()
     if transaction_commit is None:
-        raise ValueError(f"Could not prepare the update for {source.source_id}.")
+        raise ValueError(f"Could not prepare the update for {source.display_name}.")
     source_git.run(["fetch", str(transaction_git.root), transaction_commit])
     source_git.reset_hard("FETCH_HEAD")
     shutil.rmtree(transaction_path.parent, ignore_errors=True)
     if conflict_root:
         shutil.rmtree(conflict_root, ignore_errors=True)
-    state.clear_shared_operation(source.source_id)
+    state.clear_shared_operation(source.source_path)
     if upstream_tree is None:
-        raise ValueError(f"Could not read the available update for {source.source_id}.")
+        raise ValueError(
+            f"Could not read the available update for {source.display_name}."
+        )
     return files_changed, saved_commit, upstream_tree, default_branch
 
 
 def run_subscribe(args: SimpleNamespace) -> None:
-    collection_dir = require_collection_dir()
-    _require_collection_git(collection_dir)
-    source = _shared_source(collection_dir, args.source_id)
+    collection_root = require_collection_root()
+    _require_collection_git(collection_root)
+    source = _shared_source(collection_root, args.repository)
     if source.root.exists():
-        raise ValueError(f"Shared source already exists: {source.source_id}")
-    github = GitHubHost(collection_dir)
+        raise ValueError(f"Shared source already exists: {source.display_name}")
+    github = GitHubHost(collection_root)
     github.ensure_authenticated()
-    if github.repo_info(source.source_id) is None:
-        raise ValueError(f"GitHub repository is not accessible: {source.source_id}")
+    if github.repo_info(source.display_name) is None:
+        raise ValueError(f"GitHub repository is not accessible: {source.display_name}")
     try:
         source_git = GitRepository.clone(str(source.github_url), source.root)
         default_branch = source_git.default_branch("upstream")
-        source_git.ensure_work_branch(WORK_BRANCH, f"upstream/{default_branch}")
+        source_git.checkout_or_create_branch(WORK_BRANCH, f"upstream/{default_branch}")
         _ensure_submittable_note_keys(source)
     except Exception:
         if source.root.exists():
@@ -420,40 +425,39 @@ def run_subscribe(args: SimpleNamespace) -> None:
 
 
 def run_publish(args: SimpleNamespace) -> None:
-    collection_dir = require_collection_dir()
-    _require_collection_git(collection_dir)
-    source = _shared_source(collection_dir, args.source_id)
-    state = SyncState.open(collection_dir)
+    collection_root = require_collection_root()
+    _require_collection_git(collection_root)
+    source = _shared_source(collection_root, args.repository)
+    state = SyncState.open(collection_root)
     operation_id, _existing = _source_operation(state, source, "publish")
     state.save_shared_operation(
-        source.source_id,
+        source.source_path,
         operation_id,
         "publish",
         "publishing",
     )
     try:
         publish_shared_deck(
-            collection_dir,
+            collection_root,
             args.deck,
             source,
-            public=bool(getattr(args, "public", False)),
         )
     except Exception as error:
         state.save_shared_operation(
-            source.source_id,
+            source.source_path,
             operation_id,
             "publish",
             "failed",
             last_error=str(error),
         )
         raise ValueError(
-            f"Publishing did not finish for {source.source_id}. Your local deck "
+            f"Publishing did not finish for {source.display_name}. Your local deck "
             f"and any completed GitHub work were preserved. Retrying is safe: "
-            f"ankiops shared publish {args.deck!r} {source.source_id}. "
+            f"ankiops shared publish {args.deck!r} {source.display_name}. "
             f"Details: {error}"
         ) from error
     else:
-        state.clear_shared_operation(source.source_id)
+        state.clear_shared_operation(source.source_path)
     finally:
         state.close()
     _log_outcome(
@@ -472,7 +476,7 @@ def _restore_operation(
     operation: dict[str, str | None],
 ) -> None:
     state.save_shared_operation(
-        source.source_id,
+        source.source_path,
         str(operation["operation_id"]),
         str(operation["kind"]),
         str(operation["state"]),
@@ -486,13 +490,13 @@ def _restore_operation(
     )
 
 
-def _update_one(collection_dir: Path, source: DeckSource, state: SyncState) -> None:
+def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> None:
     source_git = _require_source_git(source)
     before_commit = source_git.head()
-    pending_action = state.get_shared_operation(source.source_id)
+    pending_action = state.get_shared_operation(source.source_path)
     operation_kind = str(pending_action["kind"]) if pending_action else "update"
     files_changed, saved_commit, upstream_tree, _default_branch = _integrate_upstream(
-        collection_dir, source, source_git, state, kind=operation_kind
+        collection_root, source, source_git, state, kind=operation_kind
     )
     after_commit = source_git.head()
     if files_changed and before_commit and after_commit:
@@ -531,25 +535,25 @@ def _update_one(collection_dir: Path, source: DeckSource, state: SyncState) -> N
 
 
 def run_update(args: SimpleNamespace) -> None:
-    collection_dir = require_collection_dir()
-    _require_collection_git(collection_dir)
-    sources = discover_deck_sources(collection_dir)[1:]
-    if getattr(args, "source_id", None):
-        requested_source = _shared_source(collection_dir, args.source_id)
+    collection_root = require_collection_root()
+    _require_collection_git(collection_root)
+    sources = discover_deck_sources(collection_root)[1:]
+    if getattr(args, "repository", None):
+        requested_source = _shared_source(collection_root, args.repository)
         if not requested_source.root.exists():
-            raise ValueError(f"Unknown shared source: {requested_source.source_id}")
+            raise ValueError(f"Unknown shared source: {requested_source.display_name}")
         sources = [requested_source]
     if not sources:
         logger.info("No shared sources found.")
         return
-    state = SyncState.open(collection_dir)
+    state = SyncState.open(collection_root)
     failures = []
     try:
         for source in sources:
             try:
-                _update_one(collection_dir, source, state)
+                _update_one(collection_root, source, state)
             except (ValueError, subprocess.CalledProcessError) as error:
-                failures.append(f"{source.source_id}: {error}")
+                failures.append(f"{source.display_name}: {error}")
                 logger.error("%s", failures[-1])
     finally:
         state.close()
@@ -561,19 +565,21 @@ def run_update(args: SimpleNamespace) -> None:
 
 
 def run_submit(args: SimpleNamespace) -> None:
-    collection_dir = require_collection_dir()
-    _require_collection_git(collection_dir)
-    source = _shared_source(collection_dir, args.source_id)
+    collection_root = require_collection_root()
+    _require_collection_git(collection_root)
+    source = _shared_source(collection_root, args.repository)
     source_git = _require_source_git(source)
     _ensure_submittable_note_keys(source)
-    title = getattr(args, "message", None) or f"Update shared deck {source.source_id}"
-    state = SyncState.open(collection_dir)
+    title = (
+        getattr(args, "message", None) or f"Update shared deck {source.display_name}"
+    )
+    state = SyncState.open(collection_root)
     try:
-        pending_action = state.get_shared_operation(source.source_id)
+        pending_action = state.get_shared_operation(source.source_path)
         if pending_action and pending_action["kind"] == "update":
             raise ValueError(
-                f"An update for {source.source_id} still needs attention. Run: "
-                f"ankiops shared update {source.source_id}"
+                f"An update for {source.display_name} still needs attention. Run: "
+                f"ankiops shared update {source.display_name}"
             )
         if (
             pending_action
@@ -595,7 +601,7 @@ def run_submit(args: SimpleNamespace) -> None:
         if pending_action is None:
             _files_changed, saved_commit, upstream_tree, target_branch = (
                 _integrate_upstream(
-                    collection_dir, source, source_git, state, kind="submit"
+                    collection_root, source, source_git, state, kind="submit"
                 )
             )
             if source_git.tree("HEAD") == upstream_tree:
@@ -619,9 +625,9 @@ def run_submit(args: SimpleNamespace) -> None:
                 "head_commit"
             ):
                 raise ValueError(
-                    f"A contribution for {source.source_id} is waiting to finish, "
+                    f"A contribution for {source.display_name} is waiting to finish, "
                     "but the shared files changed afterward. Nothing was sent. "
-                    f"Run: ankiops shared status {source.source_id}"
+                    f"Run: ankiops shared status {source.display_name}"
                 )
             operation_id = str(pending_action["operation_id"])
             contribution_branch = str(pending_action["publish_branch"])
@@ -630,9 +636,9 @@ def run_submit(args: SimpleNamespace) -> None:
 
         local_commit = source_git.head()
         if local_commit is None:
-            raise ValueError(f"Shared source {source.source_id} has no commits.")
+            raise ValueError(f"Shared source {source.display_name} has no commits.")
         github = GitHubHost(source.root)
-        contribution_slug, contributor = github.publish_target(source.source_id)
+        contribution_slug, contributor = github.publish_target(source.display_name)
         source_git.set_remote("publish", f"https://github.com/{contribution_slug}.git")
         uploaded_commit = source_git.remote_branch_sha("publish", contribution_branch)
         if uploaded_commit != local_commit:
@@ -640,7 +646,7 @@ def run_submit(args: SimpleNamespace) -> None:
                 source_git.push("publish", "HEAD", contribution_branch)
             except subprocess.CalledProcessError as error:
                 state.save_shared_operation(
-                    source.source_id,
+                    source.source_path,
                     operation_id,
                     "submit",
                     "push_failed",
@@ -650,14 +656,14 @@ def run_submit(args: SimpleNamespace) -> None:
                     last_error=str(error),
                 )
                 raise ValueError(
-                    f"Your contribution for {source.source_id} was committed "
+                    f"Your contribution for {source.display_name} was committed "
                     "locally, but it did not reach GitHub. Private decks were not "
                     "touched. Retrying is safe: ankiops shared submit "
-                    f"{source.source_id}"
+                    f"{source.display_name}"
                 ) from error
 
         state.save_shared_operation(
-            source.source_id,
+            source.source_path,
             operation_id,
             "submit",
             "pushed",
@@ -669,15 +675,15 @@ def run_submit(args: SimpleNamespace) -> None:
         contribution_head = f"{contributor}:{contribution_branch}"
         try:
             pr_url = github.create_pr(
-                source.source_id,
+                source.display_name,
                 head=contribution_head,
                 base=target_branch,
                 title=title,
-                body=f"Submitted with AnkiOps from {source.source_id}.",
+                body=f"Submitted with AnkiOps from {source.display_name}.",
             )
         except ValueError as error:
             state.save_shared_operation(
-                source.source_id,
+                source.source_path,
                 operation_id,
                 "submit",
                 "pr_failed",
@@ -691,10 +697,10 @@ def run_submit(args: SimpleNamespace) -> None:
                 f"Your contribution reached GitHub, but its pull request was not "
                 "created. No private files changed. Retrying is safe: "
                 "ankiops shared submit "
-                f"{source.source_id}. Details: {error}"
+                f"{source.display_name}. Details: {error}"
             ) from error
         state.save_shared_operation(
-            source.source_id,
+            source.source_path,
             operation_id,
             "submit",
             "pr_open",
@@ -745,11 +751,11 @@ def _status_one(
         source_git.fetch("upstream")
         update_state = _github_update_state(source_git)
     except (ValueError, subprocess.CalledProcessError) as error:
-        logger.debug("Could not check GitHub for %s: %s", source.source_id, error)
+        logger.debug("Could not check GitHub for %s: %s", source.display_name, error)
         update_state = "could not check GitHub; local files were not changed"
-    pending_action = state.get_shared_operation(source.source_id)
-    applied_state = state.get_source_applied_state(source.source_id)
-    logger.info("Shared deck: %s", source.source_id)
+    pending_action = state.get_shared_operation(source.source_path)
+    applied_state = state.get_source_applied_state(source.source_path)
+    logger.info("Shared deck: %s", source.display_name)
     logger.info("Local shared changes: %d", len(local_changes))
     for line in local_changes:
         logger.info("  %s", line[3:] if len(line) > 3 else line)
@@ -793,39 +799,39 @@ def _status_one(
         if pending_action.get("pr_url"):
             logger.info("Pull request: %s", pending_action["pr_url"])
     if update_state.startswith("could not check GitHub"):
-        next_command = f"ankiops shared status {source.source_id}"
+        next_command = f"ankiops shared status {source.display_name}"
     elif pending_action and pending_action["state"] == "conflict":
-        next_command = f"ankiops shared update {source.source_id}"
+        next_command = f"ankiops shared update {source.display_name}"
     elif pending_action and pending_action["kind"] == "update":
-        next_command = f"ankiops shared update {source.source_id}"
+        next_command = f"ankiops shared update {source.display_name}"
     elif pending_action and pending_action.get("pr_url"):
         next_command = f"review pull request {pending_action['pr_url']}"
     elif pending_action and pending_action["kind"] == "submit":
-        next_command = f"ankiops shared submit {source.source_id}"
+        next_command = f"ankiops shared submit {source.display_name}"
     elif update_state == "an update is available" or "both local" in update_state:
-        next_command = f"ankiops shared update {source.source_id}"
+        next_command = f"ankiops shared update {source.display_name}"
     elif local_changes or "unpublished" in update_state:
-        next_command = f"ankiops shared submit {source.source_id}"
+        next_command = f"ankiops shared submit {source.display_name}"
     else:
         next_command = "none"
     logger.info("Next: %s", next_command)
 
 
 def run_status(args: SimpleNamespace) -> None:
-    collection_dir = require_collection_dir()
-    collection_git = _require_collection_git(collection_dir)
+    collection_root = require_collection_root()
+    collection_git = _require_collection_git(collection_root)
     private_status = collection_git.status_lines()
-    sources = discover_deck_sources(collection_dir)[1:]
-    if getattr(args, "source_id", None):
-        source = _shared_source(collection_dir, args.source_id)
+    sources = discover_deck_sources(collection_root)[1:]
+    if getattr(args, "repository", None):
+        source = _shared_source(collection_root, args.repository)
         if not source.root.exists():
-            raise ValueError(f"Unknown shared source: {source.source_id}")
+            raise ValueError(f"Unknown shared source: {source.display_name}")
         sources = [source]
     if not sources:
         logger.info("No shared deck subscriptions found.")
         logger.info("Next: ankiops shared subscribe OWNER/REPO")
         return
-    state = SyncState.open(collection_dir)
+    state = SyncState.open(collection_root)
     try:
         for source in sources:
             _status_one(source, state, private_status)

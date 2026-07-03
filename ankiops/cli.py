@@ -203,25 +203,10 @@ def main():
     )
     shared_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
     shared_publish.add_argument(
-        "source_id",
+        "repository",
         metavar="OWNER/REPO",
         help="Shared deck identity (letters, digits, hyphens)",
     )
-    publish_visibility = (
-        shared_publish.add_mutually_exclusive_group()
-    )  # todo: remove this, public is the default for sharing decks
-    publish_visibility.add_argument(
-        "--public",
-        action="store_true",
-        help="Create the GitHub repo as public when it does not exist",
-    )
-    publish_visibility.add_argument(
-        "--private",
-        action="store_false",
-        dest="public",
-        help="Create the GitHub repo as private when it does not exist (default)",
-    )
-    shared_publish.set_defaults(public=False)
     shared_publish.set_defaults(handler=run_shared)
 
     shared_subscribe = shared_subparsers.add_parser(
@@ -229,7 +214,7 @@ def main():
         help="Subscribe to a shared deck on GitHub",
     )
     shared_subscribe.add_argument(
-        "source_id",
+        "repository",
         metavar="OWNER/REPO",
         help="Shared deck identity (letters, digits, hyphens)",
     )
@@ -240,7 +225,7 @@ def main():
         help="Bring available GitHub changes into shared Markdown files",
     )
     shared_update.add_argument(
-        "source_id",
+        "repository",
         metavar="OWNER/REPO",
         nargs="?",
         help="Shared deck identity (letters, digits, hyphens)",
@@ -252,7 +237,7 @@ def main():
         help="Submit a contribution as a GitHub pull request",
     )
     shared_submit.add_argument(
-        "source_id",
+        "repository",
         metavar="OWNER/REPO",
         help="Shared deck identity (letters, digits, hyphens)",
     )
@@ -269,7 +254,7 @@ def main():
         help="Preview changes, updates, submissions, and recovery state",
     )
     shared_status.add_argument(
-        "source_id",
+        "repository",
         metavar="OWNER/REPO",
         nargs="?",
         help="Shared deck identity (letters, digits, hyphens)",

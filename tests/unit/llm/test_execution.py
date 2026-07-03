@@ -21,43 +21,49 @@ class _FakeAsyncOpenAI:
         pass
 
 
-def _init_collection(collection_dir) -> None:
-    db = SyncState.open(collection_dir)
+def _init_collection(collection_root) -> None:
+    db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
-    DeckFileHarness().eject_default_note_types(collection_dir / "note_types")
+    DeckFileHarness().eject_default_note_types(collection_root / "note_types")
+    (collection_root / ".gitignore").write_text(
+        "/shared/\n.ankiops.db*\n.ankiops/\n",
+        encoding="utf-8",
+    )
 
 
-def _init_git_repo(collection_dir) -> None:
-    subprocess.run(["git", "init"], cwd=collection_dir, check=True, capture_output=True)
+def _init_git_repo(collection_root) -> None:
+    subprocess.run(
+        ["git", "init"], cwd=collection_root, check=True, capture_output=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "test@example.invalid"],
-        cwd=collection_dir,
+        cwd=collection_root,
         check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test User"],
-        cwd=collection_dir,
+        cwd=collection_root,
         check=True,
     )
 
 
-def _commit_all(collection_dir, message="root") -> None:
-    subprocess.run(["git", "add", "-A", "."], cwd=collection_dir, check=True)
+def _commit_all(collection_root, message="root") -> None:
+    subprocess.run(["git", "add", "-A", "."], cwd=collection_root, check=True)
     subprocess.run(
         ["git", "commit", "-m", message],
-        cwd=collection_dir,
+        cwd=collection_root,
         check=True,
         capture_output=True,
     )
 
 
-def _head_name_status(collection_dir) -> str:
+def _head_name_status(collection_root) -> str:
     return subprocess.run(
         ["git", "show", "--name-status", "--format=", "HEAD"],
-        cwd=collection_dir,
+        cwd=collection_root,
         text=True,
         capture_output=True,
         check=True,
@@ -163,7 +169,7 @@ def test_executor_persists_successful_field_updates(
     monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="grammar",
         no_auto_commit=True,
     )
@@ -238,7 +244,7 @@ def test_executor_snapshots_only_queued_local_deck_paths(
     monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="grammar",
         no_auto_commit=False,
     )
@@ -266,9 +272,10 @@ def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
     monkeypatch,
 ):
     _init_collection(llm_collection)
-    DeckFileHarness().eject_default_note_types(
-        llm_collection / "shared" / "owner" / "repo" / "note_types"
-    )
+    shared_root = llm_collection / "shared" / "owner" / "repo"
+    DeckFileHarness().eject_default_note_types(shared_root / "note_types")
+    _init_git_repo(shared_root)
+    _commit_all(shared_root)
     write_file(
         llm_collection / "Deck.md",
         """
@@ -316,7 +323,7 @@ def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
     monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="grammar",
         no_auto_commit=False,
     )
@@ -373,7 +380,7 @@ def test_executor_persists_successful_tag_updates(
     monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="autotagger",
         no_auto_commit=True,
     )
@@ -438,7 +445,7 @@ def test_executor_cancels_queued_items_after_fatal_error(
     monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
 
     result = run_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="grammar",
         no_auto_commit=True,
     )

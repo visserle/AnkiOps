@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import pytest
 
-from ankiops.collection import NOTE_TYPES_DIR, get_collection_dir
 from tests.support.deck_files import DeckFileHarness
 from tests.support.fake_anki import MockAnki
 from tests.support.sync_world import SyncWorld
@@ -25,20 +24,18 @@ def pytest_addoption(parser):
     )
 
 
-@pytest.fixture(scope="session", autouse=True)
-def ensure_default_note_types_dir():
-    """Bootstrap note type configs for tests in clean checkouts (e.g. CI)."""
-    note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
-    if not note_types_dir.exists():
-        DeckFileHarness().eject_default_note_types(note_types_dir)
+@pytest.fixture(scope="session")
+def default_note_types_dir(tmp_path_factory):
+    note_types_dir = tmp_path_factory.mktemp("default-note-types") / "note_types"
+    DeckFileHarness().eject_default_note_types(note_types_dir)
+    return note_types_dir
 
 
 @pytest.fixture(scope="session")
-def fs():
+def fs(default_note_types_dir):
     """DeckFileHarness pre-loaded with built-in note types (shared across tests)."""
     adapter = DeckFileHarness()
-    note_types_dir = get_collection_dir() / NOTE_TYPES_DIR
-    adapter.set_note_types(adapter.load_note_types(note_types_dir))
+    adapter.set_note_types(adapter.load_note_types(default_note_types_dir))
     return adapter
 
 

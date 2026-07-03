@@ -334,7 +334,7 @@ def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
         assert db.resolve_note_keys([note_id]).get(note_id) == note_key
 
 
-def test_exp_corr_drift_001_rejects_corrupt_db_without_rebuilding(world):
+def test_exp_corr_drift_001_rebuilds_identity_from_embedded_key(world):
     """EXP-CORR-DRIFT-001."""
     note_key = "exp-corr-drift-001"
     note_id = world.add_qa_note(
@@ -349,11 +349,13 @@ def test_exp_corr_drift_001_rejects_corrupt_db_without_rebuilding(world):
 
     world.corrupt_db()
 
-    with pytest.raises(ValueError, match="does not migrate or recreate"):
-        with world.db_session():
-            pass
+    with world.db_session() as db:
+        result = world.sync_export(db)
+        assert_summary(result.summary, created=1, errors=0)
+        assert db.resolve_note_keys([note_id]) == {note_id: note_key}
 
     assert note_id in world.mock_anki.notes
+    assert (world.root / ".ankiops.db.corrupt").exists()
 
 
 def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):

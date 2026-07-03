@@ -177,11 +177,11 @@ def is_task_config_file(path: Path) -> bool:
 
 
 def load_llm_task_catalog(
-    collection_dir: Path,
+    collection_root: Path,
     *,
     note_type_configs: list[NoteType],
 ) -> TaskCatalog:
-    llm_dir = collection_dir / LLM_DIR
+    llm_dir = collection_root / LLM_DIR
     tasks_by_name: dict[str, TaskConfig] = {}
     errors: dict[str, str] = {}
 
@@ -200,9 +200,9 @@ def load_llm_task_catalog(
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
     try:
-        model_registry = load_model_registry(collection_dir=collection_dir)
+        model_registry = load_model_registry(collection_root=collection_root)
     except ModelRegistryError as error:
-        errors[str(model_registry_path(collection_dir=collection_dir))] = str(error)
+        errors[str(model_registry_path(collection_root=collection_root))] = str(error)
         return TaskCatalog(tasks_by_name=tasks_by_name, errors=errors)
 
     for path in task_files:

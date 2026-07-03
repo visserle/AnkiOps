@@ -2,9 +2,6 @@
 
 import logging
 import re
-from collections.abc import (
-    Sequence,  # todo: again, why Sequence? why we don't just use set?
-)
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -143,24 +140,24 @@ def update_references(
 
 
 def _collect_referenced_media(
-    db_port: SyncState,
-    collection_dir: Path,
+    state: SyncState,
+    source_root: Path,
     *,
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
 ) -> set[str]:
-    resolved_cache_root = cache_root or collection_dir
+    resolved_cache_root = cache_root or source_root
     if md_files is None:
-        md_files = DeckSource.local(collection_dir).deck_files()
+        md_files = DeckSource.local(source_root).deck_files()
     md_keys = [
         _markdown_cache_key(resolved_cache_root, md_file) for md_file in md_files
     ]
     if prune_cache:
-        pruned = db_port.prune_markdown_media_cache(md_keys)
+        pruned = state.prune_markdown_media_cache(md_keys)
         if pruned:
             logger.debug(f"Pruned media cache for {pruned} stale markdown path(s)")
-    cached = db_port.resolve_markdown_media_cache(md_keys)
+    cached = state.resolve_markdown_media_cache(md_keys)
 
     referenced: set[str] = set()
     updates: list[tuple[str, int, int, set[str]]] = []
@@ -186,7 +183,7 @@ def _collect_referenced_media(
         updates.append((md_key, stat.st_mtime_ns, stat.st_size, refs))
 
     if updates:
-        db_port.upsert_markdown_media_cache(updates)
+        state.upsert_markdown_media_cache(updates)
     if md_files:
         logger.debug(
             f"Media refs cache: {cache_hits} hits, {cache_misses} misses "
@@ -196,24 +193,24 @@ def _collect_referenced_media(
 
 
 def hash_and_update_references(
-    db_port: SyncState,
-    collection_dir: Path,
+    state: SyncState,
+    source_root: Path,
     result: SyncReport,
     *,
     cache_root: Path | None = None,
     md_files: list[Path] | None = None,
     prune_cache: bool = True,
-    source_id: str = "local",
+    source_path: str = ".",
 ) -> tuple[set[str], dict[str, str]]:
     """Hash files, rename them locally, and update markdown."""
-    media_root = collection_dir / LOCAL_MEDIA_DIR
+    media_root = source_root / LOCAL_MEDIA_DIR
     if not media_root.exists():
         return set(), {}
 
     # 1. Find directly referenced files first
     referenced = _collect_referenced_media(
-        db_port,
-        collection_dir,
+        state,
+        source_root,
         cache_root=cache_root,
         md_files=md_files,
         prune_cache=prune_cache,
@@ -234,8 +231,8 @@ def hash_and_update_references(
         and not file_path.name.startswith(".")
         and (file_path.name in referenced or file_path.name.startswith("_"))
     ]
-    cached_fingerprints = db_port.resolve_media_fingerprints(
-        cache_candidates, source_id=source_id
+    cached_fingerprints = state.resolve_media_fingerprints(
+        cache_candidates, source_path=source_path
     )
 
     # 2. Hash referenced (or already hashed) files
@@ -305,9 +302,9 @@ def hash_and_update_references(
             result.errors.append(str(error))
 
     if fingerprint_updates:
-        db_port.upsert_media_fingerprints(fingerprint_updates, source_id=source_id)
+        state.upsert_media_fingerprints(fingerprint_updates, source_path=source_path)
     if fingerprint_removals:
-        db_port.delete_media_files(fingerprint_removals, source_id=source_id)
+        state.delete_media_records(fingerprint_removals, source_path=source_path)
 
     if cache_candidates:
         logger.debug(
@@ -317,12 +314,12 @@ def hash_and_update_references(
 
     # 3. Update Markdown files in bulk
     if rename_map:
-        count = update_references(collection_dir, rename_map, md_files=md_files)
+        count = update_references(source_root, rename_map, md_files=md_files)
         logger.debug(f"Updated {count} markdown files with {len(rename_map)} renames")
         # 4. Re-collect now-correctly-hashed active references
         final_referenced = _collect_referenced_media(
-            db_port,
-            collection_dir,
+            state,
+            source_root,
             cache_root=cache_root,
             md_files=md_files,
             prune_cache=False,
@@ -333,20 +330,15 @@ def hash_and_update_references(
 
 
 def sync_media_to_anki(
-    anki_port: Anki,
-    collection_dir: Path,
-    db_port: SyncState,
-    *,
-    cache_root: Path | None = None,
-    md_files: list[Path] | None = None,
-    prune_cache: bool = True,
-    source_id: str = "local",
+    anki: Anki,
+    source: DeckSource,
+    state: SyncState,
 ) -> SyncReport:
-    """Push local media to Anki."""
+    """Push media from one deck source to Anki."""
     result = SyncReport.for_media()
-    media_root = (collection_dir / LOCAL_MEDIA_DIR).resolve()
+    media_root = (source.root / LOCAL_MEDIA_DIR).resolve()
 
-    anki_media_dir = anki_port.get_media_dir().resolve()
+    anki_media_dir = anki.get_media_dir().resolve()
     if media_root == anki_media_dir:
         raise ValueError(
             f"Local media directory ({media_root}) is the same as Anki's media "
@@ -354,13 +346,13 @@ def sync_media_to_anki(
         )
 
     active_refs, digest_by_name = hash_and_update_references(
-        db_port,
-        collection_dir,
+        state,
+        source.root,
         result,
-        cache_root=cache_root,
-        md_files=md_files,
-        prune_cache=prune_cache,
-        source_id=source_id,
+        cache_root=source.collection_root,
+        md_files=source.deck_files(),
+        prune_cache=False,
+        source_path=source.source_path,
     )
     if not media_root.exists():
         return result
@@ -392,11 +384,11 @@ def sync_media_to_anki(
         and (file_path.name in active_refs or file_path.name.startswith("_"))
     ]
     result.checked = len(active_refs)
-    cached_push_state = db_port.resolve_media_push_digests(
-        push_candidates, source_id=source_id
+    cached_push_state = state.resolve_media_push_digests(
+        push_candidates, source_path=source.source_path
     )
-    cached_fingerprints = db_port.resolve_media_fingerprints(
-        push_candidates, source_id=source_id
+    cached_fingerprints = state.resolve_media_fingerprints(
+        push_candidates, source_path=source.source_path
     )
 
     push_state_updates: list[tuple[str, str]] = []
@@ -441,8 +433,7 @@ def sync_media_to_anki(
                 result.unchanged += 1
                 continue
 
-            # Push safely via Port
-            anki_port.push_media(file_path, name)
+            anki.push_media(file_path, name)
             result.add_change(Change(ChangeType.SYNC, name, name))
             push_state_updates.append((name, digest))
             logger.debug(
@@ -464,11 +455,15 @@ def sync_media_to_anki(
                 result.errors.append(str(error))
 
     if fingerprint_updates:
-        db_port.upsert_media_fingerprints(fingerprint_updates, source_id=source_id)
+        state.upsert_media_fingerprints(
+            fingerprint_updates, source_path=source.source_path
+        )
     if push_state_updates:
-        db_port.upsert_media_push_digests(push_state_updates, source_id=source_id)
+        state.upsert_media_push_digests(
+            push_state_updates, source_path=source.source_path
+        )
     if removed_names:
-        db_port.delete_media_files(removed_names, source_id=source_id)
+        state.delete_media_records(removed_names, source_path=source.source_path)
 
     if skipped_pushes:
         noun = "file" if skipped_pushes == 1 else "files"
@@ -480,32 +475,28 @@ def sync_media_to_anki(
 
 
 def sync_media_from_anki(
-    anki_port: Anki,
-    collection_dir: Path,
-    db_port: SyncState,
-    *,
-    cache_root: Path | None = None,
-    md_files: list[Path] | None = None,
-    prune_cache: bool = True,
+    anki: Anki,
+    source: DeckSource,
+    state: SyncState,
 ) -> SyncReport:
-    """Pull missing media from Anki."""
+    """Pull referenced media from Anki into one deck source."""
     result = SyncReport.for_media()
-    media_root = collection_dir / LOCAL_MEDIA_DIR
+    media_root = source.root / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
 
     referenced = _collect_referenced_media(
-        db_port,
-        collection_dir,
-        cache_root=cache_root,
-        md_files=md_files,
-        prune_cache=prune_cache,
+        state,
+        source.root,
+        cache_root=source.collection_root,
+        md_files=source.deck_files(),
+        prune_cache=False,
     )
     result.checked = len(referenced)
 
     for name in referenced:
         target = media_root / name
         if not target.exists():
-            success = anki_port.pull_media(name, target)
+            success = anki.pull_media(name, target)
             if success:
                 result.add_change(Change(ChangeType.SYNC, name, name))
                 logger.debug(
@@ -532,68 +523,55 @@ def _combine_media_result(target: SyncReport, source: SyncReport) -> None:
 
 
 def _prune_media_cache_for_sources(
-    db_port: SyncState,
-    collection_dir: Path,
+    state: SyncState,
+    collection_root: Path,
     sources: list[DeckSource],
 ) -> None:
     md_keys = [
-        _markdown_cache_key(collection_dir, md_file)
+        _markdown_cache_key(collection_root, md_file)
         for source in sources
         for md_file in source.deck_files()
     ]
-    pruned = db_port.prune_markdown_media_cache(md_keys)
+    pruned = state.prune_markdown_media_cache(md_keys)
     if pruned:
         logger.debug(f"Pruned media cache for {pruned} stale markdown path(s)")
 
 
 def sync_all_media_to_anki(
-    anki_port: Anki,
-    collection_dir: Path,
-    db_port: SyncState,
-    *,
-    sources: Sequence[DeckSource] | None = None,
+    anki: Anki,
+    collection_root: Path,
+    state: SyncState,
 ) -> SyncReport:
     """Push media from all active sync sources to Anki."""
-    selected_sources = (
-        list(sources) if sources is not None else discover_deck_sources(collection_dir)
-    )  # todo: super awkward, no?
-    _prune_media_cache_for_sources(db_port, collection_dir, selected_sources)
-    managed_before = db_port.list_managed_media()
+    selected_sources = discover_deck_sources(collection_root)
+    _prune_media_cache_for_sources(state, collection_root, selected_sources)
+    managed_before = state.list_managed_media()
     combined = SyncReport.for_media()
     for source in selected_sources:
-        source_result = sync_media_to_anki(
-            anki_port,  # todo: port is not the current semantic AST
-            source.root,
-            db_port,  # todo: see above
-            cache_root=collection_dir,
-            md_files=source.deck_files(),
-            prune_cache=False,
-            source_id=source.source_id,  # todo: why source.deck_files() and source.source_id? can't we simplify this aggressively? the filesystem is our registry
-        )
+        source_result = sync_media_to_anki(anki, source, state)
         _combine_media_result(combined, source_result)
 
     active_names: set[str] = set()
     for source in selected_sources:
         active_names.update(
             _collect_referenced_media(
-                db_port,
+                state,
                 source.root,
-                cache_root=collection_dir,
+                cache_root=collection_root,
                 md_files=source.deck_files(),
                 prune_cache=False,
             )
         )
-    selected_ids = {source.source_id for source in selected_sources}
-    for source_id, name, pushed_digest in managed_before:
+    selected_paths = {source.source_path for source in selected_sources}
+    for source_path, name, pushed_digest in managed_before:
         if (
-            source_id not in selected_ids
+            source_path not in selected_paths
             or pushed_digest is None
             or name in active_names
         ):
             continue
-        anki_port.delete_media(name)
-        db_port.delete_media_files([name], source_id=source_id)
-        # todo: why do we delete media twice?
+        anki.delete_media_file(name)
+        state.delete_media_records([name], source_path=source_path)
         if not any(
             change.change_type is ChangeType.DELETE and change.entity_repr == name
             for change in combined.changes
@@ -603,27 +581,16 @@ def sync_all_media_to_anki(
 
 
 def sync_all_media_from_anki(
-    anki_port: Anki,
-    collection_dir: Path,
-    db_port: SyncState,
-    *,
-    sources: Sequence[DeckSource] | None = None,
+    anki: Anki,
+    collection_root: Path,
+    state: SyncState,
 ) -> SyncReport:
     """Pull referenced media for all active sync sources from Anki."""
-    selected_sources = (
-        list(sources) if sources is not None else discover_deck_sources(collection_dir)
-    )
-    _prune_media_cache_for_sources(db_port, collection_dir, selected_sources)
+    selected_sources = discover_deck_sources(collection_root)
+    _prune_media_cache_for_sources(state, collection_root, selected_sources)
     combined = SyncReport.for_media()
     for source in selected_sources:
-        source_result = sync_media_from_anki(
-            anki_port,
-            source.root,
-            db_port,
-            cache_root=collection_dir,
-            md_files=source.deck_files(),
-            prune_cache=False,
-        )
+        source_result = sync_media_from_anki(anki, source, state)
         _combine_media_result(combined, source_result)
     return combined
 

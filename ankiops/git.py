@@ -73,10 +73,12 @@ class GitRepository:
         result = self.run(["rev-parse", f"{ref}^{{tree}}"], check=False)
         return result.stdout.strip() or None if result.returncode == 0 else None
 
-    def trees_equal(
-        self, left: str, right: str
-    ) -> bool:  # todo: we no longer use worktrees for shared decks, is this needed?
-        return self.tree(left) == self.tree(right)
+    def trees_equal(self, left: str, right: str) -> bool:
+        left_tree = self.tree(left)
+        right_tree = self.tree(right)
+        return (
+            left_tree is not None and right_tree is not None and left_tree == right_tree
+        )
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         result = self.run(
@@ -147,8 +149,7 @@ class GitRepository:
                 return candidate
         raise ValueError(f"Cannot determine the default branch for remote {remote}.")
 
-    def ensure_work_branch(self, branch: str, start_ref: str) -> None:
-        # todo: why a branch? we no longer use worktrees, and shared decks are just their own repositories. or am i missing sth?
+    def checkout_or_create_branch(self, branch: str, start_ref: str) -> None:
         exists = (
             self.run(
                 ["show-ref", "--verify", f"refs/heads/{branch}"], check=False
@@ -213,14 +214,13 @@ class GitRepository:
 
 
 def git_snapshot(
-    collection_dir: Path,
+    collection_root: Path,
     *,
     action: str,
     paths: Sequence[Path],
-    strict: bool = False,  # todo: are you sure this is a good idea? can we remove it? it should always work, if not, we should fix the underlying issue instead of ignoring it
 ) -> bool:
     """Commit pending changes for explicit paths in one repository."""
-    collection_git = GitRepository(collection_dir)
+    collection_git = GitRepository(collection_root)
     try:
         collection_git.ensure_repo("AnkiOps collections require a Git repository.")
         rel_paths = collection_git._tracked_or_existing_paths(list(paths))
@@ -241,9 +241,6 @@ def git_snapshot(
         logger.info("Auto-committed snapshot before %s", action)
         return True
     except (FileNotFoundError, subprocess.CalledProcessError, ValueError) as error:
-        if strict:
-            raise ValueError(
-                f"Could not create the required Git checkpoint before {action}: {error}"
-            ) from error
-        logger.warning("Auto-commit failed: %s", error)
-        return False
+        raise ValueError(
+            f"Could not create the required Git checkpoint before {action}: {error}"
+        ) from error

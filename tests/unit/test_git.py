@@ -2,32 +2,36 @@ from __future__ import annotations
 
 import subprocess
 
-from ankiops.git import git_snapshot
+import pytest
+
+from ankiops.git import GitRepository, git_snapshot
 
 
-def _init_git_repo(collection_dir):
-    subprocess.run(["git", "init"], cwd=collection_dir, check=True, capture_output=True)
+def _init_git_repo(collection_root):
+    subprocess.run(
+        ["git", "init"], cwd=collection_root, check=True, capture_output=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "test@example.invalid"],
-        cwd=collection_dir,
+        cwd=collection_root,
         check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test User"],
-        cwd=collection_dir,
+        cwd=collection_root,
         check=True,
     )
 
 
-def _commit_all(collection_dir, message):
-    subprocess.run(["git", "add", "."], cwd=collection_dir, check=True)
-    subprocess.run(["git", "commit", "-m", message], cwd=collection_dir, check=True)
+def _commit_all(collection_root, message):
+    subprocess.run(["git", "add", "."], cwd=collection_root, check=True)
+    subprocess.run(["git", "commit", "-m", message], cwd=collection_root, check=True)
 
 
-def _git_status(collection_dir):
+def _git_status(collection_root):
     result = subprocess.run(
         ["git", "status", "--short"],
-        cwd=collection_dir,
+        cwd=collection_root,
         text=True,
         capture_output=True,
         check=True,
@@ -35,10 +39,10 @@ def _git_status(collection_dir):
     return result.stdout
 
 
-def _git_head(collection_dir):
+def _git_head(collection_root):
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
-        cwd=collection_dir,
+        cwd=collection_root,
         text=True,
         capture_output=True,
         check=True,
@@ -46,10 +50,10 @@ def _git_head(collection_dir):
     return result.stdout.strip()
 
 
-def _head_subject(collection_dir):
+def _head_subject(collection_root):
     result = subprocess.run(
         ["git", "log", "-1", "--format=%s"],
-        cwd=collection_dir,
+        cwd=collection_root,
         text=True,
         capture_output=True,
         check=True,
@@ -57,10 +61,10 @@ def _head_subject(collection_dir):
     return result.stdout.strip()
 
 
-def _head_name_status(collection_dir):
+def _head_name_status(collection_root):
     result = subprocess.run(
         ["git", "show", "--name-status", "--format=", "HEAD"],
-        cwd=collection_dir,
+        cwd=collection_root,
         text=True,
         capture_output=True,
         check=True,
@@ -134,3 +138,30 @@ def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path):
     assert "M\tDeck.md" in show
     assert "M\tOther.md" in show
     assert _git_status(tmp_path) == ""
+
+
+def test_trees_equal_is_false_when_either_ref_is_missing(tmp_path):
+    _init_git_repo(tmp_path)
+    tracked = tmp_path / "Deck.md"
+    tracked.write_text("content\n", encoding="utf-8")
+    _commit_all(tmp_path, "root")
+    repository = GitRepository(tmp_path)
+
+    assert not repository.trees_equal("HEAD", "missing-ref")
+    assert not repository.trees_equal("missing-ref", "also-missing")
+
+
+def test_git_snapshot_propagates_checkpoint_failure(tmp_path, monkeypatch):
+    _init_git_repo(tmp_path)
+    tracked = tmp_path / "Deck.md"
+    tracked.write_text("old\n", encoding="utf-8")
+    _commit_all(tmp_path, "root")
+    tracked.write_text("new\n", encoding="utf-8")
+
+    def fail_commit(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(1, ["git", "commit"])
+
+    monkeypatch.setattr(GitRepository, "run", fail_commit)
+
+    with pytest.raises(ValueError, match="required Git checkpoint"):
+        git_snapshot(tmp_path, action="test", paths=[tracked])

@@ -36,13 +36,11 @@ class _PublishPlan:
 
 
 def publish_shared_deck(
-    collection_dir: Path,
+    collection_root: Path,
     deck: str,
     source: DeckSource,
-    *,
-    public: bool,
 ) -> None:
-    collection_git = GitRepository(collection_dir)
+    collection_git = GitRepository(collection_root)
     collection_git.ensure_repo(
         "AnkiOps collections require a Git repository at the root."
     )
@@ -53,20 +51,20 @@ def publish_shared_deck(
         )
     if source_git is not None:
         try:
-            _selected_deck_files(collection_dir, deck)
+            _selected_deck_files(collection_root, deck)
         except ValueError:
             return
 
-    plan = _prepare_publish_plan(collection_dir, deck, source)
-    github = GitHubHost(collection_dir)
-    github.create_repo(source.source_id, public=public)
+    plan = _prepare_publish_plan(collection_root, deck, source)
+    github = GitHubHost(collection_root)
+    github.create_repo(source.display_name)
     originals = {
         rendered.source_path: rendered.source_path.read_bytes()
         for rendered in plan.files
     }
     try:
         if source_git is None:
-            _write_publish_files(collection_dir, plan)
+            _write_publish_files(collection_root, plan)
             source_git = GitRepository(source.root)
             source_git.init_repo(initial_branch="main")
             _copy_git_identity(collection_git, source_git)
@@ -74,14 +72,14 @@ def publish_shared_deck(
         source_git.set_remote("upstream", str(source.github_url))
         source_git.set_remote("publish", str(source.github_url))
         source_git.push("upstream", "HEAD", "main")
-        source_git.ensure_work_branch("ankiops/work", "main")
+        source_git.checkout_or_create_branch("ankiops/work", "main")
 
         _remove_published_local_files(plan)
         collection_git.commit_paths(
             [rendered.source_path for rendered in plan.files],
-            f"Move {deck} into shared source {source.source_id}",
+            f"Move {deck} into shared source {source.source_path}",
         )
-        _transfer_sync_ownership(collection_dir, plan)
+        _transfer_sync_ownership(collection_root, plan)
     except Exception:
         for path, content in originals.items():
             if not path.exists():
@@ -100,13 +98,13 @@ def _copy_git_identity(
             source_git.run(["config", key, value])
 
 
-def _transfer_sync_ownership(collection_dir: Path, plan: _PublishPlan) -> None:
-    state = SyncState.open(collection_dir)
+def _transfer_sync_ownership(collection_root: Path, plan: _PublishPlan) -> None:
+    state = SyncState.open(collection_root)
     try:
         note_ids = state.resolve_note_ids(plan.note_keys)
         state.upsert_note_links(
             [(note_key, note_id) for note_key, note_id in note_ids.items()],
-            source_id=plan.source.source_id,
+            source_path=plan.source.source_path,
         )
         for rendered in plan.files:
             deck_name = file_stem_to_deck_name(rendered.source_path.stem)
@@ -116,18 +114,18 @@ def _transfer_sync_ownership(collection_dir: Path, plan: _PublishPlan) -> None:
             state.upsert_deck(
                 deck_name,
                 deck_id,
-                source_id=plan.source.source_id,
-                md_path=str(rendered.target_path.relative_to(collection_dir)),
+                source_path=plan.source.source_path,
+                md_path=str(rendered.target_path.relative_to(collection_root)),
             )
     finally:
         state.close()
 
 
-def _selected_deck_files(collection_dir: Path, deck: str) -> list[Path]:
+def _selected_deck_files(collection_root: Path, deck: str) -> list[Path]:
     deck_filter = deck.strip()
     subdeck_scope = f"{deck_filter}::"
     files = []
-    local_source = DeckSource.local(collection_dir)
+    local_source = DeckSource.local(collection_root)
     for md_file in local_source.deck_files():
         deck_name = file_stem_to_deck_name(md_file.stem)
         if deck_name == deck_filter or deck_name.startswith(subdeck_scope):
@@ -148,14 +146,14 @@ def _scoped_configs(
 
 
 def _prepare_publish_plan(
-    collection_dir: Path,
+    collection_root: Path,
     deck: str,
     source: DeckSource,
 ) -> _PublishPlan:
-    root_configs = load_note_types(collection_dir / NOTE_TYPES_DIR)
+    root_configs = load_note_types(collection_root / NOTE_TYPES_DIR)
     root_config_by_name = {config.name: config for config in root_configs}
 
-    selected_files = _selected_deck_files(collection_dir, deck)
+    selected_files = _selected_deck_files(collection_root, deck)
     parsed_files: list[tuple[Path, DeckFile]] = []
     note_types_used: set[str] = set()
     media_used: set[str] = set()
@@ -166,7 +164,7 @@ def _prepare_publish_plan(
         parsed = read_deck_file(
             md_file,
             note_types=root_configs,
-            context_root=collection_dir,
+            context_root=collection_root,
         )
         parsed_files.append((md_file, parsed))
         for index, note in enumerate(parsed.notes, start=1):
@@ -195,7 +193,7 @@ def _prepare_publish_plan(
     missing_media = sorted(
         media_name
         for media_name in media_used
-        if not (collection_dir / LOCAL_MEDIA_DIR / media_name).exists()
+        if not (collection_root / LOCAL_MEDIA_DIR / media_name).exists()
     )
     if missing_media:
         raise ValueError(
@@ -293,7 +291,7 @@ def _copy_note_type_styling_assets(
     return touched
 
 
-def _write_publish_files(collection_dir: Path, plan: _PublishPlan) -> list[Path]:
+def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path]:
     source = plan.source
     source.root.mkdir(parents=True, exist_ok=False)
     (source.root / LOCAL_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
@@ -305,19 +303,19 @@ def _write_publish_files(collection_dir: Path, plan: _PublishPlan) -> list[Path]
         touched.extend([rendered.target_path, rendered.source_path])
 
     for note_type in sorted(plan.note_types_used):
-        src = collection_dir / NOTE_TYPES_DIR / note_type
+        src = collection_root / NOTE_TYPES_DIR / note_type
         dst = source.note_types_dir / note_type
         shutil.copytree(src, dst, dirs_exist_ok=True)
         touched.append(dst)
         touched.extend(
             _copy_note_type_styling_assets(
-                collection_dir / NOTE_TYPES_DIR,
+                collection_root / NOTE_TYPES_DIR,
                 source.note_types_dir,
                 note_type,
             )
         )
 
-    root_media = collection_dir / LOCAL_MEDIA_DIR
+    root_media = collection_root / LOCAL_MEDIA_DIR
     shared_media = source.root / LOCAL_MEDIA_DIR
     for media_name in sorted(plan.media_used):
         src = root_media / media_name

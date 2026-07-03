@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ankiops.deck_sources import (
@@ -8,6 +10,7 @@ from ankiops.deck_sources import (
     load_note_types_for_collection,
     load_note_types_for_source,
 )
+from ankiops.git import GitRepository
 from tests.support.deck_files import DeckFileHarness
 
 
@@ -15,6 +18,8 @@ def test_discover_deck_sources_includes_local_and_shared(tmp_path):
     (tmp_path / "note_types").mkdir()
     (tmp_path / "shared" / "owner" / "repo" / "note_types").mkdir(parents=True)
     (tmp_path / "shared" / "other" / "deck" / "note_types").mkdir(parents=True)
+    GitRepository(tmp_path / "shared" / "owner" / "repo").init_repo()
+    GitRepository(tmp_path / "shared" / "other" / "deck").init_repo()
 
     sources = discover_deck_sources(tmp_path)
 
@@ -25,6 +30,23 @@ def test_discover_deck_sources_includes_local_and_shared(tmp_path):
     ]
     assert sources[1].github_url == "https://github.com/other/deck.git"
     assert sources[2].github_url == "https://github.com/owner/repo.git"
+
+
+def test_discover_deck_sources_rejects_non_repository_shared_directory(tmp_path):
+    invalid_root = tmp_path / "shared" / "owner" / "repo"
+    invalid_root.mkdir(parents=True)
+
+    with pytest.raises(ValueError, match="not an independent Git repository"):
+        discover_deck_sources(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [Path("owner/repo"), Path("shared/owner"), Path("shared/../repo")],
+)
+def test_deck_source_rejects_noncanonical_relative_paths(tmp_path, relative_path):
+    with pytest.raises(ValueError, match="Expected .*source"):
+        DeckSource(tmp_path, relative_path)
 
 
 def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path):
@@ -73,6 +95,7 @@ def test_collection_note_types_include_local_and_scoped_shared_configs(tmp_path)
     harness.eject_default_note_types(tmp_path / "note_types")
     shared_source = DeckSource.shared(tmp_path, "owner/repo")
     harness.eject_default_note_types(shared_source.note_types_dir)
+    GitRepository(shared_source.root).init_repo()
 
     names = {config.name for config in load_note_types_for_collection(tmp_path)}
 
@@ -96,8 +119,16 @@ def test_source_location_and_kind_are_derived_from_identity(tmp_path):
     local = DeckSource.local(tmp_path)
     shared = DeckSource.shared(tmp_path, "owner/repo")
 
-    assert vars(local) == {"collection_dir": tmp_path, "source_id": "local"}
-    assert vars(shared) == {"collection_dir": tmp_path, "source_id": "owner/repo"}
+    assert vars(local) == {
+        "collection_root": tmp_path,
+        "relative_path": Path("."),
+    }
+    assert vars(shared) == {
+        "collection_root": tmp_path,
+        "relative_path": Path("shared/owner/repo"),
+    }
+    assert local.source_path == "."
+    assert shared.source_path == "shared/owner/repo"
     assert local.root == tmp_path
     assert not local.is_shared
     assert shared.root == tmp_path / "shared" / "owner" / "repo"

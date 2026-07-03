@@ -56,7 +56,7 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
     with (
         patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
         patch(
-            "ankiops.note_types_command.require_collection_dir",
+            "ankiops.note_types_command.require_collection_root",
             return_value=tmp_path,
         ),
         patch(
@@ -108,7 +108,7 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     with (
         patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
         patch(
-            "ankiops.note_types_command.require_collection_dir",
+            "ankiops.note_types_command.require_collection_root",
             return_value=tmp_path,
         ),
         patch("builtins.input", side_effect=["Q", "n", "Q", "y", "CTX", "y"]),
@@ -148,7 +148,7 @@ def test_note_types_import_reprompts_on_invalid_label(tmp_path, caplog):
     with (
         patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
         patch(
-            "ankiops.note_types_command.require_collection_dir",
+            "ankiops.note_types_command.require_collection_root",
             return_value=tmp_path,
         ),
         patch("builtins.input", side_effect=["A B", "QQ", "y", "AA", "y"]),
@@ -172,7 +172,7 @@ def test_note_types_import_rejects_unknown_model(tmp_path):
     with (
         patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
         patch(
-            "ankiops.note_types_command.require_collection_dir",
+            "ankiops.note_types_command.require_collection_root",
             return_value=tmp_path,
         ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "DoesNotExist"]),
@@ -192,7 +192,7 @@ def test_note_types_import_rejects_existing_target_folder(tmp_path):
     with (
         patch("ankiops.note_types_command.connect_or_exit", return_value=fake_anki),
         patch(
-            "ankiops.note_types_command.require_collection_dir",
+            "ankiops.note_types_command.require_collection_root",
             return_value=tmp_path,
         ),
         patch("sys.argv", ["ankiops", "note-types", "--add", "MyType"]),

@@ -1,9 +1,11 @@
 # Git operations triggered by AnkiOps
 
-An AnkiOps collection has one required root Git repository for private decks.
+An AnkiOps collection has one required root Git repository for local decks.
 The root ignores `/shared/`. Every directory at `shared/<owner>/<repo>` is a
-separate Git repository. Git is the implementation engine; shared-command
-output describes decks, updates, contributions, and pull requests.
+separate Git repository. Together, the collection root (`.`) and these canonical
+relative paths are the filesystem source registry. Git is the implementation
+engine; shared-command output describes decks, updates, contributions, and pull
+requests.
 
 Opening the collection root in VS Code shows all Markdown files together. VS
 Code's Source Control view shows the root and nested repositories separately.
@@ -11,7 +13,7 @@ Code's Source Control view shows the root and nested repositories separately.
 ## Collection sync checkpoints
 
 Before `ankiops af` or `ankiops fa`, AnkiOps validates the complete source set.
-It then commits private pending changes in the root repository and checkpoints
+It then commits local pending changes in the root repository and checkpoints
 each dirty shared repository independently:
 
 ```text
@@ -19,13 +21,13 @@ AnkiOps: snapshot before anki-to-files
 AnkiOps: snapshot before files-to-anki
 ```
 
-The root snapshot uses explicit private paths. It never stages `/shared/`.
+The root snapshot uses explicit local paths. It never stages `/shared/`.
 
 ## Shared commands
 
-`shared publish` moves a private deck tree into a new independent repository,
-commits it, creates the GitHub repository with authenticated `gh`, and pushes
-`main`. A failed retry reuses the local repository and commit.
+`shared publish` moves a local deck tree into a new independent repository,
+commits it, creates a public GitHub repository with authenticated `gh`, and
+pushes `main`. A failed retry reuses the local repository and commit.
 
 `shared subscribe` establishes an ongoing local copy at
 `shared/<owner>/<repo>`.
@@ -53,5 +55,8 @@ rerun the same `shared update` command. Failed uploads and failed pull-request
 creation retain one reusable submission; rerunning `shared submit` does not
 duplicate the contribution or pull request.
 
-Unexpected database schemas and corrupt databases are rejected without mutation.
-Initialize a fresh collection instead.
+An unexpected database schema or corrupt database is moved to
+`.ankiops.db.corrupt`, then AnkiOps creates the current schema and retries once.
+The recovery is logged before mutation and tells the user to run `ankiops init`
+to relink the Anki profile. If creating the replacement also fails, that second
+failure is propagated.

@@ -6,7 +6,11 @@ import subprocess
 
 import pytest
 
-from ankiops.collection import _setup_gitignore, require_collection_dir
+from ankiops.collection import (
+    _setup_gitignore,
+    get_collection_root,
+    require_collection_root,
+)
 from ankiops.sync.state import SyncState
 
 
@@ -14,21 +18,27 @@ def _init_git(path):
     subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True)
 
 
-def test_require_collection_dir_exits_when_profile_is_unset(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
+def test_get_collection_root_is_current_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    assert get_collection_root() == tmp_path
+
+
+def test_require_collection_root_exits_when_profile_is_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
     db.close()
     _init_git(tmp_path)
 
     with pytest.raises(SystemExit):
-        require_collection_dir("Default")
+        require_collection_root("Default")
 
 
-def test_require_collection_dir_exits_on_profile_mismatch(
+def test_require_collection_root_exits_on_profile_mismatch(
     tmp_path, monkeypatch, caplog
 ):
-    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
+    monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
     try:
@@ -39,13 +49,13 @@ def test_require_collection_dir_exits_on_profile_mismatch(
     monkeypatch.setattr("sys.argv", ["ankiops", "fa"])
 
     with pytest.raises(SystemExit):
-        require_collection_dir("Default")
+        require_collection_root("Default")
     assert "Nothing was changed" in caplog.text
     assert "retry: ankiops fa" in caplog.text
 
 
-def test_require_collection_dir_returns_path_on_profile_match(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
+def test_require_collection_root_returns_path_on_profile_match(tmp_path, monkeypatch):
+    monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
     try:
@@ -55,16 +65,16 @@ def test_require_collection_dir_returns_path_on_profile_match(tmp_path, monkeypa
 
     _init_git(tmp_path)
 
-    assert require_collection_dir("Work") == tmp_path
+    assert require_collection_root("Work") == tmp_path
 
 
-def test_require_collection_dir_exits_without_root_git(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.collection.get_collection_dir", lambda: tmp_path)
+def test_require_collection_root_exits_without_root_git(tmp_path, monkeypatch):
+    monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
     db = SyncState.open(tmp_path)
     db.close()
 
     with pytest.raises(SystemExit):
-        require_collection_dir()
+        require_collection_root()
 
 
 def test_collection_gitignore_excludes_nested_repositories_and_recovery(tmp_path):

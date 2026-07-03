@@ -214,7 +214,7 @@ ankiops shared publish "Psychology" owner/psychology-deck
 `shared publish` requires stable `note_key` metadata and authenticated GitHub CLI.
 It moves the selected deck tree into `shared/<owner>/<repo>/`, copies referenced
 media and note types, creates an independent repository, and pushes it to GitHub.
-New repositories are private unless you pass `--public`.
+Published repositories are always public.
 
 Subscribe to and update a shared deck:
 
@@ -277,7 +277,7 @@ LLM tools:
 
 Shared deck tools:
 
-- `ankiops shared publish <deck> <owner>/<repo> [--public|--private]`
+- `ankiops shared publish <deck> <owner>/<repo>`
 - `ankiops shared subscribe <owner>/<repo>`
 - `ankiops shared status [owner/repo]`
 - `ankiops shared update [owner/repo]`

@@ -82,14 +82,14 @@ def test_dispatch_action_imports_notes_and_media(tmp_path):
         is None
     )
     assert (
-        dispatch_action(col, "notesInfo", {"notes": [note_id]})[0][
-            "fields"
-        ]["Answer"]["value"]
+        dispatch_action(col, "notesInfo", {"notes": [note_id]})[0]["fields"]["Answer"][
+            "value"
+        ]
         == "A2"
     )
-    assert dispatch_action(col, "notesInfo", {"notes": [note_id]})[0][
-        "tags"
-    ] == ["updated"]
+    assert dispatch_action(col, "notesInfo", {"notes": [note_id]})[0]["tags"] == [
+        "updated"
+    ]
 
     note_info = dispatch_action(
         col,
@@ -107,16 +107,11 @@ def test_dispatch_action_imports_notes_and_media(tmp_path):
         is None
     )
     assert (
-        dispatch_action(col, "cardsInfo", {"cards": [card_id]})[0][
-            "deckName"
-        ]
+        dispatch_action(col, "cardsInfo", {"cards": [card_id]})[0]["deckName"]
         == "Moved"
     )
 
-    assert (
-        dispatch_action(col, "deleteNotes", {"notes": [note_id]})
-        is None
-    )
+    assert dispatch_action(col, "deleteNotes", {"notes": [note_id]}) is None
     assert dispatch_action(col, "notesInfo", {"notes": [note_id]}) == []
     assert dispatch_action(col, "getMediaDirPath", {}) == str(
         tmp_path / "collection.media"

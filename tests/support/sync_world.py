@@ -18,7 +18,6 @@ from ankiops.collection import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
 )
-from ankiops.deck_sources import discover_deck_sources
 from ankiops.markdown import NOTE_SEPARATOR, format_tags_comment
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
@@ -87,20 +86,16 @@ class SyncWorld:
 
     def sync_import(self, db: SyncState):
         return sync_collection_to_anki(
-            anki_port=self.anki,
-            db_port=db,
-            collection_dir=self.root,
-            note_types_dir=self.note_types_dir,
+            anki=self.anki,
+            state=db,
+            collection_root=self.root,
         )
 
     def sync_export(self, db: SyncState):
         return sync_collection_from_anki(
-            anki_port=self.anki,
-            db_port=db,
-            collection_dir=self.root,
-            sources=discover_deck_sources(
-                self.root, note_types_dir=self.note_types_dir
-            ),
+            anki=self.anki,
+            state=db,
+            collection_root=self.root,
         )
 
     def sync_media_to_anki(self, db: SyncState):
@@ -118,7 +113,7 @@ class SyncWorld:
         with (
             patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
             patch(
-                "ankiops.cli_commands.require_collection_dir",
+                "ankiops.cli_commands.require_collection_root",
                 return_value=self.root,
             ),
         ):
@@ -129,7 +124,7 @@ class SyncWorld:
         with (
             patch("ankiops.cli_commands.connect_or_exit", return_value=self.anki),
             patch(
-                "ankiops.cli_commands.require_collection_dir",
+                "ankiops.cli_commands.require_collection_root",
                 return_value=self.root,
             ),
         ):

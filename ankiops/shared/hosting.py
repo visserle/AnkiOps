@@ -49,12 +49,12 @@ class GitHubHost:
             return None
         return value if isinstance(value, dict) else None
 
-    def create_repo(self, slug: str, *, public: bool) -> None:
+    def create_repo(self, slug: str) -> None:
         self.ensure_authenticated()
         if self.repo_info(slug) is not None:
             return
         result = self._gh(
-            ["repo", "create", slug, "--public" if public else "--private"],
+            ["repo", "create", slug, "--public"],
             check=False,
         )
         if result.returncode != 0:

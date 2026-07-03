@@ -70,55 +70,48 @@ def file_stem_to_deck_name(file_stem: str) -> str:
     return unquote(file_stem.replace("__", "::"))
 
 
-def get_collection_dir() -> Path:
-    """Get the collection directory path."""
-    pyproject = Path.cwd() / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            if 'name = "ankiops"' in pyproject.read_text():
-                return Path.cwd() / "collection"
-        except OSError:
-            pass
+def get_collection_root() -> Path:
+    """Return the current working directory as the collection root."""
     return Path.cwd()
 
 
-def require_collection_dir(active_profile: str | None = None) -> Path:
+def require_collection_root(active_profile: str | None = None) -> Path:
     """Return the collection directory, or exit if not initialized."""
     from ankiops.sync.state import SyncState
 
-    collection_dir = get_collection_dir()
-    db_path = collection_dir / ANKIOPS_DB
+    collection_root = get_collection_root()
+    db_path = collection_root / ANKIOPS_DB
     if not db_path.exists():
         logger.error(
-            f"Not an AnkiOps collection ({collection_dir}). Run 'ankiops init' first."
+            f"Not an AnkiOps collection ({collection_root}). Run 'ankiops init' first."
         )
         raise SystemExit(1)
 
     from ankiops.git import GitRepository
 
-    if not GitRepository(collection_dir).is_repo():
+    if not GitRepository(collection_root).is_repo():
         logger.error(
-            f"AnkiOps collection root is not a Git repository: {collection_dir}. "
+            f"AnkiOps collection root is not a Git repository: {collection_root}. "
             "Run 'git init' in that directory or initialize a fresh collection."
         )
         raise SystemExit(1)
 
     if active_profile is None:
-        return collection_dir
+        return collection_root
 
-    sync_state = SyncState.open(collection_dir)
+    sync_state = SyncState.open(collection_root)
     try:
         expected_profile = sync_state.get_profile_name()
         if expected_profile is None:
             logger.error(
-                f"Collection in {collection_dir} has no linked profile. "
+                f"Collection in {collection_root} has no linked profile. "
                 "Run 'ankiops init' to re-link."
             )
             raise SystemExit(1)
 
         if expected_profile != active_profile:
             logger.error(
-                f"Profile mismatch: collection in {collection_dir} is linked to "
+                f"Profile mismatch: collection in {collection_root} is linked to "
                 f"'{expected_profile}', but Anki has '{active_profile}' "
                 "open. Nothing was changed. Switch Anki to the linked profile, "
                 f"then retry: {shlex.join(sys.argv)}"
@@ -127,7 +120,7 @@ def require_collection_dir(active_profile: str | None = None) -> Path:
     finally:
         sync_state.close()
 
-    return collection_dir
+    return collection_root
 
 
 def initialize_collection(profile: str) -> Path:
@@ -135,28 +128,28 @@ def initialize_collection(profile: str) -> Path:
     from ankiops.llm.jobs import LlmJobStore
     from ankiops.sync.state import SyncState
 
-    collection_dir = get_collection_dir()
-    collection_dir.mkdir(parents=True, exist_ok=True)
+    collection_root = get_collection_root()
+    collection_root.mkdir(parents=True, exist_ok=True)
 
-    sync_state = SyncState.open(collection_dir)
+    sync_state = SyncState.open(collection_root)
     sync_state.set_profile_name(profile)
     sync_state.close()
-    llm_db = LlmJobStore.open(collection_dir)
+    llm_db = LlmJobStore.open(collection_root)
     llm_db.close()
 
-    (collection_dir / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
-    _setup_vscode_settings(collection_dir)
-    _setup_gitignore(collection_dir)
-    _setup_git(collection_dir)
-    _setup_llm_configs(collection_dir)
-    eject_default_note_types(collection_dir / NOTE_TYPES_DIR)
+    (collection_root / LOCAL_MEDIA_DIR).mkdir(exist_ok=True)
+    _setup_vscode_settings(collection_root)
+    _setup_gitignore(collection_root)
+    _setup_git(collection_root)
+    _setup_llm_configs(collection_root)
+    eject_default_note_types(collection_root / NOTE_TYPES_DIR)
 
-    return collection_dir
+    return collection_root
 
 
-def create_tutorial(collection_dir: Path) -> Path:
+def create_tutorial(collection_root: Path) -> Path:
     """Copy the tutorial Markdown file to the collection directory."""
-    tutorial_dst = collection_dir / f"{deck_name_to_file_stem('AnkiOps Tutorial')}.md"
+    tutorial_dst = collection_root / f"{deck_name_to_file_stem('AnkiOps Tutorial')}.md"
 
     try:
         ref = resources.files("ankiops.tutorial").joinpath("AnkiOps Tutorial.md")
@@ -167,7 +160,7 @@ def create_tutorial(collection_dir: Path) -> Path:
         )
 
         img_ref = resources.files("ankiops.tutorial").joinpath("sync_arrows.png")
-        img_dst = collection_dir / LOCAL_MEDIA_DIR / "sync_arrows.png"
+        img_dst = collection_root / LOCAL_MEDIA_DIR / "sync_arrows.png"
         img_dst.write_bytes(img_ref.read_bytes())
         logger.info(
             f"Tutorial image created: {clickable_path(img_dst)}",
@@ -180,9 +173,9 @@ def create_tutorial(collection_dir: Path) -> Path:
     return tutorial_dst
 
 
-def _setup_vscode_settings(collection_dir: Path) -> None:
+def _setup_vscode_settings(collection_root: Path) -> None:
     """Create/update .vscode/settings.json with markdown paste destination."""
-    vscode_dir = collection_dir / ".vscode"
+    vscode_dir = collection_root / ".vscode"
     vscode_dir.mkdir(exist_ok=True)
     settings_path = vscode_dir / "settings.json"
 
@@ -210,9 +203,9 @@ def _setup_vscode_settings(collection_dir: Path) -> None:
     settings_path.write_text(json.dumps(settings, indent=4) + "\n")
 
 
-def _setup_gitignore(collection_dir: Path) -> None:
+def _setup_gitignore(collection_root: Path) -> None:
     """Ensure local database files are in .gitignore."""
-    gitignore_path = collection_dir / ".gitignore"
+    gitignore_path = collection_root / ".gitignore"
 
     content = ""
     if gitignore_path.exists():
@@ -235,21 +228,21 @@ def _setup_gitignore(collection_dir: Path) -> None:
         logger.debug("Added local DB files to .gitignore")
 
 
-def _setup_git(collection_dir: Path) -> None:
+def _setup_git(collection_root: Path) -> None:
     """Ensure the collection directory is inside a git repository."""
     from ankiops.git import GitRepository
 
-    if GitRepository(collection_dir).init_repo():
-        logger.info(f"Initialized git repository in {collection_dir}")
+    if GitRepository(collection_root).init_repo():
+        logger.info(f"Initialized git repository in {collection_root}")
 
 
-def _eject_llm_configs(collection_dir: Path) -> None:
+def _eject_llm_configs(collection_root: Path) -> None:
     from ankiops.llm.models import (
         MODEL_REGISTRY_FILE_NAME,
         SYSTEM_PROMPT_FILE_NAME,
     )
 
-    llm_dir = collection_dir / LLM_DIR
+    llm_dir = collection_root / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)
     llm_resources = resources.files("ankiops.llm.resources")
 
@@ -275,5 +268,5 @@ def _eject_llm_configs(collection_dir: Path) -> None:
         destination.write_text(resource.read_text(encoding="utf-8"), encoding="utf-8")
 
 
-def _setup_llm_configs(collection_dir: Path) -> None:
-    _eject_llm_configs(collection_dir)
+def _setup_llm_configs(collection_root: Path) -> None:
+    _eject_llm_configs(collection_root)

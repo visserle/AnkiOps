@@ -104,44 +104,46 @@ def test_deck_mapping(db):
 
 
 def test_note_and_deck_ownership(db):
-    db.upsert_note_links([("shared-key", 101)], source_id="owner/repo")
+    db.upsert_note_links([("shared-key", 101)], source_path="shared/owner/repo")
     db.upsert_deck(
         "Shared",
         202,
-        source_id="owner/repo",
+        source_path="shared/owner/repo",
         md_path="shared/owner/repo/Shared.md",
     )
 
-    assert db.resolve_note_sources(["shared-key"]) == {"shared-key": "owner/repo"}
-    assert db.resolve_deck_source(202) == "owner/repo"
+    assert db.resolve_note_sources(["shared-key"]) == {
+        "shared-key": "shared/owner/repo"
+    }
+    assert db.resolve_deck_source(202) == "shared/owner/repo"
 
 
 def test_media_fingerprints_are_scoped_by_source(db):
     row = [("same.png", 1, 2, "digest-a", "same_a.png")]
-    db.upsert_media_fingerprints(row, source_id="owner/one")
+    db.upsert_media_fingerprints(row, source_path="shared/owner/one")
     db.upsert_media_fingerprints(
         [("same.png", 3, 4, "digest-b", "same_b.png")],
-        source_id="owner/two",
+        source_path="shared/owner/two",
     )
 
     assert (
-        db.resolve_media_fingerprints(["same.png"], source_id="owner/one")["same.png"][
-            2
-        ]
+        db.resolve_media_fingerprints(["same.png"], source_path="shared/owner/one")[
+            "same.png"
+        ][2]
         == "digest-a"
     )
     assert (
-        db.resolve_media_fingerprints(["same.png"], source_id="owner/two")["same.png"][
-            2
-        ]
+        db.resolve_media_fingerprints(["same.png"], source_path="shared/owner/two")[
+            "same.png"
+        ][2]
         == "digest-b"
     )
 
 
 def test_source_sync_and_operation_state(db):
-    db.set_source_applied_state("owner/repo", "tree", "commit")
+    db.set_source_applied_state("shared/owner/repo", "tree", "commit")
     db.save_shared_operation(
-        "owner/repo",
+        "shared/owner/repo",
         "op-1",
         "submit",
         "pushed",
@@ -149,8 +151,8 @@ def test_source_sync_and_operation_state(db):
         pushed_sha="abc",
     )
 
-    assert db.get_source_applied_state("owner/repo") == ("tree", "commit")
-    operation = db.get_shared_operation("owner/repo")
+    assert db.get_source_applied_state("shared/owner/repo") == ("tree", "commit")
+    operation = db.get_shared_operation("shared/owner/repo")
     assert operation is not None
     assert operation["publish_branch"] == "ankiops/op-1"
     assert operation["pushed_sha"] == "abc"
@@ -170,7 +172,7 @@ def test_generate_note_key(db):
     assert len(note_key) > 10
 
 
-def test_schema_or_corruption_is_rejected_without_mutation(tmp_path):
+def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path):
     db = SyncState.open(tmp_path)
     try:
         db.upsert_note_links([("n1", 100)])
@@ -182,10 +184,13 @@ def test_schema_or_corruption_is_rejected_without_mutation(tmp_path):
     db_path.write_text("corrupt data", encoding="utf-8")
 
     original = db_path.read_bytes()
-    with pytest.raises(ValueError, match="does not migrate or recreate"):
-        SyncState.open(tmp_path)
-    assert db_path.read_bytes() == original
-    assert not (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
+    replacement = SyncState.open(tmp_path)
+    try:
+        assert replacement.resolve_note_ids(["n1"]) == {}
+    finally:
+        replacement.close()
+
+    assert (tmp_path / f"{ANKIOPS_DB}.corrupt").read_bytes() == original
 
 
 def test_remove_note_by_id(tmp_path):
@@ -465,7 +470,7 @@ def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
             "b.png": (300, 1002, "d3", "b_d3.png"),
         }
 
-        adapter.delete_media_files(["a.png"])
+        adapter.delete_media_records(["a.png"])
         assert adapter.resolve_media_fingerprints(["a.png", "b.png"]) == {
             "b.png": (300, 1002, "d3", "b_d3.png")
         }

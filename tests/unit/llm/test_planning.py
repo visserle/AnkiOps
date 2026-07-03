@@ -5,23 +5,24 @@ from __future__ import annotations
 import pytest
 
 from ankiops.collection import LLM_DB_FILENAME
+from ankiops.git import GitRepository
 from ankiops.llm.planning import plan_task
 from ankiops.llm.tasks import FieldAccess
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
 
-def _init_collection_db(collection_dir):
-    db = SyncState.open(collection_dir)
+def _init_collection_db(collection_root):
+    db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
     finally:
         db.close()
 
 
-def _eject_note_types(collection_dir):
-    _init_collection_db(collection_dir)
-    DeckFileHarness().eject_default_note_types(collection_dir / "note_types")
+def _eject_note_types(collection_root):
+    _init_collection_db(collection_root)
+    DeckFileHarness().eject_default_note_types(collection_root / "note_types")
 
 
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
@@ -76,7 +77,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         """,
     )
 
-    plan = plan_task(collection_dir=llm_collection, task_name="grammar")
+    plan = plan_task(collection_root=llm_collection, task_name="grammar")
 
     assert plan.task_name == "grammar"
     assert plan.summary.decks_seen == 1
@@ -126,7 +127,7 @@ def test_plan_task_rejects_missing_note_key_before_discovery(
     )
 
     with pytest.raises(ValueError, match="LLM tasks require note_key metadata"):
-        plan_task(collection_dir=llm_collection, task_name="grammar")
+        plan_task(collection_root=llm_collection, task_name="grammar")
 
     assert not (llm_collection / "llm" / LLM_DB_FILENAME).exists()
 
@@ -177,7 +178,7 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
         """,
     )
 
-    plan = plan_task(collection_dir=llm_collection, task_name="autotagger")
+    plan = plan_task(collection_root=llm_collection, task_name="autotagger")
 
     assert plan.summary.notes_seen == 3
     assert plan.summary.eligible == 2
@@ -198,6 +199,7 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
     fs.eject_default_note_types(llm_collection / "note_types")
     shared_root = llm_collection / "shared" / "owner" / "repo"
     fs.eject_default_note_types(shared_root / "note_types")
+    GitRepository(shared_root).init_repo()
     write_file(
         llm_collection / "Local.md",
         """
@@ -229,7 +231,7 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
         """,
     )
 
-    plan = plan_task(collection_dir=llm_collection, task_name="grammar")
+    plan = plan_task(collection_root=llm_collection, task_name="grammar")
 
     surface = {(item.source, item.note_type): item for item in plan.field_surface}
     assert ("local", "AnkiOpsQA") in surface
@@ -272,7 +274,7 @@ def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(
     )
 
     plan = plan_task(
-        collection_dir=llm_collection,
+        collection_root=llm_collection,
         task_name="grammar",
         deck_override="Psychotherapie::Stoerungen",
     )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Sequence
 from pathlib import Path
 
 from rich.markup import escape as rich_escape
@@ -16,7 +15,7 @@ from ankiops.collection import (
     deck_name_to_file_stem,
     file_stem_to_deck_name,
     initialize_collection,
-    require_collection_dir,
+    require_collection_root,
 )
 from ankiops.console import clickable_path, connect_or_exit
 from ankiops.deck_sources import (
@@ -58,77 +57,48 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def _sync_note_types(anki_port, collection_dir, note_types_dir, db_port, sources):
+def _sync_note_types(anki, collection_root, state):
     return sync_note_type_configs(
-        anki_port,
-        load_note_types_for_collection(
-            collection_dir,
-            note_types_dir=note_types_dir,
-            sources=sources,
-        ),
-        sync_state=db_port,
+        anki,
+        load_note_types_for_collection(collection_root),
+        sync_state=state,
     )
 
 
-def _snapshot_paths(
-    collection_dir: Path,
-    scoped_paths: Sequence[Path],
-) -> list[Path]:
-    return list(scoped_paths)
-
-
-def _validated_sources(collection_dir: Path) -> list[DeckSource]:
-    # todo: parse, don't validate
-    sources = discover_deck_sources(collection_dir)
-    for source in sources[1:]:
-        if not GitRepository(source.root).is_repo():
-            raise ValueError(
-                f"Shared source directory {source.root} is not an independent Git "
-                "repository. Leave it untouched for inspection and subscribe to "
-                f"{source.source_id} again in a fresh collection path."
-            )
-    return sources
-
-
-def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> None:
-    for source in sources:
-        if not source.is_shared:
-            # todo: let's discuss this: does this mean we do not commit in the seperate git repository of shared decks
-            # when we have local changes and use e.g. ankiops fa?
-            continue
+def _checkpoint_shared_repositories(collection_root: Path, action: str) -> None:
+    for source in discover_deck_sources(collection_root)[1:]:
         commit = GitRepository(source.root).checkpoint(
             f"AnkiOps: snapshot before {action}"
         )
         if commit:
-            logger.info("Auto-committed %s checkpoint %s", source.source_id, commit[:7])
+            logger.info(
+                "Auto-committed %s checkpoint %s", source.display_name, commit[:7]
+            )
 
 
-# todo: same question as above
-def _record_applied_sources(
+def _record_applied_shared_sources(
     state: SyncState,
-    sources: Sequence[DeckSource],
+    collection_root: Path,
 ) -> None:
-    for source in sources:
-        if not source.is_shared:
-            continue
+    for source in discover_deck_sources(collection_root)[1:]:
         source_git = GitRepository(source.root)
         clean_commit = source_git.head() if not source_git.status_lines() else None
         state.set_source_applied_state(
-            source.source_id,
+            source.source_path,
             source_content_hash(source),
             clean_commit,
         )
 
 
-def _local_markdown_paths(collection_dir: Path) -> list[Path]:
-    paths = DeckSource.local(collection_dir).deck_files()
-    paths.extend(_deleted_local_markdown_paths(collection_dir))
+def _local_markdown_paths(collection_root: Path) -> list[Path]:
+    paths = DeckSource.local(collection_root).deck_files()
+    paths.extend(_deleted_local_markdown_paths(collection_root))
     return list(dict.fromkeys(paths))
 
 
-def _deleted_local_markdown_paths(collection_dir: Path) -> list[Path]:
+def _deleted_local_markdown_paths(collection_root: Path) -> list[Path]:
     try:
-        result = GitRepository(collection_dir).run(
+        result = GitRepository(collection_root).run(
             ["ls-files", "-z", "--deleted"],
             check=False,
         )
@@ -141,15 +111,15 @@ def _deleted_local_markdown_paths(collection_dir: Path) -> list[Path]:
     for rel_path in result.stdout.split("\0"):
         if not rel_path:
             continue
-        path = collection_dir / rel_path
-        if _is_local_markdown_deck_path(collection_dir, path):
+        path = collection_root / rel_path
+        if _is_local_markdown_deck_path(collection_root, path):
             paths.append(path)
     return paths
 
 
-def _is_local_markdown_deck_path(collection_dir: Path, path: Path) -> bool:
+def _is_local_markdown_deck_path(collection_root: Path, path: Path) -> bool:
     return (
-        path.parent == collection_dir
+        path.parent == collection_root
         and path.suffix == ".md"
         and path.name.upper() not in RESERVED_MARKDOWN_FILES
         and "___" not in path.stem
@@ -161,14 +131,14 @@ def run_init(args):
     anki = connect_or_exit()
     profile = anki.get_active_profile()
 
-    collection_dir = initialize_collection(profile)
+    collection_root = initialize_collection(profile)
 
     if args.tutorial:
-        create_tutorial(collection_dir)
+        create_tutorial(collection_root)
 
     logger.info(
-        f"Initialized AnkiOps collection in {collection_dir} (profile: {profile}). "
-        f"For the Anki add-on, set ankiops_dir to: {collection_dir}"
+        f"Initialized AnkiOps collection in {collection_root} (profile: {profile}). "
+        f"For the Anki add-on, set ankiops_dir to: {collection_root}"
     )
 
 
@@ -177,35 +147,37 @@ def run_af(args):
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
 
-    collection_dir = require_collection_dir(active_profile)
-    logger.debug(f"Collection directory: {collection_dir}")
-    sources = _validated_sources(collection_dir)
+    collection_root = require_collection_root(active_profile)
+    logger.debug(f"Collection directory: {collection_root}")
+    discover_deck_sources(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-anki-to-files git snapshot")
         git_snapshot(
-            collection_dir,
+            collection_root,
             action="anki-to-files",
-            paths=_snapshot_paths(
-                collection_dir,
-                [
-                    *_local_markdown_paths(collection_dir),
-                    collection_dir / LOCAL_MEDIA_DIR,
-                ],
-            ),
-            strict=True,
+            paths=[
+                *_local_markdown_paths(collection_root),
+                collection_root / LOCAL_MEDIA_DIR,
+            ],
         )
-        _checkpoint_shared_sources(sources, "anki-to-files")
+        _checkpoint_shared_repositories(collection_root, "anki-to-files")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
-    state = SyncState.open(collection_dir)
+    state = SyncState.open(collection_root)
+    try:
+        _run_af_with_state(anki, state, collection_root)
+    finally:
+        state.close()
+
+
+def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
 
     logger.debug("Starting note sync (Anki -> files)")
     export_summary: CollectionReport = sync_collection_from_anki(
-        anki_port=anki,
-        db_port=state,
-        collection_dir=collection_dir,
-        sources=sources,
+        anki=anki,
+        state=state,
+        collection_root=collection_root,
     )
     note_summary = export_summary.summary
     deck_count = len(export_summary.results)
@@ -243,15 +215,9 @@ def run_af(args):
     # Sync referenced media from Anki to local
     try:
         logger.debug("Starting media pull (Anki -> local)")
-        media_result = sync_media_from_anki(
-            anki,
-            collection_dir,
-            state,
-            sources=sources,
-            # todo: why collection_dir and sources?
-        )
+        media_result = sync_media_from_anki(anki, collection_root, state)
         logger.info(format_media_status(media_result, from_anki=True))
-        _record_applied_sources(state, sources)
+        _record_applied_shared_sources(state, collection_root)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -282,52 +248,51 @@ def run_fa(args):
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
 
-    collection_dir = require_collection_dir(active_profile)
-    logger.debug(f"Collection directory: {collection_dir}")
-    sources = _validated_sources(collection_dir)
+    collection_root = require_collection_root(active_profile)
+    logger.debug(f"Collection directory: {collection_root}")
+    discover_deck_sources(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-files-to-anki git snapshot")
         git_snapshot(
-            collection_dir,
+            collection_root,
             action="files-to-anki",
-            paths=_snapshot_paths(
-                collection_dir,
-                [
-                    *_local_markdown_paths(collection_dir),
-                    collection_dir / LOCAL_MEDIA_DIR,
-                    collection_dir / NOTE_TYPES_DIR,
-                ],
-            ),
-            strict=True,
+            paths=[
+                *_local_markdown_paths(collection_root),
+                collection_root / LOCAL_MEDIA_DIR,
+                collection_root / NOTE_TYPES_DIR,
+            ],
         )
-        _checkpoint_shared_sources(sources, "files-to-anki")
+        _checkpoint_shared_repositories(collection_root, "files-to-anki")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
-    state = SyncState.open(collection_dir)
-    note_types_dir = collection_dir / NOTE_TYPES_DIR
+    state = SyncState.open(collection_root)
+    try:
+        _run_fa_with_state(anki, state, collection_root)
+    finally:
+        state.close()
+
+
+def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
 
     try:
         logger.debug("Starting media push (local -> Anki)")
-        media_result = sync_media_to_anki(anki, collection_dir, state, sources=sources)
+        media_result = sync_media_to_anki(anki, collection_root, state)
         logger.info(format_media_status(media_result, from_anki=False))
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
     logger.debug("Starting note type sync")
-    nt_summary = _sync_note_types(anki, collection_dir, note_types_dir, state, sources)
+    nt_summary = _sync_note_types(anki, collection_root, state)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
     logger.debug("Starting note sync (files -> Anki)")
     import_summary: CollectionReport = sync_collection_to_anki(
-        anki_port=anki,
-        db_port=state,
-        # todo: fix variable names, make sure to use the semantic AST everywhere
-        collection_dir=collection_dir,
-        note_types_dir=note_types_dir,
-        sources=sources,
+        anki=anki,
+        state=state,
+        collection_root=collection_root,
     )
     note_summary = import_summary.summary
     deck_count = len(import_summary.results)
@@ -378,7 +343,7 @@ def run_fa(args):
             "or you risk losing notes with the next Anki -> files sync."
         )
     else:
-        _record_applied_sources(state, sources)
+        _record_applied_shared_sources(state, collection_root)
 
 
 def run_serialize(args):
@@ -387,7 +352,7 @@ def run_serialize(args):
         logger.error("--no-subdecks requires --deck")
         raise SystemExit(2)
 
-    collection_dir = require_collection_dir()
+    collection_root = require_collection_root()
 
     if args.output:
         output_file = Path(args.output)
@@ -396,12 +361,12 @@ def run_serialize(args):
     else:
         output_file = Path("AnkiCollection.json")
 
-    logger.debug(f"Serializing collection from: {collection_dir}")
+    logger.debug(f"Serializing collection from: {collection_root}")
     logger.debug(f"Output file: {output_file}")
 
     try:
         serialize_to_file(
-            collection_dir,
+            collection_root,
             output_file,
             deck=args.deck,
             no_subdecks=args.no_subdecks,
@@ -422,21 +387,17 @@ def run_deserialize(args):
         logger.error(f"Serialized file not found: {serialized_file}")
         raise SystemExit(1)
 
-    collection_dir = require_collection_dir()
+    collection_root = require_collection_root()
     deserialize_plan = plan_deserialize_from_file(
         serialized_file,
-        collection_dir=collection_dir,
-        note_types_dir=collection_dir / NOTE_TYPES_DIR,
+        collection_root=collection_root,
     )
     if not args.no_auto_commit:
         logger.debug("Creating pre-deserialize git snapshot")
         git_snapshot(
-            collection_dir,
+            collection_root,
             action="deserializing",
-            paths=_snapshot_paths(
-                collection_dir,
-                deserialize_plan.target_paths,
-            ),
+            paths=list(deserialize_plan.target_paths),
         )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
@@ -444,7 +405,7 @@ def run_deserialize(args):
     apply_deserialization_plan(
         deserialize_plan,
         overwrite=args.overwrite,
-        collection_dir=collection_dir,
+        collection_root=collection_root,
     )
 
 
@@ -454,8 +415,8 @@ def run_fix_image_widths(args):
         logger.error("--no-subdecks requires --deck")
         raise SystemExit(2)
 
-    collection_dir = require_collection_dir()
-    selected_paths = _local_markdown_paths(collection_dir)
+    collection_root = require_collection_root()
+    selected_paths = _local_markdown_paths(collection_root)
     if args.deck:
         deck_filter = args.deck.strip()
         subdeck_scope = f"{deck_filter}::"
@@ -472,16 +433,16 @@ def run_fix_image_widths(args):
     if not args.no_auto_commit:
         logger.debug("Creating pre-image-width-fix git snapshot")
         git_snapshot(
-            collection_dir,
+            collection_root,
             action="fixing image widths",
-            paths=_snapshot_paths(collection_dir, selected_paths),
+            paths=selected_paths,
         )
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
     try:
         result = fix_image_widths_collection(
-            collection_dir,
+            collection_root,
             deck=args.deck,
             no_subdecks=args.no_subdecks,
             tolerance=args.tolerance,
@@ -511,12 +472,9 @@ def run_llm(args):
     """Delegate LLM command handling to the LLM CLI module."""
     run_llm_impl(
         args,
-        require_collection_dir_fn=require_collection_dir,
+        require_collection_root_fn=require_collection_root,
         load_note_type_configs_fn=(
-            lambda note_types_dir: load_note_types_for_collection(
-                note_types_dir.parent,
-                note_types_dir=note_types_dir,
-            )
+            lambda note_types_dir: load_note_types_for_collection(note_types_dir.parent)
         ),
         load_llm_task_catalog_fn=load_llm_task_catalog,
         plan_task_fn=plan_task,
