@@ -9,7 +9,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 - ✏️ Edit Anki decks as highly readable Markdown files
 - 🔄 Two-way sync of notes, note types, decks and media files
 - ⚡ Sync thousands of notes in under a second
-- ⚙️ Define your own note types and card templates
+- ⚙️ Bring your own note types
 - ✨ Improve your flashcards with programmable LLM tasks
 - 👥 Share decks on GitHub and collaborate with others
 
@@ -17,7 +17,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ### Markdown Files
 
-One Markdown file is one deck. Each note is separated by a blank line, three dashes, and another blank line:
+One Markdown file is one deck. In a deck, each note is separated by a blank line, three dashes, and another blank line:
 
 ```markdown
 Q: Question text here
@@ -127,12 +127,12 @@ Generic, non-identifying labels such as `E:` for Extra can be added to any note 
 
 ### Synchronization
 
-AnkiOps has two sync commands:
+AnkiOps has two sync commands, which make one side match the other:
 
 - `ankiops af` (anki to files): After editing notes, tags, or decks in Anki, and
 - `ankiops fa` (files to anki): After editing Markdown decks, media, or note types.
 
-Both sync operations can create update, move, and delete managed notes, and handle all media and note types. Before syncing, an automatic Git snapshot is created.
+Both sync operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
 
 ### Add-On
 
