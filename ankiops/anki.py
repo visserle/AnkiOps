@@ -544,3 +544,4 @@ class Anki:
     def delete_media(self, remote_filename: str) -> None:
         """Delete one AnkiOps-managed media file when no source references it."""
         (self.get_media_dir() / remote_filename).unlink(missing_ok=True)
+        # todo: why was this added? is this the right place for it?

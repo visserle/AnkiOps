@@ -76,8 +76,6 @@ class SyncState:
                     "INSERT INTO app_state (id) VALUES (1) ON CONFLICT(id) DO NOTHING"
                 )
 
-                # Strict schema validation. This release deliberately has no
-                # migration or automatic recreation path.
                 conn.execute(
                     "SELECT note_key, note_id, source_id, import_md_hash, "
                     "import_anki_hash, export_md_hash, export_anki_hash "
@@ -117,6 +115,24 @@ class SyncState:
                 "This version does not migrate or recreate collections; initialize "
                 "a fresh collection."
             ) from error
+
+            # todo: implement the old simple recreation logic here:
+
+            #         except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            # if conn:
+            #     conn.close()
+            # logger.error(
+            #     f"Database at {db_path} is invalid or corrupt. "
+            #     "Backing up and recreating."
+            # )
+            # if db_path.exists():
+            #     try:
+            #         db_path.replace(db_path.with_name(f"{db_path.name}.corrupt"))
+            #     except OSError as error:
+            #         logger.error(f"Failed to back up corrupt database: {error}")
+            #         raise
+
+            # return cls.open(collection_dir)
 
         return cls(conn, db_path)
 
@@ -233,7 +249,7 @@ class SyncState:
     def upsert_note_links(
         self,
         mappings: Iterable[tuple[str, int]],
-        *,
+        *,  # todo: why the keyword-only argument? looks a bit arbitrary
         source_id: str = "local",
     ) -> None:
         rows = [(note_key, note_id) for note_key, note_id in mappings]

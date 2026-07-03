@@ -45,6 +45,11 @@ class DeckSource:
     def local(cls, collection_dir: Path) -> "DeckSource":
         return cls(collection_dir=collection_dir, source_id=LOCAL_SOURCE_ID)
 
+    # todo: please explain the meaning of collection_dir and source_id in the context of DeckSource. What do they represent?
+    # in the past, collection dir was the root of the anki collection. Is this still the case? And more importantly, do we still need it at all?
+    # for source id, what does it mean? the variable name it not easy to understand. Can we find a better name once we have a clear conceptual understanding of what it represents?
+    # please note that changes here have to applied to the rest of the codebase with the highest care.
+
     @classmethod
     def shared(cls, collection_dir: Path, source_id: str) -> "DeckSource":
         _validate_shared_source_id(source_id)
@@ -56,6 +61,9 @@ class DeckSource:
             return self.collection_dir
         owner, repository_name = _validate_shared_source_id(self.source_id)
         return self.collection_dir / SHARED_DIR / owner / repository_name
+        # again, shared_dir together with shared_id, etc., gets confusing
+
+    # todo: why another property for root? can we simplify this aggressively?
 
     @property
     def note_types_dir(self) -> Path:
@@ -64,6 +72,7 @@ class DeckSource:
     @property
     def is_shared(self) -> bool:
         return self.source_id != LOCAL_SOURCE_ID
+        # todo: awkward. the file system is our registry, simple as that.
 
     @property
     def display_name(self) -> str:
@@ -141,10 +150,12 @@ def load_note_types_for_source(source: DeckSource) -> list[NoteType]:
 def load_note_types_for_collection(
     collection_dir: Path,
     *,
-    sources: Sequence[DeckSource] | None = None,
+    sources: Sequence[DeckSource]
+    | None = None,  # todo: big question: why Sequence? why we don't just use set?
     note_types_dir: Path | None = None,
 ) -> list[NoteType]:
     """Load note types from the explicitly selected collection sources."""
+    # todo: looks super awkward. our filesystem is the registry, so we should be able to simplify this aggressively?
     selected = (
         list(sources) if sources is not None else discover_deck_sources(collection_dir)
     )

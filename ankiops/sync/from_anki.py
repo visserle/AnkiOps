@@ -534,14 +534,12 @@ def sync_collection_from_anki(
     anki_port: Anki,
     db_port: SyncState,
     collection_dir: Path,
-    *,
-    sources: Sequence[DeckSource],
+    *,  # todo: why is this a keyword-only argument? looks a bit arbitrary
+    sources: Sequence[DeckSource],  # we always sync all decks, do we need this?
 ) -> CollectionReport:
     local_source = sources[0]
     configs = [
-        config
-        for source in sources
-        for config in load_note_types_for_source(source)
+        config for source in sources for config in load_note_types_for_source(source)
     ]
     config_by_name = {config.name: config for config in configs}
     html_to_markdown = HTMLToMarkdown()

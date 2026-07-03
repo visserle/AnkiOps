@@ -78,6 +78,7 @@ def _snapshot_paths(
 
 
 def _validated_sources(collection_dir: Path) -> list[DeckSource]:
+    # todo: parse, don't validate
     sources = discover_deck_sources(collection_dir)
     for source in sources[1:]:
         if not GitRepository(source.root).is_repo():
@@ -92,6 +93,8 @@ def _validated_sources(collection_dir: Path) -> list[DeckSource]:
 def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> None:
     for source in sources:
         if not source.is_shared:
+            # todo: let's discuss this: does this mean we do not commit in the seperate git repository of shared decks
+            # when we have local changes and use e.g. ankiops fa?
             continue
         commit = GitRepository(source.root).checkpoint(
             f"AnkiOps: snapshot before {action}"
@@ -100,6 +103,7 @@ def _checkpoint_shared_sources(sources: Sequence[DeckSource], action: str) -> No
             logger.info("Auto-committed %s checkpoint %s", source.source_id, commit[:7])
 
 
+# todo: same question as above
 def _record_applied_sources(
     state: SyncState,
     sources: Sequence[DeckSource],
@@ -240,7 +244,11 @@ def run_af(args):
     try:
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(
-            anki, collection_dir, state, sources=sources
+            anki,
+            collection_dir,
+            state,
+            sources=sources,
+            # todo: why collection_dir and sources?
         )
         logger.info(format_media_status(media_result, from_anki=True))
         _record_applied_sources(state, sources)
@@ -316,6 +324,7 @@ def run_fa(args):
     import_summary: CollectionReport = sync_collection_to_anki(
         anki_port=anki,
         db_port=state,
+        # todo: fix variable names, make sure to use the semantic AST everywhere
         collection_dir=collection_dir,
         note_types_dir=note_types_dir,
         sources=sources,

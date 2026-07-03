@@ -2,7 +2,9 @@
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import (
+    Sequence,  # todo: again, why Sequence? why we don't just use set?
+)
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -554,19 +556,19 @@ def sync_all_media_to_anki(
     """Push media from all active sync sources to Anki."""
     selected_sources = (
         list(sources) if sources is not None else discover_deck_sources(collection_dir)
-    )
+    )  # todo: super awkward, no?
     _prune_media_cache_for_sources(db_port, collection_dir, selected_sources)
     managed_before = db_port.list_managed_media()
     combined = SyncReport.for_media()
     for source in selected_sources:
         source_result = sync_media_to_anki(
-            anki_port,
+            anki_port,  # todo: port is not the current semantic AST
             source.root,
-            db_port,
+            db_port,  # todo: see above
             cache_root=collection_dir,
             md_files=source.deck_files(),
             prune_cache=False,
-            source_id=source.source_id,
+            source_id=source.source_id,  # todo: why source.deck_files() and source.source_id? can't we simplify this aggressively? the filesystem is our registry
         )
         _combine_media_result(combined, source_result)
 
@@ -591,6 +593,7 @@ def sync_all_media_to_anki(
             continue
         anki_port.delete_media(name)
         db_port.delete_media_files([name], source_id=source_id)
+        # todo: why do we delete media twice?
         if not any(
             change.change_type is ChangeType.DELETE and change.entity_repr == name
             for change in combined.changes

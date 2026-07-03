@@ -73,7 +73,9 @@ class GitRepository:
         result = self.run(["rev-parse", f"{ref}^{{tree}}"], check=False)
         return result.stdout.strip() or None if result.returncode == 0 else None
 
-    def trees_equal(self, left: str, right: str) -> bool:
+    def trees_equal(
+        self, left: str, right: str
+    ) -> bool:  # todo: we no longer use worktrees for shared decks, is this needed?
         return self.tree(left) == self.tree(right)
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
@@ -146,6 +148,7 @@ class GitRepository:
         raise ValueError(f"Cannot determine the default branch for remote {remote}.")
 
     def ensure_work_branch(self, branch: str, start_ref: str) -> None:
+        # todo: why a branch? we no longer use worktrees, and shared decks are just their own repositories. or am i missing sth?
         exists = (
             self.run(
                 ["show-ref", "--verify", f"refs/heads/{branch}"], check=False
@@ -166,9 +169,7 @@ class GitRepository:
         return self.head() != old_head
 
     def unmerged_paths(self) -> list[str]:
-        result = self.run(
-            ["diff", "--name-only", "--diff-filter=U", "-z"], check=False
-        )
+        result = self.run(["diff", "--name-only", "--diff-filter=U", "-z"], check=False)
         return [path for path in result.stdout.split("\0") if path]
 
     def reset_hard(self, ref: str) -> None:
@@ -216,7 +217,7 @@ def git_snapshot(
     *,
     action: str,
     paths: Sequence[Path],
-    strict: bool = False,
+    strict: bool = False,  # todo: are you sure this is a good idea? can we remove it? it should always work, if not, we should fix the underlying issue instead of ignoring it
 ) -> bool:
     """Commit pending changes for explicit paths in one repository."""
     collection_git = GitRepository(collection_dir)

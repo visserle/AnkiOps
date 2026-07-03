@@ -207,7 +207,9 @@ def main():
         metavar="OWNER/REPO",
         help="Shared deck identity (letters, digits, hyphens)",
     )
-    publish_visibility = shared_publish.add_mutually_exclusive_group()
+    publish_visibility = (
+        shared_publish.add_mutually_exclusive_group()
+    )  # todo: remove this, public is the default for sharing decks
     publish_visibility.add_argument(
         "--public",
         action="store_true",

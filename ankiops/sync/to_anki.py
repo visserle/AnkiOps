@@ -155,6 +155,7 @@ def sync_collection_to_anki(
     note_types_dir: Path,
     *,
     sources: Sequence[DeckSource] | None = None,
+    # todo: same questions as in from_anki
 ) -> CollectionReport:
     source_deck_files, note_types_by_name, selected_sources = _load_source_deck_files(
         collection_dir,
