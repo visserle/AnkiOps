@@ -151,6 +151,16 @@ def test_trees_equal_is_false_when_either_ref_is_missing(tmp_path):
     assert not repository.trees_equal("missing-ref", "also-missing")
 
 
+def test_status_lines_keep_unicode_paths_readable(tmp_path):
+    _init_git_repo(tmp_path)
+    path = tmp_path / "Déck Ω — punctuation!.md"
+    path.write_text("content\n", encoding="utf-8")
+
+    assert GitRepository(tmp_path).status_lines() == [
+        '?? "Déck Ω — punctuation!.md"'
+    ]
+
+
 def test_git_snapshot_propagates_checkpoint_failure(tmp_path, monkeypatch):
     _init_git_repo(tmp_path)
     tracked = tmp_path / "Deck.md"

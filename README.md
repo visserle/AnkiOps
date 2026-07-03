@@ -8,8 +8,9 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 - **User-friendly**: Edit Anki decks as highly readable Markdown files
 - **Full Anki support**: Two-way sync of notes, note types, decks and media files
-- **Customization**: Define your own note types and card templates
 - **Performance**: Sync thousands of notes in under a second
+- **Customization**: Define your own note types and card templates
+- **Automation**: Improve your flashcards with programmable LLM tasks
 - **Collaboration**: Share decks on GitHub and collaborate with others
 
 ## How It Works
@@ -21,8 +22,7 @@ In a deck file, each note is separated by a blank line, three dashes, and anothe
 ```markdown
 Q: Question text here
 A: Answer text here:
-- List item 1
-- List item 2
+Multiple lines supported
 E: Extra information (optional)
 M: Content behind a "more" button (optional)
 
@@ -35,11 +35,11 @@ E: Some *formatted* extra info.
 
 ---
 
-<!-- tags: exam-question -->
+<!-- tags: exam -->
 Q: What is this?
 C1: A multiple choice note
 C2: with
-C3: automatically randomized answers.
+C3: automatically randomized answers
 A: 1, 3
 ```
 
@@ -48,18 +48,17 @@ You can use any Markdown syntax (except a horizontal rule) in the note content, 
 After the first sync, AnkiOps adds metadata comments for each note:
 
 ```markdown
-<!-- note_key: 123487556abc -->
+<!-- note_key: 2fd62bcaa861 -->
 <!-- note_type: AnkiOpsQA -->
 Q: Question text here
 A: Answer text here:
-- List item 1
-- List item 2
+Multiple lines supported
 E: Extra information (optional)
 M: Content behind a "more" button (optional)
 
 ---
 
-<!-- note_key: 123474567def -->
+<!-- note_key: ef0108255d7d -->
 <!-- note_type: AnkiOpsCloze -->
 T: Text with {{c1::multiple}} {{c2::cloze deletions}}.
 E: Some *formatted* extra info.
@@ -68,13 +67,13 @@ E: Some *formatted* extra info.
 
 ---
 
-<!-- note_key: 123473457ghi -->
+<!-- note_key: 332e64bba6fe -->
 <!-- note_type: AnkiOpsChoice -->
-<!-- tags: exam-question -->
+<!-- tags: exam -->
 Q: What is this?
 C1: A multiple choice note
 C2: with
-C3: automatically randomized answers.
+C3: automatically randomized answers
 A: 1, 3
 ```
 
@@ -84,13 +83,22 @@ The `note_key` is a stable identifier independent of Anki's note IDs and it is u
 
 The basic structure of an AnkiOps collection is:
 
-```text
-media/                 
-note_types/          
-.ankiops.db         
-Deck1.md         
-Deck1__Subdeck1.md      
-```
+````
+├── note_types/
+│   ├── AnkiOpsQA/
+│   │   ├── Front.template.anki
+│   │   ├── Back.template.anki
+│   │   └── note_type.yaml
+│   ├── AnkiOpsCloze/
+│   ├── AnkiOpsStyling.css
+│   └── SyntaxHighlighting.css
+├── media/
+│   └── image1_hash.png
+├── llm/
+├── .ankiops.db
+├── Deck1.md
+└── Deck1__Subdeck1.md
+````
 
 The `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` values in the Markdown files to Anki's internal note IDs.
 
@@ -117,8 +125,8 @@ Generic, non-identifying labels such as `E:` for Extra can be added to any note 
 
 AnkiOps has two sync commands:
 
-- `ankiops fa` (files to anki): After editing Markdown decks, media, or note types, and
-- `ankiops af` (anki to files): After editing notes, tags, or decks in Anki.
+- `ankiops af` (anki to files): After editing notes, tags, or decks in Anki, and
+- `ankiops fa` (files to anki): After editing Markdown decks, media, or note types.
 
 Both sync operations can create update, move, and delete managed notes, and handle all media and note types. Before syncing, an automatic Git snapshot is created.
 
@@ -238,6 +246,12 @@ request. Contributors without write permission use an authenticated fork
 automatically. If local and upstream edits overlap, the subscribed deck remains
 unchanged. AnkiOps preserves editable base, local, and upstream copies; edit the
 marked Markdown it reports and rerun `shared update`.
+
+If GitHub authentication, upload, or pull-request creation fails, AnkiOps keeps
+the commit on the recovery branch shown in the output. Rerun the reported
+`shared submit` command to reuse it. Your local Git configuration supplies the
+commit author; the authenticated GitHub account uploads it and opens the pull
+request. Submit output shows both identities.
 
 ## Command Reference
 

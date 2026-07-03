@@ -577,6 +577,7 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert all(deck.deck_name != "OldDeck" for deck in result.untracked_decks)
         assert db.resolve_deck_id("OldDeck") is None
         assert db.resolve_deck_id("NewDeck") == world.mock_anki.decks["NewDeck"]
+        assert "OldDeck" not in world.mock_anki.decks
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
 
@@ -626,6 +627,30 @@ def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(w
 
         moved_card_id = world.mock_anki.notes[moved_note_id]["cards"][0]
         assert world.mock_anki.cards[moved_card_id]["deckName"] == "NewDeck"
+
+
+def test_imp_run_rename_003_keeps_old_deck_with_unmanaged_card(world):
+    note_key = "imp-run-rename-003-moved"
+    moved_note_id = world.add_qa_note(
+        deck_name="OldDeck",
+        question="Moved Q",
+        answer="Moved A",
+        note_key=note_key,
+    )
+    world.add_anki_note(
+        deck_name="OldDeck",
+        note_type="OutsideAnkiOps",
+        fields={"Front": "Unmanaged"},
+    )
+    world.write_qa_deck("NewDeck", [("Moved Q", "Moved A", note_key)])
+
+    with world.db_session() as db:
+        db.upsert_note_links([(note_key, moved_note_id)])
+        db.upsert_deck("OldDeck", world.mock_anki.decks["OldDeck"])
+
+        world.sync_import(db)
+
+        assert "OldDeck" in world.mock_anki.decks
 
 
 def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world):

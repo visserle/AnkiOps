@@ -4,7 +4,7 @@ import logging
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ankiops.anki_rpc import AnkiConnectionError, invoke
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
@@ -75,6 +75,16 @@ class Anki:
 
     def fetch_deck_names_and_ids(self) -> dict[str, int]:
         return self._invoke("deckNamesAndIds")
+
+    def fetch_card_ids_in_deck(self, deck_name: str) -> list[int]:
+        return cast(
+            list[int],
+            self._invoke("findCards", query=f"deck:{_quote_search_value(deck_name)}"),
+        )
+
+    def delete_empty_deck(self, deck_name: str) -> None:
+        """Delete a deck after the caller has verified it contains no cards."""
+        self._invoke("deleteDecks", decks=[deck_name], cardsToo=True)
 
     def fetch_all_note_ids(self, required_types: list[str]) -> list[int]:
         if not required_types:

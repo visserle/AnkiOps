@@ -125,7 +125,8 @@ def _upstream_edit(tmp_path: Path, remote: Path, old: str, new: str) -> str:
     return head
 
 
-def test_update_noop_creates_no_commit(shared_world):
+def test_update_noop_creates_no_commit(shared_world, caplog):
+    caplog.set_level(logging.INFO)
     _collection, source, _remote = shared_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
 
@@ -133,6 +134,8 @@ def test_update_noop_creates_no_commit(shared_world):
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert _git(source, "branch", "--list", "ankiops/recovery/*").stdout == ""
+    assert "Local result: no local or upstream changes" in caplog.text
+    assert "Next: none" in caplog.text
 
 
 def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypatch):
@@ -304,8 +307,9 @@ def test_update_checkpoints_local_edit_and_integrates_remote(shared_world, tmp_p
 
 
 def test_conflict_preserves_versions_and_leaves_source_unchanged(
-    shared_world, tmp_path
+    shared_world, tmp_path, caplog
 ):
+    caplog.set_level(logging.INFO)
     collection, source, remote = shared_world
     deck = source / "Deck.md"
     deck.write_text(
@@ -330,6 +334,7 @@ def test_conflict_preserves_versions_and_leaves_source_unchanged(
     assert list(conflicts.rglob("Deck.md.local"))
     assert list(conflicts.rglob("Deck.md.upstream"))
     assert list(conflicts.rglob("Deck.md.base"))
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
 def test_conflict_preserves_versions_for_unicode_deck_path(shared_world, tmp_path):
@@ -514,6 +519,9 @@ def test_submit_commits_only_source_and_reuses_operation(
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == first_head
     assert _git(publish, "for-each-ref", "--format=%(refname)").stdout == first_refs
     assert created_pr[0]["head"].startswith("contributor:ankiops/")
+    assert _git(source, "log", "-1", "--format=%s").stdout.strip() == (
+        "Save local deck changes for owner/repo"
+    )
     assert private.read_text(encoding="utf-8") == "private dirty\n"
     assert _git(collection, "status", "--short").stdout.strip() == "M Private.md"
     db = SyncState.open(collection)
@@ -689,6 +697,39 @@ def test_update_after_squash_merge_cleans_submission_state(
     assert _git(publish, "for-each-ref", "--format=%(refname)").stdout == ""
 
 
+def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
+    collection, source, _remote = shared_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "locally committed answer"
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "ankiops.shared.commands.GitHubHost.publish_target",
+        lambda *_args: (_ for _ in ()).throw(
+            ValueError("GitHub CLI is not authenticated. Run: gh auth login")
+        ),
+    )
+
+    with pytest.raises(ValueError) as error:
+        run_submit(SimpleNamespace(repository="owner/repo", message="Local change"))
+
+    message = str(error.value)
+    assert "was committed locally" in message
+    assert "Nothing was uploaded" in message
+    assert "Retrying is safe: ankiops shared submit owner/repo" in message
+    db = SyncState.open(collection)
+    try:
+        assert db.get_shared_operation("shared/owner/repo") is None
+    finally:
+        db.close()
+    assert _git(source, "branch", "--list", "ankiops/*").stdout.strip() == (
+        "* ankiops/work"
+    )
+
+
 def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     _collection, source, _remote = shared_world
@@ -705,8 +746,36 @@ def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, 
 
     assert "Local shared changes: 1" in caplog.text
     assert "local files were not changed" in caplog.text
-    assert "Private deck changes: 0" in caplog.text
+    assert "collection changes" not in caplog.text.lower()
     assert "Next: ankiops shared status owner/repo" in caplog.text
+
+
+def test_status_omits_unrelated_collection_changes(shared_world, caplog):
+    caplog.set_level(logging.INFO)
+    collection, _source, _remote = shared_world
+    private_deck = collection / "Private.md"
+    private_deck.write_text("private edit\n", encoding="utf-8")
+    generated_config = collection / "note_types" / "Generated.yaml"
+    generated_config.parent.mkdir()
+    generated_config.write_text("generated\n", encoding="utf-8")
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert "collection changes" not in caplog.text.lower()
+    assert "Private.md" not in caplog.text
+    assert "Generated.yaml" not in caplog.text
+
+
+def test_status_prints_unicode_shared_paths_without_git_quoting(shared_world, caplog):
+    caplog.set_level(logging.INFO)
+    _collection, source, _remote = shared_world
+    unicode_name = "Déck Ω — punctuation!.md"
+    (source / unicode_name).write_text("draft\n", encoding="utf-8")
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+
+    assert unicode_name in caplog.text
+    assert "\\303" not in caplog.text
 
 
 @pytest.mark.parametrize("state", ["push_failed", "pr_failed"])

@@ -526,11 +526,19 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
         local=(
             "saved local deck edits and applied available updates"
             if saved_commit
-            else "applied available updates without changing private decks"
+            else (
+                "applied available updates without changing private decks"
+                if files_changed
+                else "no local or upstream changes"
+            )
         ),
         github="checked for updates; nothing was sent",
-        retry="yes; the update completed transactionally",
-        next_command="ankiops fa",
+        retry=(
+            "yes; the update completed transactionally"
+            if files_changed or saved_commit
+            else "not needed; the deck is already current"
+        ),
+        next_command="ankiops fa" if files_changed or saved_commit else "none",
     )
 
 
@@ -554,7 +562,6 @@ def run_update(args: SimpleNamespace) -> None:
                 _update_one(collection_root, source, state)
             except (ValueError, subprocess.CalledProcessError) as error:
                 failures.append(f"{source.display_name}: {error}")
-                logger.error("%s", failures[-1])
     finally:
         state.close()
     if failures:
@@ -638,7 +645,15 @@ def run_submit(args: SimpleNamespace) -> None:
         if local_commit is None:
             raise ValueError(f"Shared source {source.display_name} has no commits.")
         github = GitHubHost(source.root)
-        contribution_slug, contributor = github.publish_target(source.display_name)
+        try:
+            contribution_slug, contributor = github.publish_target(source.display_name)
+        except ValueError as error:
+            raise ValueError(
+                f"Your contribution for {source.display_name} was committed locally "
+                "but GitHub setup did not finish. Nothing was uploaded and private "
+                "decks were not touched. Retrying is safe: "
+                f"ankiops shared submit {source.display_name}. Details: {error}"
+            ) from error
         source_git.set_remote("publish", f"https://github.com/{contribution_slug}.git")
         uploaded_commit = source_git.remote_branch_sha("publish", contribution_branch)
         if uploaded_commit != local_commit:
@@ -743,7 +758,6 @@ def _github_update_state(source_git: GitRepository) -> str:
 def _status_one(
     source: DeckSource,
     state: SyncState,
-    private_status: list[str],
 ) -> None:
     source_git = _require_source_git(source)
     local_changes = source_git.status_lines()
@@ -758,11 +772,6 @@ def _status_one(
     logger.info("Shared deck: %s", source.display_name)
     logger.info("Local shared changes: %d", len(local_changes))
     for line in local_changes:
-        logger.info("  %s", line[3:] if len(line) > 3 else line)
-    logger.info(
-        "Private deck changes: %d (not part of shared commands)", len(private_status)
-    )
-    for line in private_status:
         logger.info("  %s", line[3:] if len(line) > 3 else line)
     logger.info("Available updates: %s", update_state)
     logger.info(
@@ -819,8 +828,7 @@ def _status_one(
 
 def run_status(args: SimpleNamespace) -> None:
     collection_root = require_collection_root()
-    collection_git = _require_collection_git(collection_root)
-    private_status = collection_git.status_lines()
+    _require_collection_git(collection_root)
     sources = discover_deck_sources(collection_root)[1:]
     if getattr(args, "repository", None):
         source = _shared_source(collection_root, args.repository)
@@ -834,7 +842,7 @@ def run_status(args: SimpleNamespace) -> None:
     state = SyncState.open(collection_root)
     try:
         for source in sources:
-            _status_one(source, state, private_status)
+            _status_one(source, state)
     finally:
         state.close()
 

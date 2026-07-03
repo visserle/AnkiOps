@@ -318,6 +318,9 @@ def sync_collection_to_anki(
         for source_deck, target_deck in sorted(rename_candidates):
             if source_deck in note_ids_by_deck_name:
                 continue
+            if anki.fetch_card_ids_in_deck(source_deck):
+                continue
+            anki.delete_empty_deck(source_deck)
             state.delete_deck(source_deck)
             logger.info(
                 f"Deck renamed from markdown file: '{source_deck}' -> '{target_deck}'"

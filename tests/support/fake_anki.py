@@ -209,6 +209,17 @@ class MockAnki:
                 self.decks[name] = new_id
                 return new_id
 
+            case "deleteDecks":
+                for deck_name in params["decks"]:
+                    if any(
+                        card["deckName"] == deck_name for card in self.cards.values()
+                    ):
+                        raise AnkiConnectionError(
+                            f"cannot delete non-empty deck: {deck_name}"
+                        )
+                    self.decks.pop(deck_name, None)
+                return None
+
             case "addNote":
                 note_data = params["note"]
                 if "deckName" in note_data:

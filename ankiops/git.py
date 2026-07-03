@@ -90,7 +90,13 @@ class GitRepository:
         return result.returncode == 0
 
     def status_lines(self, pathspec: list[str] | None = None) -> list[str]:
-        args = ["status", "--short", "--untracked-files=all"]
+        args = [
+            "-c",
+            "core.quotePath=false",
+            "status",
+            "--short",
+            "--untracked-files=all",
+        ]
         if pathspec:
             args.extend(["--", *pathspec])
         return self.run(args).stdout.splitlines()
