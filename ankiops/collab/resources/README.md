@@ -32,18 +32,16 @@ ankiops collab update {{REPOSITORY}}
 ankiops fa
 ```
 
-`collab status` reports available GitHub changes and local work. `collab update` brings GitHub changes into the local Markdown source. Review them, then run `ankiops fa` to apply them to Anki.
+`collab status` reports available GitHub changes and local work. `collab update` brings this repository's GitHub changes into its local Markdown files. Review them, then run `ankiops fa` to sync the whole collection to Anki.
 
 If an update overlaps with a local edit, AnkiOps leaves the subscribed repository unchanged and reports the location of preserved base, local, and upstream copies. Resolve the marked Markdown file there, remove its conflict markers, and run the reported update command again.
 
 ## Contribute to this deck
 
-Choose either editing workflow:
+Edit your subscribednotes with either workflow:
 
 - Edit the Markdown files under `collab/{{REPOSITORY}}/`.
-- Edit cards in Anki, then run `ankiops af` to write those changes back to the deck files.
-
-Deck files follow the [AnkiOps Markdown syntax](https://github.com/visserle/AnkiOps#markdown-files). Keep the `note_key` and `note_type` comments unchanged; you may edit fields and tags.
+- Edit cards in Anki, then run `ankiops fa` to write those changes back to the deck files.
 
 Review and submit your changes from the AnkiOps collection root:
 
@@ -58,12 +56,12 @@ Use an issue for questions about the deck's scope or content. Use a pull request
 
 ## Maintain this deck as a publisher
 
-<!--
-Publisher checklist:
-- Add a LICENSE file before accepting contributions.
-- Replace the notice in the License section below.
-- Remove this comment.
--->
+Before inviting subscribers, replace the opening paragraph with information specific to this deck:
+
+- Describe its topics, intended audience, and prerequisite knowledge.
+- Name its sources or credits and explain which issues and contributions you accept.
+
+Remove this checklist after updating the paragraph.
 
 Review incoming changes through GitHub pull requests. After merging a pull request, update your local subscription before making more edits:
 
@@ -74,23 +72,4 @@ ankiops fa
 
 Use the same `status` and `submit` workflow for maintainer-authored changes.
 
-## Command Reference
-
-Global options:
-
-- `--debug`: Enable debug logging.
-- `--version`: Show the installed version.
-- `--help`: Show help.
-
-Collab commands:
-
-- `ankiops init [--tutorial]`: Initialize the current directory as an AnkiOps collection.
-- `ankiops anki-to-files` or `ankiops af`: Sync Anki changes into local files.
-- `ankiops files-to-anki` or `ankiops fa`: Sync local file changes into Anki.
-- `ankiops collab publish <deck> <owner>/<repo>`: Publish a deck to GitHub.
-- `ankiops collab subscribe <owner>/<repo>`: Subscribe to a deck on GitHub.
-- `ankiops collab status [owner/repo]`: Show the status of a subscribed deck.
-- `ankiops collab update [owner/repo]`: Update a subscribed deck with upstream changes.
-- `ankiops collab submit <owner>/<repo> [-m|--message text]`: Submit local changes to a subscribed deck as a PR.
-
-See the [AnkiOps README](https://github.com/visserle/AnkiOps) for further details. 
+See the [AnkiOps README](https://github.com/visserle/AnkiOps) for the full command reference and synchronization details.
