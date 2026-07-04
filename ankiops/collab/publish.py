@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass, replace
+from importlib import resources
 from pathlib import Path
 
 import yaml
@@ -28,6 +29,7 @@ class _RenderedPublishFile:
 
 @dataclass(frozen=True)
 class _PublishPlan:
+    deck: str
     source: DeckSource
     files: list[_RenderedPublishFile]
     note_types_used: set[str]
@@ -217,6 +219,7 @@ def _prepare_publish_plan(
         )
 
     return _PublishPlan(
+        deck=deck,
         source=source,
         files=rendered_files,
         note_types_used=note_types_used,
@@ -298,6 +301,19 @@ def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path
     source.note_types_dir.mkdir(parents=True, exist_ok=True)
 
     touched: list[Path] = [source.root]
+    readme_template = (
+        resources.files("ankiops.collab")
+        .joinpath("resources/README.md")
+        .read_text(encoding="utf-8")
+    )
+    readme = source.root / "README.md"
+    readme.write_text(
+        readme_template.replace("{{DECK_NAME}}", plan.deck).replace(
+            "{{REPOSITORY}}", source.display_name
+        ),
+        encoding="utf-8",
+    )
+    touched.append(readme)
     for rendered in plan.files:
         rendered.target_path.write_text(rendered.content, encoding="utf-8")
         touched.extend([rendered.target_path, rendered.source_path])

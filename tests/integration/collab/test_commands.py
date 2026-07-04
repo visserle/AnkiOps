@@ -240,6 +240,10 @@ def test_publish_moves_deck_into_independent_repository(tmp_path, monkeypatch):
     assert "collab/owner/repo/AnkiOpsQA" in (source / "Deck.md").read_text(
         encoding="utf-8"
     )
+    readme = (source / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith("# Deck\n")
+    assert "ankiops collab subscribe owner/repo" in readme
+    assert _git(remote, "show", "main:README.md").stdout == readme
     assert _git(source, "branch", "--show-current").stdout.strip() == "ankiops/work"
     assert _git(remote, "rev-parse", "refs/heads/main").stdout.strip()
     db = SyncState.open(collection)
