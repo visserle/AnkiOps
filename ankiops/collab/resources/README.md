@@ -5,16 +5,22 @@
 > [!NOTE]
 > AnkiOps collaboration is experimental. Check the [AnkiOps documentation](https://github.com/visserle/AnkiOps#how-does-collaboration-work-experimental) before upgrading an existing collection or changing the repository layout.
 
-## Use this deck
+## Subscribe to this deck
 
-Follow the [AnkiOps installation and initialization guide](https://github.com/visserle/AnkiOps#how-to-get-started) first. Then run these commands from the AnkiOps collection root:
+Follow the [AnkiOps installation and initialization guide](https://github.com/visserle/AnkiOps#how-to-get-started) first. AnkiOps collab commands further require the [GitHub CLI](https://cli.github.com/) with an authenticated GitHub account:
+
+```bash
+gh auth login
+```
+
+Run these commands from the AnkiOps collection root:
 
 ```bash
 ankiops collab subscribe {{REPOSITORY}}
 ankiops fa
 ```
 
-`collab subscribe` clones this repository into `collab/{{REPOSITORY}}/` as an independent Git repository. `ankiops fa` syncs its deck files, media, and note types to Anki. Your AnkiOps collection can hold private decks and other shared repositories alongside it.
+`collab subscribe` clones this repository into `collab/{{REPOSITORY}}/` as an independent Git repository. `ankiops fa` syncs its deck files, media, and note types to Anki. Your AnkiOps collection can hold private decks and other shared repositories alongside it. Open Anki to confirm that `{{DECK_NAME}}` and its subdecks appear.
 
 ## Keep the deck current
 
@@ -30,7 +36,7 @@ ankiops fa
 
 If an update overlaps with a local edit, AnkiOps leaves the subscribed repository unchanged and reports the location of preserved base, local, and upstream copies. Resolve the marked Markdown file there, remove its conflict markers, and run the reported update command again.
 
-## Contribute
+## Contribute to this deck
 
 Choose either editing workflow:
 
@@ -50,17 +56,16 @@ ankiops collab submit {{REPOSITORY}} --message "Clarify the explanation of space
 
 Use an issue for questions about the deck's scope or content. Use a pull request for a concrete card, media, or note-type change.
 
-## Publish and maintain a deck
+## Maintain this deck as a publisher
 
-Publish a local deck tree from an initialized AnkiOps collection with:
+<!--
+Publisher checklist:
+- Add a LICENSE file before accepting contributions.
+- Replace the notice in the License section below.
+- Remove this comment.
+-->
 
-```bash
-ankiops collab publish "{{DECK_NAME}}" {{REPOSITORY}}
-```
-
-`collab publish` creates a public GitHub repository and moves the selected deck and its subdecks into an independent local repository. It copies referenced media and required note types; other decks stay outside the published repository.
-
-Add a deck-specific description and license before inviting contributions. Review incoming changes through GitHub pull requests. After merging a pull request, update the local subscription before making more edits:
+Review incoming changes through GitHub pull requests. After merging a pull request, update your local subscription before making more edits:
 
 ```bash
 ankiops collab update {{REPOSITORY}}
@@ -69,4 +74,23 @@ ankiops fa
 
 Use the same `status` and `submit` workflow for maintainer-authored changes.
 
-See the [AnkiOps README](https://github.com/visserle/AnkiOps) for Markdown syntax, note types, synchronization, and command details.
+## Command Reference
+
+Global options:
+
+- `--debug`: Enable debug logging.
+- `--version`: Show the installed version.
+- `--help`: Show help.
+
+Collab commands:
+
+- `ankiops init [--tutorial]`: Initialize the current directory as an AnkiOps collection.
+- `ankiops anki-to-files` or `ankiops af`: Sync Anki changes into local files.
+- `ankiops files-to-anki` or `ankiops fa`: Sync local file changes into Anki.
+- `ankiops collab publish <deck> <owner>/<repo>`: Publish a deck to GitHub.
+- `ankiops collab subscribe <owner>/<repo>`: Subscribe to a deck on GitHub.
+- `ankiops collab status [owner/repo]`: Show the status of a subscribed deck.
+- `ankiops collab update [owner/repo]`: Update a subscribed deck with upstream changes.
+- `ankiops collab submit <owner>/<repo> [-m|--message text]`: Submit local changes to a subscribed deck as a PR.
+
+See the [AnkiOps README](https://github.com/visserle/AnkiOps) for further details. 
