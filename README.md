@@ -10,7 +10,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 - 🔄 Two-way sync of notes, note types, decks and media files
 - ⚡ Sync thousands of notes in under a second
 - ⚙️ Bring your own note types
-- ✨ Improve your flashcards with programmable LLM tasks
+- ✨ Improve content with programmable LLM tasks
 - 👥 Share decks on GitHub and collaborate with others
 
 ## How It Works
