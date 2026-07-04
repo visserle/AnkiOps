@@ -223,49 +223,49 @@ ankiops fix-image-widths --deck "Deck1" --width 500  # fix width
 
 Serialize a collection (or one deck tree) to portable JSON and deserialize it back using the `ankiops serialize` and `ankiops deserialize` commands. 
 
-## How does sharing work? (experimental)
+## How does collaboration work? (experimental)
 
-Shared decks are ordinary GitHub repositories cloned inside the collection. The
-collection root remains one VS Code workspace, while VS Code shows each shared
+Collab decks are ordinary GitHub repositories cloned inside the collection. The
+collection root remains one VS Code workspace, while VS Code shows each collab
 source as its own repository.
 
 Publish a local deck tree:
 
 ```bash
-ankiops shared publish "Psychology" owner/psychology-deck
+ankiops collab publish "Psychology" owner/psychology-deck
 ```
 
-`shared publish` requires stable `note_key` metadata and authenticated GitHub CLI.
-It moves the selected deck tree into `shared/<owner>/<repo>/`, copies referenced
+`collab publish` requires stable `note_key` metadata and authenticated GitHub CLI.
+It moves the selected deck tree into `collab/<owner>/<repo>/`, copies referenced
 media and note types, creates an independent repository, and pushes it to GitHub.
 Published repositories are always public.
 
-Subscribe to and update a shared deck:
+Subscribe to and update a collab deck:
 
 ```bash
-ankiops shared subscribe owner/psychology-deck
-ankiops shared update owner/psychology-deck
+ankiops collab subscribe owner/psychology-deck
+ankiops collab update owner/psychology-deck
 ankiops fa
 ```
 
-Submit local shared edits:
+Submit local collab edits:
 
 ```bash
-ankiops shared status owner/psychology-deck
-ankiops shared submit owner/psychology-deck \
+ankiops collab status owner/psychology-deck
+ankiops collab submit owner/psychology-deck \
   --message "Clarify attention terminology"
 ```
 
-`shared update` changes files only; run `ankiops fa` after reviewing them.
-`shared submit` commits changes only inside the selected source and opens a pull
+`collab update` changes files only; run `ankiops fa` after reviewing them.
+`collab submit` commits changes only inside the selected source and opens a pull
 request. Contributors without write permission use an authenticated fork
 automatically. If local and upstream edits overlap, the subscribed deck remains
 unchanged. AnkiOps preserves editable base, local, and upstream copies; edit the
-marked Markdown it reports and rerun `shared update`.
+marked Markdown it reports and rerun `collab update`.
 
 If GitHub authentication, upload, or pull-request creation fails, AnkiOps keeps
 the commit on the recovery branch shown in the output. Rerun the reported
-`shared submit` command to reuse it. Your local Git configuration supplies the
+`collab submit` command to reuse it. Your local Git configuration supplies the
 commit author; the authenticated GitHub account uploads it and opens the pull
 request. Submit output shows both identities.
 
@@ -305,13 +305,13 @@ LLM tools:
 - `ankiops llm <task> --run [--model model] [--deck deck]`: Run a task.
 - `ankiops llm --job <id|latest>`: Inspect one job.
 
-Shared deck tools:
+Collab deck tools:
 
-- `ankiops shared publish <deck> <owner>/<repo>`
-- `ankiops shared subscribe <owner>/<repo>`
-- `ankiops shared status [owner/repo]`
-- `ankiops shared update [owner/repo]`
-- `ankiops shared submit <owner>/<repo> [-m|--message text]`
+- `ankiops collab publish <deck> <owner>/<repo>`
+- `ankiops collab subscribe <owner>/<repo>`
+- `ankiops collab status [owner/repo]`
+- `ankiops collab update [owner/repo]`
+- `ankiops collab submit <owner>/<repo> [-m|--message text]`
 
 ## Contributing
 

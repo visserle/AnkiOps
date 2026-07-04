@@ -50,20 +50,20 @@ class _NoteTypeConversion:
     import_anki_hash: str
 
 
-def _shared_scope(note_type: str) -> str | None:
+def _collab_scope(note_type: str) -> str | None:
     parts = note_type.split("/")
-    if len(parts) == 4 and parts[0] == "shared":
+    if len(parts) == 4 and parts[0] == "collab":
         return "/".join(parts[:3])
     return None
 
 
-def _format_cross_shared_conversion_error(
+def _format_cross_collab_conversion_error(
     *, note_key: str, markdown_note_type: str, anki_note_type: str
 ) -> str:
     return (
         f"Cannot convert note_key {note_key} from '{anki_note_type}' to "
         f"'{markdown_note_type}': the Anki note already belongs to a different "
-        "shared source. Use the matching shared source or resolve the note "
+        "collab source. Use the matching collab source or resolve the note "
         "ownership manually."
     )
 
@@ -409,11 +409,11 @@ def _sync_keyed_note(
     )
 
     if needs_note_type_conversion:
-        anki_scope = _shared_scope(anki_note.note_type)
-        markdown_scope = _shared_scope(parsed_note.note_type)
+        anki_scope = _collab_scope(anki_note.note_type)
+        markdown_scope = _collab_scope(parsed_note.note_type)
         if anki_scope is not None and anki_scope != markdown_scope:
             result.errors.append(
-                _format_cross_shared_conversion_error(
+                _format_cross_collab_conversion_error(
                     note_key=note_key,
                     markdown_note_type=parsed_note.note_type,
                     anki_note_type=anki_note.note_type,

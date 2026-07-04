@@ -114,7 +114,7 @@ class SyncState:
                     "SELECT source_path, operation_id, kind, state, expected_head, "
                     "expected_fingerprint, prepared_head, upstream_tree, "
                     "recovery_ref, publish_branch, pushed_sha, pr_url, last_error "
-                    "FROM shared_operations LIMIT 0"
+                    "FROM collab_operations LIMIT 0"
                 )
 
         except (sqlite3.DatabaseError, sqlite3.OperationalError) as error:
@@ -812,9 +812,9 @@ class SyncState:
         ).fetchone()
         return (row[0], row[1]) if row else None
 
-    # -- Interrupted shared operations ------------------------------------
+    # -- Interrupted collab operations ------------------------------------
 
-    def get_shared_operation(self, source_path: str) -> dict[str, str | None] | None:
+    def get_collab_operation(self, source_path: str) -> dict[str, str | None] | None:
         columns = (
             "operation_id",
             "kind",
@@ -830,7 +830,7 @@ class SyncState:
             "last_error",
         )
         row = self._conn.execute(
-            "SELECT " + ", ".join(columns) + " FROM shared_operations "
+            "SELECT " + ", ".join(columns) + " FROM collab_operations "
             "WHERE source_path = ?",
             (source_path,),
         ).fetchone()
@@ -838,7 +838,7 @@ class SyncState:
             return None
         return dict(zip(columns, row, strict=True))
 
-    def save_shared_operation(
+    def save_collab_operation(
         self,
         source_path: str,
         operation_id: str,
@@ -857,10 +857,10 @@ class SyncState:
             "pr_url",
             "last_error",
         )
-        current = self.get_shared_operation(source_path) or {}
+        current = self.get_collab_operation(source_path) or {}
         row = [values.get(field, current.get(field)) for field in fields]
         self._write(
-            "INSERT INTO shared_operations "
+            "INSERT INTO collab_operations "
             "(source_path, operation_id, kind, state, "
             + ", ".join(fields)
             + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
@@ -877,9 +877,9 @@ class SyncState:
             (source_path, operation_id, kind, state, *row),
         )
 
-    def clear_shared_operation(self, source_path: str) -> None:
+    def clear_collab_operation(self, source_path: str) -> None:
         self._write(
-            "DELETE FROM shared_operations WHERE source_path = ?", (source_path,)
+            "DELETE FROM collab_operations WHERE source_path = ?", (source_path,)
         )
 
     # -- Singleton metadata -------------------------------------------------

@@ -1,4 +1,4 @@
-"""Shared fixtures for AnkiOps tests."""
+"""Collab fixtures for AnkiOps tests."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def default_note_types_dir(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def fs(default_note_types_dir):
-    """DeckFileHarness pre-loaded with built-in note types (shared across tests)."""
+    """DeckFileHarness pre-loaded with built-in note types (collab across tests)."""
     adapter = DeckFileHarness()
     adapter.set_note_types(adapter.load_note_types(default_note_types_dir))
     return adapter

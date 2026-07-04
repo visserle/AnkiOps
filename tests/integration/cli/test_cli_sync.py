@@ -14,11 +14,11 @@ from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli import main
 from ankiops.cli_commands import (
     run_af,
+    run_collab,
     run_deserialize,
     run_fa,
     run_fix_image_widths,
     run_serialize,
-    run_shared,
 )
 from ankiops.image_widths import ImageWidthFixResult
 from tests.support.deck_files import DeckFileHarness
@@ -136,7 +136,7 @@ def test_run_fa_logs_sync_errors_with_actionable_details(world, caplog):
     world.write_deck(
         "Rhetorik",
         (
-            "<!-- note_key: shared-key -->\n"
+            "<!-- note_key: collab-key -->\n"
             "<!-- note_type: AnkiOpsQA -->\n"
             "Q: local question\n"
             "A: local answer"
@@ -145,7 +145,7 @@ def test_run_fa_logs_sync_errors_with_actionable_details(world, caplog):
     world.add_anki_note(
         deck_name="Rhetorik",
         note_type="AnkiOpsCloze",
-        fields={"Text": "{{c1::remote}}", "AnkiOps Key": "shared-key"},
+        fields={"Text": "{{c1::remote}}", "AnkiOps Key": "collab-key"},
     )
 
     with caplog.at_level(logging.ERROR):
@@ -335,17 +335,17 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
-def test_cli_shared_publish_uses_public_only_contract():
+def test_cli_collab_publish_uses_public_only_contract():
     captured = []
 
     with (
         patch(
-            "ankiops.cli_commands.run_shared_impl",
+            "ankiops.cli_commands.run_collab_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
             "sys.argv",
-            ["ankiops", "shared", "publish", "Deck", "owner/repo"],
+            ["ankiops", "collab", "publish", "Deck", "owner/repo"],
         ),
     ):
         main()
@@ -355,72 +355,72 @@ def test_cli_shared_publish_uses_public_only_contract():
     assert not hasattr(captured[0], "public")
 
 
-def test_cli_shared_submit_accepts_custom_message():
+def test_cli_collab_submit_accepts_custom_message():
     captured = []
 
     with (
         patch(
-            "ankiops.cli_commands.run_shared_impl",
+            "ankiops.cli_commands.run_collab_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
             "sys.argv",
             [
                 "ankiops",
-                "shared",
+                "collab",
                 "submit",
                 "owner/repo",
                 "--message",
-                "  Clarify shared history  ",
+                "  Clarify collab history  ",
             ],
         ),
     ):
         main()
 
-    assert captured[0].message == "Clarify shared history"
+    assert captured[0].message == "Clarify collab history"
     assert not hasattr(captured[0], "commit")
 
 
-def test_cli_shared_status_accepts_repo():
+def test_cli_collab_status_accepts_repo():
     captured = []
 
     with (
         patch(
-            "ankiops.cli_commands.run_shared_impl",
+            "ankiops.cli_commands.run_collab_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
             "sys.argv",
-            ["ankiops", "shared", "status", "owner/repo"],
+            ["ankiops", "collab", "status", "owner/repo"],
         ),
     ):
         main()
 
-    assert captured[0].shared_command == "status"
+    assert captured[0].collab_command == "status"
     assert captured[0].repository == "owner/repo"
 
 
-def test_cli_shared_subscribe_accepts_repo():
+def test_cli_collab_subscribe_accepts_repo():
     captured = []
 
     with (
         patch(
-            "ankiops.cli_commands.run_shared_impl",
+            "ankiops.cli_commands.run_collab_impl",
             side_effect=lambda args: captured.append(args),
         ),
         patch(
             "sys.argv",
-            ["ankiops", "shared", "subscribe", "owner/repo"],
+            ["ankiops", "collab", "subscribe", "owner/repo"],
         ),
     ):
         main()
 
-    assert captured[0].shared_command == "subscribe"
+    assert captured[0].collab_command == "subscribe"
     assert captured[0].repository == "owner/repo"
 
 
-def test_cli_shared_help_exposes_only_intention_commands(capsys):
-    with patch("sys.argv", ["ankiops", "shared", "--help"]):
+def test_cli_collab_help_exposes_only_intention_commands(capsys):
+    with patch("sys.argv", ["ankiops", "collab", "--help"]):
         with pytest.raises(SystemExit) as excinfo:
             main()
 
@@ -432,14 +432,14 @@ def test_cli_shared_help_exposes_only_intention_commands(capsys):
         assert command not in output
 
 
-def test_shared_submit_does_not_run_collection_export():
-    args = SimpleNamespace(shared_command="submit")
+def test_collab_submit_does_not_run_collection_export():
+    args = SimpleNamespace(collab_command="submit")
 
     with (
         patch("ankiops.cli_commands.run_af") as run_af,
-        patch("ankiops.cli_commands.run_shared_impl"),
+        patch("ankiops.cli_commands.run_collab_impl"),
     ):
-        run_shared(args)
+        run_collab(args)
 
     run_af.assert_not_called()
 
@@ -447,12 +447,12 @@ def test_shared_submit_does_not_run_collection_export():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["ankiops", "shared", "submit", "owner/repo", "--commit"],
-        ["ankiops", "shared", "submit", "owner/repo", "--from-anki"],
-        ["ankiops", "shared", "update", "owner/repo", "--to-anki"],
+        ["ankiops", "collab", "submit", "owner/repo", "--commit"],
+        ["ankiops", "collab", "submit", "owner/repo", "--from-anki"],
+        ["ankiops", "collab", "update", "owner/repo", "--to-anki"],
     ],
 )
-def test_removed_shared_flags_are_rejected(argv):
+def test_removed_collab_flags_are_rejected(argv):
     with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
         main()
 
@@ -462,9 +462,9 @@ def test_removed_shared_flags_are_rejected(argv):
 @pytest.mark.parametrize(
     "command", ["create", "add", "doctor", "resolve", "abort", "list"]
 )
-def test_removed_shared_commands_are_rejected(command):
+def test_removed_collab_commands_are_rejected(command):
     with (
-        patch("sys.argv", ["ankiops", "shared", command]),
+        patch("sys.argv", ["ankiops", "collab", command]),
         pytest.raises(SystemExit) as excinfo,
     ):
         main()
@@ -473,19 +473,19 @@ def test_removed_shared_commands_are_rejected(command):
 
 
 @pytest.mark.parametrize("message", ["   ", "line one\nline two"])
-def test_cli_shared_submit_rejects_invalid_message(message):
+def test_cli_collab_submit_rejects_invalid_message(message):
     with (
-        patch("ankiops.cli_commands.run_shared_impl") as run_shared,
+        patch("ankiops.cli_commands.run_collab_impl") as run_collab,
         patch(
             "sys.argv",
-            ["ankiops", "shared", "submit", "owner/repo", "--message", message],
+            ["ankiops", "collab", "submit", "owner/repo", "--message", message],
         ),
         pytest.raises(SystemExit) as excinfo,
     ):
         main()
 
     assert excinfo.value.code == 2
-    run_shared.assert_not_called()
+    run_collab.assert_not_called()
 
 
 def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
@@ -710,7 +710,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
 
 def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path):
     (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
-    (tmp_path / "shared" / "owner" / "repo").mkdir(parents=True)
+    (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
     args = SimpleNamespace(
         deck=None,
         no_subdecks=False,

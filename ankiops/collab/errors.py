@@ -1,4 +1,4 @@
-"""Shared command error messages."""
+"""Collab command error messages."""
 
 from __future__ import annotations
 

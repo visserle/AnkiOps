@@ -104,36 +104,36 @@ def test_deck_mapping(db):
 
 
 def test_note_and_deck_ownership(db):
-    db.upsert_note_links([("shared-key", 101)], source_path="shared/owner/repo")
+    db.upsert_note_links([("collab-key", 101)], source_path="collab/owner/repo")
     db.upsert_deck(
-        "Shared",
+        "Collab",
         202,
-        source_path="shared/owner/repo",
-        md_path="shared/owner/repo/Shared.md",
+        source_path="collab/owner/repo",
+        md_path="collab/owner/repo/Collab.md",
     )
 
-    assert db.resolve_note_sources(["shared-key"]) == {
-        "shared-key": "shared/owner/repo"
+    assert db.resolve_note_sources(["collab-key"]) == {
+        "collab-key": "collab/owner/repo"
     }
-    assert db.resolve_deck_source(202) == "shared/owner/repo"
+    assert db.resolve_deck_source(202) == "collab/owner/repo"
 
 
 def test_media_fingerprints_are_scoped_by_source(db):
     row = [("same.png", 1, 2, "digest-a", "same_a.png")]
-    db.upsert_media_fingerprints(row, source_path="shared/owner/one")
+    db.upsert_media_fingerprints(row, source_path="collab/owner/one")
     db.upsert_media_fingerprints(
         [("same.png", 3, 4, "digest-b", "same_b.png")],
-        source_path="shared/owner/two",
+        source_path="collab/owner/two",
     )
 
     assert (
-        db.resolve_media_fingerprints(["same.png"], source_path="shared/owner/one")[
+        db.resolve_media_fingerprints(["same.png"], source_path="collab/owner/one")[
             "same.png"
         ][2]
         == "digest-a"
     )
     assert (
-        db.resolve_media_fingerprints(["same.png"], source_path="shared/owner/two")[
+        db.resolve_media_fingerprints(["same.png"], source_path="collab/owner/two")[
             "same.png"
         ][2]
         == "digest-b"
@@ -141,9 +141,9 @@ def test_media_fingerprints_are_scoped_by_source(db):
 
 
 def test_source_sync_and_operation_state(db):
-    db.set_source_applied_state("shared/owner/repo", "tree", "commit")
-    db.save_shared_operation(
-        "shared/owner/repo",
+    db.set_source_applied_state("collab/owner/repo", "tree", "commit")
+    db.save_collab_operation(
+        "collab/owner/repo",
         "op-1",
         "submit",
         "pushed",
@@ -155,8 +155,8 @@ def test_source_sync_and_operation_state(db):
         pushed_sha="abc",
     )
 
-    assert db.get_source_applied_state("shared/owner/repo") == ("tree", "commit")
-    operation = db.get_shared_operation("shared/owner/repo")
+    assert db.get_source_applied_state("collab/owner/repo") == ("tree", "commit")
+    operation = db.get_collab_operation("collab/owner/repo")
     assert operation is not None
     assert operation["expected_head"] == "before"
     assert operation["expected_fingerprint"] == "fingerprint"

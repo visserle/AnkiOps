@@ -11,7 +11,7 @@ def test_dispatch_action_reads_model_state():
 
     assert dispatch_action(col, "modelNames", {}) == [
         "AnkiOpsQA",
-        "shared/owner/repo/AnkiOpsQA",
+        "collab/owner/repo/AnkiOpsQA",
     ]
     assert dispatch_action(
         col,

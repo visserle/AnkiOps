@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from ankiops.shared.hosting import GitHubHost
+from ankiops.collab.hosting import GitHubHost
 
 
 def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
@@ -27,7 +27,7 @@ def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
 
 
 def test_missing_github_cli_gives_exact_setup_command(tmp_path, monkeypatch):
-    monkeypatch.setattr("ankiops.shared.hosting.shutil.which", lambda _name: None)
+    monkeypatch.setattr("ankiops.collab.hosting.shutil.which", lambda _name: None)
 
     with pytest.raises(ValueError, match="Install gh, then run: gh auth login"):
         GitHubHost(tmp_path).ensure_authenticated()

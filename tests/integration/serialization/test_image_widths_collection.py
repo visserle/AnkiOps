@@ -84,16 +84,16 @@ def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
     assert "{width=304}" in child.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
+def test_fix_image_widths_collection_rewrites_collab_deck(tmp_path):
     _make_collection(tmp_path)
     fs = DeckFileHarness()
-    shared_root = tmp_path / "shared" / "owner" / "repo"
-    shared_root.mkdir(parents=True)
-    GitRepository(shared_root).init_repo()
-    fs.eject_default_note_types(shared_root / "note_types")
-    shared_file = shared_root / "Shared.md"
-    shared_file.write_text(
-        "<!-- note_key: shared-1 -->\n"
+    collab_root = tmp_path / "collab" / "owner" / "repo"
+    collab_root.mkdir(parents=True)
+    GitRepository(collab_root).init_repo()
+    fs.eject_default_note_types(collab_root / "note_types")
+    collab_file = collab_root / "Collab.md"
+    collab_file.write_text(
+        "<!-- note_key: collab-1 -->\n"
         "Q: Question\n"
         "A: ![a](media/a.png){width=400}\n![b](media/b.png){width=404}",
         encoding="utf-8",
@@ -101,13 +101,13 @@ def test_fix_image_widths_collection_rewrites_shared_deck(tmp_path):
 
     result = fix_image_widths_collection(
         tmp_path,
-        deck="Shared",
+        deck="Collab",
         no_subdecks=True,
         tolerance=5,
     )
 
     assert result.decks_checked == 1
-    assert "{width=404}" not in shared_file.read_text(encoding="utf-8")
+    assert "{width=404}" not in collab_file.read_text(encoding="utf-8")
 
 
 def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):

@@ -1,4 +1,4 @@
-"""Publish local decks as GitHub shared sources."""
+"""Publish local decks as GitHub collab sources."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from pathlib import Path
 
 import yaml
 
+from ankiops.collab.errors import format_missing_note_keys_error
+from ankiops.collab.hosting import GitHubHost
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
 from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
 from ankiops.media import extract_media_references
 from ankiops.note_types import NoteType, load_note_types
-from ankiops.shared.errors import format_missing_note_keys_error
-from ankiops.shared.hosting import GitHubHost
 from ankiops.sync.state import SyncState
 
 
@@ -35,7 +35,7 @@ class _PublishPlan:
     note_keys: set[str]
 
 
-def publish_shared_deck(
+def publish_collab_deck(
     collection_root: Path,
     deck: str,
     source: DeckSource,
@@ -47,7 +47,7 @@ def publish_shared_deck(
     source_git = GitRepository(source.root) if source.root.exists() else None
     if source_git is not None and not source_git.is_repo():
         raise ValueError(
-            f"Shared source path exists but is not a Git repository: {source.root}"
+            f"Collab source path exists but is not a Git repository: {source.root}"
         )
     if source_git is not None:
         try:
@@ -68,7 +68,7 @@ def publish_shared_deck(
             source_git = GitRepository(source.root)
             source_git.init_repo(initial_branch="main")
             _copy_git_identity(collection_git, source_git)
-            source_git.checkpoint(f"Publish shared deck {deck}")
+            source_git.checkpoint(f"Publish collab deck {deck}")
         source_git.set_remote("upstream", str(source.github_url))
         source_git.set_remote("publish", str(source.github_url))
         source_git.push("upstream", "HEAD", "main")
@@ -77,7 +77,7 @@ def publish_shared_deck(
         _remove_published_local_files(plan)
         collection_git.commit_paths(
             [rendered.source_path for rendered in plan.files],
-            f"Move {deck} into shared source {source.source_path}",
+            f"Move {deck} into collab source {source.source_path}",
         )
         _transfer_sync_ownership(collection_root, plan)
     except Exception:
@@ -172,7 +172,7 @@ def _prepare_publish_plan(
                 missing_note_keys.append(f"{md_file.name} note {index}")
             elif note.note_key in note_keys:
                 raise ValueError(
-                    f"Duplicate note_key in shared publish set: {note.note_key}"
+                    f"Duplicate note_key in collab publish set: {note.note_key}"
                 )
             else:
                 note_keys.add(note.note_key)
@@ -186,7 +186,7 @@ def _prepare_publish_plan(
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
         raise ValueError(
-            "Unknown note type(s) while publishing shared deck: "
+            "Unknown note type(s) while publishing collab deck: "
             + ", ".join(unknown_note_types)
         )
 
@@ -197,7 +197,7 @@ def _prepare_publish_plan(
     )
     if missing_media:
         raise ValueError(
-            "Cannot publish shared deck: referenced media file(s) missing: "
+            "Cannot publish collab deck: referenced media file(s) missing: "
             + ", ".join(missing_media)
         )
 
@@ -316,10 +316,10 @@ def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path
         )
 
     root_media = collection_root / LOCAL_MEDIA_DIR
-    shared_media = source.root / LOCAL_MEDIA_DIR
+    collab_media = source.root / LOCAL_MEDIA_DIR
     for media_name in sorted(plan.media_used):
         src = root_media / media_name
-        dst = shared_media / media_name
+        dst = collab_media / media_name
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         touched.append(dst)

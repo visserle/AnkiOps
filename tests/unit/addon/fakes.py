@@ -104,7 +104,7 @@ class _FakeModels:
 class _FakeCollection:
     def __init__(self):
         self.old_model = _model(1, "AnkiOpsQA")
-        self.new_model = _model(2, "shared/owner/repo/AnkiOpsQA")
+        self.new_model = _model(2, "collab/owner/repo/AnkiOpsQA")
         self.models_by_name = {
             self.old_model["name"]: self.old_model,
             self.new_model["name"]: self.new_model,

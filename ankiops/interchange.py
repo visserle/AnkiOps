@@ -56,7 +56,7 @@ class _ValidatedDeck:
 class DeserializationPlan:
     decks: tuple[_ValidatedDeck, ...]
     target_paths: tuple[Path, ...]
-    has_shared_sources: bool
+    has_collab_sources: bool
 
 
 def _source_name(source: DeckSource) -> str:
@@ -565,7 +565,7 @@ def plan_deserialize_from_file(
     return DeserializationPlan(
         decks=tuple(decks),
         target_paths=tuple(_deserialize_target_path(deck) for deck in decks),
-        has_shared_sources=any(deck.source.is_shared for deck in decks),
+        has_collab_sources=any(deck.source.is_collab for deck in decks),
     )
 
 

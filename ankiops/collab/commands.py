@@ -1,4 +1,4 @@
-"""Independent-repository shared source commands."""
+"""Independent-repository collab source commands."""
 
 from __future__ import annotations
 
@@ -14,6 +14,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from ankiops.collab.errors import format_missing_note_keys_error
+from ankiops.collab.hosting import GitHubHost
+from ankiops.collab.publish import publish_collab_deck
 from ankiops.collection import require_collection_root
 from ankiops.deck_sources import (
     DeckSource,
@@ -23,9 +26,6 @@ from ankiops.deck_sources import (
 )
 from ankiops.git import GitRepository
 from ankiops.markdown import read_deck_file
-from ankiops.shared.errors import format_missing_note_keys_error
-from ankiops.shared.hosting import GitHubHost
-from ankiops.shared.publish import publish_shared_deck
 from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
@@ -55,14 +55,14 @@ def _parse_github_slug(repository: str) -> str:
         raise ValueError("Expected GitHub repository as owner/repo")
     if not all(_SAFE_SLUG_PART_RE.fullmatch(part) for part in parts):
         raise ValueError(
-            f"Invalid shared deck identity '{repository}': owner and repository "
+            f"Invalid collab deck identity '{repository}': owner and repository "
             "may use ASCII letters, digits, and hyphens."
         )
     return value
 
 
-def _shared_source(collection_root: Path, repository: str) -> DeckSource:
-    return DeckSource.shared(collection_root, _parse_github_slug(repository))
+def _collab_source(collection_root: Path, repository: str) -> DeckSource:
+    return DeckSource.collab(collection_root, _parse_github_slug(repository))
 
 
 def _require_collection_git(collection_root: Path) -> GitRepository:
@@ -71,13 +71,13 @@ def _require_collection_git(collection_root: Path) -> GitRepository:
         "AnkiOps collections require a Git repository at the root."
     )
     ignored = collection_git.run(
-        ["check-ignore", "-q", "--no-index", "shared/.ankiops-probe"],
+        ["check-ignore", "-q", "--no-index", "collab/.ankiops-probe"],
         check=False,
     )
     if ignored.returncode != 0:
         raise ValueError(
-            "This collection is not configured to keep shared decks separate. "
-            "Add /shared/ to the root .gitignore, then retry the command."
+            "This collection is not configured to keep collab decks separate. "
+            "Add /collab/ to the root .gitignore, then retry the command."
         )
     return collection_git
 
@@ -92,7 +92,7 @@ def _require_source_git(source: DeckSource) -> GitRepository:
     if source_git.remote_url("upstream") is None:
         raise ValueError(
             f"The subscribed deck {source.display_name} has no GitHub source. "
-            f"Subscribe to it again in a fresh collection path: ankiops shared "
+            f"Subscribe to it again in a fresh collection path: ankiops collab "
             f"subscribe {source.display_name}"
         )
     return source_git
@@ -118,7 +118,7 @@ def _log_result(
     details: list[str] | None = None,
     next_steps: list[str] | None = None,
 ) -> None:
-    logger.info("Shared %s: %s — %s", action, source.display_name, summary)
+    logger.info("Collab %s: %s — %s", action, source.display_name, summary)
     for detail in details or []:
         logger.info("  %s", detail)
     _log_next_steps(next_steps or [])
@@ -144,11 +144,11 @@ def _counted(count: int, noun: str) -> str:
 def _source_operation(
     state: SyncState, source: DeckSource, kind: str
 ) -> tuple[str, dict[str, str | None] | None]:
-    existing = state.get_shared_operation(source.source_path)
+    existing = state.get_collab_operation(source.source_path)
     if existing and existing["kind"] != kind:
         raise ValueError(
             f"{source.display_name} has an unfinished {existing['kind']} action. "
-            f"Run ankiops shared status {source.display_name} for the exact next step."
+            f"Run ankiops collab status {source.display_name} for the exact next step."
         )
     operation_id = str(existing["operation_id"]) if existing else uuid4().hex[:12]
     return operation_id, existing
@@ -273,7 +273,7 @@ def _integrate_upstream(
     operation_id, existing = _source_operation(state, source, kind)
     original_commit = source_git.head()
     if original_commit is None:
-        raise ValueError(f"Shared source {source.display_name} has no commits.")
+        raise ValueError(f"Collab source {source.display_name} has no commits.")
     original_fingerprint = _repository_fingerprint(source_git)
 
     if existing and existing["state"] == "applying":
@@ -303,13 +303,13 @@ def _integrate_upstream(
         ):
             raise ValueError(
                 f"The subscribed deck changed after its interrupted update. Its "
-                f"files were left untouched. Review ankiops shared status "
+                f"files were left untouched. Review ankiops collab status "
                 f"{source.display_name} before retrying."
             )
     else:
         existing = None
 
-    state.save_shared_operation(
+    state.save_collab_operation(
         source.source_path,
         operation_id,
         kind,
@@ -384,7 +384,7 @@ def _integrate_upstream(
                 )
             if transaction_git.unmerged_paths():
                 paths = ", ".join(transaction_git.unmerged_paths())
-                state.save_shared_operation(
+                state.save_collab_operation(
                     source.source_path,
                     operation_id,
                     kind,
@@ -401,10 +401,10 @@ def _integrate_upstream(
                     f"Local and upstream edits overlap in: {paths}. The subscribed "
                     f"deck was not changed. Edit the preserved Markdown in "
                     f"{conflict_root}, remove its conflict markers, then retry: "
-                    f"ankiops shared update {source.display_name}"
+                    f"ankiops collab update {source.display_name}"
                 ) from error
         else:
-            state.save_shared_operation(
+            state.save_collab_operation(
                 source.source_path,
                 operation_id,
                 kind,
@@ -420,10 +420,10 @@ def _integrate_upstream(
                 f"GitHub could not be reached for {source.display_name}. The "
                 "subscribed deck was not changed and nothing was sent. "
                 "Retrying is safe: "
-                f"ankiops shared {kind} {source.display_name}"
+                f"ankiops collab {kind} {source.display_name}"
             ) from error
     except ValueError as error:
-        state.save_shared_operation(
+        state.save_collab_operation(
             source.source_path,
             operation_id,
             kind,
@@ -440,7 +440,7 @@ def _integrate_upstream(
     transaction_commit = transaction_git.head()
     if transaction_commit is None:
         raise ValueError(f"Could not prepare the update for {source.display_name}.")
-    state.save_shared_operation(
+    state.save_collab_operation(
         source.source_path,
         operation_id,
         kind,
@@ -467,9 +467,9 @@ def _integrate_upstream(
 def run_subscribe(args: SimpleNamespace) -> None:
     collection_root = require_collection_root()
     _require_collection_git(collection_root)
-    source = _shared_source(collection_root, args.repository)
+    source = _collab_source(collection_root, args.repository)
     if source.root.exists():
-        raise ValueError(f"Shared source already exists: {source.display_name}")
+        raise ValueError(f"Collab source already exists: {source.display_name}")
     github = GitHubHost(collection_root)
     github.ensure_authenticated()
     if github.repo_info(source.display_name) is None:
@@ -495,23 +495,23 @@ def run_subscribe(args: SimpleNamespace) -> None:
 def run_publish(args: SimpleNamespace) -> None:
     collection_root = require_collection_root()
     _require_collection_git(collection_root)
-    source = _shared_source(collection_root, args.repository)
+    source = _collab_source(collection_root, args.repository)
     state = SyncState.open(collection_root)
     operation_id, _existing = _source_operation(state, source, "publish")
-    state.save_shared_operation(
+    state.save_collab_operation(
         source.source_path,
         operation_id,
         "publish",
         "publishing",
     )
     try:
-        publish_shared_deck(
+        publish_collab_deck(
             collection_root,
             args.deck,
             source,
         )
     except Exception as error:
-        state.save_shared_operation(
+        state.save_collab_operation(
             source.source_path,
             operation_id,
             "publish",
@@ -521,11 +521,11 @@ def run_publish(args: SimpleNamespace) -> None:
         raise ValueError(
             f"Publishing did not finish for {source.display_name}. Your local deck "
             f"and any completed GitHub work were preserved. Retrying is safe: "
-            f"ankiops shared publish {args.deck!r} {source.display_name}. "
+            f"ankiops collab publish {args.deck!r} {source.display_name}. "
             f"Details: {error}"
         ) from error
     else:
-        state.clear_shared_operation(source.source_path)
+        state.clear_collab_operation(source.source_path)
     finally:
         state.close()
     github_url = str(source.github_url).removesuffix(".git")
@@ -546,7 +546,7 @@ def _restore_operation(
     source: DeckSource,
     operation: dict[str, str | None],
 ) -> None:
-    state.save_shared_operation(
+    state.save_collab_operation(
         source.source_path,
         str(operation["operation_id"]),
         str(operation["kind"]),
@@ -566,7 +566,7 @@ def _restore_operation(
 def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> None:
     source_git = _require_source_git(source)
     before_commit = source_git.head()
-    pending_action = state.get_shared_operation(source.source_path)
+    pending_action = state.get_collab_operation(source.source_path)
     operation_kind = str(pending_action["kind"]) if pending_action else "update"
     post_submission_states = {"ready", "push_failed", "pushed", "pr_failed", "pr_open"}
     try:
@@ -576,7 +576,7 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
             )
         )
     except (ValueError, subprocess.CalledProcessError):
-        current_action = state.get_shared_operation(source.source_path)
+        current_action = state.get_collab_operation(source.source_path)
         if (
             pending_action
             and pending_action["state"] in post_submission_states
@@ -607,12 +607,12 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
                 source_git.delete_remote_branch(
                     "publish", str(pending_action["publish_branch"])
                 )
-            state.clear_shared_operation(source.source_path)
+            state.clear_collab_operation(source.source_path)
         else:
             _restore_operation(state, source, pending_action)
     else:
-        state.clear_shared_operation(source.source_path)
-    remaining_action = state.get_shared_operation(source.source_path)
+        state.clear_collab_operation(source.source_path)
+    remaining_action = state.get_collab_operation(source.source_path)
 
     if upstream_changed and saved_commit:
         summary = "committed local changes and integrated upstream changes"
@@ -638,11 +638,11 @@ def _update_one(collection_root: Path, source: DeckSource, state: SyncState) -> 
         next_steps.append(f"Review pull request: {remaining_action['pr_url']}")
     elif remaining_action and remaining_action["kind"] == "submit":
         next_steps.append(
-            f"Retry submission: ankiops shared submit {source.display_name}"
+            f"Retry submission: ankiops collab submit {source.display_name}"
         )
     elif local_contribution:
         next_steps.append(
-            f"Submit contribution: ankiops shared submit {source.display_name}"
+            f"Submit contribution: ankiops collab submit {source.display_name}"
         )
 
     _log_result(
@@ -659,13 +659,13 @@ def run_update(args: SimpleNamespace) -> None:
     _require_collection_git(collection_root)
     sources = discover_deck_sources(collection_root)[1:]
     if getattr(args, "repository", None):
-        requested_source = _shared_source(collection_root, args.repository)
+        requested_source = _collab_source(collection_root, args.repository)
         if not requested_source.root.exists():
-            raise ValueError(f"Unknown shared source: {requested_source.display_name}")
+            raise ValueError(f"Unknown collab source: {requested_source.display_name}")
         sources = [requested_source]
     if not sources:
-        logger.info("Shared update: no subscribed decks")
-        _log_next_steps(["Subscribe to a deck: ankiops shared subscribe OWNER/REPO"])
+        logger.info("Collab update: no subscribed decks")
+        _log_next_steps(["Subscribe to a deck: ankiops collab subscribe OWNER/REPO"])
         return
     state = SyncState.open(collection_root)
     failures = []
@@ -679,7 +679,7 @@ def run_update(args: SimpleNamespace) -> None:
         state.close()
     if failures:
         raise ValueError(
-            f"Shared update finished with {len(failures)} failure(s): "
+            f"Collab update finished with {len(failures)} failure(s): "
             + " | ".join(failures)
         )
 
@@ -687,24 +687,24 @@ def run_update(args: SimpleNamespace) -> None:
 def run_submit(args: SimpleNamespace) -> None:
     collection_root = require_collection_root()
     _require_collection_git(collection_root)
-    source = _shared_source(collection_root, args.repository)
+    source = _collab_source(collection_root, args.repository)
     source_git = _require_source_git(source)
     _ensure_submittable_note_keys(source)
     title = (
-        getattr(args, "message", None) or f"Update shared deck {source.display_name}"
+        getattr(args, "message", None) or f"Update collab deck {source.display_name}"
     )
     state = SyncState.open(collection_root)
     try:
-        pending_action = state.get_shared_operation(source.source_path)
+        pending_action = state.get_collab_operation(source.source_path)
         if pending_action and pending_action["kind"] == "update":
             raise ValueError(
                 f"An update for {source.display_name} still needs attention. Run: "
-                f"ankiops shared update {source.display_name}"
+                f"ankiops collab update {source.display_name}"
             )
         if pending_action and pending_action["state"] == "conflict":
             raise ValueError(
                 f"A contribution for {source.display_name} has unresolved upstream "
-                f"changes. Run: ankiops shared update {source.display_name}"
+                f"changes. Run: ankiops collab update {source.display_name}"
             )
         if (
             pending_action
@@ -750,13 +750,13 @@ def run_submit(args: SimpleNamespace) -> None:
                     ),
                     next_steps=next_steps,
                 )
-                state.clear_shared_operation(source.source_path)
+                state.clear_collab_operation(source.source_path)
                 return
             contribution_branch = f"ankiops/{operation_id}"
             local_commit = source_git.head()
             if local_commit is None:
-                raise ValueError(f"Shared source {source.display_name} has no commits.")
-            state.save_shared_operation(
+                raise ValueError(f"Collab source {source.display_name} has no commits.")
+            state.save_collab_operation(
                 source.source_path,
                 operation_id,
                 "submit",
@@ -774,8 +774,8 @@ def run_submit(args: SimpleNamespace) -> None:
             ):
                 raise ValueError(
                     f"A contribution for {source.display_name} is waiting to finish, "
-                    "but the shared files changed afterward. Nothing was sent. "
-                    f"Run: ankiops shared status {source.display_name}"
+                    "but the collab files changed afterward. Nothing was sent. "
+                    f"Run: ankiops collab status {source.display_name}"
                 )
             operation_id = str(pending_action["operation_id"])
             contribution_branch = str(pending_action["publish_branch"])
@@ -784,12 +784,12 @@ def run_submit(args: SimpleNamespace) -> None:
 
         local_commit = source_git.head()
         if local_commit is None:
-            raise ValueError(f"Shared source {source.display_name} has no commits.")
+            raise ValueError(f"Collab source {source.display_name} has no commits.")
         github = GitHubHost(source.root)
         try:
             contribution_slug, contributor = github.publish_target(source.display_name)
         except ValueError as error:
-            state.save_shared_operation(
+            state.save_collab_operation(
                 source.source_path,
                 operation_id,
                 "submit",
@@ -800,7 +800,7 @@ def run_submit(args: SimpleNamespace) -> None:
                 f"Your contribution for {source.display_name} was committed locally "
                 "but GitHub setup did not finish. Nothing was uploaded and private "
                 "decks were not touched. Retrying is safe: "
-                f"ankiops shared submit {source.display_name}. Details: {error}"
+                f"ankiops collab submit {source.display_name}. Details: {error}"
             ) from error
         source_git.set_remote("publish", f"https://github.com/{contribution_slug}.git")
         uploaded_commit = source_git.remote_branch_sha("publish", contribution_branch)
@@ -808,7 +808,7 @@ def run_submit(args: SimpleNamespace) -> None:
             try:
                 source_git.push("publish", "HEAD", contribution_branch)
             except subprocess.CalledProcessError as error:
-                state.save_shared_operation(
+                state.save_collab_operation(
                     source.source_path,
                     operation_id,
                     "submit",
@@ -821,11 +821,11 @@ def run_submit(args: SimpleNamespace) -> None:
                 raise ValueError(
                     f"Your contribution for {source.display_name} was committed "
                     "locally, but it did not reach GitHub. Private decks were not "
-                    "touched. Retrying is safe: ankiops shared submit "
+                    "touched. Retrying is safe: ankiops collab submit "
                     f"{source.display_name}"
                 ) from error
 
-        state.save_shared_operation(
+        state.save_collab_operation(
             source.source_path,
             operation_id,
             "submit",
@@ -846,7 +846,7 @@ def run_submit(args: SimpleNamespace) -> None:
                 body=f"Submitted with AnkiOps from {source.display_name}.",
             )
         except ValueError as error:
-            state.save_shared_operation(
+            state.save_collab_operation(
                 source.source_path,
                 operation_id,
                 "submit",
@@ -860,10 +860,10 @@ def run_submit(args: SimpleNamespace) -> None:
             raise ValueError(
                 f"Your contribution reached GitHub, but its pull request was not "
                 "created. No private files changed. Retrying is safe: "
-                "ankiops shared submit "
+                "ankiops collab submit "
                 f"{source.display_name}. Details: {error}"
             ) from error
-        state.save_shared_operation(
+        state.save_collab_operation(
             source.source_path,
             operation_id,
             "submit",
@@ -926,7 +926,7 @@ def _status_one(
         repository_state = _repository_state(source_git)
     except (ValueError, subprocess.CalledProcessError) as error:
         logger.debug("Could not check GitHub for %s: %s", source.display_name, error)
-    pending_action = state.get_shared_operation(source.source_path)
+    pending_action = state.get_collab_operation(source.source_path)
     is_applied = _source_is_applied(source, state)
     submission_accepted = bool(
         not local_changes
@@ -936,7 +936,7 @@ def _status_one(
         and pending_action["kind"] == "submit"
     )
 
-    logger.info("Shared status: %s", source.display_name)
+    logger.info("Collab status: %s", source.display_name)
     working_tree = (
         "clean" if not local_changes else _counted(len(local_changes), "changed path")
     )
@@ -1003,23 +1003,23 @@ def _status_one(
 
     next_steps = []
     if repository_state is None:
-        next_steps.append(f"Retry status: ankiops shared status {source.display_name}")
+        next_steps.append(f"Retry status: ankiops collab status {source.display_name}")
     elif pending_action and (
         pending_action["state"] == "conflict" or pending_action["kind"] == "update"
     ):
-        next_steps.append(f"Resume update: ankiops shared update {source.display_name}")
+        next_steps.append(f"Resume update: ankiops collab update {source.display_name}")
     elif repository_state.relation in {
         _RepositoryRelation.BEHIND,
         _RepositoryRelation.DIVERGED,
     }:
         next_steps.append(
-            f"Integrate upstream: ankiops shared update {source.display_name}"
+            f"Integrate upstream: ankiops collab update {source.display_name}"
         )
     elif submission_accepted:
         if not is_applied:
             next_steps.append("Apply to Anki: ankiops fa")
         next_steps.append(
-            f"Finalize submission: ankiops shared update {source.display_name}"
+            f"Finalize submission: ankiops collab update {source.display_name}"
         )
     else:
         if not is_applied:
@@ -1028,11 +1028,11 @@ def _status_one(
             next_steps.append(f"Review pull request: {pending_action['pr_url']}")
         elif pending_action and pending_action["kind"] == "submit":
             next_steps.append(
-                f"Retry submission: ankiops shared submit {source.display_name}"
+                f"Retry submission: ankiops collab submit {source.display_name}"
             )
         elif local_changes or repository_state.relation is _RepositoryRelation.AHEAD:
             next_steps.append(
-                f"Submit contribution: ankiops shared submit {source.display_name}"
+                f"Submit contribution: ankiops collab submit {source.display_name}"
             )
     _log_next_steps(next_steps)
 
@@ -1042,13 +1042,13 @@ def run_status(args: SimpleNamespace) -> None:
     _require_collection_git(collection_root)
     sources = discover_deck_sources(collection_root)[1:]
     if getattr(args, "repository", None):
-        source = _shared_source(collection_root, args.repository)
+        source = _collab_source(collection_root, args.repository)
         if not source.root.exists():
-            raise ValueError(f"Unknown shared source: {source.display_name}")
+            raise ValueError(f"Unknown collab source: {source.display_name}")
         sources = [source]
     if not sources:
-        logger.info("Shared status: no subscribed decks")
-        _log_next_steps(["Subscribe to a deck: ankiops shared subscribe OWNER/REPO"])
+        logger.info("Collab status: no subscribed decks")
+        _log_next_steps(["Subscribe to a deck: ankiops collab subscribe OWNER/REPO"])
         return
     state = SyncState.open(collection_root)
     try:
@@ -1066,7 +1066,7 @@ def run(args: SimpleNamespace) -> None:
         "submit": run_submit,
         "status": run_status,
     }
-    handler = handlers.get(args.shared_command)
+    handler = handlers.get(args.collab_command)
     if handler is None:
         raise SystemExit(2)
     handler(args)

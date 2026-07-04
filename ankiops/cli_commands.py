@@ -8,6 +8,7 @@ from pathlib import Path
 
 from rich.markup import escape as rich_escape
 
+from ankiops.collab import run as run_collab_impl
 from ankiops.collection import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -45,7 +46,6 @@ from ankiops.media import (
 )
 from ankiops.note_types import sync_note_type_configs
 from ankiops.note_types_command import run as run_note_type_impl
-from ankiops.shared import run as run_shared_impl
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.report import CollectionReport
 from ankiops.sync.state import SyncState
@@ -65,7 +65,7 @@ def _sync_note_types(anki, collection_root, state):
     )
 
 
-def _checkpoint_shared_repositories(collection_root: Path, action: str) -> None:
+def _checkpoint_collab_repositories(collection_root: Path, action: str) -> None:
     for source in discover_deck_sources(collection_root)[1:]:
         commit = GitRepository(source.root).checkpoint(
             f"AnkiOps: snapshot before {action}"
@@ -76,7 +76,7 @@ def _checkpoint_shared_repositories(collection_root: Path, action: str) -> None:
             )
 
 
-def _record_applied_shared_sources(
+def _record_applied_collab_sources(
     state: SyncState,
     collection_root: Path,
 ) -> None:
@@ -163,7 +163,7 @@ def run_af(args):
                 collection_root / LOCAL_MEDIA_DIR,
             ],
         )
-        _checkpoint_shared_repositories(collection_root, "anki-to-files")
+        _checkpoint_collab_repositories(collection_root, "anki-to-files")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
     state = SyncState.open(collection_root)
@@ -219,7 +219,7 @@ def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, collection_root, state)
         logger.info(format_media_status(media_result, from_anki=True))
-        _record_applied_shared_sources(state, collection_root)
+        _record_applied_collab_sources(state, collection_root)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -265,7 +265,7 @@ def run_fa(args):
                 collection_root / NOTE_TYPES_DIR,
             ],
         )
-        _checkpoint_shared_repositories(collection_root, "files-to-anki")
+        _checkpoint_collab_repositories(collection_root, "files-to-anki")
     else:
         logger.debug("Auto-commit disabled (--no-auto-commit)")
 
@@ -345,7 +345,7 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
             "or you risk losing notes with the next Anki -> files sync."
         )
     else:
-        _record_applied_shared_sources(state, collection_root)
+        _record_applied_collab_sources(state, collection_root)
 
 
 def run_serialize(args):
@@ -490,9 +490,9 @@ def run_note_type(args):
     run_note_type_impl(args)
 
 
-def run_shared(args):
+def run_collab(args):
     try:
-        run_shared_impl(args)
+        run_collab_impl(args)
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error

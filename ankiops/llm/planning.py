@@ -241,7 +241,7 @@ def snapshot_paths_for_task(
     task_context: MaterializedTaskContext,
 ) -> list[Path]:
     sources = discover_deck_sources(collection_root)
-    if any(source.is_shared for source in sources):
+    if any(source.is_collab for source in sources):
         return [collection_root]
 
     if any(

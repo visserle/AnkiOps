@@ -8,14 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ankiops.git import GitRepository
-from ankiops.shared.commands import (
+from ankiops.collab.commands import (
     run_publish,
     run_status,
     run_submit,
     run_subscribe,
     run_update,
 )
+from ankiops.git import GitRepository
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
@@ -49,7 +49,7 @@ def _setup_collection(tmp_path: Path) -> Path:
     _git(collection, "init", "-b", "main")
     _configure(collection, "Private User")
     (collection / ".gitignore").write_text(
-        "/shared/\n.ankiops.db\n.ankiops.db-shm\n.ankiops.db-wal\n.ankiops/\n",
+        "/collab/\n.ankiops.db\n.ankiops.db-shm\n.ankiops.db-wal\n.ankiops/\n",
         encoding="utf-8",
     )
     (collection / "Private.md").write_text("private baseline\n", encoding="utf-8")
@@ -68,13 +68,13 @@ def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
     _configure(seed, "Upstream User")
     DeckFileHarness().eject_default_note_types(seed / "note_types")
     (seed / "Deck.md").write_text(
-        "<!-- note_key: shared-key -->\nQ: shared question\nA: upstream answer\n",
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: upstream answer\n",
         encoding="utf-8",
     )
-    _commit(seed, "Initial shared deck")
+    _commit(seed, "Initial collab deck")
     _git(seed, "push", "origin", "main")
 
-    source = collection / "shared" / "owner" / "repo"
+    source = collection / "collab" / "owner" / "repo"
     source.parent.mkdir(parents=True)
     _git(source.parent, "clone", "--origin", "upstream", str(remote), str(source))
     _configure(source, "Contributor")
@@ -83,8 +83,8 @@ def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
 
 
 @pytest.fixture(scope="session")
-def shared_world_template(tmp_path_factory):
-    root = tmp_path_factory.mktemp("shared-world-template")
+def collab_world_template(tmp_path_factory):
+    root = tmp_path_factory.mktemp("collab-world-template")
     collection = _setup_collection(root)
     _setup_source(root, collection)
     shutil.rmtree(root / "seed")
@@ -92,14 +92,14 @@ def shared_world_template(tmp_path_factory):
 
 
 @pytest.fixture
-def shared_world(tmp_path, monkeypatch, shared_world_template):
-    shutil.copytree(shared_world_template, tmp_path, dirs_exist_ok=True)
+def collab_world(tmp_path, monkeypatch, collab_world_template):
+    shutil.copytree(collab_world_template, tmp_path, dirs_exist_ok=True)
     collection = tmp_path / "collection"
-    source = collection / "shared" / "owner" / "repo"
+    source = collection / "collab" / "owner" / "repo"
     remote = tmp_path / "upstream.git"
     _git(source, "remote", "set-url", "upstream", str(remote))
     monkeypatch.setattr(
-        "ankiops.shared.commands.require_collection_root", lambda: collection
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
     return collection, source, remote
 
@@ -117,22 +117,22 @@ def _upstream_edit(tmp_path: Path, remote: Path, old: str, new: str) -> str:
     return head
 
 
-def test_update_noop_creates_no_commit(shared_world, caplog):
+def test_update_noop_creates_no_commit(collab_world, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
 
     run_update(SimpleNamespace(repository="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert _git(source, "branch", "--list", "ankiops/recovery/*").stdout == ""
-    assert "Shared update: owner/repo — already up to date" in caplog.text
+    assert "Collab update: owner/repo — already up to date" in caplog.text
     assert "Apply to Anki: ankiops fa" in caplog.text
 
 
-def test_update_reports_preserved_local_contribution(shared_world, caplog):
+def test_update_reports_preserved_local_contribution(collab_world, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace(
@@ -145,18 +145,18 @@ def test_update_reports_preserved_local_contribution(shared_world, caplog):
     run_update(SimpleNamespace(repository="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
-    assert "Shared update: owner/repo — no upstream changes" in caplog.text
+    assert "Collab update: owner/repo — no upstream changes" in caplog.text
     assert "Local contribution: ready to submit" in caplog.text
     assert "Apply to Anki: ankiops fa" in caplog.text
-    assert "Submit contribution: ankiops shared submit owner/repo" in caplog.text
+    assert "Submit contribution: ankiops collab submit owner/repo" in caplog.text
 
 
-def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypatch):
-    collection, source, _remote = shared_world
+def test_submit_noop_creates_no_commit_branch_push_or_pr(collab_world, monkeypatch):
+    collection, source, _remote = collab_world
     before_head = _git(source, "rev-parse", "HEAD").stdout.strip()
     before_branches = _git(source, "branch", "--format=%(refname)").stdout
     publish = monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: pytest.fail("no-op submit must not publish"),
     )
     assert publish is None
@@ -167,7 +167,7 @@ def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypat
     assert _git(source, "branch", "--format=%(refname)").stdout == before_branches
     db = SyncState.open(collection)
     try:
-        assert db.get_shared_operation("shared/owner/repo") is None
+        assert db.get_collab_operation("collab/owner/repo") is None
     finally:
         db.close()
 
@@ -175,7 +175,7 @@ def test_submit_noop_creates_no_commit_branch_push_or_pr(shared_world, monkeypat
 def test_subscribe_clones_independent_repository(tmp_path, monkeypatch):
     collection = _setup_collection(tmp_path)
     _source, remote = _setup_source(tmp_path, collection)
-    shutil_source = collection / "shared" / "owner" / "repo"
+    shutil_source = collection / "collab" / "owner" / "repo"
     shutil.rmtree(shutil_source)
     original_clone = GitRepository.clone.__func__
 
@@ -185,13 +185,13 @@ def test_subscribe_clones_independent_repository(tmp_path, monkeypatch):
     remote_path = remote
     monkeypatch.setattr(GitRepository, "clone", classmethod(local_clone))
     monkeypatch.setattr(
-        "ankiops.shared.commands.require_collection_root", lambda: collection
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.ensure_authenticated", lambda *_: None
+        "ankiops.collab.commands.GitHubHost.ensure_authenticated", lambda *_: None
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.repo_info",
+        "ankiops.collab.commands.GitHubHost.repo_info",
         lambda *_: {"default_branch": "main"},
     )
 
@@ -226,18 +226,18 @@ def test_publish_moves_deck_into_independent_repository(tmp_path, monkeypatch):
 
     monkeypatch.setattr(GitRepository, "set_remote", local_remote)
     monkeypatch.setattr(
-        "ankiops.shared.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
+        "ankiops.collab.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.require_collection_root", lambda: collection
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
     run_publish(SimpleNamespace(deck="Deck", repository="owner/repo"))
 
-    source = collection / "shared" / "owner" / "repo"
+    source = collection / "collab" / "owner" / "repo"
     assert not deck.exists()
     assert GitRepository(source).is_repo()
-    assert "shared/owner/repo/AnkiOpsQA" in (source / "Deck.md").read_text(
+    assert "collab/owner/repo/AnkiOpsQA" in (source / "Deck.md").read_text(
         encoding="utf-8"
     )
     assert _git(source, "branch", "--show-current").stdout.strip() == "ankiops/work"
@@ -245,9 +245,9 @@ def test_publish_moves_deck_into_independent_repository(tmp_path, monkeypatch):
     db = SyncState.open(collection)
     try:
         assert db.resolve_note_sources(["create-key"])["create-key"] == (
-            "shared/owner/repo"
+            "collab/owner/repo"
         )
-        assert db.resolve_deck_source(456) == "shared/owner/repo"
+        assert db.resolve_deck_source(456) == "collab/owner/repo"
     finally:
         db.close()
 
@@ -282,16 +282,16 @@ def test_publish_retry_reuses_local_repository_after_push_failure(
     monkeypatch.setattr(GitRepository, "set_remote", local_remote)
     monkeypatch.setattr(GitRepository, "push", fail_once)
     monkeypatch.setattr(
-        "ankiops.shared.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
+        "ankiops.collab.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.require_collection_root", lambda: collection
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
     args = SimpleNamespace(deck="Deck", repository="owner/repo")
 
     with pytest.raises(ValueError, match="Retrying is safe"):
         run_publish(args)
-    source = collection / "shared" / "owner" / "repo"
+    source = collection / "collab" / "owner" / "repo"
     first_head = _git(source, "rev-parse", "HEAD").stdout.strip()
     run_publish(args)
 
@@ -300,8 +300,8 @@ def test_publish_retry_reuses_local_repository_after_push_failure(
     assert not deck.exists()
 
 
-def test_update_checkpoints_local_edit_and_integrates_remote(shared_world, tmp_path):
-    collection, source, remote = shared_world
+def test_update_checkpoints_local_edit_and_integrates_remote(collab_world, tmp_path):
+    collection, source, remote = collab_world
     private_before = (collection / "Private.md").read_bytes()
     (source / "Local.md").write_text(
         "<!-- note_key: local-key -->\nQ: local\nA: edit\n", encoding="utf-8"
@@ -320,10 +320,10 @@ def test_update_checkpoints_local_edit_and_integrates_remote(shared_world, tmp_p
 
 
 def test_conflict_preserves_versions_and_leaves_source_unchanged(
-    shared_world, tmp_path, caplog
+    collab_world, tmp_path, caplog
 ):
     caplog.set_level(logging.INFO)
-    collection, source, remote = shared_world
+    collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
@@ -350,11 +350,11 @@ def test_conflict_preserves_versions_and_leaves_source_unchanged(
     assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
 
 
-def test_conflict_preserves_versions_for_unicode_deck_path(shared_world, tmp_path):
-    collection, source, remote = shared_world
+def test_conflict_preserves_versions_for_unicode_deck_path(collab_world, tmp_path):
+    collection, source, remote = collab_world
     deck_name = "Déck Ω — punctuation!.md"
     _git(source, "mv", "Deck.md", deck_name)
-    _commit(source, "Rename shared deck with Unicode")
+    _commit(source, "Rename collab deck with Unicode")
     _git(source, "push", "upstream", "HEAD:main")
 
     deck = source / deck_name
@@ -382,7 +382,7 @@ def test_conflict_preserves_versions_for_unicode_deck_path(shared_world, tmp_pat
 
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         conflict_root = Path(str(operation["recovery_ref"]))
     finally:
@@ -393,9 +393,9 @@ def test_conflict_preserves_versions_for_unicode_deck_path(shared_world, tmp_pat
 
 
 def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_update(
-    shared_world, tmp_path
+    collab_world, tmp_path
 ):
-    collection, source, remote = shared_world
+    collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
@@ -406,7 +406,7 @@ def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_upd
         run_update(SimpleNamespace(repository="owner/repo"))
     conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     conflict_file.write_text(
-        "<!-- note_key: shared-key -->\nQ: shared question\nA: combined answer\n",
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: combined answer\n",
         encoding="utf-8",
     )
 
@@ -417,13 +417,13 @@ def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_upd
     assert not list((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     db = SyncState.open(collection)
     try:
-        assert db.get_shared_operation("shared/owner/repo") is None
+        assert db.get_collab_operation("collab/owner/repo") is None
     finally:
         db.close()
 
 
-def test_submit_conflict_is_resumed_with_update(shared_world, tmp_path):
-    collection, source, remote = shared_world
+def test_submit_conflict_is_resumed_with_update(collab_world, tmp_path):
+    collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace(
@@ -433,12 +433,12 @@ def test_submit_conflict_is_resumed_with_update(shared_world, tmp_path):
     )
     _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
 
-    with pytest.raises(ValueError, match="shared update owner/repo"):
+    with pytest.raises(ValueError, match="collab update owner/repo"):
         run_submit(SimpleNamespace(repository="owner/repo", message=None))
 
     conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
     conflict_file.write_text(
-        "<!-- note_key: shared-key -->\nQ: shared question\nA: combined\n",
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: combined\n",
         encoding="utf-8",
     )
     run_update(SimpleNamespace(repository="owner/repo"))
@@ -446,15 +446,15 @@ def test_submit_conflict_is_resumed_with_update(shared_world, tmp_path):
     assert "combined" in deck.read_text(encoding="utf-8")
     db = SyncState.open(collection)
     try:
-        assert db.get_shared_operation("shared/owner/repo") is None
+        assert db.get_collab_operation("collab/owner/repo") is None
     finally:
         db.close()
 
 
 def test_failed_update_fetch_leaves_repository_exactly_unchanged(
-    shared_world, monkeypatch
+    collab_world, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace("upstream answer", "local edit"),
@@ -480,7 +480,7 @@ def test_failed_update_fetch_leaves_repository_exactly_unchanged(
     assert deck.read_bytes() == before_bytes
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "integrating"
     finally:
@@ -488,9 +488,9 @@ def test_failed_update_fetch_leaves_repository_exactly_unchanged(
 
 
 def test_submit_commits_only_source_and_reuses_operation(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     private = collection / "Private.md"
@@ -509,7 +509,7 @@ def test_submit_commits_only_source_and_reuses_operation(
 
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     created_pr = []
@@ -519,11 +519,11 @@ def test_submit_commits_only_source_and_reuses_operation(
         return "https://github.test/owner/repo/pull/1"
 
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         create_pr,
     )
 
-    args = SimpleNamespace(repository="owner/repo", message="Clarify shared answer")
+    args = SimpleNamespace(repository="owner/repo", message="Clarify collab answer")
     run_submit(args)
     first_head = _git(source, "rev-parse", "HEAD").stdout.strip()
     first_refs = _git(publish, "for-each-ref", "--format=%(refname)").stdout
@@ -539,7 +539,7 @@ def test_submit_commits_only_source_and_reuses_operation(
     assert _git(collection, "status", "--short").stdout.strip() == "M Private.md"
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "pr_open"
         assert operation["pr_url"] == "https://github.test/owner/repo/pull/1"
@@ -547,8 +547,8 @@ def test_submit_commits_only_source_and_reuses_operation(
         db.close()
 
 
-def test_submit_retry_after_failed_integration(shared_world, tmp_path, monkeypatch):
-    _collection, source, _remote = shared_world
+def test_submit_retry_after_failed_integration(collab_world, tmp_path, monkeypatch):
+    _collection, source, _remote = collab_world
     publish = tmp_path / "integration-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -575,11 +575,11 @@ def test_submit_retry_after_failed_integration(shared_world, tmp_path, monkeypat
     monkeypatch.setattr(GitRepository, "fetch", fail_once)
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/integration",
     )
     args = SimpleNamespace(repository="owner/repo", message="Retry integration")
@@ -593,9 +593,9 @@ def test_submit_retry_after_failed_integration(shared_world, tmp_path, monkeypat
 
 
 def test_submit_retry_after_interruption_while_applying(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     publish = tmp_path / "apply-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -622,11 +622,11 @@ def test_submit_retry_after_interruption_while_applying(
     monkeypatch.setattr(GitRepository, "reset_hard", interrupt_after_reset)
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/apply",
     )
     args = SimpleNamespace(repository="owner/repo", message="Retry apply")
@@ -635,7 +635,7 @@ def test_submit_retry_after_interruption_while_applying(
         run_submit(args)
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "applying"
     finally:
@@ -647,9 +647,9 @@ def test_submit_retry_after_interruption_while_applying(
 
 
 def test_submit_retry_after_failed_pr_reuses_pushed_branch(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     publish = tmp_path / "pr-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -673,10 +673,10 @@ def test_submit_retry_after_failed_pr_reuses_pushed_branch(
 
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
-    monkeypatch.setattr("ankiops.shared.commands.GitHubHost.create_pr", fail_once)
+    monkeypatch.setattr("ankiops.collab.commands.GitHubHost.create_pr", fail_once)
     args = SimpleNamespace(repository="owner/repo", message="Retry PR")
 
     with pytest.raises(ValueError, match="reached GitHub"):
@@ -694,7 +694,7 @@ def test_submit_retry_after_failed_pr_reuses_pushed_branch(
     )
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "pr_open"
         assert operation["pr_url"] == "https://github.test/owner/repo/pull/2"
@@ -703,9 +703,9 @@ def test_submit_retry_after_failed_pr_reuses_pushed_branch(
 
 
 def test_submit_retry_after_failed_push_reuses_commit_and_branch(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     publish = tmp_path / "push-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -732,11 +732,11 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(GitRepository, "push", fail_once)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/3",
     )
     args = SimpleNamespace(repository="owner/repo", message="Retry push")
@@ -746,7 +746,7 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
     failed_head = _git(source, "rev-parse", "HEAD").stdout.strip()
     db = SyncState.open(collection)
     try:
-        failed_operation = db.get_shared_operation("shared/owner/repo")
+        failed_operation = db.get_collab_operation("collab/owner/repo")
         assert failed_operation is not None
         branch = failed_operation["publish_branch"]
         assert failed_operation["state"] == "push_failed"
@@ -757,7 +757,7 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == failed_head
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["publish_branch"] == branch
         assert operation["state"] == "pr_open"
@@ -766,9 +766,9 @@ def test_submit_retry_after_failed_push_reuses_commit_and_branch(
 
 
 def test_submit_retry_after_interruption_after_push(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     publish = tmp_path / "pushed-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -795,11 +795,11 @@ def test_submit_retry_after_interruption_after_push(
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(GitRepository, "push", interrupt_after_push)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/pushed",
     )
     args = SimpleNamespace(repository="owner/repo", message="Retry pushed commit")
@@ -812,9 +812,9 @@ def test_submit_retry_after_interruption_after_push(
 
 
 def test_submit_retry_after_interruption_after_pr_creation(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     publish = tmp_path / "pr-created-retry.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -841,11 +841,11 @@ def test_submit_retry_after_interruption_after_pr_creation(
 
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr", interrupt_after_pr
+        "ankiops.collab.commands.GitHubHost.create_pr", interrupt_after_pr
     )
     args = SimpleNamespace(repository="owner/repo", message="Retry created PR")
 
@@ -856,7 +856,7 @@ def test_submit_retry_after_interruption_after_pr_creation(
     assert pr_calls == 2
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "pr_open"
         assert operation["pr_url"] == "https://github.test/owner/repo/pull/existing"
@@ -865,9 +865,9 @@ def test_submit_retry_after_interruption_after_pr_creation(
 
 
 def test_update_after_squash_merge_cleans_submission_state(
-    shared_world, tmp_path, monkeypatch
+    collab_world, tmp_path, monkeypatch
 ):
-    collection, source, upstream_remote = shared_world
+    collection, source, upstream_remote = collab_world
     publish = tmp_path / "merged-fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
     deck = source / "Deck.md"
@@ -882,11 +882,11 @@ def test_update_after_squash_merge_cleans_submission_state(
 
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.create_pr",
+        "ankiops.collab.commands.GitHubHost.create_pr",
         lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/4",
     )
     run_submit(SimpleNamespace(repository="owner/repo", message="Merged change"))
@@ -902,14 +902,14 @@ def test_update_after_squash_merge_cleans_submission_state(
 
     db = SyncState.open(collection)
     try:
-        assert db.get_shared_operation("shared/owner/repo") is None
+        assert db.get_collab_operation("collab/owner/repo") is None
     finally:
         db.close()
     assert _git(publish, "for-each-ref", "--format=%(refname)").stdout == ""
 
 
-def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
-    collection, source, _remote = shared_world
+def test_submit_auth_failure_reports_simple_retry(collab_world, monkeypatch):
+    collection, source, _remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace(
@@ -918,7 +918,7 @@ def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "ankiops.shared.commands.GitHubHost.publish_target",
+        "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: (_ for _ in ()).throw(
             ValueError("GitHub CLI is not authenticated. Run: gh auth login")
         ),
@@ -930,10 +930,10 @@ def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
     message = str(error.value)
     assert "was committed locally" in message
     assert "Nothing was uploaded" in message
-    assert "Retrying is safe: ankiops shared submit owner/repo" in message
+    assert "Retrying is safe: ankiops collab submit owner/repo" in message
     db = SyncState.open(collection)
     try:
-        operation = db.get_shared_operation("shared/owner/repo")
+        operation = db.get_collab_operation("collab/owner/repo")
         assert operation is not None
         assert operation["state"] == "ready"
     finally:
@@ -943,9 +943,9 @@ def test_submit_auth_failure_reports_simple_retry(shared_world, monkeypatch):
     )
 
 
-def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, caplog):
+def test_status_reports_local_state_when_fetch_fails(collab_world, monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     (source / "Draft.md").write_text("draft\n", encoding="utf-8")
     monkeypatch.setattr(
         GitRepository,
@@ -960,12 +960,12 @@ def test_status_reports_local_state_when_fetch_fails(shared_world, monkeypatch, 
     assert "Working tree: 1 changed path" in caplog.text
     assert "Upstream: unavailable" in caplog.text
     assert "collection changes" not in caplog.text.lower()
-    assert "Retry status: ankiops shared status owner/repo" in caplog.text
+    assert "Retry status: ankiops collab status owner/repo" in caplog.text
 
 
-def test_status_reports_committed_local_contribution(shared_world, caplog):
+def test_status_reports_committed_local_contribution(collab_world, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace(
@@ -977,31 +977,31 @@ def test_status_reports_committed_local_contribution(shared_world, caplog):
 
     run_status(SimpleNamespace(repository="owner/repo"))
 
-    assert "Shared status: owner/repo" in caplog.text
+    assert "Collab status: owner/repo" in caplog.text
     assert "Working tree: clean" in caplog.text
     assert "Local contribution: 1 commit ready to submit" in caplog.text
     assert "Upstream: up to date" in caplog.text
     assert "Anki: changes not applied" in caplog.text
     assert "Apply to Anki: ankiops fa" in caplog.text
-    assert "Submit contribution: ankiops shared submit owner/repo" in caplog.text
+    assert "Submit contribution: ankiops collab submit owner/repo" in caplog.text
 
 
-def test_status_reports_available_upstream_update(shared_world, tmp_path, caplog):
+def test_status_reports_available_upstream_update(collab_world, tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    _collection, _source, remote = shared_world
+    _collection, _source, remote = collab_world
     _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
 
     run_status(SimpleNamespace(repository="owner/repo"))
 
     assert "Local contribution: none" in caplog.text
     assert "Upstream: 1 commit available" in caplog.text
-    assert "Integrate upstream: ankiops shared update owner/repo" in caplog.text
+    assert "Integrate upstream: ankiops collab update owner/repo" in caplog.text
     assert "Submit contribution:" not in caplog.text
 
 
-def test_status_reports_diverged_contributions(shared_world, tmp_path, caplog):
+def test_status_reports_diverged_contributions(collab_world, tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, remote = shared_world
+    _collection, source, remote = collab_world
     (source / "Local.md").write_text("local\n", encoding="utf-8")
     _commit(source, "Local contribution")
     _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
@@ -1010,13 +1010,13 @@ def test_status_reports_diverged_contributions(shared_world, tmp_path, caplog):
 
     assert "Local contribution: 1 commit ready to submit" in caplog.text
     assert "Upstream: 1 commit available; update before submitting" in caplog.text
-    assert "Integrate upstream: ankiops shared update owner/repo" in caplog.text
+    assert "Integrate upstream: ankiops collab update owner/repo" in caplog.text
     assert "Submit contribution:" not in caplog.text
 
 
-def test_status_reports_contribution_accepted_upstream(shared_world, tmp_path, caplog):
+def test_status_reports_contribution_accepted_upstream(collab_world, tmp_path, caplog):
     caplog.set_level(logging.INFO)
-    collection, source, remote = shared_world
+    collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace("upstream answer", "accepted answer"),
@@ -1027,8 +1027,8 @@ def test_status_reports_contribution_accepted_upstream(shared_world, tmp_path, c
     _upstream_edit(tmp_path, remote, "upstream answer", "accepted answer")
     db = SyncState.open(collection)
     try:
-        db.save_shared_operation(
-            "shared/owner/repo",
+        db.save_collab_operation(
+            "collab/owner/repo",
             "accepted-operation",
             "submit",
             "pr_open",
@@ -1045,13 +1045,13 @@ def test_status_reports_contribution_accepted_upstream(shared_world, tmp_path, c
     assert "Local contribution: none" in caplog.text
     assert "Upstream: up to date" in caplog.text
     assert "Submission: accepted upstream; cleanup pending" in caplog.text
-    assert "Finalize submission: ankiops shared update owner/repo" in caplog.text
+    assert "Finalize submission: ankiops collab update owner/repo" in caplog.text
     assert "Review pull request:" not in caplog.text
 
 
-def test_status_omits_unrelated_collection_changes(shared_world, caplog):
+def test_status_omits_unrelated_collection_changes(collab_world, caplog):
     caplog.set_level(logging.INFO)
-    collection, _source, _remote = shared_world
+    collection, _source, _remote = collab_world
     private_deck = collection / "Private.md"
     private_deck.write_text("private edit\n", encoding="utf-8")
     generated_config = collection / "note_types" / "Generated.yaml"
@@ -1065,9 +1065,9 @@ def test_status_omits_unrelated_collection_changes(shared_world, caplog):
     assert "Generated.yaml" not in caplog.text
 
 
-def test_status_prints_unicode_shared_paths_without_git_quoting(shared_world, caplog):
+def test_status_prints_unicode_collab_paths_without_git_quoting(collab_world, caplog):
     caplog.set_level(logging.INFO)
-    _collection, source, _remote = shared_world
+    _collection, source, _remote = collab_world
     unicode_name = "Déck Ω — punctuation!.md"
     (source / unicode_name).write_text("draft\n", encoding="utf-8")
 
@@ -1085,10 +1085,10 @@ def test_status_prints_unicode_shared_paths_without_git_quoting(shared_world, ca
     ],
 )
 def test_status_gives_submit_retry_as_next_command(
-    shared_world, caplog, state, submission_status
+    collab_world, caplog, state, submission_status
 ):
     caplog.set_level(logging.INFO)
-    collection, source, _remote = shared_world
+    collection, source, _remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace(
@@ -1099,8 +1099,8 @@ def test_status_gives_submit_retry_as_next_command(
     prepared_head = _commit(source, "Local contribution")
     db = SyncState.open(collection)
     try:
-        db.save_shared_operation(
-            "shared/owner/repo",
+        db.save_collab_operation(
+            "collab/owner/repo",
             "retry-operation",
             "submit",
             state,
@@ -1116,4 +1116,4 @@ def test_status_gives_submit_retry_as_next_command(
     run_status(SimpleNamespace(repository="owner/repo"))
 
     assert f"Submission: {submission_status}" in caplog.text
-    assert "Retry submission: ankiops shared submit owner/repo" in caplog.text
+    assert "Retry submission: ankiops collab submit owner/repo" in caplog.text

@@ -27,7 +27,7 @@ class MockAnki:
     def _base_model_name(self, model_name: str | None) -> str | None:
         if model_name == "RenamedQA":
             return "AnkiOpsQA"
-        if model_name and model_name.startswith("shared/"):
+        if model_name and model_name.startswith("collab/"):
             return model_name.split("/")[-1]
         return model_name
 

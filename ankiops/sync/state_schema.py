@@ -49,8 +49,8 @@ CREATE TABLE source_sync_state (
     CHECK (source_path <> '')
 )
 """,
-    "shared_operations": """
-CREATE TABLE shared_operations (
+    "collab_operations": """
+CREATE TABLE collab_operations (
     source_path TEXT PRIMARY KEY,
     operation_id TEXT NOT NULL UNIQUE,
     kind TEXT NOT NULL,

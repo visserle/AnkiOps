@@ -1,6 +1,6 @@
-"""GitHub-native shared support for AnkiOps."""
+"""GitHub-native collab support for AnkiOps."""
 
-from ankiops.shared.commands import (
+from ankiops.collab.commands import (
     run,
     run_publish,
     run_status,

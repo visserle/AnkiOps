@@ -513,20 +513,20 @@ def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):
     """EXP-RUN-PROTECT-004."""
     world.add_qa_note(
         deck_name="NoDuplicateDeck",
-        question="Shared Q",
-        answer="Shared A",
+        question="Collab Q",
+        answer="Collab A",
         note_key=None,
     )
     world.write_qa_deck(
         "NoDuplicateDeck",
-        [("Shared Q", "Shared A", None)],
+        [("Collab Q", "Collab A", None)],
     )
 
     with world.db_session() as db:
         result = world.sync_export(db)
 
     content = world.read_deck("NoDuplicateDeck")
-    assert content.count("Q: Shared Q") == 1
+    assert content.count("Q: Collab Q") == 1
     assert len(world.extract_note_keys("NoDuplicateDeck")) == 1
     assert_summary(result.summary, created=1, updated=0, moved=0, deleted=0, errors=0)
     assert all(

@@ -131,7 +131,7 @@ def test_invoke_requires_ankiops_connect_for_custom_actions():
                 "convertNotesToNoteType",
                 noteIds=[101],
                 oldNoteType="AnkiOpsQA",
-                newNoteType="shared/o/r/AnkiOpsQA",
+                newNoteType="collab/o/r/AnkiOpsQA",
             )
 
     post.assert_called_once()

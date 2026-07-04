@@ -29,7 +29,7 @@ def _init_collection(collection_root) -> None:
         db.close()
     DeckFileHarness().eject_default_note_types(collection_root / "note_types")
     (collection_root / ".gitignore").write_text(
-        "/shared/\n.ankiops.db*\n.ankiops/\n",
+        "/collab/\n.ankiops.db*\n.ankiops/\n",
         encoding="utf-8",
     )
 
@@ -266,16 +266,16 @@ def test_executor_snapshots_only_queued_local_deck_paths(
     assert "Q: Fixed question" in working
 
 
-def test_executor_uses_broad_snapshot_with_shared_without_committing_llm_db(
+def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
     llm_collection,
     write_file,
     monkeypatch,
 ):
     _init_collection(llm_collection)
-    shared_root = llm_collection / "shared" / "owner" / "repo"
-    DeckFileHarness().eject_default_note_types(shared_root / "note_types")
-    _init_git_repo(shared_root)
-    _commit_all(shared_root)
+    collab_root = llm_collection / "collab" / "owner" / "repo"
+    DeckFileHarness().eject_default_note_types(collab_root / "note_types")
+    _init_git_repo(collab_root)
+    _commit_all(collab_root)
     write_file(
         llm_collection / "Deck.md",
         """

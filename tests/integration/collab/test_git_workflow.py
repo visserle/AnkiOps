@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from ankiops.shared.commands import run_update
+from ankiops.collab.commands import run_update
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
@@ -27,13 +27,13 @@ def _commit(root: Path, message: str) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
-def test_concurrent_shared_update_preserves_private_root(tmp_path, monkeypatch):
+def test_concurrent_collab_update_preserves_private_root(tmp_path, monkeypatch):
     collection = tmp_path / "collection"
     collection.mkdir()
     _git(collection, "init", "-b", "main")
     _identity(collection, "private")
     (collection / ".gitignore").write_text(
-        "/shared/\n.ankiops.db*\n.ankiops/\n", encoding="utf-8"
+        "/collab/\n.ankiops.db*\n.ankiops/\n", encoding="utf-8"
     )
     private = collection / "Private.md"
     private.write_text("private baseline\n", encoding="utf-8")
@@ -48,13 +48,13 @@ def test_concurrent_shared_update_preserves_private_root(tmp_path, monkeypatch):
     _identity(upstream, "upstream")
     DeckFileHarness().eject_default_note_types(upstream / "note_types")
     (upstream / "Deck.md").write_text(
-        "<!-- note_key: shared -->\nQ: question\nA: baseline\n",
+        "<!-- note_key: collab -->\nQ: question\nA: baseline\n",
         encoding="utf-8",
     )
-    _commit(upstream, "Initial shared deck")
+    _commit(upstream, "Initial collab deck")
     _git(upstream, "push", "origin", "main")
 
-    source = collection / "shared" / "owner" / "repo"
+    source = collection / "collab" / "owner" / "repo"
     source.parent.mkdir(parents=True)
     _git(source.parent, "clone", "--origin", "upstream", str(remote), str(source))
     _identity(source, "local")
@@ -70,10 +70,10 @@ def test_concurrent_shared_update_preserves_private_root(tmp_path, monkeypatch):
         .replace("baseline", "remote edit"),
         encoding="utf-8",
     )
-    _commit(upstream, "Remote shared edit")
+    _commit(upstream, "Remote collab edit")
     _git(upstream, "push", "origin", "main")
     monkeypatch.setattr(
-        "ankiops.shared.commands.require_collection_root", lambda: collection
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
     run_update(SimpleNamespace(repository="owner/repo"))

@@ -175,7 +175,7 @@ def test_convert_notes_to_note_type_calls_ankiops_connect_action():
     invoke = _InvokeRecorder()
     adapter = Anki(invoke_func=invoke)
 
-    adapter.convert_notes_to_note_type([101, 102], "AnkiOpsQA", "shared/o/r/AnkiOpsQA")
+    adapter.convert_notes_to_note_type([101, 102], "AnkiOpsQA", "collab/o/r/AnkiOpsQA")
 
     assert invoke.calls == [
         (
@@ -183,7 +183,7 @@ def test_convert_notes_to_note_type_calls_ankiops_connect_action():
             {
                 "noteIds": [101, 102],
                 "oldNoteType": "AnkiOpsQA",
-                "newNoteType": "shared/o/r/AnkiOpsQA",
+                "newNoteType": "collab/o/r/AnkiOpsQA",
             },
         )
     ]

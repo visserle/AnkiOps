@@ -5,6 +5,7 @@ from importlib.metadata import PackageNotFoundError, version
 from ankiops.anki_rpc import AnkiConnectionError
 from ankiops.cli_commands import (
     run_af,
+    run_collab,
     run_deserialize,
     run_fa,
     run_fix_image_widths,
@@ -12,7 +13,6 @@ from ankiops.cli_commands import (
     run_llm,
     run_note_type,
     run_serialize,
-    run_shared,
 )
 from ankiops.console import configure_logging
 from ankiops.llm.commands import configure_llm_parser
@@ -188,78 +188,78 @@ def main():
 
     configure_llm_parser(subparsers, handler=run_llm)
 
-    shared_parser = subparsers.add_parser(
-        "shared",
-        help="Publish, subscribe to, update, and contribute to shared decks",
+    collab_parser = subparsers.add_parser(
+        "collab",
+        help="Publish, subscribe to, update, and contribute to collab decks",
     )
-    shared_subparsers = shared_parser.add_subparsers(
-        dest="shared_command",
+    collab_subparsers = collab_parser.add_subparsers(
+        dest="collab_command",
         required=True,
     )
 
-    shared_publish = shared_subparsers.add_parser(
+    collab_publish = collab_subparsers.add_parser(
         "publish",
         help="Publish an existing local deck as a new GitHub repository",
     )
-    shared_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
-    shared_publish.add_argument(
+    collab_publish.add_argument("deck", help="Deck to publish (includes subdecks)")
+    collab_publish.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Shared deck identity (letters, digits, hyphens)",
+        help="Collab deck identity (letters, digits, hyphens)",
     )
-    shared_publish.set_defaults(handler=run_shared)
+    collab_publish.set_defaults(handler=run_collab)
 
-    shared_subscribe = shared_subparsers.add_parser(
+    collab_subscribe = collab_subparsers.add_parser(
         "subscribe",
-        help="Subscribe to a shared deck on GitHub",
+        help="Subscribe to a collab deck on GitHub",
     )
-    shared_subscribe.add_argument(
+    collab_subscribe.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Shared deck identity (letters, digits, hyphens)",
+        help="Collab deck identity (letters, digits, hyphens)",
     )
-    shared_subscribe.set_defaults(handler=run_shared)
+    collab_subscribe.set_defaults(handler=run_collab)
 
-    shared_update = shared_subparsers.add_parser(
+    collab_update = collab_subparsers.add_parser(
         "update",
-        help="Bring available GitHub changes into shared Markdown files",
+        help="Bring available GitHub changes into collab Markdown files",
     )
-    shared_update.add_argument(
+    collab_update.add_argument(
         "repository",
         metavar="OWNER/REPO",
         nargs="?",
-        help="Shared deck identity (letters, digits, hyphens)",
+        help="Collab deck identity (letters, digits, hyphens)",
     )
-    shared_update.set_defaults(handler=run_shared)
+    collab_update.set_defaults(handler=run_collab)
 
-    shared_submit = shared_subparsers.add_parser(
+    collab_submit = collab_subparsers.add_parser(
         "submit",
         help="Submit a contribution as a GitHub pull request",
     )
-    shared_submit.add_argument(
+    collab_submit.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Shared deck identity (letters, digits, hyphens)",
+        help="Collab deck identity (letters, digits, hyphens)",
     )
-    shared_submit.add_argument(
+    collab_submit.add_argument(
         "--message",
         "-m",
         type=_single_line_text,
         help="Pull request title and commit message for new changes",
     )
-    shared_submit.set_defaults(handler=run_shared)
+    collab_submit.set_defaults(handler=run_collab)
 
-    shared_status = shared_subparsers.add_parser(
+    collab_status = collab_subparsers.add_parser(
         "status",
         help="Preview changes, updates, submissions, and recovery state",
     )
-    shared_status.add_argument(
+    collab_status.add_argument(
         "repository",
         metavar="OWNER/REPO",
         nargs="?",
-        help="Shared deck identity (letters, digits, hyphens)",
+        help="Collab deck identity (letters, digits, hyphens)",
     )
-    shared_status.set_defaults(handler=run_shared)
+    collab_status.set_defaults(handler=run_collab)
 
     note_types_parser = subparsers.add_parser(
         "note-types",
@@ -310,7 +310,7 @@ def main():
         print("  fix-image-widths  Normalize or force Markdown image widths")
         print("  llm               Status/plan/run LLM jobs and inspect one LLM job")
         print(
-            "  shared            Publish, subscribe to, update, and contribute to decks"
+            "  collab            Publish, subscribe to, update, and contribute to decks"
         )
         print("  note-types        List note type labels or add note types from Anki")
         print()
@@ -342,7 +342,7 @@ def main():
             "  ankiops llm --job latest                     # Show most recent LLM job"
         )
         print("  ankiops llm --job <job_id>                   # Show one LLM job")
-        print("  ankiops shared status                        # Check shared decks")
+        print("  ankiops collab status                        # Check collab decks")
         print(
             "  ankiops note-types                           "
             "# Show note types and label registry"

@@ -16,11 +16,11 @@ def test_convert_notes_to_note_type_converts_selected_notes_only():
         col,
         [101],
         "AnkiOpsQA",
-        "shared/owner/repo/AnkiOpsQA",
+        "collab/owner/repo/AnkiOpsQA",
     )
 
     assert result == {"changed": 1}
-    assert col.notes[101].note_type()["name"] == "shared/owner/repo/AnkiOpsQA"
+    assert col.notes[101].note_type()["name"] == "collab/owner/repo/AnkiOpsQA"
     assert col.notes[102].note_type()["name"] == "AnkiOpsQA"
 
 
@@ -41,7 +41,7 @@ def test_convert_notes_to_note_type_blocks_wrong_current_model():
             col,
             [101],
             "AnkiOpsQA",
-            "shared/owner/repo/AnkiOpsQA",
+            "collab/owner/repo/AnkiOpsQA",
         )
 
 
@@ -57,7 +57,7 @@ def test_convert_notes_to_note_type_blocks_missing_ankiops_key_field():
             col,
             [101],
             "AnkiOpsQA",
-            "shared/owner/repo/AnkiOpsQA",
+            "collab/owner/repo/AnkiOpsQA",
         )
 
 
@@ -65,7 +65,7 @@ def test_convert_notes_to_note_type_blocks_mismatched_fields():
     col = _FakeCollection()
     col.new_model = _model(
         2,
-        "shared/owner/repo/AnkiOpsQA",
+        "collab/owner/repo/AnkiOpsQA",
         fields=["Question", "Different", "AnkiOps Key"],
     )
     col.models_by_name[col.new_model["name"]] = col.new_model
@@ -77,7 +77,7 @@ def test_convert_notes_to_note_type_blocks_mismatched_fields():
             col,
             [101],
             "AnkiOpsQA",
-            "shared/owner/repo/AnkiOpsQA",
+            "collab/owner/repo/AnkiOpsQA",
         )
 
 
@@ -94,5 +94,5 @@ def test_convert_notes_to_note_type_blocks_post_verification_failures():
             col,
             [101],
             "AnkiOpsQA",
-            "shared/owner/repo/AnkiOpsQA",
+            "collab/owner/repo/AnkiOpsQA",
         )

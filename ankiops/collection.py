@@ -187,7 +187,7 @@ def _setup_vscode_settings(collection_root: Path) -> None:
             pass
     settings.update(
         {
-            "git.repositoryScanMaxDepth": 3,  # detect git repos from shared subfolders
+            "git.repositoryScanMaxDepth": 3,  # detect git repos from collab subfolders
             "[markdown]": {
                 "editor.formatOnSave": False,
                 "editor.wordWrap": "wordWrapColumn",
@@ -217,7 +217,7 @@ def _setup_gitignore(collection_root: Path) -> None:
         ANKIOPS_DB,
         f"{ANKIOPS_DB}-shm",
         f"{ANKIOPS_DB}-wal",
-        "/shared/",
+        "/collab/",
     ]
     missing = [entry for entry in entries if entry not in content]
     if missing:

@@ -81,4 +81,4 @@ def test_collection_gitignore_excludes_nested_repositories_and_recovery(tmp_path
     _setup_gitignore(tmp_path)
 
     entries = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "/shared/" in entries
+    assert "/collab/" in entries

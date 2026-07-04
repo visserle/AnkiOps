@@ -1,4 +1,4 @@
-"""Authenticated GitHub operations for shared repositories."""
+"""Authenticated GitHub operations for collab repositories."""
 
 from __future__ import annotations
 

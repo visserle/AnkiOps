@@ -193,13 +193,13 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
     assert surface_by_type["AnkiOpsReversed"].candidate_notes == 0
 
 
-def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_file):
+def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_file):
     _init_collection_db(llm_collection)
     fs = DeckFileHarness()
     fs.eject_default_note_types(llm_collection / "note_types")
-    shared_root = llm_collection / "shared" / "owner" / "repo"
-    fs.eject_default_note_types(shared_root / "note_types")
-    GitRepository(shared_root).init_repo()
+    collab_root = llm_collection / "collab" / "owner" / "repo"
+    fs.eject_default_note_types(collab_root / "note_types")
+    GitRepository(collab_root).init_repo()
     write_file(
         llm_collection / "Local.md",
         """
@@ -209,11 +209,11 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
         """,
     )
     write_file(
-        shared_root / "Shared.md",
+        collab_root / "Collab.md",
         """
-        <!-- note_key: shared-1 -->
-        Q: shared question
-        A: shared answer
+        <!-- note_key: collab-1 -->
+        Q: collab question
+        A: collab answer
         """,
     )
     write_file(
@@ -235,9 +235,9 @@ def test_plan_task_discovers_shared_notes_with_sources(llm_collection, write_fil
 
     surface = {(item.source, item.note_type): item for item in plan.field_surface}
     assert ("local", "AnkiOpsQA") in surface
-    assert ("owner/repo", "shared/owner/repo/AnkiOpsQA") in surface
+    assert ("owner/repo", "collab/owner/repo/AnkiOpsQA") in surface
     assert surface[("local", "AnkiOpsQA")].candidate_notes == 1
-    assert surface[("owner/repo", "shared/owner/repo/AnkiOpsQA")].candidate_notes == 1
+    assert surface[("owner/repo", "collab/owner/repo/AnkiOpsQA")].candidate_notes == 1
 
 
 def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(
