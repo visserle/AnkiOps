@@ -187,7 +187,7 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### What is the recommended workflow?
 
-We recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder well.
+We emphatically recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder well. AnkiOps ejects a configuration for VS Code that works out of the box with all features provided by AnkiOps.
 
 ### How can I migrate my existing notes into AnkiOps?
 
@@ -316,6 +316,11 @@ Collab deck tools:
 ## Contributing
 
 Bug fixes, documentation improvements, tests, and PRs are welcome!
+
+## Inspired by
+
+- [hashcards](https://github.com/eudoxia0/hashcards): Markdown-first flashcards
+- [AnkiCollab](https://github.com/CravingCrates/AnkiCollab-Plugin): Collaborative Anki decks
 
 ## License
 
