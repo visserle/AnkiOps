@@ -56,13 +56,6 @@ Use an issue for questions about the deck's scope or content. Use a pull request
 
 ## Maintain this deck as a publisher
 
-Before inviting subscribers, replace the opening paragraph with information specific to this deck:
-
-- Describe its topics, intended audience, and prerequisite knowledge.
-- Name its sources or credits and explain which issues and contributions you accept.
-
-Remove this checklist after updating the paragraph.
-
 Review incoming changes through GitHub pull requests. After merging a pull request, update your local subscription before making more edits:
 
 ```bash
