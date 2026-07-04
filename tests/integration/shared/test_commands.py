@@ -16,7 +16,6 @@ from ankiops.shared.commands import (
     run_subscribe,
     run_update,
 )
-from ankiops.shared.hosting import GitHubHost
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
@@ -61,25 +60,6 @@ def _setup_collection(tmp_path: Path) -> Path:
     return collection
 
 
-def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
-    calls = []
-
-    def fake_gh(_host, args, *, check=True):
-        calls.append((args, check))
-        return subprocess.CompletedProcess(
-            ["gh", *args],
-            1 if args[:1] == ["api"] else 0,
-            stdout="",
-            stderr="",
-        )
-
-    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
-
-    GitHubHost(tmp_path).create_repo("owner/repo")
-
-    assert (["repo", "create", "owner/repo", "--public"], False) in calls
-
-
 def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
     remote = tmp_path / "upstream.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
@@ -102,10 +82,22 @@ def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
     return source, remote
 
 
+@pytest.fixture(scope="session")
+def shared_world_template(tmp_path_factory):
+    root = tmp_path_factory.mktemp("shared-world-template")
+    collection = _setup_collection(root)
+    _setup_source(root, collection)
+    shutil.rmtree(root / "seed")
+    return root
+
+
 @pytest.fixture
-def shared_world(tmp_path, monkeypatch):
-    collection = _setup_collection(tmp_path)
-    source, remote = _setup_source(tmp_path, collection)
+def shared_world(tmp_path, monkeypatch, shared_world_template):
+    shutil.copytree(shared_world_template, tmp_path, dirs_exist_ok=True)
+    collection = tmp_path / "collection"
+    source = collection / "shared" / "owner" / "repo"
+    remote = tmp_path / "upstream.git"
+    _git(source, "remote", "set-url", "upstream", str(remote))
     monkeypatch.setattr(
         "ankiops.shared.commands.require_collection_root", lambda: collection
     )

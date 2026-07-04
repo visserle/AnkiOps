@@ -7,6 +7,25 @@ import pytest
 from ankiops.shared.hosting import GitHubHost
 
 
+def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_gh(_host, args, *, check=True):
+        calls.append((args, check))
+        return subprocess.CompletedProcess(
+            ["gh", *args],
+            1 if args[:1] == ["api"] else 0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
+
+    GitHubHost(tmp_path).create_repo("owner/repo")
+
+    assert (["repo", "create", "owner/repo", "--public"], False) in calls
+
+
 def test_missing_github_cli_gives_exact_setup_command(tmp_path, monkeypatch):
     monkeypatch.setattr("ankiops.shared.hosting.shutil.which", lambda _name: None)
 
