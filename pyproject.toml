@@ -61,6 +61,7 @@ ankiops = [
     "default_note_types/**/*.css",
     "default_note_types/**/*.yaml",
     "llm/resources/*.yaml",
+    "llm/resources/README.md",
     "llm/resources/_system_prompt.md",
 ]
 

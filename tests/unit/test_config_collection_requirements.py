@@ -7,6 +7,7 @@ import subprocess
 import pytest
 
 from ankiops.collection import (
+    _eject_llm_configs,
     _setup_gitignore,
     get_collection_root,
     require_collection_root,
@@ -82,3 +83,15 @@ def test_collection_gitignore_excludes_nested_repositories_and_recovery(tmp_path
 
     entries = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "/shared/" in entries
+
+
+def test_eject_llm_configs_includes_readme_without_overwriting_it(tmp_path):
+    _eject_llm_configs(tmp_path)
+
+    readme = tmp_path / "llm/README.md"
+    assert readme.read_text(encoding="utf-8").startswith("# LLM tasks\n")
+
+    readme.write_text("My LLM notes\n", encoding="utf-8")
+    _eject_llm_configs(tmp_path)
+
+    assert readme.read_text(encoding="utf-8") == "My LLM notes\n"
