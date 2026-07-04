@@ -17,7 +17,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ### Markdown Files
 
-One Markdown file is one deck. In a deck, each note is separated by a blank line, three dashes, and another blank line:
+One Markdown file is one deck. Each note is separated by a blank line, three dashes, and another blank line:
 
 ```markdown
 Q: Question text here
