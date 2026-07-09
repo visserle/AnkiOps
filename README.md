@@ -17,7 +17,7 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ### Markdown Files
 
-One Markdown file is one deck. Each note is separated by a blank line, three dashes, and another blank line:
+A Markdown file represents a single Anki deck. Each note is separated by a blank line, three dashes `---`, and another blank line:
 
 ```markdown
 Q: Question text here
@@ -94,6 +94,7 @@ This is the basic structure of an AnkiOps collection:
 │   │   ├── Back.template.anki
 │   │   └── note_type.yaml
 │   ├── AnkiOpsCloze/
+│   ├── AnkiOpsChoice/
 │   ├── AnkiOpsStyling.css
 │   └── SyntaxHighlighting.css
 ├── media/
@@ -127,16 +128,19 @@ Generic, non-identifying labels such as `E:` for Extra can be added to any note 
 
 ### Synchronization
 
-AnkiOps has two sync commands, which make one side match the other:
+AnkiOps has two sync commands: 
+- `ankiops af` for syncing Anki to files, and 
+- `ankiops fa` for syncing files to Anki.
 
-- `ankiops af` (anki to files): After editing notes, tags, or decks in Anki, and
-- `ankiops fa` (files to anki): After editing Markdown decks, media, or note types.
+Each command applies changes from one side to the other. Both operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
 
-Both sync operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
+### LLM Integration
+
+
 
 ### Add-On
 
-For basic usage, you can use AnkiOps without the add-on. The add-on enables AnkiOpsConnect, which AnkiOps needs for operations related to sharing. If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). 
+For basic usage, you can use AnkiOps without the add-on. The add-on enables AnkiOpsConnect, which AnkiOps needs for operations related to collaboration. If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). 
 
 Another feature of the add-on are the toolbar buttons for `af` and `fa`:
 
