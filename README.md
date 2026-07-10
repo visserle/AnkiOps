@@ -136,7 +136,18 @@ Each command applies changes from one side to the other. Both operations create,
 
 ### LLM Integration
 
+LLM tasks apply programmable edits to existing notes, from content review and grammar fixes to translation. In contrast to prompting an AI agent to edit the Markdown files, LLM tasks send batches of serialized notes (JSON) to the model. This ensures that the LLM only sees the content it needs to interact with and does not skip any notes. LLM tasks are fully customizable and can be run on the entire collection or a single deck.
 
+Each task is a YAML file in `llm/` that specifies its prompts, model, request settings, and access to fields and tags. AnkiOps uses OpenAI models through the Responses API by default. Set the API key, validate the configuration, inspect the plan, then run the task:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+ankiops llm
+ankiops llm fix-grammar
+ankiops llm fix-grammar --run
+```
+
+Review the Git diff and use `ankiops fa` to sync accepted changes to Anki. Please refer to the [LLM task guide](https://github.com/visserle/AnkiOps/blob/main/ankiops/llm/resources/README.md) for more details on creating and customizing LLM tasks.
 
 ### Add-On
 

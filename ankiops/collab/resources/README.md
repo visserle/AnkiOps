@@ -1,6 +1,8 @@
 # {{DECK_NAME}}
 
-`{{DECK_NAME}}` is a shared Anki deck with a Git history, managed through [AnkiOps](https://github.com/visserle/AnkiOps). AnkiOps is a bidirectional bridge between Anki and your filesystem. In this collaborative repository, cards are written in Markdown, changes are reviewed through pull requests, and the accepted version is kept in sync with Anki.
+Welcome to the collaborative Anki deck `{{DECK_NAME}}`. This repository contains the Markdown files, media, and note types that make up the deck.
+
+The deck is managed through [AnkiOps](https://github.com/visserle/AnkiOps). AnkiOps is a bidirectional bridge between Anki and the filesystem, allowing you to edit your cards in Anki or in Markdown, and to share your deck with others through GitHub.
 
 > [!NOTE]
 > AnkiOps collaboration is experimental. Check the [AnkiOps documentation](https://github.com/visserle/AnkiOps#how-does-collaboration-work-experimental) before upgrading an existing collection or changing the repository layout.
@@ -41,7 +43,7 @@ If an update overlaps with a local edit, AnkiOps leaves the subscribed repositor
 Edit your subscribednotes with either workflow:
 
 - Edit the Markdown files under `collab/{{REPOSITORY}}/`.
-- Edit cards in Anki, then run `ankiops fa` to write those changes back to the deck files.
+- Edit cards in Anki, then run `ankiops af` to write those changes back to the deck files.
 
 Review and submit your changes from the AnkiOps collection root:
 
