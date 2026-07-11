@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/visserle/AnkiOps/actions/workflows/test.yml/badge.svg)](https://github.com/visserle/AnkiOps/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![PyPI version](https://img.shields.io/pypi/v/ankiops.svg)](https://pypi.org/project/ankiops/)
 
-AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways.
+AnkiOps is a bridge between Anki and your filesystem. Each deck becomes a Markdown file so you can manage your collection from your favorite text editor. Edit in plain text, version with Git, enhance with LLMs, and sync changes both ways.
 
 ## Advantages
 
@@ -15,9 +15,9 @@ AnkiOps is a bidirectional bridge between Anki and your filesystem. Each deck be
 
 ## How It Works
 
-### Markdown Files
+### 1 Markdown Files
 
-A Markdown file represents a single Anki deck. Each note is separated by a blank line, three dashes `---`, and another blank line:
+AnkiOps is Markdown-first: Each file represents an Anki deck and notes are separated by a blank line, three dashes, and another blank line. Already existing decks can be exported from Anki, or created from scratch as in the following example:
 
 ```markdown
 Q: Question text here
@@ -45,9 +45,12 @@ C3: automatically randomized answers
 A: 1, 3
 ```
 
-You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, syntax-highlighted code blocks, and more. AnkiOps automatically converts Markdown to HTML for Anki and back again.
+The three notes represent three different notes types: a question-answer note, a cloze deletion note, and a multiple-choice note. They are 
 
-After the first sync with Anki, AnkiOps adds metadata comments for each note:
+
+You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, syntax-highlighted code blocks, and more. AnkiOps automatically converts Markdown to HTML for Anki, and back to Markdown when syncing from Anki.
+
+After the first import into Anki (`ankiops files-to-anki`), AnkiOps adds metadata comments for each note:
 
 ```markdown
 <!-- note_key: 2fd62bcaa861 -->
@@ -81,9 +84,13 @@ C3: automatically randomized answers
 A: 1, 3
 ```
 
-The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. The `note_type` comment is added just for the user's reference. Neither comment should be edited by hand. The `tags` comment  is user-editable and synced with Anki's tags.
+- The `note_key` is a stable identifier independent of Anki's note IDs and it is used to track notes across syncs. 
+- The `note_type` comment is added just for the user's reference. Neither comment should be edited by hand.
+- The `tags` comment  is user-editable and synced with Anki's tags.
 
-### Collection Structure
+Markdown files can also be created by exporting existing notes from Anki with `ankiops anki-to-files`, as explained in the following sections.
+
+### 2 Collection Structure
 
 This is the basic structure of an AnkiOps collection:
 
@@ -107,12 +114,14 @@ This is the basic structure of an AnkiOps collection:
 
 The `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` values in the Markdown files to Anki's internal note IDs.
 
-### Note Types
+### 3 Note Types
 
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder.
 
-AnkiOps automatically infers the note type for each note by a unique set of identifying field labels (e.g. `Q:` for Question and `A:` for Answer, which by default is `AnkiOpsQA`). Labels are defined in the `note_type.yaml` file within each note type folder. They define field names, field labels (identifying and non-identifying), card templates, and the styling. Note types are fully customizable. 
+AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. a note with the labels `Q:` for the field Question and `A:` for Answer dafults to `AnkiOpsQA`). For the inference, each note type must have unique sets of identifying labels. The labels are defined in the `note_type.yaml` file within each note type folder. In the yaml file, you define field names, field labels (identifying and non-identifying), card templates, and the styling. Note types are fully customizable. 
+
+If you want AnkiOps to manage your own note types, create a folder in `note_types/` with the note type name and a `note_type.yaml` file and the required templates. The following table shows the default AnkiOps note types and their identifying labels, which can be changes as needed.
 
 | Default note type | Identifying labels | 
 | --- | --- | 
@@ -124,32 +133,23 @@ AnkiOps automatically infers the note type for each note by a unique set of iden
 | `AnkiOpsChoice` | `Q:`, choice labels such as `C1:`, plus `A:`  |
 | `AnkiOpsImageOcclusion` | `IO_*:` labels for image occlusion fields |
 
-Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually. Note type inference depends on unique sets of identifying labels. All notes managed by AnkiOps have an additional field called `AnkiOps Key` that stores the `note_key` in Anki. 
+Generic, non-identifying labels such as `E:` for Extra can be added to any note type. To see the assigned labels in your collection, run `ankiops note-types`, or look up the note type definitions in `note_types/` manually. All notes managed by AnkiOps have an additional field called `AnkiOps Key` that stores the `note_key` in Anki. 
 
-### Synchronization
+### 4 Synchronization
 
 AnkiOps has two sync commands: 
-- `ankiops af` for syncing Anki to files, and 
-- `ankiops fa` for syncing files to Anki.
+- `ankiops anki-to-files` or short **`ankiops af`** for syncing Anki to files, and 
+- `ankiops files-to-anki` or short **`ankiops fa`** for syncing files to Anki.
 
-Each command applies changes from one side to the other. Both operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
+The commands apply changes from one side to the other. Both operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
 
-### LLM Integration
+### 5 LLM Integration
 
-LLM tasks apply programmable edits to existing notes, from content review and grammar fixes to translation. In contrast to prompting an AI agent to edit the Markdown files, LLM tasks send batches of serialized notes (JSON) to the model. This ensures that the LLM only sees the content it needs to interact with and does not skip any notes. LLM tasks are fully customizable and can be run on the entire collection or a single deck.
+LLM tasks apply programmable edits to existing notes, from content review and grammar fixes to translation. In contrast to prompting an AI agent to edit the Markdown files, LLM tasks send batches of serialized notes (JSON) to the model. This ensures that the LLM only sees the content it needs to interact with and does not skip any notes. LLM tasks are fully customizable and can be run on the entire collection or a single deck. 
 
-Each task is a YAML file in `llm/` that specifies its prompts, model, request settings, and access to fields and tags. AnkiOps uses OpenAI models through the Responses API by default. Set the API key, validate the configuration, inspect the plan, then run the task:
+Please refer to the [LLM task guide](https://github.com/visserle/AnkiOps/blob/main/ankiops/llm/resources/README.md) for more details on creating and customizing LLM tasks.
 
-```bash
-export OPENAI_API_KEY="your-api-key"
-ankiops llm
-ankiops llm fix-grammar
-ankiops llm fix-grammar --run
-```
-
-Review the Git diff and use `ankiops fa` to sync accepted changes to Anki. Please refer to the [LLM task guide](https://github.com/visserle/AnkiOps/blob/main/ankiops/llm/resources/README.md) for more details on creating and customizing LLM tasks.
-
-### Add-On
+### 6 Add-On
 
 For basic usage, you can use AnkiOps without the add-on. The add-on enables AnkiOpsConnect, which AnkiOps needs for operations related to collaboration. If you do not want to install the add-on, you can use AnkiOps with AnkiConnect (AnkiOpsConnect is twice as fast though). 
 
@@ -174,7 +174,7 @@ cd my-collection
 ankiops init --tutorial
 ```
 
-3. **Sync files to Anki**: Apply the current files, including Markdown decks, media, and note types, to Anki.
+3. **Sync files to Anki**: Apply the current files, including Markdown decks, media, and note types, to Anki. `fa` is short for `files-to-anki`.
 
 ```bash
 ankiops fa
@@ -183,7 +183,7 @@ ankiops fa
 4. **Sync Anki back to files**: After you review or edit cards in Anki, apply those changes to your local files. Each sync makes one side match the other. Inspect the Git diff to easily track all changes.
 
 ```bash
-ankiops af
+ankiops af # anki-to-files
 ```
 
 ## FAQ
@@ -202,7 +202,7 @@ Yes, AnkiOps will never modify notes that are not defined within the `note_types
 
 ### What is the recommended workflow?
 
-We emphatically recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder well. AnkiOps ejects a configuration for VS Code that works out of the box with all features provided by AnkiOps.
+We recommend VS Code because it has a stable Markdown previewer and handles images with the dedicated `media/` folder well. AnkiOps ejects a configuration for VS Code that works out of the box with all features provided by AnkiOps.
 
 ### How can I migrate my existing notes into AnkiOps?
 
@@ -268,21 +268,28 @@ Submit local collab edits:
 ```bash
 ankiops collab status owner/psychology-deck
 ankiops collab submit owner/psychology-deck \
-  --message "Clarify attention terminology"
+  --title "Clarify attention terminology"
 ```
 
-`collab update` changes files only; run `ankiops fa` after reviewing them.
-`collab submit` commits changes only inside the selected source and opens a pull
-request. Contributors without write permission use an authenticated fork
-automatically. If local and upstream edits overlap, the subscribed deck remains
-unchanged. AnkiOps preserves editable base, local, and upstream copies; edit the
-marked Markdown it reports and rerun `collab update`.
+Public subscriptions do not require GitHub authentication. After subscribing,
+run `ankiops fa`. An update recommends that command only when deck
+Markdown, referenced media, or note-type files changed; documentation-only
+updates do not affect Anki.
 
-If GitHub authentication, upload, or pull-request creation fails, AnkiOps keeps
-the commit on the recovery branch shown in the output. Rerun the reported
-`collab submit` command to reuse it. Your local Git configuration supplies the
-commit author; the authenticated GitHub account uploads it and opens the pull
-request. Submit output shows both identities.
+`collab submit` checkpoints the complete non-ignored draft inside the selected
+source and opens a pull request. Staged, unstaged, untracked, and deleted files
+are all included; private decks and other subscriptions are excluded.
+Contributors without write permission use an authenticated fork automatically.
+Further edits update the same open pull request as one synthetic commit. If
+local and upstream edits overlap, the subscribed deck remains unchanged.
+AnkiOps preserves editable base, local, and upstream copies; edit the marked
+Markdown it reports and rerun `collab update`.
+
+If GitHub authentication, upload, or pull-request creation fails, rerun the
+reported `collab submit` command. The local `ankiops/journal` branch and internal
+checkpoints preserve the operation without exposing recovery branches. Your
+local Git configuration supplies the commit author; the authenticated GitHub
+account uploads it and opens the pull request.
 
 ## Command Reference
 
@@ -326,7 +333,7 @@ Collab deck tools:
 - `ankiops collab subscribe <owner>/<repo>`
 - `ankiops collab status [owner/repo]`
 - `ankiops collab update [owner/repo]`
-- `ankiops collab submit <owner>/<repo> [-m|--message text]`
+- `ankiops collab submit <owner>/<repo> [-t|--title text]`
 
 ## Contributing
 
