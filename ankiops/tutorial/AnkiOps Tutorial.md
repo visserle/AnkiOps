@@ -2,7 +2,7 @@ Q: Welcome to AnkiOps!
 A: Anki decks ↔ Markdown files, in perfect sync
 E: Edit in your text editor, review in Anki.
 
-![](sync_arrows.png)
+![](sync_arrows.png){width=150}
 M: Neat!
 
 ---
@@ -47,4 +47,7 @@ Q: How do I get started?
 A: Run `ankiops fa` to sync files --> Anki
 
 Run `ankiops af` to sync Anki --> files
-E: Check the README for detailed documentation!
+E: ==Note==: AnkiOps only acts on note types defined within the `note_types/` folder.
+
+
+Check the README for detailed documentation!

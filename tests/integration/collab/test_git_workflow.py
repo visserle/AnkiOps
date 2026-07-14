@@ -27,7 +27,7 @@ def _commit(root: Path, message: str) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
-def test_concurrent_collab_update_preserves_private_root(tmp_path, monkeypatch):
+def test_collab_update_preserves_dirty_private_root(tmp_path, monkeypatch):
     collection = tmp_path / "collection"
     collection.mkdir()
     _git(collection, "init", "-b", "main")

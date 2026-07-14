@@ -1,4 +1,4 @@
-from ankiops.collab.commands import _has_conflict_markers
+from ankiops.collab.commands import _contains_conflict_markers
 
 
 def test_conflict_marker_detection_requires_a_complete_marker_triplet(tmp_path):
@@ -7,11 +7,11 @@ def test_conflict_marker_detection_requires_a_complete_marker_triplet(tmp_path):
         "A: The values are ======= by definition.\n", encoding="utf-8"
     )
 
-    assert not _has_conflict_markers(explanation)
+    assert not _contains_conflict_markers(explanation.read_bytes())
 
     explanation.write_text(
         "<<<<<<< local\nA: local\n=======\nA: upstream\n>>>>>>> upstream\n",
         encoding="utf-8",
     )
 
-    assert _has_conflict_markers(explanation)
+    assert _contains_conflict_markers(explanation.read_bytes())

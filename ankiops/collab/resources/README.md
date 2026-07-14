@@ -32,7 +32,9 @@ ankiops fa
 
 `collab status` reports available GitHub changes and local work. `collab update` brings this repository's GitHub changes into its local Markdown files and tells you when `ankiops fa` is needed.
 
-If an update overlaps with a local edit, AnkiOps leaves the subscribed repository unchanged and reports the location of preserved base, local, and upstream copies. Resolve the marked Markdown file there, remove its conflict markers, and run the reported update command again.
+Before checking GitHub, `collab update` commits every non-ignored local change in this repository. If local and upstream edits overlap, the repository returns to that clean local checkpoint and AnkiOps writes editable files plus `.base`, `.local`, and `.upstream` evidence under `.ankiops/conflicts/{{REPOSITORY}}/` in the collection.
+
+Resolve only the editable conflict copies and run the exact retry command AnkiOps reports. The retry always resolves against the frozen upstream commit that caused the conflict. If newer GitHub work arrived meanwhile, AnkiOps finishes the frozen resolution first and then recommends one more update.
 
 ## Contribute to this deck
 
@@ -50,7 +52,7 @@ ankiops collab status {{REPOSITORY}}
 ankiops collab submit {{REPOSITORY}} --title "Clarify the explanation of spaced repetition"
 ```
 
-`collab submit` commits changes from this shared repository and opens a pull request. It excludes private decks and changes from other subscribed repositories. If your GitHub account lacks write access, AnkiOps creates or reuses a fork for the submission.
+`collab submit` first commits all non-ignored staged, unstaged, untracked, and deleted files in this shared repository, then opens or updates one pull request. It excludes private decks and changes from other subscribed repositories. If your GitHub account lacks write access, AnkiOps creates or reuses a fork for the submission. Interrupted uploads and pull-request creation are safe to retry with the command AnkiOps reports.
 
 Use an issue for questions about the deck's scope or content. Use a pull request for a concrete card, media, or note-type change.
 

@@ -140,55 +140,18 @@ def test_media_fingerprints_are_scoped_by_source(db):
     )
 
 
-def test_source_sync_and_operation_state(db):
-    db.set_source_applied_state("collab/owner/repo", "tree", "commit")
-    db.save_collab_operation(
-        "collab/owner/repo",
-        "op-1",
-        "submit",
-        "pushed",
-        expected_head="before",
-        expected_fingerprint="fingerprint",
-        prepared_head="after",
-        upstream_tree="tree",
-        publish_branch="ankiops/op-1",
-        pushed_sha="abc",
-        requested_title="Clarify shared deck",
-    )
-
-    assert db.get_source_applied_state("collab/owner/repo") == ("tree", "commit")
-    operation = db.get_collab_operation("collab/owner/repo")
-    assert operation is not None
-    assert operation["expected_head"] == "before"
-    assert operation["expected_fingerprint"] == "fingerprint"
-    assert operation["prepared_head"] == "after"
-    assert operation["upstream_tree"] == "tree"
-    assert operation["publish_branch"] == "ankiops/op-1"
-    assert operation["pushed_sha"] == "abc"
-    assert operation["requested_title"] == "Clarify shared deck"
-
-
-def test_open_recreates_an_unsupported_operation_schema(tmp_path):
+def test_open_recreates_a_database_with_the_removed_operation_table(tmp_path):
     state = SyncState.open(tmp_path)
-    try:
-        state.save_collab_operation(
-            "collab/owner/repo",
-            "obsolete-op",
-            "submit",
-            "ready",
-        )
-    finally:
-        state.close()
+    state.close()
 
     db_path = tmp_path / ANKIOPS_DB
     with sqlite3.connect(db_path) as connection:
-        connection.execute("ALTER TABLE collab_operations DROP COLUMN requested_title")
+        connection.execute(
+            "CREATE TABLE collab_operations (source_path TEXT PRIMARY KEY)"
+        )
 
     recreated = SyncState.open(tmp_path)
-    try:
-        assert recreated.get_collab_operation("collab/owner/repo") is None
-    finally:
-        recreated.close()
+    recreated.close()
 
     assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
 

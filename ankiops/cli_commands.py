@@ -25,7 +25,6 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     load_note_types_for_collection,
-    source_content_hash,
 )
 from ankiops.git import GitRepository, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
@@ -76,20 +75,6 @@ def _checkpoint_collab_repositories(collection_root: Path, action: str) -> None:
             logger.info(
                 "Auto-committed %s checkpoint %s", source.display_name, commit[:7]
             )
-
-
-def _record_applied_collab_sources(
-    state: SyncState,
-    collection_root: Path,
-) -> None:
-    for source in discover_deck_sources(collection_root)[1:]:
-        source_git = GitRepository(source.root)
-        clean_commit = source_git.head() if not source_git.status_lines() else None
-        state.set_source_applied_state(
-            source.source_path,
-            source_content_hash(source),
-            clean_commit,
-        )
 
 
 def _local_markdown_paths(collection_root: Path) -> list[Path]:
@@ -221,7 +206,6 @@ def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, collection_root, state)
         logger.info(format_media_status(media_result, from_anki=True))
-        _record_applied_collab_sources(state, collection_root)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -346,8 +330,6 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
             "Review and resolve errors above, then re-run files -> Anki — "
             "or you risk losing notes with the next Anki -> files sync."
         )
-    else:
-        _record_applied_collab_sources(state, collection_root)
 
 
 def run_serialize(args):

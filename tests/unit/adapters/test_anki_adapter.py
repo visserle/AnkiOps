@@ -332,56 +332,6 @@ def test_fetch_note_type_states_raises_on_malformed_styling_payload():
         adapter.fetch_note_type_states(["MyType"])
 
 
-def test_pull_media_rejects_a_remote_path_outside_collection_media(tmp_path: Path):
-    profile = tmp_path / "profile"
-    media_dir = profile / "collection.media"
-    media_dir.mkdir(parents=True)
-    collection_db = profile / "collection.anki2"
-    collection_db.write_bytes(b"private collection")
-    local_media = tmp_path / "media"
-    local_media.mkdir()
-    target = local_media / "stolen.anki2"
-    adapter = Anki(invoke_func=_InvokeRecorder(str(media_dir)))
-
-    with pytest.raises(ValueError, match="Invalid media reference"):
-        adapter.pull_media("../collection.anki2", target)
-
-    assert collection_db.read_bytes() == b"private collection"
-    assert not target.exists()
-
-
-def test_push_media_rejects_a_remote_path_outside_collection_media(tmp_path: Path):
-    local_media = tmp_path / "local" / "media"
-    local_media.mkdir(parents=True)
-    local_file = local_media / "collection.anki2"
-    local_file.write_bytes(b"not a collection")
-    profile = tmp_path / "profile"
-    anki_media = profile / "collection.media"
-    anki_media.mkdir(parents=True)
-    collection_db = profile / "collection.anki2"
-    collection_db.write_bytes(b"private collection")
-    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
-
-    with pytest.raises(ValueError, match="Invalid media reference"):
-        adapter.push_media(local_file, "../collection.anki2")
-
-    assert collection_db.read_bytes() == b"private collection"
-
-
-def test_delete_media_rejects_a_path_outside_collection_media(tmp_path: Path):
-    profile = tmp_path / "profile"
-    anki_media = profile / "collection.media"
-    anki_media.mkdir(parents=True)
-    collection_db = profile / "collection.anki2"
-    collection_db.write_bytes(b"private collection")
-    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
-
-    with pytest.raises(ValueError, match="Invalid media reference"):
-        adapter.delete_media_file("../collection.anki2")
-
-    assert collection_db.read_bytes() == b"private collection"
-
-
 def test_adapter_media_operations_accept_regular_flat_media_files(tmp_path: Path):
     source_media = tmp_path / "source" / "media"
     source_media.mkdir(parents=True)

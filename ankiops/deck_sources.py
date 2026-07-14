@@ -167,11 +167,3 @@ def load_note_types_for_collection(
     for source in discover_deck_sources(collection_root):
         note_types.extend(load_note_types_for_source(source))
     return note_types
-
-
-def source_content_hash(source: DeckSource) -> str:
-    """Hash only source files that can change files-to-Anki behavior."""
-    # Local import avoids a cycle: the manifest uses DeckSource and the deck parser.
-    from ankiops.anki_manifest import source_anki_manifest
-
-    return source_anki_manifest(source).content_hash()

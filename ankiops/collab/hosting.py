@@ -238,6 +238,37 @@ class GitHubHost:
         )
         return result.stdout.strip() or None if result.returncode == 0 else None
 
+    def find_pull_request(
+        self, upstream_slug: str, head: str
+    ) -> PullRequestInfo | None:
+        result = self._gh(
+            [
+                "pr",
+                "list",
+                "--repo",
+                upstream_slug,
+                "--head",
+                head,
+                "--state",
+                "all",
+                "--limit",
+                "1",
+                "--json",
+                ("url,state,headRefName,headRefOid,headRepositoryOwner,headRepository"),
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise ValueError(f"Could not inspect pull requests: {detail}")
+        try:
+            values = json.loads(result.stdout)
+            if not values:
+                return None
+            return _parse_pull_request(values[0])
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise ValueError("GitHub returned invalid pull request state.") from error
+
     def pull_request(self, url: str) -> PullRequestInfo:
         result = self._gh(
             [
@@ -254,14 +285,7 @@ class GitHubHost:
             raise ValueError(f"Could not read pull request state: {detail}")
         try:
             value = json.loads(result.stdout)
-            return PullRequestInfo(
-                url=str(value["url"]),
-                state=str(value["state"]).upper(),
-                head_branch=str(value["headRefName"]),
-                head_sha=str(value["headRefOid"]),
-                head_owner=str(value["headRepositoryOwner"]["login"]),
-                head_repository=str(value["headRepository"]["nameWithOwner"]),
-            )
+            return _parse_pull_request(value)
         except (json.JSONDecodeError, KeyError, TypeError) as error:
             raise ValueError("GitHub returned invalid pull request state.") from error
 
@@ -308,3 +332,14 @@ class GitHubHost:
             detail = result.stderr.strip() or url or "unknown error"
             raise ValueError(f"GitHub did not create the pull request: {detail}")
         return url
+
+
+def _parse_pull_request(value: dict[str, Any]) -> PullRequestInfo:
+    return PullRequestInfo(
+        url=str(value["url"]),
+        state=str(value["state"]).upper(),
+        head_branch=str(value["headRefName"]),
+        head_sha=str(value["headRefOid"]),
+        head_owner=str(value["headRepositoryOwner"]["login"]),
+        head_repository=str(value["headRepository"]["nameWithOwner"]),
+    )

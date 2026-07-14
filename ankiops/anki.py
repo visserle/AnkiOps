@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from ankiops.anki_rpc import AnkiConnectionError, invoke
-from ankiops.media_paths import media_path
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
 from ankiops.notes import AnkiNote, normalize_tags
 from ankiops.sync.report import Change
@@ -545,10 +544,10 @@ class Anki:
         return cached
 
     def push_media(self, local_path: Path, remote_filename: str) -> None:
-        shutil.copyfile(local_path, media_path(self.get_media_dir(), remote_filename))
+        shutil.copyfile(local_path, self.get_media_dir() / remote_filename)
 
     def pull_media(self, remote_filename: str, local_path: Path) -> bool:
-        source = media_path(self.get_media_dir(), remote_filename)
+        source = self.get_media_dir() / remote_filename
         if not source.exists():
             return False
         shutil.copyfile(source, local_path)
@@ -556,4 +555,4 @@ class Anki:
 
     def delete_media_file(self, remote_filename: str) -> None:
         """Delete one AnkiOps-managed media file when no source references it."""
-        media_path(self.get_media_dir(), remote_filename).unlink(missing_ok=True)
+        (self.get_media_dir() / remote_filename).unlink(missing_ok=True)

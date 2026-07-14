@@ -15,7 +15,6 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
 )
-from ankiops.media_paths import parse_media_filename
 from ankiops.sync.report import Change, ChangeType, SyncReport
 from ankiops.sync.state import SyncState
 
@@ -27,6 +26,20 @@ MARKDOWN_IMAGE_PATTERN = (
     r"!\[.*?\]\((?:<(.+?)>|([^()]+(?:\([^()]*\)[^()]*)*))\)(?:\{[^}]*\})?"
 )
 HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
+
+
+def _parse_media_filename(value: str) -> str:
+    if (
+        not value
+        or value in {".", ".."}
+        or "\0" in value
+        or "/" in value
+        or "\\" in value
+    ):
+        raise ValueError(
+            f"Invalid media reference '{value}': expected one filename in media/."
+        )
+    return value
 
 
 def _decode_media_reference(path: str) -> str:
@@ -48,7 +61,7 @@ def _normalize_media_path(path: str) -> str | None:
         decoded = decoded[len(LOCAL_MEDIA_DIR) + 1 :]
     if not decoded:
         return None
-    return parse_media_filename(decoded)
+    return _parse_media_filename(decoded)
 
 
 def _extract_media_references(text: str) -> set[str]:
@@ -215,7 +228,7 @@ def _collect_referenced_media(
             and cached_entry[0] == stat.st_mtime_ns
             and cached_entry[1] == stat.st_size
         ):
-            referenced.update(parse_media_filename(name) for name in cached_entry[2])
+            referenced.update(_parse_media_filename(name) for name in cached_entry[2])
             cache_hits += 1
             continue
 

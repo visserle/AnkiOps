@@ -4,16 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from ankiops.anki_manifest import (
-    anki_applicable_paths_changed,
-    source_anki_manifest,
-)
+from ankiops.anki_manifest import anki_applicable_paths
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     load_note_types_for_collection,
     load_note_types_for_source,
-    source_content_hash,
 )
 from ankiops.git import GitRepository
 from tests.support.deck_files import DeckFileHarness
@@ -140,7 +136,7 @@ def test_source_location_and_kind_are_derived_from_identity(tmp_path):
     assert collab.is_collab
 
 
-def test_anki_manifest_contains_only_files_used_by_loaded_decks(tmp_path):
+def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(tmp_path):
     source = DeckSource.collab(tmp_path, "owner/repo")
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
     (source.root / "Deck.md").write_text(
@@ -153,9 +149,9 @@ def test_anki_manifest_contains_only_files_used_by_loaded_decks(tmp_path):
     (media / "shared.png").write_bytes(b"shared")
     (media / "private.png").write_bytes(b"private")
 
-    manifest = source_anki_manifest(source)
+    paths = anki_applicable_paths(source)
 
-    assert manifest.paths == frozenset(
+    assert paths == frozenset(
         {
             "Deck.md",
             "media/shared.png",
@@ -168,31 +164,7 @@ def test_anki_manifest_contains_only_files_used_by_loaded_decks(tmp_path):
     )
 
 
-def test_source_content_hash_ignores_files_that_cannot_change_anki(tmp_path):
-    source = DeckSource.local(tmp_path)
-    DeckFileHarness().eject_default_note_types(source.note_types_dir)
-    (source.root / "Deck.md").write_text(
-        "<!-- note_key: key -->\nQ: question\nA: ![image](media/shared.png)\n",
-        encoding="utf-8",
-    )
-    (source.root / "README.md").write_text("docs\n", encoding="utf-8")
-    media = source.root / "media"
-    media.mkdir()
-    (media / "shared.png").write_bytes(b"shared")
-    (media / "private.png").write_bytes(b"private")
-    baseline = source_content_hash(source)
-
-    (source.root / "README.md").write_text("new docs\n", encoding="utf-8")
-    (media / "private.png").write_bytes(b"new private")
-
-    assert source_content_hash(source) == baseline
-
-    (media / "shared.png").write_bytes(b"new shared")
-
-    assert source_content_hash(source) != baseline
-
-
-def test_anki_manifest_keeps_removed_references_applicable_to_update(tmp_path):
+def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(tmp_path):
     source = DeckSource.local(tmp_path)
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
     deck = source.root / "Deck.md"
@@ -204,35 +176,16 @@ def test_anki_manifest_keeps_removed_references_applicable_to_update(tmp_path):
     media.mkdir()
     shared = media / "shared.png"
     shared.write_bytes(b"shared")
-    before = source_anki_manifest(source)
+    before = anki_applicable_paths(source)
 
     deck.write_text(
         "<!-- note_key: key -->\nQ: question\nA: no image\n",
         encoding="utf-8",
     )
     shared.unlink()
-    after = source_anki_manifest(source)
+    after = anki_applicable_paths(source)
 
-    assert "media/shared.png" not in after.paths
-    assert anki_applicable_paths_changed({"media/shared.png"}, before, after)
-    assert not anki_applicable_paths_changed({"media/private.png"}, before, after)
-
-
-def test_source_content_hash_tracks_only_referenced_note_type_assets(tmp_path):
-    source = DeckSource.local(tmp_path)
-    DeckFileHarness().eject_default_note_types(source.note_types_dir)
-    (source.root / "Deck.md").write_text(
-        "<!-- note_key: key -->\nQ: question\nA: answer\n",
-        encoding="utf-8",
-    )
-    baseline = source_content_hash(source)
-    unreferenced = source.note_types_dir / "AnkiOpsChoice" / "ChoiceStyling.css"
-
-    unreferenced.write_text(".choice { color: red; }\n", encoding="utf-8")
-
-    assert source_content_hash(source) == baseline
-
-    referenced = source.note_types_dir / "AnkiOpsQA" / "Front.template.anki"
-    referenced.write_text("{{Question}} changed\n", encoding="utf-8")
-
-    assert source_content_hash(source) != baseline
+    applicable = before | after
+    assert "media/shared.png" not in after
+    assert "media/shared.png" in applicable
+    assert "media/private.png" not in applicable

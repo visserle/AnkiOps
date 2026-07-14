@@ -64,6 +64,7 @@ class GitRepository:
         args: list[str],
         *,
         check: bool = True,
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = ["git", *args]
         safe_command = [_redact_git_text(part) for part in command]
@@ -75,6 +76,7 @@ class GitRepository:
                 text=True,
                 capture_output=True,
                 check=check,
+                input=input_text,
             )
         except subprocess.CalledProcessError as error:
             safe_stdout = _redact_git_text(error.stdout)
@@ -189,8 +191,30 @@ class GitRepository:
     def update_ref(self, ref: str, value: str) -> None:
         self.run(["update-ref", ref, value])
 
+    def update_refs(self, values: dict[str, str]) -> None:
+        commands = "".join(f"update {ref} {value}\n" for ref, value in values.items())
+        self.run(["update-ref", "--stdin"], input_text=commands)
+
     def delete_ref(self, ref: str) -> None:
         self.run(["update-ref", "-d", ref], check=False)
+
+    def delete_refs(self, refs: Sequence[str]) -> None:
+        commands = "".join(f"delete {ref}\n" for ref in refs)
+        self.run(["update-ref", "--stdin"], input_text=commands)
+
+    def config_get(self, key: str) -> str | None:
+        result = self.run(["config", "--local", "--get", key], check=False)
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    def config_set(self, key: str, value: str) -> None:
+        self.run(["config", "--local", key, value])
+
+    def config_unset(self, key: str) -> None:
+        self.run(["config", "--local", "--unset-all", key], check=False)
+
+    def commit_message(self, ref: str) -> str | None:
+        result = self.run(["show", "-s", "--format=%B", ref], check=False)
+        return result.stdout.rstrip("\n") if result.returncode == 0 else None
 
     def trees_equal(self, left: str, right: str) -> bool:
         left_tree = self.tree(left)
