@@ -158,6 +158,18 @@ Another feature of the add-on are the toolbar buttons for `af` and `fa`:
 
 To install the add-on, download the folder and put it in your Anki add-ons directory.
 
+### 7 Collaboration
+
+AnkiOps supports collaborative decks on GitHub. You can publish a deck as a public GitHub repository and collaborate through pull requests. Each shared deck lives at `collab/<owner>/<repo>/` as its own Git repository, alongside your private decks. `ankiops collab publish` moves the selected deck and its referenced media and note types into that folder, then publishes the repository to GitHub.
+
+Others can add the deck to their collection with `ankiops collab subscribe <owner>/<repo>`. Subscribers edit its Markdown files and send changes through pull requests. You review and merge those pull requests on GitHub. See the [public example collab deck](https://github.com/visserle/ankiops-collab-example) for setup and the complete workflow. Available collab commands are:
+
+- `ankiops collab publish <deck> <owner>/<repo>`: Publish a local deck tree as a public GitHub repository.
+- `ankiops collab subscribe <owner>/<repo>`: Add a public collab deck to your collection.
+- `ankiops collab status [owner/repo]`: Show local changes, upstream updates, and pull-request state for one or all collab decks.
+- `ankiops collab update <owner>/<repo>`: Bring GitHub changes into one collab deck.
+- `ankiops collab submit <owner>/<repo> [-t|--title text]`: Open or update a pull request with your changes.
+
 ## How To Get Started
 
 1. Install AnkiOps via [uv](https://docs.astral.sh/uv/getting-started/installation/) from PyPI. This will make the `ankiops` command available in your shell in an isolated virtual environment. No need to get Python separately.
@@ -237,50 +249,6 @@ ankiops fix-image-widths --deck "Deck1" --width 500  # fix width
 
 Serialize a collection (or one deck tree) to portable JSON and deserialize it back using the `ankiops serialize` and `ankiops deserialize` commands. 
 
-## How does collaboration work? (experimental)
-
-Collab decks are ordinary GitHub repositories cloned inside the collection. The collection root remains one VS Code workspace, while VS Code shows each collab source as its own repository.
-
-Publish a local deck tree:
-
-```bash
-ankiops collab publish "Psychology" owner/psychology-deck
-```
-
-`collab publish` requires stable `note_key` metadata and authenticated GitHub CLI.
-It moves the selected deck tree into `collab/<owner>/<repo>/`, copies referenced media and note types, creates an independent repository, and pushes it to GitHub. Published repositories are always public.
-
-Subscribe to and update a collab deck:
-
-```bash
-ankiops collab subscribe owner/psychology-deck
-ankiops collab update owner/psychology-deck
-ankiops fa
-```
-
-Submit local collab edits:
-
-```bash
-ankiops collab status owner/psychology-deck
-ankiops collab submit owner/psychology-deck \
-  --title "Clarify attention terminology"
-```
-
-Public subscriptions do not require GitHub authentication. After subscribing, run `ankiops fa`. An update recommends that command only when deck Markdown, referenced media, or note-type files changed; documentation-only updates do not affect Anki.
-
-`collab submit` checkpoints the complete non-ignored draft inside the selected source and opens a pull request. Staged, unstaged, untracked, and deleted files are all included; private decks and other subscriptions are excluded. Contributors without write permission use GitHub's standard same-name fork, `<account>/<upstream-repository>`.
-Further edits update the same open pull request as one synthetic commit on the
-`ankiops/contribution` branch. AnkiOps owns that branch and force-replaces it
-with each prepared contribution; GitHub-side edits to it are unsupported.
-Before an update, AnkiOps commits
-all non-ignored local work in that collab repository. If local and upstream
-edits overlap, the repository returns to that clean checkpoint and AnkiOps
-preserves editable base, local, and upstream copies. Edit only the conflict
-copy and rerun the exact command it reports. The conflict stays pinned to the
-upstream commit that caused it; a newer upstream commit becomes a subsequent
-update.
-
-If GitHub authentication, upload, or pull-request creation fails, rerun the reported `collab submit` command. A Git ref records the prepared snapshot, so retry repeats the upload safely and reuses an already-open pull request. The managed branch remains on GitHub after merge or closure and is reused for the next contribution. Your local Git configuration supplies the commit author; the authenticated GitHub account uploads it and opens the pull request.
 
 ## Command Reference
 
