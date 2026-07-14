@@ -178,7 +178,7 @@ def test_subscribe_rejects_a_note_type_manifest_path_outside_the_repository(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
-    with pytest.raises(ValueError, match="outside the subscribed repository"):
+    with pytest.raises(ValueError, match="invalid styling file"):
         run_subscribe(SimpleNamespace(repository="owner/repo"))
 
     assert private.read_bytes() == private_before
@@ -302,7 +302,7 @@ def test_update_rejects_an_upstream_note_type_path_escape_before_applying_it(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
-    with pytest.raises(ValueError, match="outside the subscribed repository"):
+    with pytest.raises(ValueError, match="invalid styling file"):
         run_update(SimpleNamespace(repository="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout == head_before

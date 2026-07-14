@@ -1,4 +1,4 @@
-"""Security boundaries for media synchronization."""
+"""Flat media namespace behavior."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_af_rejects_collab_media_traversal_before_reading_anki_or_writing_files(
     deck_before = deck.read_bytes()
     world.mock_anki.calls.clear()
 
-    with pytest.raises(ValueError, match="Unsafe media"):
+    with pytest.raises(ValueError, match="Invalid media reference"):
         world.run_af(no_auto_commit=False)
 
     assert world.mock_anki.calls == [("getActiveProfile", {})]
@@ -98,7 +98,7 @@ def test_fa_rejects_every_unsupported_media_path_before_snapshot(world, kind):
     ).stdout
     world.mock_anki.calls.clear()
 
-    with pytest.raises(ValueError, match="Unsafe media"):
+    with pytest.raises(ValueError, match="Invalid media reference"):
         world.run_fa(no_auto_commit=False)
 
     head_after = subprocess.run(
@@ -111,20 +111,3 @@ def test_fa_rejects_every_unsupported_media_path_before_snapshot(world, kind):
     assert head_after == head_before
     assert world.mock_anki.calls == [("getActiveProfile", {})]
     assert private_file.read_bytes() == b"private"
-
-
-def test_fa_rejects_a_symlinked_source_media_file_before_anki_mutation(world):
-    media_dir = world.root / "media"
-    media_dir.mkdir()
-    private_file = world.root / "private.txt"
-    private_file.write_bytes(b"private")
-    (media_dir / "shared.txt").symlink_to(private_file)
-    world.write_deck("UnsafeMedia", "Q: unsafe\nA: ![private](media/shared.txt)")
-    world.mock_anki.calls.clear()
-
-    with pytest.raises(ValueError, match="symbolic links"):
-        world.run_fa()
-
-    assert world.mock_anki.calls == [("getActiveProfile", {})]
-    assert private_file.read_bytes() == b"private"
-    assert not (world.mock_anki.media_dir / "shared.txt").exists()

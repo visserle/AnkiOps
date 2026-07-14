@@ -596,8 +596,8 @@ def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
 
 def test_cli_validation_error_is_concise_without_a_traceback(capsys):
     message = (
-        "local: Unsafe media path '' outside the supported media namespace: "
-        "expected one filename inside media/."
+        "local: Invalid media reference 'nested/image.png': "
+        "expected one filename in media/."
     )
     with (
         patch("ankiops.cli.run_af", side_effect=ValueError(message)),

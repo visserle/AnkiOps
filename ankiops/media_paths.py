@@ -1,48 +1,22 @@
-"""Dependency-free validation for Anki's flat media namespace."""
+"""Paths in Anki's flat media namespace."""
 
-import os
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 
 
-def validate_media_filename(filename: str) -> str:
-    """Return a portable flat media filename or reject an unsafe path."""
+def parse_media_filename(value: str) -> str:
+    """Parse one filename stored directly inside a media directory."""
     if (
-        not filename
-        or filename in {".", ".."}
-        or "\0" in filename
-        or "/" in filename
-        or "\\" in filename
-        or Path(filename).is_absolute()
-        or PureWindowsPath(filename).drive
+        not value
+        or value in {".", ".."}
+        or "\0" in value
+        or "/" in value
+        or "\\" in value
     ):
         raise ValueError(
-            f"Unsafe media path '{filename}' outside the supported media namespace: "
-            "expected one filename inside media/."
+            f"Invalid media reference '{value}': expected one filename in media/."
         )
-    return filename
+    return value
 
 
-def validate_local_media_path(path: Path, filename: str) -> Path:
-    """Validate one local source-media path without following symlinks."""
-    safe_name = validate_media_filename(filename)
-    if (
-        path.name != safe_name
-        or path.parent.name != "media"
-        or any(part in {".", ".."} for part in path.parts)
-    ):
-        raise ValueError(
-            f"Unsafe local media path '{path}': expected media/{safe_name}."
-        )
-    absolute = Path(os.path.abspath(path))
-    current = Path(absolute.anchor)
-    has_symlink = False
-    for part in absolute.parts[1:]:
-        current /= part
-        if current.is_symlink():
-            has_symlink = True
-            break
-    if has_symlink:
-        raise ValueError(
-            f"Unsafe local media path '{path}': symbolic links are not allowed."
-        )
-    return path
+def media_path(media_dir: Path, filename: str) -> Path:
+    return media_dir / parse_media_filename(filename)

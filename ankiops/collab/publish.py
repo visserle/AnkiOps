@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
-
-import yaml
 
 from ankiops.collab.errors import (
     RepositoryCollisionError,
@@ -23,6 +20,7 @@ from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
 from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
 from ankiops.media import extract_media_references
+from ankiops.media_paths import media_path
 from ankiops.note_types import NoteType, load_note_types
 from ankiops.sync.state import SyncState
 
@@ -38,7 +36,6 @@ class _RenderedPublishFile:
 class _PublishManifestEntry:
     role: str
     relative_path: Path
-    file_type: str
     content: bytes
 
 
@@ -52,7 +49,6 @@ class _PublishManifest:
             for value in (
                 entry.role.encode(),
                 entry.relative_path.as_posix().encode(),
-                entry.file_type.encode(),
                 entry.content,
             ):
                 digest.update(len(value).to_bytes(8, "big"))
@@ -270,7 +266,7 @@ def _manifest_entry_is_current(
     collection_root: Path, entry: _PublishManifestEntry
 ) -> bool:
     path = collection_root / entry.relative_path
-    if entry.file_type != "regular" or path.is_symlink() or not path.is_file():
+    if not path.is_file():
         return False
     try:
         return path.read_bytes() == entry.content
@@ -405,12 +401,6 @@ def _prepare_publish_plan(
     missing_note_keys: list[str] = []
 
     for md_file in selected_files:
-        md_file = _contained_regular_file(
-            collection_root,
-            md_file,
-            label=f"Selected deck file '{md_file.name}'",
-            scope="collection root",
-        )
         parsed = read_deck_file(
             md_file,
             note_types=root_configs,
@@ -441,7 +431,7 @@ def _prepare_publish_plan(
         )
 
     media_paths = {
-        media_name: _contained_media_path(collection_root / LOCAL_MEDIA_DIR, media_name)
+        media_name: media_path(collection_root / LOCAL_MEDIA_DIR, media_name)
         for media_name in media_used
     }
     missing_media = sorted(
@@ -476,7 +466,7 @@ def _prepare_publish_plan(
         manifest=_capture_publish_manifest(
             collection_root,
             selected_files=selected_files,
-            note_types_used=note_types_used,
+            used_note_types=used_configs,
             media_used=media_used,
         ),
     )
@@ -525,167 +515,31 @@ def _prepare_publish_recovery_plan(
     )
 
 
-def _contained_media_path(media_dir: Path, media_name: str) -> Path:
-    normalized_name = media_name.replace("\\", "/")
-    media_prefix = f"{LOCAL_MEDIA_DIR}/"
-    if normalized_name.startswith(media_prefix):
-        normalized_name = normalized_name[len(media_prefix) :]
-    return _contained_regular_file(
-        media_dir,
-        media_dir / normalized_name,
-        label=f"Referenced media path '{media_name}'",
-        scope="media directory",
-    )
-
-
-def _contained_regular_file(
-    root: Path,
-    candidate: Path,
-    *,
-    label: str,
-    scope: str,
-) -> Path:
-    """Return a contained regular path without following any symlink component."""
-    lexical_root = Path(os.path.abspath(root))
-    lexical_candidate = Path(os.path.abspath(candidate))
-    resolved_root = lexical_root.resolve()
-    resolved_candidate = lexical_candidate.resolve()
-    try:
-        resolved_candidate.relative_to(resolved_root)
-    except ValueError as error:
-        raise ValueError(f"{label} points outside the {scope}.") from error
-    try:
-        relative = lexical_candidate.relative_to(lexical_root)
-    except ValueError as error:
-        raise ValueError(f"{label} points outside the {scope}.") from error
-
-    current = lexical_root
-    for part in relative.parts:
-        current /= part
-        if current.is_symlink():
-            raise ValueError(
-                f"{label} is or traverses a symbolic link. Publish regular files only."
-            )
-    return lexical_candidate
-
-
-def _styling_refs(note_type_dir: Path) -> list[str]:
-    with open(note_type_dir / "note_type.yaml", encoding="utf-8") as file:
-        info = yaml.safe_load(file) or {}
-    styling = info.get("styling")
-    if isinstance(styling, str):
-        return [styling]
-    if isinstance(styling, list):
-        styling_refs: list[str] = []
-        for css_file in styling:
-            if not isinstance(css_file, str) or not css_file.strip():
-                raise ValueError(
-                    f"Note type '{note_type_dir.name}' has invalid styling entry "
-                    f"'{css_file}'. Expected non-empty file names."
-                )
-            styling_refs.append(css_file.strip())
-        if styling_refs:
-            return styling_refs
-    raise ValueError(
-        f"Note type '{note_type_dir.name}' must reference at least one styling file."
-    )
-
-
-def _template_refs(note_type_dir: Path) -> list[str]:
-    with open(note_type_dir / "note_type.yaml", encoding="utf-8") as file:
-        info = yaml.safe_load(file) or {}
-    templates = info.get("templates")
-    if templates is None:
-        refs = ["Front.template.anki", "Back.template.anki"]
-        template_index = 2
-        while True:
-            front = f"Front{template_index}.template.anki"
-            back = f"Back{template_index}.template.anki"
-            if (
-                not (note_type_dir / front).exists()
-                or not (note_type_dir / back).exists()
-            ):
-                break
-            refs.extend([front, back])
-            template_index += 1
-        return refs
-    return [
-        str(template[side]).strip()
-        for template in templates
-        for side in ("front", "back")
-    ]
-
-
-def _relative_note_type_asset_path(
-    note_types_dir: Path,
-    note_type: str,
-    asset_path: Path,
-    asset_ref: str,
-) -> Path:
-    contained = _contained_regular_file(
-        note_types_dir,
-        asset_path,
-        label=f"Note type '{note_type}' asset '{asset_ref}'",
-        scope="note_types directory",
-    )
-    return contained.relative_to(Path(os.path.abspath(note_types_dir)))
-
-
-def _note_type_manifest_paths(note_types_dir: Path, note_type: str) -> list[Path]:
-    source_note_type_dir = note_types_dir / note_type
-
-    asset_refs = [
-        "note_type.yaml",
-        *_template_refs(source_note_type_dir),
-        *_styling_refs(source_note_type_dir),
-    ]
-    copied: set[Path] = set()
-    paths: list[Path] = []
-    for asset_ref in asset_refs:
-        source_asset = source_note_type_dir / asset_ref
-        if not source_asset.exists() or not source_asset.is_file():
-            raise ValueError(
-                f"Note type '{note_type}' references missing asset '{asset_ref}'."
-            )
-        relative_asset = _relative_note_type_asset_path(
-            note_types_dir,
-            note_type,
-            source_asset,
-            asset_ref,
-        )
-        if relative_asset in copied:
-            continue
-        copied.add(relative_asset)
-        paths.append(note_types_dir / relative_asset)
-
-    return paths
-
-
 def _capture_publish_manifest(
     collection_root: Path,
     *,
     selected_files: list[Path],
-    note_types_used: set[str],
+    used_note_types: list[NoteType],
     media_used: set[str],
 ) -> _PublishManifest:
-    root = Path(os.path.abspath(collection_root))
+    root = collection_root.absolute()
     paths: list[tuple[str, Path]] = [("deck", path) for path in selected_files]
     note_types_dir = root / NOTE_TYPES_DIR
-    for note_type in sorted(note_types_used):
+    for note_type in used_note_types:
         paths.extend(
-            ("note_type", path)
-            for path in _note_type_manifest_paths(note_types_dir, note_type)
+            ("note_type", note_types_dir / relative_path)
+            for relative_path in note_type.source_files
         )
     media_dir = root / LOCAL_MEDIA_DIR
     paths.extend(
-        ("media", _contained_media_path(media_dir, media_name))
+        ("media", media_path(media_dir, media_name))
         for media_name in sorted(media_used)
     )
 
     entries: dict[Path, _PublishManifestEntry] = {}
     for role, path in paths:
-        path = Path(os.path.abspath(path))
-        if path.is_symlink() or not path.is_file():
+        path = path.absolute()
+        if not path.is_file():
             raise ValueError(
                 f"Publish-applicable path '{path.relative_to(root)}' is not a "
                 "regular file."
@@ -694,7 +548,6 @@ def _capture_publish_manifest(
         entry = _PublishManifestEntry(
             role=role,
             relative_path=relative_path,
-            file_type="regular",
             content=path.read_bytes(),
         )
         existing = entries.get(relative_path)

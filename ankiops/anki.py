@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ankiops.anki_rpc import AnkiConnectionError, invoke
-from ankiops.media_paths import validate_local_media_path, validate_media_filename
+from ankiops.media_paths import media_path
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
 from ankiops.notes import AnkiNote, normalize_tags
 from ankiops.sync.report import Change
@@ -188,7 +188,9 @@ class Anki:
                     inOrderFields=fields,
                     css=model_config.css,
                     isCloze=model_config.is_cloze,
-                    cardTemplates=model_config.templates,
+                    cardTemplates=[
+                        template.as_anki_dict() for template in model_config.templates
+                    ],
                 )
             )
             # Apply descriptions / fonts
@@ -275,31 +277,31 @@ class Anki:
             for template_index, expected in enumerate(model_config.templates):
                 if (
                     template_index < len(current_names)
-                    and current_names[template_index] != expected["Name"]
+                    and current_names[template_index] != expected.name
                 ):
                     actions.append(
                         _action(
                             "modelTemplateRename",
                             modelName=model_config.name,
                             oldTemplateName=current_names[template_index],
-                            newTemplateName=expected["Name"],
+                            newTemplateName=expected.name,
                         )
                     )
-                    current_names[template_index] = expected["Name"]
+                    current_names[template_index] = expected.name
 
             templates_dict = {}
             for template_index, expected in enumerate(model_config.templates):
                 if template_index < len(current_names):
                     templates_dict[current_names[template_index]] = {
-                        "Front": expected["Front"],
-                        "Back": expected["Back"],
+                        "Front": expected.front,
+                        "Back": expected.back,
                     }
                 else:
                     actions.append(
                         _action(
                             "modelTemplateAdd",
                             modelName=model_config.name,
-                            template=expected,
+                            template=expected.as_anki_dict(),
                         )
                     )
 
@@ -542,28 +544,16 @@ class Anki:
             self._media_dir = cached
         return cached
 
-    def _anki_media_path(self, filename: str) -> Path:
-        safe_name = validate_media_filename(filename)
-        media_dir = self.get_media_dir().resolve()
-        target = media_dir / safe_name
-        if target.is_symlink() or target.resolve().parent != media_dir:
-            raise ValueError(
-                f"Unsafe media filename '{filename}': symbolic links are not allowed."
-            )
-        return target
-
     def push_media(self, local_path: Path, remote_filename: str) -> None:
-        safe_local = validate_local_media_path(local_path, remote_filename)
-        shutil.copyfile(safe_local, self._anki_media_path(remote_filename))
+        shutil.copyfile(local_path, media_path(self.get_media_dir(), remote_filename))
 
     def pull_media(self, remote_filename: str, local_path: Path) -> bool:
-        safe_local = validate_local_media_path(local_path, remote_filename)
-        source = self._anki_media_path(remote_filename)
+        source = media_path(self.get_media_dir(), remote_filename)
         if not source.exists():
             return False
-        shutil.copyfile(source, safe_local)
+        shutil.copyfile(source, local_path)
         return True
 
     def delete_media_file(self, remote_filename: str) -> None:
         """Delete one AnkiOps-managed media file when no source references it."""
-        self._anki_media_path(remote_filename).unlink(missing_ok=True)
+        media_path(self.get_media_dir(), remote_filename).unlink(missing_ok=True)

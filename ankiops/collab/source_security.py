@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import os
-import posixpath
 import stat
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
-
-import yaml
 
 from ankiops.deck_sources import RESERVED_MARKDOWN_FILES, discover_deck_sources
 from ankiops.git import GitRepository
+from ankiops.note_types import load_note_types
 
 
 @dataclass(frozen=True)
@@ -201,77 +198,6 @@ def _is_anki_source_path(path: str) -> bool:
     return bool(candidate.parts and candidate.parts[0] == "note_types")
 
 
-def _manifest_references(info: Any) -> list[str]:
-    if not isinstance(info, dict):
-        return []
-    references: list[str] = []
-    styling = info.get("styling")
-    if isinstance(styling, str):
-        references.append(styling)
-    elif isinstance(styling, list):
-        references.extend(item for item in styling if isinstance(item, str))
-
-    templates = info.get("templates")
-    if templates is None:
-        references.extend(["Front.template.anki", "Back.template.anki"])
-    elif isinstance(templates, list):
-        for template in templates:
-            if not isinstance(template, dict):
-                continue
-            references.extend(
-                value
-                for side in ("front", "back")
-                if isinstance(value := template.get(side), str)
-            )
-    return references
-
-
-def _validate_manifest_references(
-    repository: GitRepository,
-    *,
-    ref: str,
-    manifest_path: str,
-    display_name: str,
-) -> None:
-    raw_manifest = repository.run(["show", f"{ref}:{manifest_path}"]).stdout
-    info = yaml.safe_load(raw_manifest) or {}
-    parent = PurePosixPath(manifest_path).parent.as_posix()
-    for reference in _manifest_references(info):
-        normalized_reference = reference.strip().replace("\\", "/")
-        candidate = posixpath.normpath(f"{parent}/{normalized_reference}")
-        if posixpath.isabs(normalized_reference) or not candidate.startswith(
-            "note_types/"
-        ):
-            raise ValueError(
-                f"The subscribed deck {display_name} has note-type manifest path "
-                f"'{reference}' outside the subscribed repository's note_types "
-                "directory."
-            )
-
-
-def _worktree_reference_path(
-    note_types_dir: Path,
-    *,
-    manifest_path: Path,
-    reference: str,
-    display_name: str,
-) -> Path:
-    normalized_reference = reference.strip().replace("\\", "/")
-    relative_parent = manifest_path.parent.relative_to(note_types_dir).as_posix()
-    candidate = posixpath.normpath(f"{relative_parent}/{normalized_reference}")
-    if (
-        posixpath.isabs(normalized_reference)
-        or candidate == ".."
-        or candidate.startswith("../")
-    ):
-        raise ValueError(
-            f"The subscribed deck {display_name} has note-type manifest path "
-            f"'{reference}' outside the subscribed repository's note_types "
-            "directory."
-        )
-    return note_types_dir / PurePosixPath(candidate)
-
-
 def _ensure_regular_without_symlinks(
     root: Path,
     path: Path,
@@ -322,24 +248,7 @@ def validate_collab_worktree(
         if path.is_symlink() or is_special:
             _ensure_regular_without_symlinks(root, path, display_name=display_name)
 
-    for note_type_dir in note_types_dir.iterdir():
-        if not note_type_dir.is_dir() or note_type_dir.is_symlink():
-            continue
-        manifest_path = note_type_dir / "note_type.yaml"
-        if not manifest_path.exists():
-            continue
-        _ensure_regular_without_symlinks(root, manifest_path, display_name=display_name)
-        info = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-        for reference in _manifest_references(info):
-            referenced_path = _worktree_reference_path(
-                note_types_dir,
-                manifest_path=manifest_path,
-                reference=reference,
-                display_name=display_name,
-            )
-            _ensure_regular_without_symlinks(
-                root, referenced_path, display_name=display_name
-            )
+    load_note_types(note_types_dir)
 
 
 def validate_collab_checkout(
@@ -350,7 +259,6 @@ def validate_collab_checkout(
 ) -> None:
     """Reject Git symlinks in files that AnkiOps can parse or apply."""
     output = repository.run(["ls-tree", "-r", "-z", ref]).stdout
-    manifest_paths: list[str] = []
     for raw_entry in output.split("\0"):
         if not raw_entry:
             continue
@@ -363,21 +271,6 @@ def validate_collab_checkout(
                 "Deck Markdown and note-type files must be regular files contained "
                 "in the subscribed repository."
             )
-        candidate = PurePosixPath(path)
-        if (
-            len(candidate.parts) == 3
-            and candidate.parts[0] == "note_types"
-            and candidate.name == "note_type.yaml"
-        ):
-            manifest_paths.append(path)
-
-    for manifest_path in manifest_paths:
-        _validate_manifest_references(
-            repository,
-            ref=ref,
-            manifest_path=manifest_path,
-            display_name=display_name,
-        )
 
 
 def validate_collection_collab_sources(collection_root: Path) -> None:

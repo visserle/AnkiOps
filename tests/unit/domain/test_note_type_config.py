@@ -121,6 +121,14 @@ def test_load_custom_from_dir():
             "Definition",
             "Term",
         ]
+        assert config.source_files == frozenset(
+            {
+                Path("MyCustomType/note_type.yaml"),
+                Path("MyCustomType/AnkiOpsStyling.css"),
+                Path("MyCustomType/Front.template.anki"),
+                Path("MyCustomType/Back.template.anki"),
+            }
+        )
 
 
 def test_note_type_load_missing_dir_fails(tmp_path):
@@ -260,6 +268,27 @@ def test_missing_template_file_fails(tmp_path):
     fs = DeckFileHarness()
     with pytest.raises(ValueError, match="references missing template file"):
         fs.load_note_types(note_types)
+
+
+def test_template_requires_both_sides(tmp_path):
+    note_types = tmp_path / "note_types"
+    subdir = note_types / "BrokenType"
+    subdir.mkdir(parents=True)
+    (subdir / "note_type.yaml").write_text(
+        yaml.dump(
+            {
+                "fields": [{"name": "Term", "label": "TM:", "identifying": True}],
+                "styling": "Style.css",
+                "templates": [{"name": "Card 1", "front": "Front.template.anki"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (subdir / "Style.css").write_text(".card{}", encoding="utf-8")
+    (subdir / "Front.template.anki").write_text("{{Term}}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="template with invalid 'back'"):
+        DeckFileHarness().load_note_types(note_types)
 
 
 def test_label_collision_different_field():

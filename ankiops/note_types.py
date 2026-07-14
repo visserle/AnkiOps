@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 from importlib import resources
@@ -34,6 +35,18 @@ class NoteField:
 ANKIOPS_KEY_FIELD = NoteField("AnkiOps Key", None, identifying=False)
 
 
+@dataclass(frozen=True)
+class CardTemplate:
+    """One complete Anki card template."""
+
+    name: str
+    front: str
+    back: str
+
+    def as_anki_dict(self) -> dict[str, str]:
+        return {"Name": self.name, "Front": self.front, "Back": self.back}
+
+
 @dataclass
 class NoteType:
     """Pure data configuration for a single note type."""
@@ -43,7 +56,8 @@ class NoteType:
     css: str = ""
     is_cloze: bool = False
     is_choice: bool = False
-    templates: list[dict[str, str]] = field(default_factory=list)
+    templates: list[CardTemplate] = field(default_factory=list)
+    source_files: frozenset[Path] = field(default_factory=frozenset, repr=False)
 
     @property
     def identifying_labels(self) -> set[str]:
@@ -255,8 +269,10 @@ def load_note_types(note_types_dir: Path) -> list[NoteType]:
         if ANKIOPS_KEY_FIELD.name not in [field_config.name for field_config in fields]:
             fields.append(ANKIOPS_KEY_FIELD)
 
-        css = _load_styling(subdir, name, info.get("styling"))
-        templates = _load_templates(subdir, name, info)
+        css, styling_files = _load_styling(
+            note_types_dir, subdir, name, info.get("styling")
+        )
+        templates, template_files = _load_templates(note_types_dir, subdir, name, info)
 
         configs_dict[name] = NoteType(
             name=name,
@@ -265,6 +281,13 @@ def load_note_types(note_types_dir: Path) -> list[NoteType]:
             is_cloze=bool(info.get("is_cloze", False)),
             is_choice=bool(info.get("is_choice", False)),
             templates=templates,
+            source_files=frozenset(
+                {
+                    Path(name) / "note_type.yaml",
+                    *styling_files,
+                    *template_files,
+                }
+            ),
         )
 
     configs = list(configs_dict.values())
@@ -278,7 +301,34 @@ def load_note_types(note_types_dir: Path) -> list[NoteType]:
     return configs
 
 
-def _load_styling(subdir: Path, name: str, styling_input: Any) -> str:
+def _read_note_type_asset(
+    note_types_dir: Path,
+    subdir: Path,
+    name: str,
+    reference: str,
+    kind: str,
+) -> tuple[str, Path]:
+    root = Path(os.path.abspath(note_types_dir))
+    path = Path(os.path.abspath(subdir / reference))
+    try:
+        relative_path = path.relative_to(root)
+    except ValueError as error:
+        raise ValueError(
+            f"Note type '{name}' has invalid {kind} file '{reference}'."
+        ) from error
+    if not path.is_file():
+        raise ValueError(
+            f"Note type '{name}' references missing {kind} file '{reference}'."
+        )
+    return path.read_text(encoding="utf-8"), relative_path
+
+
+def _load_styling(
+    note_types_dir: Path,
+    subdir: Path,
+    name: str,
+    styling_input: Any,
+) -> tuple[str, set[Path]]:
     if isinstance(styling_input, str):
         styling_files = [styling_input]
     elif isinstance(styling_input, list):
@@ -301,45 +351,36 @@ def _load_styling(subdir: Path, name: str, styling_input: Any) -> str:
         )
 
     css_parts = []
+    source_files = set()
     for css_file in styling_files:
-        css_path = subdir / css_file
-        if not css_path.exists() or not css_path.is_file():
-            raise ValueError(
-                f"Note type '{name}' references missing styling file '{css_file}'."
-            )
-        css_parts.append(css_path.read_text(encoding="utf-8"))
-    return "\n\n".join(css_parts)
+        content, source_file = _read_note_type_asset(
+            note_types_dir, subdir, name, css_file, "styling"
+        )
+        css_parts.append(content)
+        source_files.add(source_file)
+    return "\n\n".join(css_parts), source_files
 
 
 def _load_templates(
+    note_types_dir: Path,
     subdir: Path,
     name: str,
     info: dict[str, Any],
-) -> list[dict[str, str]]:
+) -> tuple[list[CardTemplate], set[Path]]:
     raw_templates = info.get("templates")
-    templates: list[dict[str, str]] = []
+    templates: list[CardTemplate] = []
+    source_files: set[Path] = set()
 
     if raw_templates is None:
-        front = subdir / "Front.template.anki"
-        back = subdir / "Back.template.anki"
-        if not front.exists() or not back.exists():
-            missing = []
-            if not front.exists():
-                missing.append("Front.template.anki")
-            if not back.exists():
-                missing.append("Back.template.anki")
-            missing_text = ", ".join(missing)
-            raise ValueError(
-                f"Note type '{name}' is missing template file(s): {missing_text}."
-            )
-
-        name_card1 = "Cloze" if info.get("is_cloze") else "Card 1"
+        front, front_file = _read_note_type_asset(
+            note_types_dir, subdir, name, "Front.template.anki", "template"
+        )
+        back, back_file = _read_note_type_asset(
+            note_types_dir, subdir, name, "Back.template.anki", "template"
+        )
+        source_files.update({front_file, back_file})
         templates.append(
-            {
-                "Name": name_card1,
-                "Front": front.read_text(encoding="utf-8"),
-                "Back": back.read_text(encoding="utf-8"),
-            }
+            CardTemplate("Cloze" if info.get("is_cloze") else "Card 1", front, back)
         )
 
         template_index = 2
@@ -349,12 +390,15 @@ def _load_templates(
             has_front = front_n.exists()
             has_back = back_n.exists()
             if has_front and has_back:
+                front_content, front_file = _read_note_type_asset(
+                    note_types_dir, subdir, name, front_n.name, "template"
+                )
+                back_content, back_file = _read_note_type_asset(
+                    note_types_dir, subdir, name, back_n.name, "template"
+                )
+                source_files.update({front_file, back_file})
                 templates.append(
-                    {
-                        "Name": f"Card {template_index}",
-                        "Front": front_n.read_text(encoding="utf-8"),
-                        "Back": back_n.read_text(encoding="utf-8"),
-                    }
+                    CardTemplate(f"Card {template_index}", front_content, back_content)
                 )
                 template_index += 1
             elif has_front != has_back:
@@ -369,7 +413,7 @@ def _load_templates(
                 )
             else:
                 break
-        return templates
+        return templates, source_files
 
     if not isinstance(raw_templates, list) or not raw_templates:
         raise ValueError(
@@ -389,25 +433,18 @@ def _load_templates(
         if not isinstance(back_ref, str) or not back_ref.strip():
             raise ValueError(f"Note type '{name}' has template with invalid 'back'.")
 
-        front = subdir / front_ref.strip()
-        back = subdir / back_ref.strip()
-        if not front.exists() or not front.is_file():
-            raise ValueError(
-                f"Note type '{name}' references missing template file '{front_ref}'."
-            )
-        if not back.exists() or not back.is_file():
-            raise ValueError(
-                f"Note type '{name}' references missing template file '{back_ref}'."
-            )
+        front, front_file = _read_note_type_asset(
+            note_types_dir, subdir, name, front_ref.strip(), "template"
+        )
+        back, back_file = _read_note_type_asset(
+            note_types_dir, subdir, name, back_ref.strip(), "template"
+        )
+        source_files.update({front_file, back_file})
 
         templates.append(
-            {
-                "Name": str(template_data.get("name", "Card")),
-                "Front": front.read_text(encoding="utf-8"),
-                "Back": back.read_text(encoding="utf-8"),
-            }
+            CardTemplate(str(template_data.get("name", "Card")), front, back)
         )
-    return templates
+    return templates, source_files
 
 
 def eject_default_note_types(dst_dir: Path) -> None:
@@ -440,14 +477,7 @@ def _note_types_sync_hash(configs: list[NoteType]) -> str:
                     }
                     for field in config.fields
                 ],
-                "templates": [
-                    {
-                        "Name": template.get("Name", ""),
-                        "Front": template.get("Front", ""),
-                        "Back": template.get("Back", ""),
-                    }
-                    for template in config.templates
-                ],
+                "templates": [template.as_anki_dict() for template in config.templates],
             }
         )
 

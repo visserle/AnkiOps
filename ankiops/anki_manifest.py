@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import yaml
 from blake3 import blake3
 
 from ankiops.deck_sources import DeckSource, load_note_types_for_source
@@ -41,6 +38,7 @@ class AnkiApplicableManifest:
 def source_anki_manifest(source: DeckSource) -> AnkiApplicableManifest:
     """Return repository-relative files read by files-to-Anki for one source."""
     note_types = load_note_types_for_source(source)
+    note_types_by_name = {note_type.name: note_type for note_type in note_types}
     paths: set[str] = set()
     note_types_used: set[str] = set()
 
@@ -57,9 +55,11 @@ def source_anki_manifest(source: DeckSource) -> AnkiApplicableManifest:
         )
         note_types_used.update(note.note_type for note in deck.notes)
 
-    for scoped_name in note_types_used:
-        name = source.unscoped_note_type_name(scoped_name)
-        paths.update(_note_type_paths(source, name))
+    for name in note_types_used:
+        paths.update(
+            (Path("note_types") / path).as_posix()
+            for path in note_types_by_name[name].source_files
+        )
 
     return AnkiApplicableManifest(source.root, frozenset(paths))
 
@@ -71,55 +71,3 @@ def anki_applicable_paths_changed(
 ) -> bool:
     """Return whether changes touch paths applicable before or after an update."""
     return bool(changed_paths & (before.paths | after.paths))
-
-
-def _note_type_paths(source: DeckSource, name: str) -> set[str]:
-    note_type_dir = source.note_types_dir / name
-    manifest_path = note_type_dir / "note_type.yaml"
-    info = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
-    references = _note_type_references(note_type_dir, info)
-    paths = {manifest_path.relative_to(source.root).as_posix()}
-    paths.update(
-        _contained_note_type_path(source, note_type_dir / reference)
-        for reference in references
-    )
-    return paths
-
-
-def _note_type_references(note_type_dir: Path, info: Any) -> list[str]:
-    if not isinstance(info, dict):
-        return []
-    styling = info.get("styling")
-    styling_refs = [styling] if isinstance(styling, str) else list(styling or [])
-
-    templates = info.get("templates")
-    if templates is not None:
-        template_refs = [
-            str(template[side]).strip()
-            for template in templates
-            for side in ("front", "back")
-        ]
-        return [*styling_refs, *template_refs]
-
-    template_refs = ["Front.template.anki", "Back.template.anki"]
-    index = 2
-    while (note_type_dir / f"Front{index}.template.anki").is_file() and (
-        note_type_dir / f"Back{index}.template.anki"
-    ).is_file():
-        template_refs.extend(
-            [f"Front{index}.template.anki", f"Back{index}.template.anki"]
-        )
-        index += 1
-    return [*styling_refs, *template_refs]
-
-
-def _contained_note_type_path(source: DeckSource, path: Path) -> str:
-    note_types_root = Path(os.path.abspath(source.note_types_dir))
-    candidate = Path(os.path.abspath(path))
-    try:
-        relative = candidate.relative_to(note_types_root)
-    except ValueError as error:
-        raise ValueError(
-            f"Note-type asset '{path}' is outside {source.note_types_dir}."
-        ) from error
-    return (Path("note_types") / relative).as_posix()

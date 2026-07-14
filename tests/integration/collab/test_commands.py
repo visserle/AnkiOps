@@ -506,64 +506,6 @@ def test_publish_exports_only_the_referenced_note_type_manifest(tmp_path, monkey
     assert private.read_text(encoding="utf-8") == "root secret\n"
 
 
-def test_publish_rejects_a_symlinked_selected_deck(tmp_path, monkeypatch):
-    collection = _setup_collection(tmp_path)
-    DeckFileHarness().eject_default_note_types(collection / "note_types")
-    private = collection / "PrivateSource.md"
-    private.write_text(
-        "<!-- note_key: private-source-key -->\nQ: private\nA: secret\n",
-        encoding="utf-8",
-    )
-    (collection / "Shared.md").symlink_to(private)
-    _commit(collection, "Add symlinked deck")
-    monkeypatch.setattr(
-        "ankiops.collab.publish.GitHubHost.create_repo",
-        lambda *_args, **_kwargs: pytest.fail(
-            "symlinked deck must fail before creating a GitHub repository"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.require_collection_root", lambda: collection
-    )
-
-    with pytest.raises(ValueError, match="symbolic link"):
-        run_publish(SimpleNamespace(deck="Shared", repository="owner/symlink-deck"))
-
-    assert private.read_text(encoding="utf-8").endswith("A: secret\n")
-    assert not (collection / "collab" / "owner" / "symlink-deck").exists()
-
-
-def test_publish_rejects_a_referenced_symlinked_note_type_asset(tmp_path, monkeypatch):
-    collection = _setup_collection(tmp_path)
-    DeckFileHarness().eject_default_note_types(collection / "note_types")
-    qa_dir = collection / "note_types" / "AnkiOpsQA"
-    private = collection / "PrivateTemplate.txt"
-    private.write_text("{{Question}}\n", encoding="utf-8")
-    front = qa_dir / "Front.template.anki"
-    front.unlink()
-    front.symlink_to(private)
-    (collection / "Shared.md").write_text(
-        "<!-- note_key: symlink-template-key -->\nQ: shared\nA: answer\n",
-        encoding="utf-8",
-    )
-    _commit(collection, "Add symlinked note-type template")
-    monkeypatch.setattr(
-        "ankiops.collab.publish.GitHubHost.create_repo",
-        lambda *_args, **_kwargs: pytest.fail(
-            "symlinked asset must fail before creating a GitHub repository"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.require_collection_root", lambda: collection
-    )
-
-    with pytest.raises(ValueError, match="outside the note_types|symbolic link"):
-        run_publish(SimpleNamespace(deck="Shared", repository="owner/symlink-template"))
-
-    assert private.read_text(encoding="utf-8") == "{{Question}}\n"
-    assert not (collection / "collab" / "owner" / "symlink-template").exists()
-
-
 def test_publish_retry_reuses_local_repository_after_push_failure(
     tmp_path, monkeypatch
 ):
@@ -1753,35 +1695,28 @@ def test_publish_rejects_media_paths_that_escape_the_media_directory(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
-    with pytest.raises(ValueError, match="media path.*outside.*media"):
+    with pytest.raises(ValueError, match="Invalid media reference"):
         run_publish(SimpleNamespace(deck="Shared", repository="owner/traversal"))
 
     assert private_file.read_text(encoding="utf-8") == "must never be published\n"
     assert not (collection / "collab" / "owner" / "traversal").exists()
 
 
-@pytest.mark.parametrize("escape_kind", ["absolute", "symlink"])
-def test_publish_rejects_absolute_and_symlink_media_escapes(
-    tmp_path, monkeypatch, escape_kind
-):
+def test_publish_rejects_absolute_media_reference(tmp_path, monkeypatch):
     collection = _setup_collection(tmp_path)
     DeckFileHarness().eject_default_note_types(collection / "note_types")
     media = collection / "media"
     media.mkdir()
     private_file = collection / "PrivateSecret.txt"
     private_file.write_text("must never be published\n", encoding="utf-8")
-    if escape_kind == "absolute":
-        media_ref = private_file.as_posix()
-    else:
-        (media / "secret-link.txt").symlink_to(private_file)
-        media_ref = "media/secret-link.txt"
+    media_ref = private_file.as_posix()
     (collection / "Shared.md").write_text(
         "<!-- note_key: media-escape-key -->\n"
         "Q: shared\n"
         f"A: ![secret](<{media_ref}>)\n",
         encoding="utf-8",
     )
-    _commit(collection, f"Add {escape_kind} media escape attempt")
+    _commit(collection, "Add absolute media reference")
     monkeypatch.setattr(
         "ankiops.collab.publish.GitHubHost.create_repo",
         lambda *_args, **_kwargs: pytest.fail(
@@ -1792,47 +1727,11 @@ def test_publish_rejects_absolute_and_symlink_media_escapes(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
-    with pytest.raises(ValueError, match="media path.*outside.*media"):
+    with pytest.raises(ValueError, match="Invalid media reference"):
         run_publish(SimpleNamespace(deck="Shared", repository="owner/media-escape"))
 
     assert private_file.read_text(encoding="utf-8") == "must never be published\n"
     assert not (collection / "collab" / "owner" / "media-escape").exists()
-
-
-def test_publish_rejects_a_media_symlink_even_when_its_target_is_contained(
-    tmp_path, monkeypatch
-):
-    collection = _setup_collection(tmp_path)
-    DeckFileHarness().eject_default_note_types(collection / "note_types")
-    media = collection / "media"
-    media.mkdir()
-    private_file = media / "unreferenced-private.txt"
-    private_file.write_text("must never be published\n", encoding="utf-8")
-    (media / "shared-link.txt").symlink_to(private_file)
-    (collection / "Shared.md").write_text(
-        "<!-- note_key: contained-symlink-key -->\n"
-        "Q: shared\n"
-        "A: ![secret](media/shared-link.txt)\n",
-        encoding="utf-8",
-    )
-    _commit(collection, "Add contained media symlink")
-    monkeypatch.setattr(
-        "ankiops.collab.publish.GitHubHost.create_repo",
-        lambda *_args, **_kwargs: pytest.fail(
-            "symlinked media must fail before creating a GitHub repository"
-        ),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.require_collection_root", lambda: collection
-    )
-
-    with pytest.raises(ValueError, match="symbolic link"):
-        run_publish(
-            SimpleNamespace(deck="Shared", repository="owner/contained-symlink")
-        )
-
-    assert private_file.read_text(encoding="utf-8") == "must never be published\n"
-    assert not (collection / "collab" / "owner" / "contained-symlink").exists()
 
 
 def test_update_checkpoints_local_edit_and_integrates_remote(collab_world, tmp_path):

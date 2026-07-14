@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from ankiops.collection import LLM_DB_FILENAME
 from ankiops.llm.execution import OpenAIResult, _validate_cloze_text_fields, run_task
+from ankiops.note_types import CardTemplate
 from ankiops.notes import Note
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
@@ -461,13 +462,7 @@ def test_validate_cloze_text_fields_uses_template_cloze_sources(llm_qa_config):
     config = replace(
         llm_qa_config,
         is_cloze=True,
-        templates=[
-            {
-                "Name": "Cloze",
-                "Front": "{{edit:cloze:Question}}",
-                "Back": "{{Answer}}",
-            }
-        ],
+        templates=[CardTemplate("Cloze", "{{edit:cloze:Question}}", "{{Answer}}")],
     )
     valid_note = Note(
         note_key="nk-1",
