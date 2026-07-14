@@ -162,7 +162,7 @@ To install the add-on, download the folder and put it in your Anki add-ons direc
 
 AnkiOps supports collaborative decks on GitHub. You can publish a deck as a public GitHub repository and collaborate through pull requests. Each shared deck lives at `collab/<owner>/<repo>/` as its own Git repository, alongside your private decks. `ankiops collab publish` moves the selected deck and its referenced media and note types into that folder, then publishes the repository to GitHub.
 
-Others can add the deck to their collection with `ankiops collab subscribe <owner>/<repo>`. Subscribers edit its Markdown files and send changes through pull requests. You review and merge those pull requests on GitHub. See the [public example collab deck](https://github.com/visserle/ankiops-collab-example) for setup and the complete workflow. Available collab commands are:
+Others can add the deck to their collection with `ankiops collab subscribe <owner>/<repo>`. Subscribers edit its Markdown files and send changes through pull requests. You review and merge those pull requests on GitHub. See the [public example collab deck](https://github.com/visserle/Collaborate-With-AnkiOps) for setup and the complete workflow. Available collab commands are:
 
 - `ankiops collab publish <deck> <owner>/<repo>`: Publish a local deck tree as a public GitHub repository.
 - `ankiops collab subscribe <owner>/<repo>`: Add a public collab deck to your collection.
