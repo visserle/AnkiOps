@@ -33,6 +33,7 @@ def test_af_rejects_collab_media_traversal_before_reading_anki_or_writing_files(
     )
     source_git = GitRepository(source_root)
     source_git.init_repo()
+    source_git.copy_identity_from(GitRepository(world.root))
     source_git.checkpoint("Add malicious subscribed deck")
     source_head = source_git.head()
     anki_database = world.mock_anki.media_dir.parent / "collection.anki2"
