@@ -81,36 +81,6 @@ def test_invalid_github_auth_gives_exact_login_command(tmp_path, monkeypatch):
     assert "token is invalid" in str(error.value)
 
 
-@pytest.mark.parametrize(
-    ("response", "expected"), [("true\n", True), ("false\n", False)]
-)
-def test_push_access_uses_authenticated_repository_permissions(
-    tmp_path, monkeypatch, response, expected
-):
-    calls = []
-
-    def fake_gh(_host, args, *, check=True):
-        calls.append((args, check))
-        return subprocess.CompletedProcess(["gh", *args], 0, stdout=response, stderr="")
-
-    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
-
-    assert GitHubHost(tmp_path).can_push("owner/repo") is expected
-    assert calls == [(["api", "repos/owner/repo", "--jq", ".permissions.push"], False)]
-
-
-def test_push_access_preserves_permission_api_failure(tmp_path, monkeypatch):
-    failed = subprocess.CompletedProcess(
-        ["gh", "api"], 1, stdout="", stderr="API unavailable"
-    )
-    monkeypatch.setattr(GitHubHost, "_gh", lambda *_args, **_kwargs: failed)
-
-    with pytest.raises(ValueError, match="push access check failed") as error:
-        GitHubHost(tmp_path).can_push("owner/repo")
-
-    assert "API unavailable" in str(error.value)
-
-
 def test_publish_target_uses_an_alternate_fork_name_when_default_is_occupied(
     tmp_path, monkeypatch
 ):
@@ -469,50 +439,6 @@ def test_publish_target_keeps_alternate_fork_names_within_github_limit(
 
     assert len(fork_name) == 100
     assert fork_name.endswith("-ankiops")
-
-
-def test_pull_request_reads_live_state(tmp_path, monkeypatch):
-    response = subprocess.CompletedProcess(
-        ["gh", "pr", "view"],
-        0,
-        stdout=(
-            '{"url":"https://github.com/owner/repo/pull/7",'
-            '"state":"MERGED","headRefName":"ankiops/abc",'
-            '"headRefOid":"deadbeef",'
-            '"headRepository":{"nameWithOwner":"contributor/repo-ankiops"},'
-            '"headRepositoryOwner":{"login":"contributor"}}'
-        ),
-        stderr="",
-    )
-    calls = []
-
-    def fake_gh(_host, args, *, check=True):
-        calls.append((args, check))
-        return response
-
-    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
-
-    pull_request = GitHubHost(tmp_path).pull_request(
-        "https://github.com/owner/repo/pull/7"
-    )
-
-    assert pull_request.state == "MERGED"
-    assert pull_request.head_branch == "ankiops/abc"
-    assert pull_request.head_sha == "deadbeef"
-    assert pull_request.head_owner == "contributor"
-    assert pull_request.head_repository == "contributor/repo-ankiops"
-    assert calls == [
-        (
-            [
-                "pr",
-                "view",
-                "https://github.com/owner/repo/pull/7",
-                "--json",
-                ("url,state,headRefName,headRefOid,headRepositoryOwner,headRepository"),
-            ],
-            False,
-        )
-    ]
 
 
 def test_pull_request_title_update_uses_existing_pr(tmp_path, monkeypatch):

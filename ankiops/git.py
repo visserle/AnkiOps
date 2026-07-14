@@ -212,16 +212,15 @@ class GitRepository:
     def config_unset(self, key: str) -> None:
         self.run(["config", "--local", "--unset-all", key], check=False)
 
+    def copy_identity_from(self, source: "GitRepository") -> None:
+        for key in ("user.name", "user.email"):
+            value = source.run(["config", "--get", key], check=False).stdout.strip()
+            if value:
+                self.run(["config", key, value])
+
     def commit_message(self, ref: str) -> str | None:
         result = self.run(["show", "-s", "--format=%B", ref], check=False)
         return result.stdout.rstrip("\n") if result.returncode == 0 else None
-
-    def trees_equal(self, left: str, right: str) -> bool:
-        left_tree = self.tree(left)
-        right_tree = self.tree(right)
-        return (
-            left_tree is not None and right_tree is not None and left_tree == right_tree
-        )
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         result = self.run(
@@ -273,13 +272,6 @@ class GitRepository:
             index += path_count
             changes.append(GitPathChange(status, paths))
         return changes
-
-    def diff_paths(self, base_ref: str, target_ref: str | None = None) -> list[str]:
-        return [
-            path
-            for change in self.diff_name_status(base_ref, target_ref)
-            for path in change.paths
-        ]
 
     def tracked(self, rel_path: str) -> bool:
         return (

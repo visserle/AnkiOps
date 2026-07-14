@@ -21,9 +21,9 @@ from ankiops.collection import (
 )
 from ankiops.console import clickable_path, connect_or_exit, print_error
 from ankiops.deck_sources import (
-    RESERVED_MARKDOWN_FILES,
     DeckSource,
     discover_deck_sources,
+    is_deck_markdown_filename,
     load_note_types_for_collection,
 )
 from ankiops.git import GitRepository, git_snapshot
@@ -105,12 +105,7 @@ def _deleted_local_markdown_paths(collection_root: Path) -> list[Path]:
 
 
 def _is_local_markdown_deck_path(collection_root: Path, path: Path) -> bool:
-    return (
-        path.parent == collection_root
-        and path.suffix == ".md"
-        and path.name.upper() not in RESERVED_MARKDOWN_FILES
-        and "___" not in path.stem
-    )
+    return path.parent == collection_root and is_deck_markdown_filename(path.name)
 
 
 def run_init(args):

@@ -46,7 +46,7 @@ def test_discover_deck_sources_rejects_non_repository_collab_directory(tmp_path)
     [Path("owner/repo"), Path("collab/owner"), Path("collab/../repo")],
 )
 def test_deck_source_rejects_noncanonical_relative_paths(tmp_path, relative_path):
-    with pytest.raises(ValueError, match="Expected .*source"):
+    with pytest.raises(ValueError, match="Expected .*source|Invalid collab deck"):
         DeckSource(tmp_path, relative_path)
 
 

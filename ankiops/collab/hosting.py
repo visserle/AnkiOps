@@ -43,7 +43,6 @@ class PullRequestInfo:
     state: str
     head_branch: str
     head_sha: str
-    head_owner: str
     head_repository: str
 
 
@@ -108,18 +107,6 @@ class GitHubHost:
         if result.returncode != 0 or not login:
             raise ValueError("GitHub CLI is not authenticated. Run: gh auth login")
         return login
-
-    def can_push(self, slug: str) -> bool:
-        result = self._gh(
-            ["api", f"repos/{slug}", "--jq", ".permissions.push"], check=False
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise ValueError(f"GitHub push access check failed: {detail}")
-        permission = result.stdout.strip().casefold()
-        if permission not in {"true", "false"}:
-            raise ValueError("GitHub returned an invalid push-access response.")
-        return permission == "true"
 
     def _existing_fork(self, login: str, upstream_slug: str) -> str | None:
         result = self._gh(
@@ -218,26 +205,6 @@ class GitHubHost:
             "Rename one of the colliding repositories, then retry."
         )
 
-    def find_open_pr(self, upstream_slug: str, head: str) -> str | None:
-        result = self._gh(
-            [
-                "pr",
-                "list",
-                "--repo",
-                upstream_slug,
-                "--head",
-                head,
-                "--state",
-                "open",
-                "--json",
-                "url",
-                "--jq",
-                ".[0].url",
-            ],
-            check=False,
-        )
-        return result.stdout.strip() or None if result.returncode == 0 else None
-
     def find_pull_request(
         self, upstream_slug: str, head: str
     ) -> PullRequestInfo | None:
@@ -254,7 +221,7 @@ class GitHubHost:
                 "--limit",
                 "1",
                 "--json",
-                ("url,state,headRefName,headRefOid,headRepositoryOwner,headRepository"),
+                "url,state,headRefName,headRefOid,headRepository",
             ],
             check=False,
         )
@@ -266,26 +233,6 @@ class GitHubHost:
             if not values:
                 return None
             return _parse_pull_request(values[0])
-        except (json.JSONDecodeError, KeyError, TypeError) as error:
-            raise ValueError("GitHub returned invalid pull request state.") from error
-
-    def pull_request(self, url: str) -> PullRequestInfo:
-        result = self._gh(
-            [
-                "pr",
-                "view",
-                url,
-                "--json",
-                ("url,state,headRefName,headRefOid,headRepositoryOwner,headRepository"),
-            ],
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "not found"
-            raise ValueError(f"Could not read pull request state: {detail}")
-        try:
-            value = json.loads(result.stdout)
-            return _parse_pull_request(value)
         except (json.JSONDecodeError, KeyError, TypeError) as error:
             raise ValueError("GitHub returned invalid pull request state.") from error
 
@@ -307,9 +254,6 @@ class GitHubHost:
         title: str,
         body: str,
     ) -> str:
-        existing = self.find_open_pr(upstream_slug, head)
-        if existing:
-            return existing
         result = self._gh(
             [
                 "pr",
@@ -340,6 +284,5 @@ def _parse_pull_request(value: dict[str, Any]) -> PullRequestInfo:
         state=str(value["state"]).upper(),
         head_branch=str(value["headRefName"]),
         head_sha=str(value["headRefOid"]),
-        head_owner=str(value["headRepositoryOwner"]["login"]),
         head_repository=str(value["headRepository"]["nameWithOwner"]),
     )

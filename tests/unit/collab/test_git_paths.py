@@ -10,10 +10,10 @@ from ankiops.collab.commands import (
     _delete_submission_branch,
     _derive_submit_title,
     _github_slug_from_remote,
-    _parse_github_slug,
     _SubmissionPhase,
     _SubmissionState,
 )
+from ankiops.deck_sources import parse_github_slug
 from ankiops.git import GitRepository
 
 
@@ -75,13 +75,13 @@ def test_github_slug_accepts_standard_remote_url_forms(url: str) -> None:
     ],
 )
 def test_collab_identity_accepts_github_repository_names(slug: str) -> None:
-    assert _parse_github_slug(slug) == slug
+    assert parse_github_slug(slug) == slug
 
 
 @pytest.mark.parametrize("slug", ["owner/.", "owner/.."])
 def test_collab_identity_rejects_path_segments(slug: str) -> None:
     with pytest.raises(ValueError, match="Invalid collab deck identity"):
-        _parse_github_slug(slug)
+        parse_github_slug(slug)
 
 
 def test_merged_cleanup_keeps_a_branch_advanced_after_merge(tmp_path: Path) -> None:

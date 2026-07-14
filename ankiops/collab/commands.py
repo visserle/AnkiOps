@@ -25,34 +25,30 @@ from ankiops.collab.git_state import (
     CONTRIBUTION_BRANCH,
     INTEGRATED_REF,
     JOURNAL_BRANCH,
-    PUBLISH_DECK_CONFIG,
-    PUBLISH_PREPARED_REF,
     SUBMISSION_REF,
     UPLOADED_REF,
 )
 from ankiops.collab.hosting import GitHubHost, PullRequestInfo
-from ankiops.collab.publish import publish_collab_deck
+from ankiops.collab.publish import prepared_publish, publish_collab_deck
 from ankiops.collab.source_security import (
     validate_collab_checkout,
-    validate_collab_worktree,
 )
 from ankiops.collection import require_collection_root
 from ankiops.console import print_line as output_line
 from ankiops.console import print_next_steps as output_next_steps
 from ankiops.console import print_result as output_result
 from ankiops.deck_sources import (
-    RESERVED_MARKDOWN_FILES,
     DeckSource,
     discover_deck_sources,
+    is_deck_markdown_filename,
     load_note_types_for_source,
+    parse_github_slug,
 )
 from ankiops.git import GitPathChange, GitRepository
 from ankiops.markdown import read_deck_file
 
 logger = logging.getLogger(__name__)
 
-_SAFE_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
-_SAFE_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _UNRESOLVED_CONFLICT_PLACEHOLDER = (
     b"<<<<<<< AnkiOps unresolved conflict\n"
     b"Git could not create a textual merge for this path. Raw versions are stored "
@@ -62,10 +58,6 @@ _UNRESOLVED_CONFLICT_PLACEHOLDER = (
     b"this file\nto resolve the conflict by deleting the path, before retrying.\n"
     b">>>>>>> AnkiOps unresolved conflict\n"
 )
-
-
-class _ConflictResolutionRequired(ValueError):
-    pass
 
 
 class _RepositoryRelation(Enum):
@@ -94,18 +86,10 @@ class _ConflictState:
 
 @dataclass(frozen=True)
 class _IntegrationResult:
-    files_changed: bool
     saved_commit: str | None
-    upstream_commit: str
-    default_branch: str
+    anki_paths: frozenset[str]
     newer_upstream: bool = False
     resolved_conflict: bool = False
-
-
-@dataclass(frozen=True)
-class _PublishState:
-    prepared_commit: str
-    deck: str
 
 
 class _SubmissionPhase(Enum):
@@ -128,45 +112,8 @@ class _SubmissionState:
     pull_request: PullRequestInfo | None
 
 
-def _publish_state(source_git: GitRepository) -> _PublishState | None:
-    prepared_commit = source_git.ref_sha(PUBLISH_PREPARED_REF)
-    deck = source_git.config_get(PUBLISH_DECK_CONFIG)
-    if prepared_commit is None and deck is None:
-        return None
-    if deck is None:
-        raise ValueError(
-            f"The prepared publish state at {source_git.root} is incomplete."
-        )
-    if prepared_commit is None:
-        prepared_commit = source_git.head()
-    if prepared_commit is None:
-        raise ValueError(
-            f"The prepared publish state at {source_git.root} has no commit."
-        )
-    return _PublishState(prepared_commit, deck)
-
-
-def _parse_github_slug(repository: str) -> str:
-    value = repository.strip().removesuffix(".git")
-    parts = value.split("/")
-    if len(parts) != 2 or not all(parts):
-        raise ValueError("Expected GitHub repository as owner/repo")
-    owner, repo = parts
-    if (
-        not _SAFE_OWNER_RE.fullmatch(owner)
-        or not _SAFE_REPOSITORY_RE.fullmatch(repo)
-        or repo in {".", ".."}
-    ):
-        raise ValueError(
-            f"Invalid collab deck identity '{repository}': owner may use ASCII "
-            "letters, digits, hyphens, and internal underscores; repository may "
-            "use ASCII letters, digits, hyphens, underscores, and periods."
-        )
-    return value
-
-
 def _collab_source(collection_root: Path, repository: str) -> DeckSource:
-    return DeckSource.collab(collection_root, _parse_github_slug(repository))
+    return DeckSource.collab(collection_root, repository)
 
 
 def _require_collection_git(collection_root: Path) -> GitRepository:
@@ -219,7 +166,7 @@ def _ensure_submittable_note_keys(source: DeckSource) -> None:
             canonical = None
             if identity:
                 try:
-                    canonical = _parse_github_slug("/".join(identity.groups()))
+                    canonical = parse_github_slug("/".join(identity.groups()))
                 except ValueError:
                     pass
             if canonical and canonical != source.display_name:
@@ -265,32 +212,6 @@ def _log_next_steps(steps: list[str]) -> None:
     output_next_steps(steps)
 
 
-def _read_anki_applicable_paths(source: DeckSource) -> frozenset[str] | None:
-    try:
-        return anki_applicable_paths(source)
-    except Exception as error:
-        logger.debug(
-            "Could not calculate Anki-applicable paths for %s: %s",
-            source.display_name,
-            error,
-        )
-        return None
-
-
-def _conservative_anki_guidance(changed_paths: set[str]) -> bool:
-    for raw_path in changed_paths:
-        path = Path(raw_path)
-        if (
-            len(path.parts) == 1
-            and path.suffix.lower() == ".md"
-            and path.name.upper() not in RESERVED_MARKDOWN_FILES
-        ):
-            return True
-        if path.parts and path.parts[0] in {"media", "note_types"}:
-            return True
-    return False
-
-
 def _derive_submit_title(source_git: GitRepository, upstream_ref: str) -> str:
     changes = source_git.diff_name_status(upstream_ref, "HEAD")
     deck_changes: list[tuple[str, tuple[Path, ...]]] = []
@@ -299,11 +220,7 @@ def _derive_submit_title(source_git: GitRepository, upstream_ref: str) -> str:
         deck_paths = []
         for raw_path in change.paths:
             path = Path(raw_path)
-            if (
-                len(path.parts) == 1
-                and path.suffix.lower() == ".md"
-                and path.name.upper() not in RESERVED_MARKDOWN_FILES
-            ):
+            if len(path.parts) == 1 and is_deck_markdown_filename(path.name):
                 deck_paths.append(path)
             elif path.parts and path.parts[0] in {"media", "note_types"}:
                 assets_changed = True
@@ -464,31 +381,8 @@ def _save_conflict_copies(
     return conflict_root
 
 
-def _preserved_conflict_paths(conflict_root: Path) -> list[str]:
-    paths = set()
-    for artifact in conflict_root.rglob("*"):
-        if not artifact.is_file():
-            continue
-        relative = artifact.relative_to(conflict_root).as_posix()
-        if relative == "conflict.json":
-            continue
-        for suffix in (".base", ".local", ".upstream"):
-            if relative.endswith(suffix):
-                paths.add(relative[: -len(suffix)])
-                break
-    return sorted(paths)
-
-
-def _upstream_ref(source_git: GitRepository) -> tuple[str, str]:
-    default_branch = source_git.default_branch("upstream")
-    return default_branch, f"upstream/{default_branch}"
-
-
-def _copy_git_identity(source_git: GitRepository, target_git: GitRepository) -> None:
-    for key in ("user.name", "user.email"):
-        value = source_git.run(["config", "--get", key], check=False).stdout.strip()
-        if value:
-            target_git.run(["config", key, value])
+def _upstream_ref(source_git: GitRepository) -> str:
+    return f"upstream/{source_git.default_branch('upstream')}"
 
 
 def _contains_conflict_markers(content: bytes) -> bool:
@@ -555,17 +449,14 @@ def _finish_content_merge(
     local_commit: str,
     result_tree: str,
     upstream_commit: str,
-) -> bool:
+) -> frozenset[str]:
     local_tree = source_git.tree(local_commit)
     if local_tree is None:
         raise ValueError(
             f"Could not read the local checkpoint for {source.display_name}."
         )
-    validate_collab_checkout(source_git, display_name=source.display_name)
-    validate_collab_worktree(source_git, display_name=source.display_name)
     if result_tree == local_tree:
         source_git.reset_hard(local_commit)
-        files_changed = False
     else:
         result_commit = source_git.create_commit(
             result_tree,
@@ -573,9 +464,9 @@ def _finish_content_merge(
             f"Integrate upstream changes for {source.display_name}",
         )
         source_git.reset_hard(result_commit)
-        files_changed = True
+    applicable_paths = anki_applicable_paths(source)
     source_git.update_ref(INTEGRATED_REF, upstream_commit)
-    return files_changed
+    return applicable_paths
 
 
 def _resolve_frozen_conflict(
@@ -590,8 +481,6 @@ def _resolve_frozen_conflict(
             f"local checkpoint, then retry: "
             f"{_conflict_retry_command(source, conflict.kind)}"
         )
-    validate_collab_checkout(source_git, display_name=source.display_name)
-    validate_collab_worktree(source_git, display_name=source.display_name)
     base_tree = source_git.tree(conflict.base_commit)
     local_tree = source_git.tree(conflict.local_commit)
     upstream_tree = source_git.tree(conflict.upstream_commit)
@@ -615,7 +504,7 @@ def _resolve_frozen_conflict(
             unresolved = _apply_preserved_resolutions(source_git, conflict.root)
             if unresolved:
                 source_git.reset_hard(conflict.local_commit)
-                raise _ConflictResolutionRequired(
+                raise ValueError(
                     f"Conflict resolution is still required for: "
                     f"{', '.join(unresolved)}. Edit the files in {conflict.root}, "
                     f"then retry: {_conflict_retry_command(source, conflict.kind)}"
@@ -633,7 +522,7 @@ def _resolve_frozen_conflict(
                 raise ValueError(
                     f"Could not read the resolved content for {source.display_name}."
                 )
-        files_changed = _finish_content_merge(
+        anki_paths = _finish_content_merge(
             source,
             source_git,
             local_commit=conflict.local_commit,
@@ -645,7 +534,7 @@ def _resolve_frozen_conflict(
         raise
 
     _clear_conflict_state(source_git, conflict.root)
-    default_branch, upstream_ref = _upstream_ref(source_git)
+    upstream_ref = _upstream_ref(source_git)
     newer_upstream = False
     try:
         source_git.fetch("upstream")
@@ -660,10 +549,8 @@ def _resolve_frozen_conflict(
             error,
         )
     return _IntegrationResult(
-        files_changed=files_changed,
         saved_commit=None,
-        upstream_commit=conflict.upstream_commit,
-        default_branch=default_branch,
+        anki_paths=anki_paths,
         newer_upstream=newer_upstream,
         resolved_conflict=True,
     )
@@ -688,7 +575,6 @@ def _integrate_upstream(
         return _resolve_frozen_conflict(source, source_git, conflict)
 
     validate_collab_checkout(source_git, display_name=source.display_name)
-    validate_collab_worktree(source_git, display_name=source.display_name)
     saved_commit = source_git.checkpoint(
         f"Save local deck changes for {source.display_name}"
     )
@@ -713,7 +599,7 @@ def _integrate_upstream(
             f"Could not fetch GitHub updates for {source.display_name}."
             f"{checkpoint} Retry exactly: {_conflict_retry_command(source, kind)}"
         ) from error
-    default_branch, upstream_ref = _upstream_ref(source_git)
+    upstream_ref = _upstream_ref(source_git)
     upstream_commit = source_git.ref_sha(upstream_ref)
     upstream_tree = source_git.tree(upstream_ref)
     if upstream_commit is None or upstream_tree is None:
@@ -761,7 +647,7 @@ def _integrate_upstream(
             requested_title=requested_title,
         )
         source_git.reset_hard(local_commit)
-        raise _ConflictResolutionRequired(
+        raise ValueError(
             f"Local contribution committed at {local_commit[:12]}. Local and "
             f"upstream edits overlap in: {', '.join(paths)}. Resolve the editable "
             f"files in {conflict_root}, then retry exactly: "
@@ -772,7 +658,7 @@ def _integrate_upstream(
         raise
 
     try:
-        files_changed = _finish_content_merge(
+        anki_paths = _finish_content_merge(
             source,
             source_git,
             local_commit=local_commit,
@@ -783,10 +669,8 @@ def _integrate_upstream(
         source_git.reset_hard(local_commit)
         raise
     return _IntegrationResult(
-        files_changed=files_changed,
         saved_commit=saved_commit,
-        upstream_commit=upstream_commit,
-        default_branch=default_branch,
+        anki_paths=anki_paths,
     )
 
 
@@ -800,14 +684,13 @@ def run_subscribe(args: SimpleNamespace) -> None:
         source_git = GitRepository.clone(
             str(source.github_url), source.root, anonymous=True
         )
-        _copy_git_identity(collection_git, source_git)
+        source_git.copy_identity_from(collection_git)
         default_branch = source_git.default_branch("upstream")
         upstream_ref = f"upstream/{default_branch}"
         source_git.checkout_or_create_branch(JOURNAL_BRANCH, upstream_ref)
         source_git.run(["branch", "--unset-upstream"], check=False)
         source_git.update_ref(INTEGRATED_REF, upstream_ref)
         validate_collab_checkout(source_git, display_name=source.display_name)
-        validate_collab_worktree(source_git, display_name=source.display_name)
         _ensure_submittable_note_keys(source)
     except BaseException:
         if source.root.exists():
@@ -835,7 +718,7 @@ def run_publish(args: SimpleNamespace) -> None:
         raise ValueError(str(error)) from error
     except Exception as error:
         source_git = GitRepository(source.root)
-        prepared = _publish_state(source_git) if source_git.is_repo() else None
+        prepared = prepared_publish(source_git) if source_git.is_repo() else None
         prepared_detail = (
             f"Prepared repository: {source.root}. " if prepared is not None else ""
         )
@@ -864,7 +747,12 @@ def _github_slug_from_remote(url: str) -> str | None:
         url,
         flags=re.IGNORECASE,
     )
-    return f"{match.group(1)}/{match.group(2)}" if match else None
+    if match is None:
+        return None
+    try:
+        return parse_github_slug(f"{match.group(1)}/{match.group(2)}")
+    except ValueError:
+        return None
 
 
 def _submission_state(
@@ -961,7 +849,7 @@ def _clear_submission_refs(source_git: GitRepository) -> None:
 
 def _update_one(collection_root: Path, source: DeckSource) -> None:
     source_git = _require_source_git(source)
-    anki_paths_before = _read_anki_applicable_paths(source)
+    anki_paths_before = anki_applicable_paths(source)
     integrated_before = source_git.ref_sha(INTEGRATED_REF)
     submission: _SubmissionState | None = None
     if source_git.ref_sha(SUBMISSION_REF):
@@ -998,13 +886,9 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
         flat_changed_paths = {
             path for changed_path in changed_paths for path in changed_path.paths
         }
-        anki_paths_after = _read_anki_applicable_paths(source)
-        if anki_paths_before is not None and anki_paths_after is not None:
-            anki_applicable_changes = bool(
-                flat_changed_paths & (anki_paths_before | anki_paths_after)
-            )
-        else:
-            anki_applicable_changes = _conservative_anki_guidance(flat_changed_paths)
+        anki_applicable_changes = bool(
+            flat_changed_paths & (anki_paths_before | result.anki_paths)
+        )
     local_contribution = source_git.tree("HEAD") != source_git.tree(INTEGRATED_REF)
     branch_kept = False
     if submission and submission.phase == _SubmissionPhase.MERGED:
@@ -1302,8 +1186,9 @@ def run_submit(args: SimpleNamespace) -> None:
 
     contribution_head = f"{contributor}:{CONTRIBUTION_BRANCH}"
     try:
-        pr_url = github.find_open_pr(source.display_name, contribution_head)
-        if pr_url:
+        pull_request = submission.pull_request
+        if pull_request is not None and pull_request.state == "OPEN":
+            pr_url = pull_request.url
             if prepared_new_snapshot or requested_title:
                 github.update_pr(pr_url, title=title)
             summary = (
@@ -1337,7 +1222,7 @@ def run_submit(args: SimpleNamespace) -> None:
 
 
 def _repository_state(source_git: GitRepository) -> _RepositoryState:
-    _default_branch, upstream_ref = _upstream_ref(source_git)
+    upstream_ref = _upstream_ref(source_git)
     upstream_tree = source_git.tree(upstream_ref)
     if upstream_tree is None:
         raise ValueError("Could not read the upstream content tree.")
@@ -1379,8 +1264,8 @@ def _status_one(source: DeckSource) -> None:
     source_git.ensure_repo(
         f"The collab source {source.display_name} is not a valid repository."
     )
-    prepared_publish = _publish_state(source_git)
-    if prepared_publish is not None:
+    publish_preparation = prepared_publish(source_git)
+    if publish_preparation is not None:
         output_line(source.display_name)
         output_line("  Publish: prepared; handoff incomplete")
         output_line(f"  Local repository: {source.root}")
@@ -1392,7 +1277,7 @@ def _status_one(source: DeckSource) -> None:
                         "ankiops",
                         "collab",
                         "publish",
-                        prepared_publish.deck,
+                        publish_preparation.deck,
                         source.display_name,
                     ]
                 )

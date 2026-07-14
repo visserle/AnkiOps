@@ -212,25 +212,3 @@ def test_update_rejects_an_upstream_note_type_path_escape_before_applying_it(
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert _git(source, "status", "--short").stdout == ""
     assert (collection / "Private.md").read_text() == "private baseline\n"
-
-
-def test_update_rejects_a_symlinked_local_deck_before_reading_it(
-    tmp_path: Path, monkeypatch
-):
-    collection = _collection(tmp_path)
-    remote = _safe_remote(tmp_path)
-    source = _checkout_source(collection, remote)
-    deck = source / "Deck.md"
-    deck.unlink()
-    deck.symlink_to("../../../Private.md")
-    before = _git(source, "rev-parse", "HEAD").stdout.strip()
-    monkeypatch.setattr(
-        "ankiops.collab.commands.require_collection_root", lambda: collection
-    )
-
-    with pytest.raises(ValueError, match="symbolic link"):
-        run_update(SimpleNamespace(repository="owner/repo"))
-
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
-    assert deck.is_symlink()
-    assert (collection / "Private.md").read_text() == "private baseline\n"

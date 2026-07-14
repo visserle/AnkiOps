@@ -259,17 +259,6 @@ def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path):
     assert _git_status(tmp_path) == ""
 
 
-def test_trees_equal_is_false_when_either_ref_is_missing(tmp_path):
-    _init_git_repo(tmp_path)
-    tracked = tmp_path / "Deck.md"
-    tracked.write_text("content\n", encoding="utf-8")
-    _commit_all(tmp_path, "root")
-    repository = GitRepository(tmp_path)
-
-    assert not repository.trees_equal("HEAD", "missing-ref")
-    assert not repository.trees_equal("missing-ref", "also-missing")
-
-
 def test_status_lines_keep_unicode_paths_readable(tmp_path):
     _init_git_repo(tmp_path)
     path = tmp_path / "Déck Ω — punctuation!.md"
@@ -295,10 +284,6 @@ def test_diff_name_status_preserves_unicode_spaces_and_rename_paths(tmp_path):
 
     assert [(change.status, change.paths) for change in changes] == [
         ("R100", ("Old déck Ω.md", "New déck Ω.md"))
-    ]
-    assert repository.diff_paths("HEAD^", "HEAD") == [
-        "Old déck Ω.md",
-        "New déck Ω.md",
     ]
 
 

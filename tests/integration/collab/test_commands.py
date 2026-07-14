@@ -638,12 +638,8 @@ def _mock_submission_github(monkeypatch, publish: Path):
             state=str(pull["state"]),
             head_branch=CONTRIBUTION_BRANCH,
             head_sha=remote_sha(),
-            head_owner="contributor",
             head_repository="contributor/repo",
         )
-
-    def find_open(*_args):
-        return pull["url"] if pull["state"] == "OPEN" else None
 
     def create_pr(*_args, **kwargs):
         pull["state"] = "OPEN"
@@ -665,7 +661,6 @@ def _mock_submission_github(monkeypatch, publish: Path):
     monkeypatch.setattr(
         "ankiops.collab.commands.GitHubHost.find_pull_request", pull_request
     )
-    monkeypatch.setattr("ankiops.collab.commands.GitHubHost.find_open_pr", find_open)
     monkeypatch.setattr("ankiops.collab.commands.GitHubHost.create_pr", create_pr)
     monkeypatch.setattr("ankiops.collab.commands.GitHubHost.update_pr", update_pr)
     return pull

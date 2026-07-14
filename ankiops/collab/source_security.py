@@ -6,7 +6,6 @@ from pathlib import Path, PurePosixPath
 
 from ankiops.deck_sources import RESERVED_MARKDOWN_FILES, discover_deck_sources
 from ankiops.git import GitRepository
-from ankiops.note_types import load_note_types
 
 
 def _is_anki_source_path(path: str) -> bool:
@@ -18,59 +17,6 @@ def _is_anki_source_path(path: str) -> bool:
     ):
         return True
     return bool(candidate.parts and candidate.parts[0] == "note_types")
-
-
-def _ensure_regular_without_symlinks(
-    root: Path,
-    path: Path,
-    *,
-    display_name: str,
-) -> None:
-    current = root
-    for part in path.relative_to(root).parts:
-        current /= part
-        if current.is_symlink():
-            raise ValueError(
-                f"The subscribed deck {display_name} contains a symbolic link at "
-                f"'{path.relative_to(root)}'. Deck Markdown and note-type files "
-                "must be regular files contained in the subscribed repository."
-            )
-    if path.exists() and not path.is_file():
-        raise ValueError(
-            f"The subscribed deck {display_name} contains a non-regular file at "
-            f"'{path.relative_to(root)}'. Deck Markdown and note-type files must "
-            "be regular files."
-        )
-
-
-def validate_collab_worktree(
-    repository: GitRepository,
-    *,
-    display_name: str,
-) -> None:
-    """Reject unsafe applicable paths in the checked-out working tree."""
-    root = repository.root
-    for path in root.iterdir():
-        candidate = PurePosixPath(path.name)
-        if (
-            candidate.suffix.lower() == ".md"
-            and candidate.name.upper() not in RESERVED_MARKDOWN_FILES
-        ):
-            _ensure_regular_without_symlinks(root, path, display_name=display_name)
-
-    note_types_dir = root / "note_types"
-    if note_types_dir.is_symlink():
-        _ensure_regular_without_symlinks(
-            root, note_types_dir, display_name=display_name
-        )
-    if not note_types_dir.is_dir():
-        return
-    for path in note_types_dir.rglob("*"):
-        is_special = path.exists() and not path.is_file() and not path.is_dir()
-        if path.is_symlink() or is_special:
-            _ensure_regular_without_symlinks(root, path, display_name=display_name)
-
-    load_note_types(note_types_dir)
 
 
 def validate_collab_checkout(
@@ -100,4 +46,3 @@ def validate_collection_collab_sources(collection_root: Path) -> None:
     for source in discover_deck_sources(collection_root)[1:]:
         repository = GitRepository(source.root)
         validate_collab_checkout(repository, display_name=source.display_name)
-        validate_collab_worktree(repository, display_name=source.display_name)

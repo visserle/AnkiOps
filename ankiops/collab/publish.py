@@ -48,6 +48,31 @@ class _PublishPlan:
     assets: tuple[_PublishAsset, ...]
 
 
+@dataclass(frozen=True)
+class PreparedPublish:
+    prepared_commit: str
+    deck: str
+
+
+def prepared_publish(repository: GitRepository) -> PreparedPublish | None:
+    """Read the durable state of an interrupted publish."""
+    prepared_commit = repository.ref_sha(PUBLISH_PREPARED_REF)
+    deck = repository.config_get(PUBLISH_DECK_CONFIG)
+    if prepared_commit is None and deck is None:
+        return None
+    if deck is None:
+        raise ValueError(
+            f"The prepared publish state at {repository.root} is incomplete."
+        )
+    if prepared_commit is None:
+        prepared_commit = repository.head()
+    if prepared_commit is None:
+        raise ValueError(
+            f"The prepared publish state at {repository.root} has no commit."
+        )
+    return PreparedPublish(prepared_commit, deck)
+
+
 def publish_collab_deck(
     collection_root: Path,
     deck: str,
@@ -65,29 +90,30 @@ def publish_collab_deck(
                 f"Local collab source already exists and is not a Git repository: "
                 f"{source.root}"
             )
-        prepared_head = source_git.ref_sha(PUBLISH_PREPARED_REF)
-        prepared_deck = source_git.config_get(PUBLISH_DECK_CONFIG)
-        if prepared_deck is None:
+        preparation = prepared_publish(source_git)
+        if preparation is None:
             raise RepositoryCollisionError(
                 f"Local collab source already exists: {source.display_name}. "
                 "It was not prepared by this publish, so it was left untouched."
             )
-        if prepared_deck != deck:
+        if preparation.deck != deck:
             raise ValueError(
-                f"The interrupted publish at {source.root} is for '{prepared_deck}', "
+                f"The interrupted publish at {source.root} is for "
+                f"'{preparation.deck}', "
                 f"not '{deck}'. Retry with that deck name."
             )
+        prepared_marker = source_git.ref_sha(PUBLISH_PREPARED_REF)
+        prepared_head = preparation.prepared_commit
         current_head = source_git.head()
         if current_head is None or source_git.status_lines():
             raise ValueError(
                 f"The prepared publish repository changed at {source.root}. "
                 "Review it before retrying."
             )
-        if prepared_head is None:
+        if prepared_marker is None:
             if source_git.ref_sha(INTEGRATED_REF) == current_head:
                 source_git.config_unset(PUBLISH_DECK_CONFIG)
                 return
-            prepared_head = current_head
             source_git.update_ref(PUBLISH_PREPARED_REF, prepared_head)
         elif current_head != prepared_head:
             raise ValueError(
@@ -99,7 +125,7 @@ def publish_collab_deck(
         plan = _prepare_publish_plan(collection_root, deck, source)
         _write_publish_files(plan)
         source_git.init_repo(initial_branch="main")
-        _copy_git_identity(collection_git, source_git)
+        source_git.copy_identity_from(collection_git)
         source_git.checkpoint(f"Publish collab deck {deck}")
         prepared_head = source_git.head()
         if prepared_head is None:
@@ -172,16 +198,6 @@ def _ensure_retry_remote_matches(
     )
 
 
-def _copy_git_identity(
-    collection_git: GitRepository,
-    source_git: GitRepository,
-) -> None:
-    for key in ("user.name", "user.email"):
-        value = collection_git.run(["config", "--get", key], check=False).stdout.strip()
-        if value:
-            source_git.run(["config", key, value])
-
-
 def _transfer_sync_ownership(collection_root: Path, plan: _PublishPlan) -> None:
     state = SyncState.open(collection_root)
     try:
@@ -233,6 +249,24 @@ def _scoped_configs(
     ]
 
 
+def _collect_note_keys(deck_files: list[DeckFile]) -> set[str]:
+    note_keys: set[str] = set()
+    missing = 0
+    for deck_file in deck_files:
+        for note in deck_file.notes:
+            if not note.note_key:
+                missing += 1
+            elif note.note_key in note_keys:
+                raise ValueError(
+                    f"Duplicate note_key in collab publish: {note.note_key}"
+                )
+            else:
+                note_keys.add(note.note_key)
+    if missing:
+        raise ValueError(format_missing_note_keys_error(missing))
+    return note_keys
+
+
 def _prepare_publish_plan(
     collection_root: Path,
     deck: str,
@@ -245,8 +279,6 @@ def _prepare_publish_plan(
     parsed_files: list[tuple[Path, DeckFile]] = []
     note_types_used: set[str] = set()
     media_used: set[str] = set()
-    note_keys: set[str] = set()
-    missing_note_keys: list[str] = []
 
     for md_file in selected_files:
         parsed = read_deck_file(
@@ -255,21 +287,12 @@ def _prepare_publish_plan(
             context_root=collection_root,
         )
         parsed_files.append((md_file, parsed))
-        for index, note in enumerate(parsed.notes, start=1):
-            if not note.note_key:
-                missing_note_keys.append(f"{md_file.name} note {index}")
-            elif note.note_key in note_keys:
-                raise ValueError(
-                    f"Duplicate note_key in collab publish set: {note.note_key}"
-                )
-            else:
-                note_keys.add(note.note_key)
+        for note in parsed.notes:
             note_types_used.add(note.note_type)
             for field_value in note.fields.values():
                 media_used.update(extract_media_references(field_value))
 
-    if missing_note_keys:
-        raise ValueError(format_missing_note_keys_error(len(missing_note_keys)))
+    note_keys = _collect_note_keys([parsed for _, parsed in parsed_files])
 
     unknown_note_types = sorted(note_types_used - set(root_config_by_name))
     if unknown_note_types:
@@ -326,24 +349,15 @@ def _prepare_publish_recovery_plan(
 ) -> _PublishPlan:
     selected_files = _select_deck_files(source.deck_files(), deck)
     configs = _scoped_configs(source, load_note_types(source.note_types_dir))
-    note_keys: set[str] = set()
+    parsed_files: list[DeckFile] = []
     rendered_files: list[_RenderedPublishFile] = []
-    missing_note_keys = 0
     for md_file in selected_files:
         parsed = read_deck_file(
             md_file,
             note_types=configs,
             context_root=source.root,
         )
-        for note in parsed.notes:
-            if not note.note_key:
-                missing_note_keys += 1
-            elif note.note_key in note_keys:
-                raise ValueError(
-                    f"Duplicate note_key in interrupted collab publish: {note.note_key}"
-                )
-            else:
-                note_keys.add(note.note_key)
+        parsed_files.append(parsed)
         rendered_files.append(
             _RenderedPublishFile(
                 source_path=collection_root / md_file.name,
@@ -351,8 +365,7 @@ def _prepare_publish_recovery_plan(
                 content=md_file.read_text(encoding="utf-8"),
             )
         )
-    if missing_note_keys:
-        raise ValueError(format_missing_note_keys_error(missing_note_keys))
+    note_keys = _collect_note_keys(parsed_files)
     return _PublishPlan(
         deck=deck,
         source=source,
@@ -397,13 +410,12 @@ def _capture_publish_assets(
     )
 
 
-def _write_publish_files(plan: _PublishPlan) -> list[Path]:
+def _write_publish_files(plan: _PublishPlan) -> None:
     source = plan.source
     source.root.mkdir(parents=True, exist_ok=False)
     (source.root / LOCAL_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
     source.note_types_dir.mkdir(parents=True, exist_ok=True)
 
-    touched: list[Path] = [source.root]
     readme_template = (
         resources.files("ankiops.collab")
         .joinpath("resources/README.md")
@@ -416,7 +428,6 @@ def _write_publish_files(plan: _PublishPlan) -> list[Path]:
         ),
         encoding="utf-8",
     )
-    touched.append(readme)
     gitignore = source.root / ".gitignore"
     gitignore.write_text(
         resources.files("ankiops.collab")
@@ -424,18 +435,13 @@ def _write_publish_files(plan: _PublishPlan) -> list[Path]:
         .read_text(encoding="utf-8"),
         encoding="utf-8",
     )
-    touched.append(gitignore)
     for rendered in plan.files:
         rendered.target_path.write_text(rendered.content, encoding="utf-8")
-        touched.extend([rendered.target_path, rendered.source_path])
 
     for entry in plan.assets:
         target = source.root / entry.relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(entry.content)
-        touched.append(target)
-
-    return touched
 
 
 def _remove_published_local_files(plan: _PublishPlan) -> None:
