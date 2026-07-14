@@ -752,7 +752,7 @@ def _submission_state(
 
 def _update_one(collection_root: Path, source: DeckSource) -> None:
     source_git = _require_source_git(source)
-    anki_paths_before = parse_source(source).applicable_paths
+    current_source: ParsedSource = parse_source(source)
     integrated_before = source_git.ref_sha(INTEGRATED_REF)
     submission: _SubmissionState | None = None
     if source_git.ref_sha(SUBMISSION_REF):
@@ -791,7 +791,7 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
         }
         anki_applicable_changes = bool(
             flat_changed_paths
-            & (anki_paths_before | result.parsed_source.applicable_paths)
+            & (current_source.applicable_paths | result.parsed_source.applicable_paths)
         )
     local_contribution = source_git.tree("HEAD") != source_git.tree(INTEGRATED_REF)
     if submission and submission.phase in {
@@ -826,7 +826,9 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
         next_steps.append(
             f"Integrate the newer update: ankiops collab update {source.display_name}"
         )
-    elif local_contribution:
+    if anki_applicable_changes:
+        next_steps.append("Apply to Anki: ankiops fa")
+    if local_contribution and not result.newer_upstream:
         next_steps.append(
             f"Submit contribution: ankiops collab submit {source.display_name}"
         )

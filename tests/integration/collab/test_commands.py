@@ -148,6 +148,55 @@ def test_clean_update_is_a_noop(collab_world, capsys):
     assert "already up to date" in capsys.readouterr().out
 
 
+def test_update_recommends_fa_for_anki_applicable_changes(
+    collab_world, tmp_path, capsys
+):
+    _collection, _source, remote = collab_world
+    _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
+
+    run_update(SimpleNamespace(repository="owner/repo"))
+
+    output = capsys.readouterr().out
+    assert "Anki: changes available" in output
+    assert "Apply to Anki: ankiops fa" in output
+
+
+def test_update_rejects_invalid_source_before_git_operations(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, remote = collab_world
+    upstream = _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
+    config = source / "note_types" / "AnkiOpsQA" / "note_type.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "    back: Back.template.anki\n",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    head_before = _git(source, "rev-parse", "HEAD").stdout.strip()
+    integrated_before = _git(source, "rev-parse", INTEGRATED_REF).stdout.strip()
+    tracking_before = _git(source, "rev-parse", "upstream/main").stdout.strip()
+    status_before = _git(source, "status", "--short").stdout
+    config_before = config.read_text(encoding="utf-8")
+
+    def unexpected_git_operation(*_args, **_kwargs):
+        pytest.fail("Git activity started before source parsing completed")
+
+    monkeypatch.setattr(GitRepository, "checkpoint", unexpected_git_operation)
+    monkeypatch.setattr(GitRepository, "fetch", unexpected_git_operation)
+
+    with pytest.raises(ValueError, match="template with invalid 'back'"):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert tracking_before != upstream
+    assert _git(source, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == integrated_before
+    assert _git(source, "rev-parse", "upstream/main").stdout.strip() == tracking_before
+    assert _git(source, "status", "--short").stdout == status_before
+    assert config.read_text(encoding="utf-8") == config_before
+
+
 def test_update_rejects_unknown_source_without_touching_another_repository(
     collab_world,
 ):
@@ -171,7 +220,9 @@ def test_update_rejects_unknown_source_without_touching_another_repository(
     assert "unsaved work" in other_deck.read_text(encoding="utf-8")
 
 
-def test_update_commits_staged_unstaged_and_untracked_changes(collab_world, tmp_path):
+def test_update_commits_staged_unstaged_and_untracked_changes(
+    collab_world, tmp_path, capsys
+):
     _collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
@@ -198,6 +249,7 @@ def test_update_commits_staged_unstaged_and_untracked_changes(collab_world, tmp_
     assert "final answer" in deck.read_text(encoding="utf-8")
     assert (source / "README.md").read_text() == "upstream docs\n"
     assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == upstream
+    assert "ankiops fa" not in capsys.readouterr().out
 
 
 def test_text_conflict_commits_local_checkpoint_and_preserves_evidence(
@@ -263,6 +315,7 @@ def test_conflict_retry_uses_frozen_upstream_then_recommends_next_update(
     assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == frozen
     assert "resolved frozen conflict" in output
     assert "Integrate the newer update: ankiops collab update owner/repo" in output
+    assert "Apply to Anki: ankiops fa" in output
     assert not _conflict_root(collection).exists()
 
     run_update(SimpleNamespace(repository="owner/repo"))
