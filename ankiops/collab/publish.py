@@ -6,10 +6,7 @@ from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 
-from ankiops.collab.errors import (
-    RepositoryCollisionError,
-    format_missing_note_keys_error,
-)
+from ankiops.collab.errors import RepositoryCollisionError
 from ankiops.collab.git_state import (
     INTEGRATED_REF,
     JOURNAL_BRANCH,
@@ -20,9 +17,10 @@ from ankiops.collab.hosting import GitHubHost
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
 from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
-from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
+from ankiops.interchange import ParsedDeck, parse_source, require_note_keys
+from ankiops.markdown import render_notes_to_markdown
 from ankiops.media import extract_media_references
-from ankiops.note_types import NoteType, load_note_types
+from ankiops.note_types import NoteType
 from ankiops.sync.state import SyncState
 
 
@@ -136,22 +134,11 @@ def publish_collab_deck(
     github = GitHubHost(collection_root)
     source_git.set_remote("upstream", str(source.github_url))
     source_git.set_remote("publish", str(source.github_url))
-    remote_probe = source_git.run(["ls-remote", "upstream"], check=False)
-    if remote_probe.returncode == 0:
-        _ensure_retry_remote_matches(source_git, source, prepared_head)
-    elif github.repo_info(source.display_name) is None:
+    if github.repo_info(source.display_name) is None:
         github.create_repo(source.display_name)
-    else:
-        _ensure_retry_remote_matches(source_git, source, prepared_head)
-
-    remote_head = source_git.remote_branch_sha("upstream", "main")
+    remote_head = _publish_remote_head(source_git, source, prepared_head)
     if remote_head is None:
         source_git.push("upstream", "HEAD", "main")
-    elif remote_head != prepared_head:
-        raise RepositoryCollisionError(
-            f"GitHub repository {source.display_name} changed after this publish was "
-            "prepared. Nothing was overwritten."
-        )
 
     source_git.checkout_or_create_branch(JOURNAL_BRANCH, prepared_head)
     source_git.run(["branch", "--unset-upstream"], check=False)
@@ -166,11 +153,11 @@ def publish_collab_deck(
     source_git.config_unset(PUBLISH_DECK_CONFIG)
 
 
-def _ensure_retry_remote_matches(
+def _publish_remote_head(
     repository: GitRepository,
     source: DeckSource,
     prepared_head: str,
-) -> None:
+) -> str | None:
     result = repository.run(["ls-remote", "upstream"], check=False)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "unreachable"
@@ -184,14 +171,14 @@ def _ensure_retry_remote_matches(
         for sha, ref in [line.split("\t", 1)]
     }
     if not refs:
-        return
+        return None
     allowed_refs = {"HEAD", "refs/heads/main"}
     if (
         "refs/heads/main" in refs
         and set(refs).issubset(allowed_refs)
         and all(sha == prepared_head for sha in refs.values())
     ):
-        return
+        return prepared_head
     raise RepositoryCollisionError(
         f"GitHub repository {source.display_name} contains unrelated content. "
         "Nothing was overwritten. Choose a new name."
@@ -222,21 +209,18 @@ def _transfer_sync_ownership(collection_root: Path, plan: _PublishPlan) -> None:
         state.close()
 
 
-def _selected_deck_files(collection_root: Path, deck: str) -> list[Path]:
-    return _select_deck_files(DeckSource.local(collection_root).deck_files(), deck)
-
-
-def _select_deck_files(deck_files: list[Path], deck: str) -> list[Path]:
+def _select_decks(decks: tuple[ParsedDeck, ...], deck: str) -> list[ParsedDeck]:
     deck_filter = deck.strip()
     subdeck_scope = f"{deck_filter}::"
-    files = []
-    for md_file in deck_files:
-        deck_name = file_stem_to_deck_name(md_file.stem)
-        if deck_name == deck_filter or deck_name.startswith(subdeck_scope):
-            files.append(md_file)
-    if not files:
+    selected = [
+        parsed_deck
+        for parsed_deck in decks
+        if parsed_deck.deck_name == deck_filter
+        or parsed_deck.deck_name.startswith(subdeck_scope)
+    ]
+    if not selected:
         raise ValueError(f"No local deck files found for '{deck}'")
-    return files
+    return selected
 
 
 def _scoped_configs(
@@ -249,57 +233,26 @@ def _scoped_configs(
     ]
 
 
-def _collect_note_keys(deck_files: list[DeckFile]) -> set[str]:
-    note_keys: set[str] = set()
-    missing = 0
-    for deck_file in deck_files:
-        for note in deck_file.notes:
-            if not note.note_key:
-                missing += 1
-            elif note.note_key in note_keys:
-                raise ValueError(
-                    f"Duplicate note_key in collab publish: {note.note_key}"
-                )
-            else:
-                note_keys.add(note.note_key)
-    if missing:
-        raise ValueError(format_missing_note_keys_error(missing))
-    return note_keys
-
-
 def _prepare_publish_plan(
     collection_root: Path,
     deck: str,
     source: DeckSource,
 ) -> _PublishPlan:
-    root_configs = load_note_types(collection_root / NOTE_TYPES_DIR)
+    parsed_source = parse_source(DeckSource.local(collection_root))
+    root_configs = list(parsed_source.note_types)
     root_config_by_name = {config.name: config for config in root_configs}
 
-    selected_files = _selected_deck_files(collection_root, deck)
-    parsed_files: list[tuple[Path, DeckFile]] = []
+    selected_decks = _select_decks(parsed_source.decks, deck)
     note_types_used: set[str] = set()
     media_used: set[str] = set()
 
-    for md_file in selected_files:
-        parsed = read_deck_file(
-            md_file,
-            note_types=root_configs,
-            context_root=collection_root,
-        )
-        parsed_files.append((md_file, parsed))
-        for note in parsed.notes:
+    for parsed_deck in selected_decks:
+        for note in parsed_deck.parsed.notes:
             note_types_used.add(note.note_type)
             for field_value in note.fields.values():
                 media_used.update(extract_media_references(field_value))
 
-    note_keys = _collect_note_keys([parsed for _, parsed in parsed_files])
-
-    unknown_note_types = sorted(note_types_used - set(root_config_by_name))
-    if unknown_note_types:
-        raise ValueError(
-            "Unknown note type(s) while publishing collab deck: "
-            + ", ".join(unknown_note_types)
-        )
+    note_keys = require_note_keys(deck.parsed for deck in selected_decks)
 
     media_paths = {
         media_name: collection_root / LOCAL_MEDIA_DIR / media_name
@@ -318,14 +271,17 @@ def _prepare_publish_plan(
     scoped_configs = _scoped_configs(source, used_configs)
     scoped_config_by_name = {config.name: config for config in scoped_configs}
     rendered_files: list[_RenderedPublishFile] = []
-    for md_file, parsed in parsed_files:
-        for note in parsed.notes:
+    for parsed_deck in selected_decks:
+        for note in parsed_deck.parsed.notes:
             note.note_type = source.scope_note_type_name(note.note_type)
         rendered_files.append(
             _RenderedPublishFile(
-                source_path=md_file,
-                target_path=source.root / md_file.name,
-                content=render_notes_to_markdown(parsed.notes, scoped_config_by_name),
+                source_path=parsed_deck.path,
+                target_path=source.root / parsed_deck.path.name,
+                content=render_notes_to_markdown(
+                    parsed_deck.parsed.notes,
+                    scoped_config_by_name,
+                ),
             )
         )
 
@@ -347,25 +303,18 @@ def _prepare_publish_recovery_plan(
     deck: str,
     source: DeckSource,
 ) -> _PublishPlan:
-    selected_files = _select_deck_files(source.deck_files(), deck)
-    configs = _scoped_configs(source, load_note_types(source.note_types_dir))
-    parsed_files: list[DeckFile] = []
+    parsed_source = parse_source(source)
+    selected_decks = _select_decks(parsed_source.decks, deck)
     rendered_files: list[_RenderedPublishFile] = []
-    for md_file in selected_files:
-        parsed = read_deck_file(
-            md_file,
-            note_types=configs,
-            context_root=source.root,
-        )
-        parsed_files.append(parsed)
+    for parsed_deck in selected_decks:
         rendered_files.append(
             _RenderedPublishFile(
-                source_path=collection_root / md_file.name,
-                target_path=md_file,
-                content=md_file.read_text(encoding="utf-8"),
+                source_path=collection_root / parsed_deck.path.name,
+                target_path=parsed_deck.path,
+                content=parsed_deck.parsed.raw_content,
             )
         )
-    note_keys = _collect_note_keys(parsed_files)
+    note_keys = require_note_keys(deck.parsed for deck in selected_decks)
     return _PublishPlan(
         deck=deck,
         source=source,

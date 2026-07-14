@@ -174,11 +174,15 @@ def test_run_fa_auto_commit_snapshots_declared_state_before_sync_mutates_media(
         check=True,
     ).stdout
     working = world.read_deck("MediaDeck")
+    note_id = world.assert_anki_note(deck_name="MediaDeck", question="prompt")
+    anki_answer = world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
 
     assert "media/img.png" in committed
     assert "<!-- note_key:" not in committed
     assert "media/img_" in working
     assert "<!-- note_key:" in working
+    assert "img_" in anki_answer
+    assert "img.png" not in anki_answer
 
 
 def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
@@ -476,6 +480,16 @@ def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys):
 )
 def test_removed_collab_flags_are_rejected(argv):
     with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 2
+
+
+def test_collab_update_requires_one_repository():
+    with (
+        patch("sys.argv", ["ankiops", "collab", "update"]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
         main()
 
     assert excinfo.value.code == 2

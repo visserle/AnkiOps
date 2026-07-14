@@ -52,7 +52,7 @@ ankiops collab status {{REPOSITORY}}
 ankiops collab submit {{REPOSITORY}} --title "Clarify the explanation of spaced repetition"
 ```
 
-`collab submit` first commits all non-ignored staged, unstaged, untracked, and deleted files in this shared repository, then opens or updates one pull request. It excludes private decks and changes from other subscribed repositories. If your GitHub account lacks write access, AnkiOps creates or reuses a fork for the submission. Interrupted uploads and pull-request creation are safe to retry with the command AnkiOps reports.
+`collab submit` first commits all non-ignored staged, unstaged, untracked, and deleted files in this shared repository, then opens or updates one pull request. It excludes private decks and changes from other subscribed repositories. If your GitHub account lacks write access, AnkiOps creates or reuses GitHub's standard same-name fork, `<account>/<upstream-repository>`. AnkiOps owns `ankiops/contribution` in that repository and force-replaces it with each prepared contribution; GitHub-side edits to that branch are unsupported. Interrupted uploads and pull-request creation are safe to retry with the command AnkiOps reports.
 
 Use an issue for questions about the deck's scope or content. Use a pull request for a concrete card, media, or note-type change.
 

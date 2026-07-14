@@ -4,7 +4,6 @@ JOURNAL_BRANCH = "ankiops/journal"
 CONTRIBUTION_BRANCH = "ankiops/contribution"
 
 INTEGRATED_REF = "refs/ankiops/integrated"
-UPLOADED_REF = "refs/ankiops/uploaded"
 SUBMISSION_REF = "refs/ankiops/submission"
 PUBLISH_PREPARED_REF = "refs/ankiops/publish-prepared"
 

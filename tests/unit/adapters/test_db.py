@@ -191,20 +191,6 @@ def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path):
     assert (tmp_path / f"{ANKIOPS_DB}.corrupt").read_bytes() == original
 
 
-def test_remove_note_by_id(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        assert adapter.resolve_note_ids(["k1"]).get("k1") == 101
-
-        adapter.delete_note_link_by_id(101)
-
-        assert adapter.resolve_note_ids(["k1"]).get("k1") is None
-        assert adapter.resolve_note_keys([101]).get(101) is None
-    finally:
-        adapter.close()
-
-
 def test_delete_deck(tmp_path):
     adapter = SyncState.open(tmp_path)
     try:
@@ -383,36 +369,6 @@ def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
         adapter.close()
 
 
-def test_clear_import_hashes_does_not_clear_export_hashes(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
-        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
-
-        adapter.clear_import_hashes(["k1"])
-
-        assert adapter.resolve_import_hashes(["k1"]) == {}
-        assert adapter.resolve_export_hashes(["k1"]) == {"k1": ("emd1", "ea1")}
-    finally:
-        adapter.close()
-
-
-def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
-        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
-
-        adapter.clear_export_hashes(["k1"])
-
-        assert adapter.resolve_import_hashes(["k1"]) == {"k1": ("imd1", "ia1")}
-        assert adapter.resolve_export_hashes(["k1"]) == {}
-    finally:
-        adapter.close()
-
-
 def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
     adapter = SyncState.open(tmp_path)
     try:
@@ -494,7 +450,5 @@ def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
             "b.png": "d3",
         }
 
-        adapter.clear_media_push_digests(["a.png"])
-        assert adapter.resolve_media_push_digests(["a.png", "b.png"]) == {"b.png": "d3"}
     finally:
         adapter.close()

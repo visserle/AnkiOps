@@ -471,7 +471,7 @@ def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
     assert result.protected_note_groups[0].note_count == 1
 
 
-def test_exp_run_protect_006_keeps_link_for_active_key_seen_in_orphan_file(world):
+def test_exp_run_protect_006_rejects_duplicate_key_in_orphan_file(world):
     """EXP-RUN-PROTECT-006."""
     active_key = "active-key"
     note_id = world.add_qa_note(
@@ -485,28 +485,23 @@ def test_exp_run_protect_006_keeps_link_for_active_key_seen_in_orphan_file(world
 
     with world.db_session() as db:
         db.upsert_note_links([(active_key, note_id)])
-        result = world.sync_export(db)
+        with pytest.raises(ValueError, match="Duplicate note_key 'active-key'"):
+            world.sync_export(db)
         assert db.resolve_note_ids([active_key]).get(active_key) == note_id
 
-    assert not world.deck_path("DuplicateOrphanDeck").exists()
-    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=1, errors=0)
+    assert world.deck_path("DuplicateOrphanDeck").exists()
 
 
-def test_exp_run_protect_003_preserves_malformed_orphan_file(world, caplog):
+def test_exp_run_protect_003_rejects_malformed_orphan_file(world):
     """EXP-RUN-PROTECT-003."""
     malformed_file = world.deck_path("MalformedOrphanDeck")
     malformed_file.write_text("UNKNOWN: bad\n", encoding="utf-8")
 
-    with (
-        caplog.at_level(logging.WARNING),
-        world.db_session() as db,
-    ):
-        result = world.sync_export(db)
+    with world.db_session() as db:
+        with pytest.raises(ValueError, match="Error parsing local:MalformedOrphanDeck"):
+            world.sync_export(db)
 
     assert malformed_file.exists()
-    assert "could not be parsed during export cleanup" in caplog.text
-    assert_summary(result.summary, created=0, updated=0, moved=0, deleted=0, errors=0)
-    assert result.protected_note_groups == []
 
 
 def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):

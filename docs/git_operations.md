@@ -32,9 +32,8 @@ pushes `main`. A failed retry reuses the local repository and commit.
 `collab subscribe` establishes an ongoing local copy at
 `collab/<owner>/<repo>` without requiring authentication for public
 repositories. Its local `ankiops/journal` branch has no upstream tracking
-branch. `refs/ankiops/integrated`, `refs/ankiops/submission`, and
-`refs/ankiops/uploaded` record the integrated upstream commit, prepared
-contribution, and last confirmed upload.
+branch. `refs/ankiops/integrated` records the integrated upstream commit and
+`refs/ankiops/submission` records the prepared contribution.
 
 `collab status` previews local changes, available updates, pending submissions,
 conflict recovery state, live pull request state, and the next collab command.
@@ -45,16 +44,18 @@ needs it.
 `collab update` commits all non-ignored local changes directly in the subscribed
 repository before fetching. It performs the content merge there and records the
 upstream commit in `refs/ankiops/integrated`. Its explicit content merge base
-preserves edits made after an uploaded contribution, including after a squash
+preserves edits made after an accepted contribution, including after a squash
 merge.
 
 `collab submit` checkpoints all tracked, untracked, staged, unstaged, and deleted
 non-ignored files in only the selected source, integrates upstream, and compares
 content trees. Identical trees are a no-op. If changes remain, it uploads a
 single synthetic commit on `ankiops/contribution` and creates or reuses a native
-GitHub pull request. Later drafts replace that commit with force-with-lease while
-retaining the same pull request. A contributor without write permission receives
-or reuses a fork.
+GitHub pull request. AnkiOps owns `ankiops/contribution` and unconditionally
+force-replaces it with each later draft while retaining the same pull request.
+The branch remains after merge or closure and is reused for the next contribution.
+A contributor without write permission receives or reuses GitHub's standard
+same-name fork.
 
 ## Conflict and retry behavior
 

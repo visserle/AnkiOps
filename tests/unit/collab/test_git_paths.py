@@ -6,12 +6,8 @@ from pathlib import Path
 import pytest
 
 from ankiops.collab.commands import (
-    INTEGRATED_REF,
-    _delete_submission_branch,
     _derive_submit_title,
     _github_slug_from_remote,
-    _SubmissionPhase,
-    _SubmissionState,
 )
 from ankiops.deck_sources import parse_github_slug
 from ankiops.git import GitRepository
@@ -82,43 +78,3 @@ def test_collab_identity_accepts_github_repository_names(slug: str) -> None:
 def test_collab_identity_rejects_path_segments(slug: str) -> None:
     with pytest.raises(ValueError, match="Invalid collab deck identity"):
         parse_github_slug(slug)
-
-
-def test_merged_cleanup_keeps_a_branch_advanced_after_merge(tmp_path: Path) -> None:
-    collection = tmp_path / "collection"
-    source = collection / "collab" / "owner" / "repo"
-    source.mkdir(parents=True)
-    _init_repository(source)
-    deck = source / "Deck.md"
-    deck.write_text("base\n", encoding="utf-8")
-    base = _commit(source, "Base")
-    repository = GitRepository(source)
-    repository.update_ref(INTEGRATED_REF, base)
-
-    publish = tmp_path / "publish.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    _git(source, "remote", "add", "publish", str(publish))
-    _git(source, "checkout", "-b", "ankiops/contribution")
-    deck.write_text("submitted\n", encoding="utf-8")
-    submitted = _commit(source, "Submit")
-    _git(source, "push", "publish", "HEAD:ankiops/contribution")
-    deck.write_text("unrelated post-merge work\n", encoding="utf-8")
-    reused_head = _commit(source, "Reuse branch after merge")
-    _git(source, "push", "publish", "HEAD:ankiops/contribution")
-
-    deleted = _delete_submission_branch(
-        repository,
-        _SubmissionState(
-            phase=_SubmissionPhase.MERGED,
-            snapshot=submitted,
-            uploaded=submitted,
-            publish_slug=None,
-            remote_sha=reused_head,
-            pull_request=None,
-        ),
-    )
-
-    assert not deleted
-    assert (
-        repository.remote_branch_sha("publish", "ankiops/contribution") == reused_head
-    )

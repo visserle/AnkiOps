@@ -367,44 +367,8 @@ class GitRepository:
     def push(self, remote: str, source_ref: str, branch: str) -> None:
         self.run(["push", remote, f"{source_ref}:refs/heads/{branch}"])
 
-    def push_force_with_lease(
-        self,
-        remote: str,
-        source_ref: str,
-        branch: str,
-        expected_sha: str,
-    ) -> None:
-        self.run(
-            [
-                "push",
-                f"--force-with-lease=refs/heads/{branch}:{expected_sha}",
-                remote,
-                f"{source_ref}:refs/heads/{branch}",
-            ]
-        )
-
-    def delete_remote_branch_with_lease(
-        self, remote: str, branch: str, expected_sha: str
-    ) -> None:
-        self.run(
-            [
-                "push",
-                f"--force-with-lease=refs/heads/{branch}:{expected_sha}",
-                remote,
-                f":refs/heads/{branch}",
-            ]
-        )
-
-    def remote_branch_sha(self, remote: str, branch: str) -> str | None:
-        result = self.run(
-            ["ls-remote", "--heads", remote, f"refs/heads/{branch}"],
-            check=False,
-        )
-        if result.returncode != 0:
-            result.check_returncode()
-        if not result.stdout.strip():
-            return None
-        return result.stdout.split()[0]
+    def push_force(self, remote: str, source_ref: str, branch: str) -> None:
+        self.run(["push", "--force", remote, f"{source_ref}:refs/heads/{branch}"])
 
     def rel_path(self, path: Path) -> str:
         return str(path.relative_to(self.root))

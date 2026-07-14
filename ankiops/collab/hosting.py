@@ -9,22 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ankiops.collab.errors import (
-    RepositoryCollisionError,
-    RepositoryCreationUncertainError,
-)
-
-MAX_FORK_NAME_ATTEMPTS = 20
-MAX_FORK_DISCOVERY_RESULTS = 1000
-MAX_GITHUB_REPOSITORY_NAME_LENGTH = 100
-
-
-def _fork_name(repo_name: str, attempt: int) -> str:
-    if attempt == 0:
-        return repo_name
-    suffix = "-ankiops" if attempt == 1 else f"-ankiops-{attempt}"
-    base = repo_name[: MAX_GITHUB_REPOSITORY_NAME_LENGTH - len(suffix)]
-    return f"{base}{suffix}"
+from ankiops.collab.errors import RepositoryCollisionError
 
 
 def _is_fork_of(repository: dict[str, Any] | None, upstream_slug: str) -> bool:
@@ -41,9 +26,8 @@ def _is_fork_of(repository: dict[str, Any] | None, upstream_slug: str) -> bool:
 class PullRequestInfo:
     url: str
     state: str
-    head_branch: str
+    title: str
     head_sha: str
-    head_repository: str
 
 
 @dataclass(frozen=True)
@@ -78,27 +62,34 @@ class GitHubHost:
     def repo_info(self, slug: str) -> dict[str, Any] | None:
         result = self._gh(["api", f"repos/{slug}"], check=False)
         if result.returncode != 0:
-            return None
+            detail = result.stderr.strip() or result.stdout.strip()
+            if "HTTP 404" in detail or "Not Found" in detail:
+                return None
+            raise ValueError(
+                f"Could not inspect GitHub repository {slug}: "
+                f"{detail or 'unknown error'}"
+            )
         try:
             value = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, dict) else None
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"GitHub returned invalid repository state for {slug}."
+            ) from error
+        if not isinstance(value, dict):
+            raise ValueError(f"GitHub returned invalid repository state for {slug}.")
+        return value
 
     def create_repo(self, slug: str) -> None:
         self.ensure_authenticated()
-        if self.repo_info(slug) is not None:
-            raise RepositoryCollisionError(
-                f"GitHub repository already exists: {slug}. Choose a new name."
-            )
         result = self._gh(
             ["repo", "create", slug, "--public"],
             check=False,
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise RepositoryCreationUncertainError(
-                f"Could not confirm creation of GitHub repository {slug}: {detail}"
+            raise ValueError(
+                f"Could not create GitHub repository {slug}: {detail}. "
+                "Retrying is safe."
             )
 
     def login(self) -> str:
@@ -107,49 +98,6 @@ class GitHubHost:
         if result.returncode != 0 or not login:
             raise ValueError("GitHub CLI is not authenticated. Run: gh auth login")
         return login
-
-    def _existing_fork(self, login: str, upstream_slug: str) -> str | None:
-        result = self._gh(
-            [
-                "repo",
-                "list",
-                login,
-                "--fork",
-                "--limit",
-                str(MAX_FORK_DISCOVERY_RESULTS + 1),
-                "--json",
-                "nameWithOwner,parent",
-            ],
-            check=False,
-        )
-        if result.returncode != 0:
-            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise ValueError(f"Could not inspect existing GitHub forks: {detail}")
-        try:
-            repositories = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise ValueError("GitHub returned an invalid fork list.") from error
-        if not isinstance(repositories, list):
-            raise ValueError("GitHub returned an invalid fork list.")
-        if len(repositories) > MAX_FORK_DISCOVERY_RESULTS:
-            raise ValueError(
-                "Could not safely inspect all existing GitHub forks. "
-                "Reduce the number of forks under this account, then retry."
-            )
-        for repository in repositories:
-            if not isinstance(repository, dict):
-                continue
-            parent = repository.get("parent") or {}
-            parent_slug = parent.get("nameWithOwner")
-            fork_slug = repository.get("nameWithOwner")
-            if (
-                isinstance(parent_slug, str)
-                and parent_slug.casefold() == upstream_slug.casefold()
-                and isinstance(fork_slug, str)
-                and fork_slug
-            ):
-                return fork_slug
-        return None
 
     def publish_target(self, upstream_slug: str) -> tuple[str, str]:
         """Return writable repository slug and PR head owner."""
@@ -165,44 +113,33 @@ class GitHubHost:
             return upstream_slug, str(owner)
 
         login = self.login()
-        existing_fork = self._existing_fork(login, upstream_slug)
-        if existing_fork is not None:
-            return existing_fork, login
         repo_name = upstream_slug.split("/", 1)[1]
-        for attempt in range(MAX_FORK_NAME_ATTEMPTS):
-            fork_name = _fork_name(repo_name, attempt)
-            fork_slug = f"{login}/{fork_name}"
-            fork = self.repo_info(fork_slug)
-            if fork is not None:
-                if _is_fork_of(fork, upstream_slug):
-                    return fork_slug, login
-                continue
-
-            args = ["repo", "fork", upstream_slug, "--clone=false"]
-            if fork_name != repo_name:
-                args.extend(["--fork-name", fork_name])
-            result = self._gh(args, check=False)
-            fork = self.repo_info(fork_slug)
-            if _is_fork_of(fork, upstream_slug):
-                return fork_slug, login
-            if fork is not None:
-                continue
-            if result.returncode != 0:
-                detail = (
-                    result.stderr.strip() or result.stdout.strip() or "unknown error"
-                )
-                raise ValueError(
-                    f"Could not create contributor fork {fork_slug}: {detail}. "
-                    "Nothing was pushed; retrying is safe."
-                )
-            raise ValueError(
-                f"GitHub did not confirm contributor fork {fork_slug}. "
-                "Nothing was pushed; retrying is safe."
+        fork_slug = f"{login}/{repo_name}"
+        fork = self.repo_info(fork_slug)
+        if _is_fork_of(fork, upstream_slug):
+            return fork_slug, login
+        if fork is not None:
+            raise RepositoryCollisionError(
+                f"Contribution repository {fork_slug} contains unrelated content. "
+                "Rename or remove it, then retry."
             )
 
+        result = self._gh(
+            ["repo", "fork", upstream_slug, "--clone=false"],
+            check=False,
+        )
+        fork = self.repo_info(fork_slug)
+        if _is_fork_of(fork, upstream_slug):
+            return fork_slug, login
+        if fork is not None:
+            raise RepositoryCollisionError(
+                f"Contribution repository {fork_slug} contains unrelated content. "
+                "Rename or remove it, then retry."
+            )
+        detail = result.stderr.strip() or result.stdout.strip() or "not confirmed"
         raise ValueError(
-            f"Could not find an available fork name under {login}. "
-            "Rename one of the colliding repositories, then retry."
+            f"Could not create standard contributor fork {fork_slug}: {detail}. "
+            "AnkiOps does not search for renamed forks. Nothing was pushed."
         )
 
     def find_pull_request(
@@ -210,18 +147,16 @@ class GitHubHost:
     ) -> PullRequestInfo | None:
         result = self._gh(
             [
-                "pr",
-                "list",
-                "--repo",
-                upstream_slug,
-                "--head",
-                head,
-                "--state",
-                "all",
-                "--limit",
-                "1",
-                "--json",
-                "url,state,headRefName,headRefOid,headRepository",
+                "api",
+                "-X",
+                "GET",
+                f"repos/{upstream_slug}/pulls",
+                "-f",
+                f"head={head}",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=1",
             ],
             check=False,
         )
@@ -280,9 +215,8 @@ class GitHubHost:
 
 def _parse_pull_request(value: dict[str, Any]) -> PullRequestInfo:
     return PullRequestInfo(
-        url=str(value["url"]),
-        state=str(value["state"]).upper(),
-        head_branch=str(value["headRefName"]),
-        head_sha=str(value["headRefOid"]),
-        head_repository=str(value["headRepository"]["nameWithOwner"]),
+        url=str(value["html_url"]),
+        state="MERGED" if value.get("merged_at") else str(value["state"]).upper(),
+        title=str(value["title"]),
+        head_sha=str(value["head"]["sha"]),
     )

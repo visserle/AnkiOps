@@ -13,11 +13,7 @@ from enum import Enum, auto
 from pathlib import Path
 from types import SimpleNamespace
 
-from ankiops.anki_manifest import anki_applicable_paths
-from ankiops.collab.errors import (
-    RepositoryCollisionError,
-    format_missing_note_keys_error,
-)
+from ankiops.collab.errors import RepositoryCollisionError
 from ankiops.collab.git_state import (
     CONFLICT_BASE_REF,
     CONFLICT_LOCAL_REF,
@@ -26,7 +22,6 @@ from ankiops.collab.git_state import (
     INTEGRATED_REF,
     JOURNAL_BRANCH,
     SUBMISSION_REF,
-    UPLOADED_REF,
 )
 from ankiops.collab.hosting import GitHubHost, PullRequestInfo
 from ankiops.collab.publish import prepared_publish, publish_collab_deck
@@ -41,11 +36,10 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     is_deck_markdown_filename,
-    load_note_types_for_source,
     parse_github_slug,
 )
 from ankiops.git import GitPathChange, GitRepository
-from ankiops.markdown import read_deck_file
+from ankiops.interchange import ParsedSource, parse_source, require_note_keys
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +81,7 @@ class _ConflictState:
 @dataclass(frozen=True)
 class _IntegrationResult:
     saved_commit: str | None
-    anki_paths: frozenset[str]
+    parsed_source: ParsedSource
     newer_upstream: bool = False
     resolved_conflict: bool = False
 
@@ -95,9 +89,7 @@ class _IntegrationResult:
 class _SubmissionPhase(Enum):
     NONE = auto()
     PREPARED = auto()
-    PUSHED = auto()
     PR_OPEN = auto()
-    REMOTELY_CHANGED = auto()
     MERGED = auto()
     CLOSED = auto()
 
@@ -106,9 +98,7 @@ class _SubmissionPhase(Enum):
 class _SubmissionState:
     phase: _SubmissionPhase
     snapshot: str | None
-    uploaded: str | None
     publish_slug: str | None
-    remote_sha: str | None
     pull_request: PullRequestInfo | None
 
 
@@ -147,51 +137,6 @@ def _require_source_git(source: DeckSource) -> GitRepository:
             f"subscribe {source.display_name}"
         )
     return source_git
-
-
-def _ensure_submittable_note_keys(source: DeckSource) -> None:
-    configs = load_note_types_for_source(source)
-    missing = []
-    note_key_locations: dict[str, list[str]] = {}
-    for md_file in source.deck_files():
-        try:
-            parsed = read_deck_file(
-                md_file, note_types=configs, context_root=source.root
-            )
-        except ValueError as error:
-            identity = re.search(
-                r"Unknown note type 'collab/([^/']+)/([^/']+)/",
-                str(error),
-            )
-            canonical = None
-            if identity:
-                try:
-                    canonical = parse_github_slug("/".join(identity.groups()))
-                except ValueError:
-                    pass
-            if canonical and canonical != source.display_name:
-                raise ValueError(
-                    f"This repository's deck files belong to {canonical}, not "
-                    f"{source.display_name}. Subscribe to the canonical deck "
-                    f"instead: ankiops collab subscribe {canonical}"
-                ) from error
-            raise
-        for index, note in enumerate(parsed.notes, start=1):
-            if not note.note_key:
-                missing.append(f"{md_file.name} note {index}")
-            else:
-                note_key_locations.setdefault(note.note_key, []).append(
-                    f"{md_file.name} note {index}"
-                )
-    if missing:
-        raise ValueError(format_missing_note_keys_error(len(missing)))
-    duplicates = [
-        f"Duplicate note_key '{note_key}' in {', '.join(locations)}"
-        for note_key, locations in note_key_locations.items()
-        if len(locations) > 1
-    ]
-    if duplicates:
-        raise ValueError("; ".join(duplicates))
 
 
 def _log_result(
@@ -449,7 +394,7 @@ def _finish_content_merge(
     local_commit: str,
     result_tree: str,
     upstream_commit: str,
-) -> frozenset[str]:
+) -> ParsedSource:
     local_tree = source_git.tree(local_commit)
     if local_tree is None:
         raise ValueError(
@@ -464,9 +409,9 @@ def _finish_content_merge(
             f"Integrate upstream changes for {source.display_name}",
         )
         source_git.reset_hard(result_commit)
-    applicable_paths = anki_applicable_paths(source)
+    parsed_source = parse_source(source)
     source_git.update_ref(INTEGRATED_REF, upstream_commit)
-    return applicable_paths
+    return parsed_source
 
 
 def _resolve_frozen_conflict(
@@ -522,7 +467,7 @@ def _resolve_frozen_conflict(
                 raise ValueError(
                     f"Could not read the resolved content for {source.display_name}."
                 )
-        anki_paths = _finish_content_merge(
+        parsed_source = _finish_content_merge(
             source,
             source_git,
             local_commit=conflict.local_commit,
@@ -550,7 +495,7 @@ def _resolve_frozen_conflict(
         )
     return _IntegrationResult(
         saved_commit=None,
-        anki_paths=anki_paths,
+        parsed_source=parsed_source,
         newer_upstream=newer_upstream,
         resolved_conflict=True,
     )
@@ -562,7 +507,7 @@ def _integrate_upstream(
     source_git: GitRepository,
     *,
     kind: str,
-    uploaded_accepted: bool = False,
+    submission_accepted: bool = False,
     requested_title: str | None = None,
 ) -> _IntegrationResult:
     conflict = _load_conflict_state(collection_root, source, source_git)
@@ -612,7 +557,7 @@ def _integrate_upstream(
         ref=upstream_ref,
     )
 
-    base_ref = UPLOADED_REF if uploaded_accepted else INTEGRATED_REF
+    base_ref = SUBMISSION_REF if submission_accepted else INTEGRATED_REF
     base_commit = source_git.ref_sha(base_ref)
     base_tree = source_git.tree(base_ref)
     if base_commit is None or base_tree is None:
@@ -658,7 +603,7 @@ def _integrate_upstream(
         raise
 
     try:
-        anki_paths = _finish_content_merge(
+        parsed_source = _finish_content_merge(
             source,
             source_git,
             local_commit=local_commit,
@@ -670,7 +615,7 @@ def _integrate_upstream(
         raise
     return _IntegrationResult(
         saved_commit=saved_commit,
-        anki_paths=anki_paths,
+        parsed_source=parsed_source,
     )
 
 
@@ -691,7 +636,8 @@ def run_subscribe(args: SimpleNamespace) -> None:
         source_git.run(["branch", "--unset-upstream"], check=False)
         source_git.update_ref(INTEGRATED_REF, upstream_ref)
         validate_collab_checkout(source_git, display_name=source.display_name)
-        _ensure_submittable_note_keys(source)
+        parsed_source = parse_source(source)
+        require_note_keys(deck.parsed for deck in parsed_source.decks)
     except BaseException:
         if source.root.exists():
             shutil.rmtree(source.root)
@@ -718,7 +664,11 @@ def run_publish(args: SimpleNamespace) -> None:
         raise ValueError(str(error)) from error
     except Exception as error:
         source_git = GitRepository(source.root)
-        prepared = prepared_publish(source_git) if source_git.is_repo() else None
+        prepared = (
+            prepared_publish(source_git)
+            if source.root.exists() and source_git.is_repo()
+            else None
+        )
         prepared_detail = (
             f"Prepared repository: {source.root}. " if prepared is not None else ""
         )
@@ -761,95 +711,48 @@ def _submission_state(
     github: GitHubHost,
 ) -> _SubmissionState:
     snapshot = source_git.ref_sha(SUBMISSION_REF)
-    uploaded = source_git.ref_sha(UPLOADED_REF)
-    publish_slug = _github_slug_from_remote(source_git.remote_url("publish") or "")
     if snapshot is None:
-        return _SubmissionState(
-            _SubmissionPhase.NONE,
-            None,
-            uploaded,
-            publish_slug,
-            None,
-            None,
-        )
+        return _SubmissionState(_SubmissionPhase.NONE, None, None, None)
+
+    publish_slug = _github_slug_from_remote(source_git.remote_url("publish") or "")
     if publish_slug is None:
         return _SubmissionState(
             _SubmissionPhase.PREPARED,
             snapshot,
-            uploaded,
-            None,
             None,
             None,
         )
 
-    remote_sha = source_git.remote_branch_sha("publish", CONTRIBUTION_BRANCH)
     owner = publish_slug.split("/", 1)[0]
     pull_request = github.find_pull_request(
         source.display_name,
         f"{owner}:{CONTRIBUTION_BRANCH}",
     )
-    expected_sha = uploaded or snapshot
     if (
         pull_request is not None
         and pull_request.state in {"MERGED", "CLOSED"}
-        and pull_request.head_sha != expected_sha
+        and pull_request.head_sha != snapshot
     ):
         pull_request = None
-    remote_changed = (
-        remote_sha is not None and remote_sha not in {snapshot, uploaded}
-    ) or (uploaded is not None and remote_sha is None)
     if pull_request is not None and pull_request.state == "MERGED":
         phase = _SubmissionPhase.MERGED
     elif pull_request is not None and pull_request.state == "CLOSED":
         phase = _SubmissionPhase.CLOSED
-    elif remote_changed:
-        phase = _SubmissionPhase.REMOTELY_CHANGED
     elif pull_request is not None and pull_request.state == "OPEN":
-        if (
-            pull_request.head_branch != CONTRIBUTION_BRANCH
-            or pull_request.head_repository.casefold() != publish_slug.casefold()
-            or pull_request.head_sha != expected_sha
-        ):
-            phase = _SubmissionPhase.REMOTELY_CHANGED
-        else:
-            phase = _SubmissionPhase.PR_OPEN
-    elif remote_sha == snapshot:
-        phase = _SubmissionPhase.PUSHED
+        phase = _SubmissionPhase.PR_OPEN
     else:
         phase = _SubmissionPhase.PREPARED
     return _SubmissionState(
         phase,
         snapshot,
-        uploaded,
         publish_slug,
-        remote_sha,
         pull_request,
     )
 
 
-def _delete_submission_branch(
-    source_git: GitRepository,
-    submission: _SubmissionState,
-) -> bool:
-    if submission.remote_sha is None:
-        return True
-    if submission.uploaded is None or submission.remote_sha != submission.uploaded:
-        return False
-    source_git.delete_remote_branch_with_lease(
-        "publish",
-        CONTRIBUTION_BRANCH,
-        submission.uploaded,
-    )
-    return source_git.remote_branch_sha("publish", CONTRIBUTION_BRANCH) is None
-
-
-def _clear_submission_refs(source_git: GitRepository) -> None:
-    source_git.delete_refs((SUBMISSION_REF, UPLOADED_REF))
-
-
 def _update_one(collection_root: Path, source: DeckSource) -> None:
     source_git = _require_source_git(source)
-    anki_paths_before = anki_applicable_paths(source)
+    anki_paths_before = parse_source(source).applicable_paths
     integrated_before = source_git.ref_sha(INTEGRATED_REF)
     submission: _SubmissionState | None = None
     if source_git.ref_sha(SUBMISSION_REF):
@@ -871,7 +774,7 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
         source,
         source_git,
         kind="update",
-        uploaded_accepted=bool(
+        submission_accepted=bool(
             submission and submission.phase == _SubmissionPhase.MERGED
         ),
     )
@@ -887,17 +790,15 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
             path for changed_path in changed_paths for path in changed_path.paths
         }
         anki_applicable_changes = bool(
-            flat_changed_paths & (anki_paths_before | result.anki_paths)
+            flat_changed_paths
+            & (anki_paths_before | result.parsed_source.applicable_paths)
         )
     local_contribution = source_git.tree("HEAD") != source_git.tree(INTEGRATED_REF)
-    branch_kept = False
-    if submission and submission.phase == _SubmissionPhase.MERGED:
-        branch_kept = not _delete_submission_branch(source_git, submission)
-        _clear_submission_refs(source_git)
-    elif submission and submission.phase == _SubmissionPhase.CLOSED:
-        branch_kept = not _delete_submission_branch(source_git, submission)
-        if not branch_kept:
-            _clear_submission_refs(source_git)
+    if submission and submission.phase in {
+        _SubmissionPhase.MERGED,
+        _SubmissionPhase.CLOSED,
+    }:
+        source_git.delete_ref(SUBMISSION_REF)
 
     if result.resolved_conflict:
         summary = "resolved frozen conflict and integrated upstream changes"
@@ -919,8 +820,6 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
         details.append("Anki: changes available")
     if local_contribution:
         details.append("Local contribution: ready to submit")
-    if branch_kept:
-        details.append("Contribution branch: kept because it changed on GitHub")
 
     next_steps = []
     if result.newer_upstream:
@@ -944,29 +843,10 @@ def _update_one(collection_root: Path, source: DeckSource) -> None:
 def run_update(args: SimpleNamespace) -> None:
     collection_root = require_collection_root()
     _require_collection_git(collection_root)
-    sources = discover_deck_sources(collection_root)[1:]
-    if getattr(args, "repository", None):
-        requested_source = _collab_source(collection_root, args.repository)
-        if not requested_source.root.exists():
-            raise ValueError(f"Unknown collab source: {requested_source.display_name}")
-        sources = [requested_source]
-    if not sources:
-        output_line("No subscribed collab decks.")
-        _log_next_steps(["Subscribe to a deck: ankiops collab subscribe OWNER/REPO"])
-        return
-    failures = []
-    for index, source in enumerate(sources):
-        if index:
-            output_line()
-        try:
-            _update_one(collection_root, source)
-        except (ValueError, subprocess.CalledProcessError) as error:
-            failures.append(f"{source.display_name}: {error}")
-    if failures:
-        raise ValueError(
-            f"Collab update finished with {len(failures)} failure(s): "
-            + " | ".join(failures)
-        )
+    source = _collab_source(collection_root, args.repository)
+    if not source.root.exists():
+        raise ValueError(f"Unknown collab source: {source.display_name}")
+    _update_one(collection_root, source)
 
 
 def run_submit(args: SimpleNamespace) -> None:
@@ -974,7 +854,8 @@ def run_submit(args: SimpleNamespace) -> None:
     _require_collection_git(collection_root)
     source = _collab_source(collection_root, args.repository)
     source_git = _require_source_git(source)
-    _ensure_submittable_note_keys(source)
+    parsed_source = parse_source(source)
+    require_note_keys(deck.parsed for deck in parsed_source.decks)
     requested_title = getattr(args, "title", None)
     conflict = _load_conflict_state(collection_root, source, source_git)
     if conflict is not None:
@@ -996,22 +877,12 @@ def run_submit(args: SimpleNamespace) -> None:
             f"{source.display_name}. Nothing was sent. Retry exactly: "
             f"ankiops collab submit {source.display_name}. Details: {error}"
         ) from error
-    if submission.phase == _SubmissionPhase.REMOTELY_CHANGED:
-        url = submission.pull_request.url if submission.pull_request else "GitHub"
-        raise ValueError(
-            f"The contribution branch for {source.display_name} changed remotely. "
-            f"Nothing was overwritten. Inspect {url} before submitting again."
-        )
     if submission.phase == _SubmissionPhase.MERGED:
-        cleaned = _delete_submission_branch(source_git, submission)
-        details = [f"Pull request: {submission.pull_request.url}"]
-        if not cleaned:
-            details.append("Contribution branch: kept because it changed on GitHub")
         _log_result(
             "submit",
             source,
             "pull request merged",
-            details=details,
+            details=[f"Pull request: {submission.pull_request.url}"],
             next_steps=[
                 f"Integrate the merged contribution: ankiops collab update "
                 f"{source.display_name}"
@@ -1019,20 +890,8 @@ def run_submit(args: SimpleNamespace) -> None:
         )
         return
     if submission.phase == _SubmissionPhase.CLOSED:
-        if not _delete_submission_branch(source_git, submission):
-            raise ValueError(
-                f"The closed contribution branch for {source.display_name} changed "
-                "on GitHub. It was preserved."
-            )
-        _clear_submission_refs(source_git)
-        submission = _SubmissionState(
-            _SubmissionPhase.NONE,
-            None,
-            None,
-            submission.publish_slug,
-            None,
-            None,
-        )
+        source_git.delete_ref(SUBMISSION_REF)
+        submission = _SubmissionState(_SubmissionPhase.NONE, None, None, None)
 
     snapshot_tree = (
         source_git.tree(submission.snapshot) if submission.snapshot else None
@@ -1041,19 +900,6 @@ def run_submit(args: SimpleNamespace) -> None:
         submission.snapshot
         and (source_git.status_lines() or source_git.tree("HEAD") != snapshot_tree)
     )
-    if (
-        submission.phase == _SubmissionPhase.PR_OPEN
-        and not draft_changed
-        and requested_title is None
-    ):
-        _log_result(
-            "submit",
-            source,
-            "pull request already open",
-            details=[f"Pull request: {submission.pull_request.url}"],
-        )
-        return
-
     prepare_snapshot = (
         submission.snapshot is None or draft_changed or bool(requested_title)
     )
@@ -1079,7 +925,7 @@ def run_submit(args: SimpleNamespace) -> None:
                 f"Could not prepare the contribution for {source.display_name}."
             )
         if local_tree == upstream_tree:
-            _clear_submission_refs(source_git)
+            source_git.delete_ref(SUBMISSION_REF)
             _log_result(
                 "submit",
                 source,
@@ -1152,31 +998,7 @@ def run_submit(args: SimpleNamespace) -> None:
         contributor = contribution_slug.split("/", 1)[0]
 
     try:
-        remote_sha = source_git.remote_branch_sha("publish", CONTRIBUTION_BRANCH)
-        uploaded = source_git.ref_sha(UPLOADED_REF)
-        if remote_sha == snapshot:
-            source_git.update_ref(UPLOADED_REF, snapshot)
-        elif remote_sha is None:
-            if uploaded is not None:
-                raise ValueError(
-                    f"The contribution branch for {source.display_name} was removed "
-                    "on GitHub after upload. It will not be recreated automatically."
-                )
-            source_git.push("publish", snapshot, CONTRIBUTION_BRANCH)
-            source_git.update_ref(UPLOADED_REF, snapshot)
-        elif uploaded is not None and remote_sha == uploaded:
-            source_git.push_force_with_lease(
-                "publish",
-                snapshot,
-                CONTRIBUTION_BRANCH,
-                uploaded,
-            )
-            source_git.update_ref(UPLOADED_REF, snapshot)
-        else:
-            raise ValueError(
-                f"The contribution branch for {source.display_name} changed "
-                "remotely. Nothing was overwritten."
-            )
+        source_git.push_force("publish", snapshot, CONTRIBUTION_BRANCH)
     except subprocess.CalledProcessError as error:
         raise ValueError(
             f"Submission prepared locally for {source.display_name}, but the push "
@@ -1189,10 +1011,14 @@ def run_submit(args: SimpleNamespace) -> None:
         pull_request = submission.pull_request
         if pull_request is not None and pull_request.state == "OPEN":
             pr_url = pull_request.url
-            if prepared_new_snapshot or requested_title:
+            head_changed = pull_request.head_sha != snapshot
+            title_changed = pull_request.title != title
+            if title_changed:
                 github.update_pr(pr_url, title=title)
             summary = (
-                "pull request updated" if prepared_new_snapshot else "pull request open"
+                "pull request updated"
+                if prepared_new_snapshot or head_changed or title_changed
+                else "pull request open"
             )
         else:
             pr_url = github.create_pr(
@@ -1324,7 +1150,7 @@ def _status_one(source: DeckSource) -> None:
         output_line("  Upstream: up to date")
     elif repository_state.relation is _RepositoryRelation.AHEAD:
         contribution_state = (
-            "uploaded"
+            "in pull request"
             if submission and submission.phase == _SubmissionPhase.PR_OPEN
             else "ready to submit"
         )
@@ -1342,7 +1168,7 @@ def _status_one(source: DeckSource) -> None:
         )
     else:
         contribution_state = (
-            "uploaded"
+            "in pull request"
             if submission and submission.phase == _SubmissionPhase.PR_OPEN
             else "ready to submit"
         )
@@ -1363,9 +1189,7 @@ def _status_one(source: DeckSource) -> None:
     elif submission.phase != _SubmissionPhase.NONE:
         labels = {
             _SubmissionPhase.PREPARED: "prepared locally",
-            _SubmissionPhase.PUSHED: "pushed; pull request not confirmed",
             _SubmissionPhase.PR_OPEN: "pull request open",
-            _SubmissionPhase.REMOTELY_CHANGED: "changed remotely; protected",
             _SubmissionPhase.MERGED: "merged; update to integrate",
             _SubmissionPhase.CLOSED: "pull request closed without merge",
         }
@@ -1393,15 +1217,7 @@ def _status_one(source: DeckSource) -> None:
         next_steps.append(f"Retry status: ankiops collab status {source.display_name}")
     elif submission and submission.phase == _SubmissionPhase.CLOSED:
         next_steps.append(f"Submit again: ankiops collab submit {source.display_name}")
-    elif submission and submission.phase == _SubmissionPhase.REMOTELY_CHANGED:
-        target = submission.pull_request.url if submission.pull_request else "GitHub"
-        next_steps.append(
-            f"Inspect the remote contribution before another upload: {target}"
-        )
-    elif submission and submission.phase in {
-        _SubmissionPhase.PREPARED,
-        _SubmissionPhase.PUSHED,
-    }:
+    elif submission and submission.phase == _SubmissionPhase.PREPARED:
         next_steps.append(
             f"Retry submission: ankiops collab submit {source.display_name}"
         )
@@ -1415,6 +1231,8 @@ def _status_one(source: DeckSource) -> None:
         next_steps.append(
             f"Update pull request: ankiops collab submit {source.display_name}"
         )
+    elif submission and submission.phase == _SubmissionPhase.PR_OPEN:
+        pass
     elif local_changes or (
         repository_state and repository_state.relation is _RepositoryRelation.AHEAD
     ):

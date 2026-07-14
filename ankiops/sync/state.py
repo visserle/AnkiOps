@@ -316,9 +316,6 @@ class SyncState:
             )
         self._write_many(statements)
 
-    def delete_note_link_by_id(self, note_id: int) -> None:
-        self._write("DELETE FROM note_state WHERE note_id = ?", (note_id,))
-
     # -- Note fingerprints --------------------------------------------------
 
     def _resolve_directional_hashes(
@@ -397,29 +394,6 @@ class SyncState:
                 ],
             )
 
-    def _clear_directional_hashes(
-        self,
-        note_keys: Iterable[str],
-        *,
-        md_column: str,
-        anki_column: str,
-    ) -> None:
-        note_key_list = list(note_keys)
-        if not note_key_list:
-            return
-        statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(note_key_list):
-            placeholders = ",".join("?" * len(chunk))
-            statements.append(
-                (
-                    f"UPDATE note_state SET {md_column} = NULL, "
-                    f"{anki_column} = NULL "
-                    f"WHERE note_key IN ({placeholders})",
-                    tuple(chunk),
-                )
-            )
-        self._write_many(statements)
-
     def resolve_import_hashes(
         self, note_keys: Iterable[str]
     ) -> dict[str, tuple[str, str]]:
@@ -448,20 +422,6 @@ class SyncState:
     def upsert_export_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
         self._upsert_directional_hashes(
             rows,
-            md_column="export_md_hash",
-            anki_column="export_anki_hash",
-        )
-
-    def clear_import_hashes(self, note_keys: Iterable[str]) -> None:
-        self._clear_directional_hashes(
-            note_keys,
-            md_column="import_md_hash",
-            anki_column="import_anki_hash",
-        )
-
-    def clear_export_hashes(self, note_keys: Iterable[str]) -> None:
-        self._clear_directional_hashes(
-            note_keys,
             md_column="export_md_hash",
             anki_column="export_anki_hash",
         )
@@ -743,27 +703,6 @@ class SyncState:
                     raise sqlite3.IntegrityError(
                         f"Cannot set push digest for unknown media '{name}'"
                     )
-
-    def clear_media_push_digests(
-        self,
-        names: Iterable[str],
-        *,
-        source_path: str = ".",
-    ) -> None:
-        name_list = list(names)
-        if not name_list:
-            return
-        statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(name_list):
-            placeholders = ",".join("?" * len(chunk))
-            statements.append(
-                (
-                    "UPDATE media_files SET pushed_digest = NULL WHERE source_path = ? "
-                    f"AND name IN ({placeholders})",
-                    (source_path, *chunk),
-                )
-            )
-        self._write_many(statements)
 
     def list_managed_media(self) -> list[tuple[str, str, str | None]]:
         rows = self._conn.execute(

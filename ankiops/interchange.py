@@ -2,7 +2,8 @@
 
 import json
 import logging
-from collections.abc import Sequence
+import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     load_note_types_for_source,
+    parse_github_slug,
 )
 from ankiops.markdown import (
     DeckFile,
@@ -26,21 +28,26 @@ from ankiops.markdown import (
     render_notes_to_markdown,
     write_deck_file,
 )
+from ankiops.media import extract_media_references
 from ankiops.note_types import NoteType
 from ankiops.notes import Note
 
 logger = logging.getLogger(__name__)
 
-LOCAL_SOURCE_NAME = "local"
-
 
 @dataclass(frozen=True)
-class _ParsedDeck:
-    source: DeckSource
-    source_name: str
+class ParsedDeck:
     path: Path
     deck_name: str
     parsed: DeckFile
+
+
+@dataclass(frozen=True)
+class ParsedSource:
+    source: DeckSource
+    note_types: tuple[NoteType, ...]
+    decks: tuple[ParsedDeck, ...]
+    applicable_paths: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -74,10 +81,7 @@ def serialize(
     if not db_path.exists():
         raise ValueError(f"Not an AnkiOps collection: {collection_root}")
 
-    sources = discover_deck_sources(collection_root)
-    parsed_decks = _parse_sources(collection_root, sources)
-    _validate_parsed_decks(parsed_decks)
-
+    parsed_sources = parse_collection(collection_root)
     serialized_data: dict[str, Any] = {
         "collection": {
             "serialized_at": datetime.now(timezone.utc).isoformat(),
@@ -87,8 +91,9 @@ def serialize(
 
     deck_filter = deck.strip() if isinstance(deck, str) else None
     filtered_decks = [
-        parsed_deck
-        for parsed_deck in parsed_decks
+        (parsed_source, parsed_deck)
+        for parsed_source in parsed_sources
+        for parsed_deck in parsed_source.decks
         if _deck_matches_filter(
             parsed_deck.deck_name,
             deck_filter=deck_filter,
@@ -96,7 +101,7 @@ def serialize(
         )
     ]
 
-    for parsed_deck in filtered_decks:
+    for parsed_source, parsed_deck in filtered_decks:
         notes_data = [
             {
                 "note_key": note.note_key,
@@ -112,7 +117,7 @@ def serialize(
         if isinstance(decks_data, list):
             decks_data.append(
                 {
-                    "source": parsed_deck.source_name,
+                    "source": parsed_source.source.display_name,
                     "name": parsed_deck.deck_name,
                     "notes": notes_data,
                 }
@@ -128,95 +133,154 @@ def serialize(
         "Serialized %d deck(s), %d note(s), %d source(s) to in-memory mapping",
         total_decks,
         total_notes,
-        len(sources),
+        len(parsed_sources),
     )
 
     return serialized_data
 
 
-def _parse_sources(
-    collection_root: Path,
-    sources: list[DeckSource],
-) -> list[_ParsedDeck]:
-    parsed_decks: list[_ParsedDeck] = []
-    for source in sources:
-        configs = load_note_types_for_source(source)
-        for md_file in source.deck_files():
-            try:
-                parsed = read_deck_file(
-                    md_file,
-                    note_types=configs,
-                    context_root=source.root,
-                )
-            except Exception as error:
-                display = _display_source_path(collection_root, source, md_file)
-                raise ValueError(f"Error parsing {display}: {error}") from error
-            parsed_decks.append(
-                _ParsedDeck(
-                    source=source,
-                    source_name=_source_name(source),
-                    path=md_file,
-                    deck_name=file_stem_to_deck_name(md_file.stem),
-                    parsed=parsed,
-                )
+def parse_source(source: DeckSource) -> ParsedSource:
+    parsed_source = _parse_source(source)
+    _validate_parsed_sources((parsed_source,))
+    return parsed_source
+
+
+def _parse_source(source: DeckSource) -> ParsedSource:
+    note_types = load_note_types_for_source(source)
+    note_types_by_name = {note_type.name: note_type for note_type in note_types}
+    decks = []
+    applicable_paths: set[str] = set()
+    used_note_types: set[str] = set()
+    for md_file in source.deck_files():
+        try:
+            parsed = read_deck_file(
+                md_file,
+                note_types=note_types,
+                context_root=source.root,
             )
-    parsed_decks.sort(
-        key=lambda item: (
-            0 if item.source_name == LOCAL_SOURCE_NAME else 1,
-            item.source_name,
-            item.deck_name,
+        except Exception as error:
+            _raise_source_parse_error(source, md_file, error)
+        decks.append(
+            ParsedDeck(
+                path=md_file,
+                deck_name=file_stem_to_deck_name(md_file.stem),
+                parsed=parsed,
+            )
         )
+        applicable_paths.add(md_file.relative_to(source.root).as_posix())
+        applicable_paths.update(
+            f"media/{filename}"
+            for filename in extract_media_references(parsed.raw_content)
+        )
+        used_note_types.update(note.note_type for note in parsed.notes)
+
+    for name in used_note_types:
+        applicable_paths.update(
+            (Path("note_types") / path).as_posix()
+            for path in note_types_by_name[name].source_files
+        )
+    return ParsedSource(
+        source=source,
+        note_types=tuple(note_types),
+        decks=tuple(decks),
+        applicable_paths=frozenset(applicable_paths),
     )
-    return parsed_decks
 
 
-def _validate_parsed_decks(parsed_decks: list[_ParsedDeck]) -> None:
-    errors: list[str] = []
-    deck_by_name: dict[str, _ParsedDeck] = {}
-    note_key_by_value: dict[str, tuple[_ParsedDeck, int]] = {}
+def parse_collection(collection_root: Path) -> tuple[ParsedSource, ...]:
+    parsed_sources = tuple(
+        _parse_source(source) for source in discover_deck_sources(collection_root)
+    )
+    _validate_parsed_sources(parsed_sources)
+    return parsed_sources
 
-    for parsed_deck in parsed_decks:
-        previous_deck = deck_by_name.get(parsed_deck.deck_name)
-        if previous_deck is not None:
-            errors.append(
-                "Duplicate deck name "
-                f"'{parsed_deck.deck_name}' in "
-                f"{previous_deck.source_name}:{previous_deck.path.name} and "
-                f"{parsed_deck.source_name}:{parsed_deck.path.name}."
+
+def require_note_keys(deck_files: Iterable[DeckFile]) -> set[str]:
+    note_key_locations: dict[str, list[str]] = {}
+    missing = 0
+    for deck_file in deck_files:
+        for index, note in enumerate(deck_file.notes, start=1):
+            if not note.note_key:
+                missing += 1
+                continue
+            note_key_locations.setdefault(note.note_key, []).append(
+                f"{deck_file.file_path.name} note {index}"
             )
-        else:
-            deck_by_name[parsed_deck.deck_name] = parsed_deck
+    if missing:
+        note_label = "note" if missing == 1 else "notes"
+        raise ValueError(
+            f"Missing note_keys for {missing} {note_label}. note_keys are stable "
+            "IDs AnkiOps needs to match notes across collections without "
+            "duplicates. Fix: run 'ankiops fa' to assign them."
+        )
+    duplicates = [
+        f"Duplicate note_key '{note_key}' in {', '.join(locations)}"
+        for note_key, locations in note_key_locations.items()
+        if len(locations) > 1
+    ]
+    if duplicates:
+        raise ValueError("; ".join(duplicates))
+    return set(note_key_locations)
 
-        for index, note in enumerate(parsed_deck.parsed.notes, start=1):
-            note_key = note.note_key
-            if note_key is not None:
-                previous_note = note_key_by_value.get(note_key)
+
+def _raise_source_parse_error(
+    source: DeckSource,
+    md_file: Path,
+    error: Exception,
+) -> None:
+    identity = re.search(
+        r"Unknown note type 'collab/([^/']+)/([^/']+)/",
+        str(error),
+    )
+    if identity:
+        try:
+            canonical = parse_github_slug("/".join(identity.groups()))
+        except ValueError:
+            canonical = None
+        if canonical and canonical != source.display_name:
+            raise ValueError(
+                f"This repository's deck files belong to {canonical}, not "
+                f"{source.display_name}. Subscribe to the canonical deck instead: "
+                f"ankiops collab subscribe {canonical}"
+            ) from error
+    raise ValueError(
+        f"Error parsing {source.display_name}:{md_file.name}: {error}"
+    ) from error
+
+
+def _validate_parsed_sources(parsed_sources: tuple[ParsedSource, ...]) -> None:
+    errors: list[str] = []
+    deck_locations: dict[str, str] = {}
+    note_key_locations: dict[str, str] = {}
+
+    for parsed_source in parsed_sources:
+        source_name = parsed_source.source.display_name
+        for parsed_deck in parsed_source.decks:
+            location = f"{source_name}:{parsed_deck.path.name}"
+            previous_deck = deck_locations.get(parsed_deck.deck_name)
+            if previous_deck is not None:
+                errors.append(
+                    f"Duplicate deck name '{parsed_deck.deck_name}' in "
+                    f"{previous_deck} and {location}."
+                )
+            else:
+                deck_locations[parsed_deck.deck_name] = location
+
+            for index, note in enumerate(parsed_deck.parsed.notes, start=1):
+                if note.note_key is None:
+                    continue
+                note_location = f"{location} note {index}"
+                previous_note = note_key_locations.get(note.note_key)
                 if previous_note is not None:
-                    previous_deck, previous_index = previous_note
                     errors.append(
-                        "Duplicate note_key "
-                        f"'{note_key}' in "
-                        f"{previous_deck.source_name}:{previous_deck.path.name} "
-                        f"note {previous_index} and "
-                        f"{parsed_deck.source_name}:{parsed_deck.path.name} "
-                        f"note {index}."
+                        f"Duplicate note_key '{note.note_key}' in "
+                        f"{previous_note} and {note_location}."
                     )
                 else:
-                    note_key_by_value[note_key] = (parsed_deck, index)
+                    note_key_locations[note.note_key] = note_location
 
     if errors:
-        raise ValueError("Cannot serialize collection:\n- " + "\n- ".join(errors))
-
-
-def _display_source_path(collection_root: Path, source: DeckSource, path: Path) -> str:
-    try:
-        relative = path.resolve().relative_to(source.root.resolve())
-    except ValueError:
-        try:
-            relative = path.resolve().relative_to(collection_root.resolve())
-        except ValueError:
-            return str(path)
-    return f"{_source_name(source)}:{relative}"
+        raise ValueError("Invalid collection:\n- " + "\n- ".join(errors))
 
 
 def _deck_matches_filter(

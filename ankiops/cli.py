@@ -227,7 +227,6 @@ def main():
     collab_update.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        nargs="?",
         help="GitHub repository identity",
     )
     collab_update.set_defaults(handler=run_collab)

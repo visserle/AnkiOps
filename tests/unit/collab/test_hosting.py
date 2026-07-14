@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import json
 import subprocess
 
 import pytest
 
-from ankiops.collab.errors import RepositoryCreationUncertainError
-from ankiops.collab.hosting import (
-    MAX_FORK_DISCOVERY_RESULTS,
-    MAX_FORK_NAME_ATTEMPTS,
-    GitHubHost,
-)
+from ankiops.collab.errors import RepositoryCollisionError
+from ankiops.collab.hosting import GitHubHost, PullRequestInfo
 
 
 def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
@@ -18,44 +13,27 @@ def test_github_repository_creation_is_always_public(tmp_path, monkeypatch):
 
     def fake_gh(_host, args, *, check=True):
         calls.append((args, check))
-        return subprocess.CompletedProcess(
-            ["gh", *args],
-            1 if args[:1] == ["api"] else 0,
-            stdout="",
-            stderr="",
-        )
+        return subprocess.CompletedProcess(["gh", *args], 0, stdout="", stderr="")
 
+    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
     monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
 
     GitHubHost(tmp_path).create_repo("owner/repo")
 
-    assert (["repo", "create", "owner/repo", "--public"], False) in calls
+    assert calls == [(["repo", "create", "owner/repo", "--public"], False)]
 
 
-def test_github_repository_creation_rejects_an_existing_target(tmp_path, monkeypatch):
+def test_github_repository_creation_failure_is_retryable(tmp_path, monkeypatch):
     monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "repo_info", lambda *_args: {"private": False})
+    monkeypatch.setattr(
+        GitHubHost,
+        "_gh",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["gh"], 1, stdout="", stderr="connection closed after request"
+        ),
+    )
 
-    with pytest.raises(ValueError, match="already exists.*Choose a new name"):
-        GitHubHost(tmp_path).create_repo("owner/repo")
-
-
-def test_github_repository_creation_reports_an_ambiguous_failed_command(
-    tmp_path, monkeypatch
-):
-    def fake_gh(_host, args, *, check=True):
-        return subprocess.CompletedProcess(
-            ["gh", *args],
-            1 if args[:1] in (["api"], ["repo"]) else 0,
-            stdout="",
-            stderr="connection closed after request",
-        )
-
-    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
-
-    with pytest.raises(
-        RepositoryCreationUncertainError, match="Could not confirm creation"
-    ):
+    with pytest.raises(ValueError, match="Retrying is safe"):
         GitHubHost(tmp_path).create_repo("owner/repo")
 
 
@@ -81,27 +59,67 @@ def test_invalid_github_auth_gives_exact_login_command(tmp_path, monkeypatch):
     assert "token is invalid" in str(error.value)
 
 
-def test_publish_target_uses_an_alternate_fork_name_when_default_is_occupied(
-    tmp_path, monkeypatch
-):
-    repositories = {
-        "owner/repo": {"permissions": {"push": False}},
-        "contributor/repo": {"fork": False},
-    }
-    calls = []
+def test_repo_info_distinguishes_absent_from_unavailable(tmp_path, monkeypatch):
+    results = iter(
+        [
+            subprocess.CompletedProcess(
+                ["gh"], 1, stdout="", stderr="gh: Not Found (HTTP 404)"
+            ),
+            subprocess.CompletedProcess(
+                ["gh"], 1, stdout="", stderr="network unavailable"
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        GitHubHost,
+        "_gh",
+        lambda *_args, **_kwargs: next(results),
+    )
+    host = GitHubHost(tmp_path)
 
+    assert host.repo_info("owner/absent") is None
+    with pytest.raises(ValueError, match="network unavailable"):
+        host.repo_info("owner/unknown")
+
+
+def _configure_contributor(monkeypatch, repositories):
     monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
     monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
     monkeypatch.setattr(
         GitHubHost,
         "repo_info",
         lambda _host, slug: repositories.get(slug),
     )
 
+
+def test_publish_target_uses_upstream_when_user_can_push(tmp_path, monkeypatch):
+    repositories = {
+        "owner/repo": {
+            "permissions": {"push": True},
+            "owner": {"login": "owner"},
+        }
+    }
+    _configure_contributor(monkeypatch, repositories)
+    monkeypatch.setattr(
+        GitHubHost,
+        "_gh",
+        lambda *_args, **_kwargs: pytest.fail("a fork must not be created"),
+    )
+
+    assert GitHubHost(tmp_path).publish_target("owner/repo") == (
+        "owner/repo",
+        "owner",
+    )
+
+
+def test_publish_target_creates_deterministic_fork(tmp_path, monkeypatch):
+    repositories = {"owner/repo": {"permissions": {"push": False}}}
+    calls = []
+    _configure_contributor(monkeypatch, repositories)
+
     def fake_gh(_host, args, *, check=True):
         calls.append((args, check))
-        repositories["contributor/repo-ankiops"] = {
+        repositories["contributor/repo"] = {
             "fork": True,
             "parent": {"full_name": "owner/repo"},
         }
@@ -110,7 +128,7 @@ def test_publish_target_uses_an_alternate_fork_name_when_default_is_occupied(
     monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
 
     assert GitHubHost(tmp_path).publish_target("owner/repo") == (
-        "contributor/repo-ankiops",
+        "contributor/repo",
         "contributor",
     )
     assert calls == [
@@ -120,175 +138,50 @@ def test_publish_target_uses_an_alternate_fork_name_when_default_is_occupied(
                 "fork",
                 "owner/repo",
                 "--clone=false",
-                "--fork-name",
-                "repo-ankiops",
             ],
             False,
         )
     ]
 
 
-def test_publish_target_reuses_an_existing_alternate_fork_on_retry(
-    tmp_path, monkeypatch
-):
+def test_publish_target_reuses_deterministic_fork(tmp_path, monkeypatch):
     repositories = {
         "owner/repo": {"permissions": {"push": False}},
-        "contributor/repo": {"fork": False},
-        "contributor/repo-ankiops": {
+        "contributor/repo": {
             "fork": True,
             "parent": {"full_name": "owner/repo"},
         },
     }
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(
-        GitHubHost,
-        "_existing_fork",
-        lambda *_args: "contributor/repo-ankiops",
-    )
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: repositories.get(slug),
-    )
+    _configure_contributor(monkeypatch, repositories)
     monkeypatch.setattr(
         GitHubHost,
         "_gh",
-        lambda *_args, **_kwargs: pytest.fail("retry must not create another fork"),
+        lambda *_args, **_kwargs: pytest.fail("the existing fork must be reused"),
     )
 
     assert GitHubHost(tmp_path).publish_target("owner/repo") == (
-        "contributor/repo-ankiops",
+        "contributor/repo",
         "contributor",
     )
 
 
-def test_publish_target_reuses_a_renamed_existing_fork_without_mutation(
-    tmp_path, monkeypatch
-):
-    calls = []
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: (
-            {"permissions": {"push": False}} if slug == "owner/repo" else None
-        ),
-    )
-
-    def fake_gh(_host, args, *, check=True):
-        calls.append((args, check))
-        if args[:2] == ["repo", "list"]:
-            return subprocess.CompletedProcess(
-                ["gh", *args],
-                0,
-                stdout=(
-                    '[{"nameWithOwner":"contributor/my-renamed-fork",'
-                    '"parent":{"nameWithOwner":"owner/repo"}}]'
-                ),
-                stderr="",
-            )
-        pytest.fail("an existing fork must never be renamed or recreated")
-
-    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
-
-    assert GitHubHost(tmp_path).publish_target("owner/repo") == (
-        "contributor/my-renamed-fork",
-        "contributor",
-    )
-    assert len(calls) == 1
-    assert calls[0][0][:2] == ["repo", "list"]
-
-
-def test_publish_target_does_not_mutate_when_existing_fork_lookup_fails(
-    tmp_path, monkeypatch
-):
-    calls = []
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: (
-            {"permissions": {"push": False}} if slug == "owner/repo" else None
-        ),
-    )
-
-    def failed_lookup(_host, args, *, check=True):
-        calls.append((args, check))
-        return subprocess.CompletedProcess(
-            ["gh", *args], 1, stdout="", stderr="API unavailable"
-        )
-
-    monkeypatch.setattr(GitHubHost, "_gh", failed_lookup)
-
-    with pytest.raises(ValueError, match="inspect existing GitHub forks") as error:
-        GitHubHost(tmp_path).publish_target("owner/repo")
-
-    assert "API unavailable" in str(error.value)
-    assert len(calls) == 1
-    assert calls[0][0][:2] == ["repo", "list"]
-
-
-def test_publish_target_does_not_mutate_when_fork_discovery_exceeds_its_bound(
-    tmp_path, monkeypatch
-):
-    calls = []
-    repositories = [
-        {
-            "nameWithOwner": f"contributor/fork-{index}",
-            "parent": {"nameWithOwner": f"other/repo-{index}"},
-        }
-        for index in range(MAX_FORK_DISCOVERY_RESULTS + 1)
-    ]
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: (
-            {"permissions": {"push": False}} if slug == "owner/repo" else None
-        ),
-    )
-
-    def full_fork_inventory(_host, args, *, check=True):
-        calls.append((args, check))
-        return subprocess.CompletedProcess(
-            ["gh", *args], 0, stdout=json.dumps(repositories), stderr=""
-        )
-
-    monkeypatch.setattr(GitHubHost, "_gh", full_fork_inventory)
-
-    with pytest.raises(ValueError, match="safely inspect all existing GitHub forks"):
-        GitHubHost(tmp_path).publish_target("owner/repo")
-
-    assert len(calls) == 1
-    assert calls[0][0][:2] == ["repo", "list"]
-
-
-def test_publish_target_reconciles_an_ambiguous_fork_command(tmp_path, monkeypatch):
+def test_publish_target_refuses_deterministic_name_collision(tmp_path, monkeypatch):
     repositories = {
         "owner/repo": {"permissions": {"push": False}},
         "contributor/repo": {"fork": False},
     }
+    _configure_contributor(monkeypatch, repositories)
 
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: repositories.get(slug),
-    )
+    with pytest.raises(RepositoryCollisionError, match="unrelated content"):
+        GitHubHost(tmp_path).publish_target("owner/repo")
+
+
+def test_publish_target_accepts_fork_after_ambiguous_creation(tmp_path, monkeypatch):
+    repositories = {"owner/repo": {"permissions": {"push": False}}}
+    _configure_contributor(monkeypatch, repositories)
 
     def ambiguous_gh(_host, args, *, check=True):
-        assert args[-2:] == ["--fork-name", "repo-ankiops"]
-        repositories["contributor/repo-ankiops"] = {
+        repositories["contributor/repo"] = {
             "fork": True,
             "parent": {"full_name": "owner/repo"},
         }
@@ -302,143 +195,24 @@ def test_publish_target_reconciles_an_ambiguous_fork_command(tmp_path, monkeypat
     monkeypatch.setattr(GitHubHost, "_gh", ambiguous_gh)
 
     assert GitHubHost(tmp_path).publish_target("owner/repo") == (
-        "contributor/repo-ankiops",
+        "contributor/repo",
         "contributor",
     )
 
 
-def test_publish_target_accepts_githubs_canonical_parent_casing(tmp_path, monkeypatch):
-    repositories = {
-        "Owner/Repo": {"permissions": {"push": False}},
-        "contributor/Repo": {"fork": False},
-    }
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: repositories.get(slug),
-    )
-
-    def create_fork(_host, args, *, check=True):
-        repositories["contributor/Repo-ankiops"] = {
-            "fork": True,
-            "parent": {"full_name": "owner/repo"},
-        }
-        return subprocess.CompletedProcess(["gh", *args], 0, stdout="", stderr="")
-
-    monkeypatch.setattr(GitHubHost, "_gh", create_fork)
-
-    assert GitHubHost(tmp_path).publish_target("Owner/Repo") == (
-        "contributor/Repo-ankiops",
-        "contributor",
-    )
-
-
-def test_publish_target_advances_after_a_fork_name_race(tmp_path, monkeypatch):
-    repositories = {
-        "owner/repo": {"permissions": {"push": False}},
-        "contributor/repo": {"fork": False},
-    }
-    attempts = []
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: repositories.get(slug),
-    )
-
-    def racing_gh(_host, args, *, check=True):
-        fork_name = args[-1]
-        attempts.append(fork_name)
-        if len(attempts) == 1:
-            repositories[f"contributor/{fork_name}"] = {"fork": False}
-            return subprocess.CompletedProcess(
-                ["gh", *args], 1, stdout="", stderr="name already exists"
-            )
-        repositories[f"contributor/{fork_name}"] = {
-            "fork": True,
-            "parent": {"full_name": "owner/repo"},
-        }
-        return subprocess.CompletedProcess(["gh", *args], 0, stdout="", stderr="")
-
-    monkeypatch.setattr(GitHubHost, "_gh", racing_gh)
-
-    assert GitHubHost(tmp_path).publish_target("owner/repo") == (
-        "contributor/repo-ankiops-2",
-        "contributor",
-    )
-    assert attempts == ["repo-ankiops", "repo-ankiops-2"]
-
-
-def test_publish_target_stops_after_bounded_fork_name_collisions(tmp_path, monkeypatch):
-    candidate_lookups = []
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
-
-    def occupied_repo(_host, slug):
-        if slug == "owner/repo":
-            return {"permissions": {"push": False}}
-        candidate_lookups.append(slug)
-        return {"fork": False}
-
-    monkeypatch.setattr(GitHubHost, "repo_info", occupied_repo)
+def test_publish_target_explains_differently_named_fork(tmp_path, monkeypatch):
+    repositories = {"owner/repo": {"permissions": {"push": False}}}
+    _configure_contributor(monkeypatch, repositories)
     monkeypatch.setattr(
         GitHubHost,
         "_gh",
-        lambda *_args, **_kwargs: pytest.fail(
-            "occupied candidates must not trigger repository creation"
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["gh"], 1, stdout="", stderr="already forked"
         ),
     )
 
-    with pytest.raises(ValueError, match="available fork name"):
+    with pytest.raises(ValueError, match="does not search for renamed forks"):
         GitHubHost(tmp_path).publish_target("owner/repo")
-
-    assert len(candidate_lookups) == MAX_FORK_NAME_ATTEMPTS
-    assert candidate_lookups[-1] == "contributor/repo-ankiops-19"
-
-
-def test_publish_target_keeps_alternate_fork_names_within_github_limit(
-    tmp_path, monkeypatch
-):
-    repo_name = "r" * 100
-    upstream_slug = f"owner/{repo_name}"
-    repositories = {
-        upstream_slug: {"permissions": {"push": False}},
-        f"contributor/{repo_name}": {"fork": False},
-    }
-
-    monkeypatch.setattr(GitHubHost, "ensure_authenticated", lambda *_args: None)
-    monkeypatch.setattr(GitHubHost, "login", lambda *_args: "contributor")
-    monkeypatch.setattr(GitHubHost, "_existing_fork", lambda *_args: None)
-    monkeypatch.setattr(
-        GitHubHost,
-        "repo_info",
-        lambda _host, slug: repositories.get(slug),
-    )
-
-    def create_fork(_host, args, *, check=True):
-        fork_name = args[-1]
-        repositories[f"contributor/{fork_name}"] = {
-            "fork": True,
-            "parent": {"full_name": upstream_slug},
-        }
-        return subprocess.CompletedProcess(["gh", *args], 0, stdout="", stderr="")
-
-    monkeypatch.setattr(GitHubHost, "_gh", create_fork)
-
-    fork_slug, _login = GitHubHost(tmp_path).publish_target(upstream_slug)
-    fork_name = fork_slug.split("/", 1)[1]
-
-    assert len(fork_name) == 100
-    assert fork_name.endswith("-ankiops")
 
 
 def test_pull_request_title_update_uses_existing_pr(tmp_path, monkeypatch):
@@ -466,3 +240,73 @@ def test_pull_request_title_update_uses_existing_pr(tmp_path, monkeypatch):
             False,
         )
     ]
+
+
+def test_pull_request_lookup_filters_exact_fork_owner_and_branch(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_gh(_host, args, *, check=True):
+        calls.append((args, check))
+        return subprocess.CompletedProcess(
+            ["gh", *args],
+            0,
+            stdout=(
+                '[{"html_url":"https://github.com/owner/repo/pull/7",'
+                '"state":"open","title":"A title",'
+                '"head":{"sha":"abc123"}}]'
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(GitHubHost, "_gh", fake_gh)
+
+    assert GitHubHost(tmp_path).find_pull_request(
+        "owner/repo", "contributor:ankiops/contribution"
+    ) == PullRequestInfo(
+        url="https://github.com/owner/repo/pull/7",
+        state="OPEN",
+        title="A title",
+        head_sha="abc123",
+    )
+    assert calls == [
+        (
+            [
+                "api",
+                "-X",
+                "GET",
+                "repos/owner/repo/pulls",
+                "-f",
+                "head=contributor:ankiops/contribution",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=1",
+            ],
+            False,
+        )
+    ]
+
+
+def test_pull_request_lookup_distinguishes_merged_from_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        GitHubHost,
+        "_gh",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["gh"],
+            0,
+            stdout=(
+                '[{"html_url":"https://github.com/owner/repo/pull/7",'
+                '"state":"closed","merged_at":"2026-07-14T16:00:00Z",'
+                '"title":"Merged title",'
+                '"head":{"sha":"abc123"}}]'
+            ),
+            stderr="",
+        ),
+    )
+
+    pull_request = GitHubHost(tmp_path).find_pull_request(
+        "owner/repo", "contributor:ankiops/contribution"
+    )
+
+    assert pull_request is not None
+    assert pull_request.state == "MERGED"

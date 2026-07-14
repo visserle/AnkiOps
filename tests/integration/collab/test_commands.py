@@ -18,9 +18,8 @@ from ankiops.collab.git_state import (
     PUBLISH_DECK_CONFIG,
     PUBLISH_PREPARED_REF,
     SUBMISSION_REF,
-    UPLOADED_REF,
 )
-from ankiops.collab.hosting import PullRequestInfo
+from ankiops.collab.hosting import GitHubHost, PullRequestInfo
 from ankiops.git import GitRepository
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
@@ -58,7 +57,10 @@ def _setup_collection(tmp_path: Path) -> Path:
         "/collab/\n.ankiops.db\n.ankiops.db-shm\n.ankiops.db-wal\n.ankiops/\n",
         encoding="utf-8",
     )
-    (collection / "Private.md").write_text("private baseline\n", encoding="utf-8")
+    (collection / "Private.md").write_text(
+        "Q: private baseline\nA: private answer\n",
+        encoding="utf-8",
+    )
     _commit(collection, "Initialize private collection")
     state = SyncState.open(collection)
     state.set_profile_name("Test")
@@ -144,6 +146,29 @@ def test_clean_update_is_a_noop(collab_world, capsys):
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
     assert "already up to date" in capsys.readouterr().out
+
+
+def test_update_rejects_unknown_source_without_touching_another_repository(
+    collab_world,
+):
+    _collection, source, _remote = collab_world
+    other_deck = source / "Deck.md"
+    other_deck.write_text(
+        other_deck.read_text(encoding="utf-8").replace(
+            "upstream answer",
+            "unsaved work",
+        ),
+        encoding="utf-8",
+    )
+    before_head = _git(source, "rev-parse", "HEAD").stdout.strip()
+    before_status = _git(source, "status", "--short").stdout
+
+    with pytest.raises(ValueError, match="Unknown collab source: other/repo"):
+        run_update(SimpleNamespace(repository="other/repo"))
+
+    assert _git(source, "rev-parse", "HEAD").stdout.strip() == before_head
+    assert _git(source, "status", "--short").stdout == before_status
+    assert "unsaved work" in other_deck.read_text(encoding="utf-8")
 
 
 def test_update_commits_staged_unstaged_and_untracked_changes(collab_world, tmp_path):
@@ -416,6 +441,10 @@ def _redirect_publish_remote(monkeypatch, remote: Path) -> None:
         original(repository, name, str(remote))
 
     monkeypatch.setattr(GitRepository, "set_remote", local_remote)
+    monkeypatch.setattr(
+        "ankiops.collab.hosting.GitHubHost.repo_info",
+        lambda *_args: {"full_name": "owner/repo"},
+    )
 
 
 def test_publish_handoff_is_git_native_and_clears_preparation(
@@ -636,9 +665,8 @@ def _mock_submission_github(monkeypatch, publish: Path):
         return PullRequestInfo(
             url=str(pull["url"]),
             state=str(pull["state"]),
-            head_branch=CONTRIBUTION_BRANCH,
+            title=str(pull["title"] or ""),
             head_sha=remote_sha(),
-            head_repository="contributor/repo",
         )
 
     def create_pr(*_args, **kwargs):
@@ -687,9 +715,10 @@ def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
     run_submit(args)
 
     repository = GitRepository(source)
-    remote = repository.remote_branch_sha("publish", CONTRIBUTION_BRANCH)
+    remote = _git(
+        publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}"
+    ).stdout.strip()
     assert repository.ref_sha(SUBMISSION_REF) == remote
-    assert repository.ref_sha(UPLOADED_REF) == remote
     assert repository.commit_message(SUBMISSION_REF).splitlines()[0] == (
         "Improve shared deck"
     )
@@ -699,10 +728,10 @@ def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
     assert "pull request opened" in capsys.readouterr().out
 
     run_submit(SimpleNamespace(repository="owner/repo", title=None))
-    assert "pull request already open" in capsys.readouterr().out
+    assert "pull request open" in capsys.readouterr().out
 
 
-def test_submit_retry_adopts_push_completed_before_interruption(
+def test_submit_retry_force_pushes_again_after_interrupted_push(
     collab_world, tmp_path, monkeypatch
 ):
     _collection, source, _remote = collab_world
@@ -714,30 +743,31 @@ def test_submit_retry_adopts_push_completed_before_interruption(
         deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
         encoding="utf-8",
     )
-    original_push = GitRepository.push
+    original_push = GitRepository.push_force
     interrupted = False
+    pushes = 0
 
     def push_then_interrupt(repository, remote_name, source_ref, branch):
-        nonlocal interrupted
+        nonlocal interrupted, pushes
+        pushes += 1
         original_push(repository, remote_name, source_ref, branch)
         if branch == CONTRIBUTION_BRANCH and not interrupted:
             interrupted = True
             raise subprocess.CalledProcessError(1, ["git", "push"])
 
-    monkeypatch.setattr(GitRepository, "push", push_then_interrupt)
+    monkeypatch.setattr(GitRepository, "push_force", push_then_interrupt)
     args = SimpleNamespace(repository="owner/repo", title="Retry title")
 
     with pytest.raises(ValueError, match="Submission prepared locally"):
         run_submit(args)
     repository = GitRepository(source)
-    assert repository.ref_sha(UPLOADED_REF) is None
-    assert repository.remote_branch_sha("publish", CONTRIBUTION_BRANCH) == (
-        repository.ref_sha(SUBMISSION_REF)
-    )
+    assert _git(
+        publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}"
+    ).stdout.strip() == repository.ref_sha(SUBMISSION_REF)
 
     run_submit(SimpleNamespace(repository="owner/repo", title=None))
-    assert repository.ref_sha(UPLOADED_REF) == repository.ref_sha(SUBMISSION_REF)
     assert pull["state"] == "OPEN"
+    assert pushes == 2
 
 
 def test_submit_retry_reuses_pr_created_before_interruption(
@@ -753,6 +783,12 @@ def test_submit_retry_reuses_pr_created_before_interruption(
         encoding="utf-8",
     )
     interrupted = False
+    pushes = []
+    original_push = GitRepository.push_force
+
+    def record_push(repository, remote_name, source_ref, branch):
+        pushes.append(source_ref)
+        original_push(repository, remote_name, source_ref, branch)
 
     def create_then_interrupt(*_args, **kwargs):
         nonlocal interrupted
@@ -766,12 +802,52 @@ def test_submit_retry_reuses_pr_created_before_interruption(
     monkeypatch.setattr(
         "ankiops.collab.commands.GitHubHost.create_pr", create_then_interrupt
     )
+    monkeypatch.setattr(GitRepository, "push_force", record_push)
     args = SimpleNamespace(repository="owner/repo", title="Recovered PR")
 
     with pytest.raises(ValueError, match="Submission pushed"):
         run_submit(args)
     run_submit(SimpleNamespace(repository="owner/repo", title=None))
     assert pull["state"] == "OPEN"
+    assert len(pushes) == 2
+
+
+def test_submit_retry_restores_title_after_interrupted_pr_update(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "first answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title="First title"))
+
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("first answer", "revised answer"),
+        encoding="utf-8",
+    )
+    original_update = GitHubHost.update_pr
+    interrupted = False
+
+    def interrupt_update(host, url, *, title):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise ValueError("lost response before title update")
+        original_update(host, url, title=title)
+
+    monkeypatch.setattr(GitHubHost, "update_pr", interrupt_update)
+
+    with pytest.raises(ValueError, match="Submission pushed"):
+        run_submit(SimpleNamespace(repository="owner/repo", title="Revised title"))
+    assert pull["title"] == "First title"
+
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["title"] == "Revised title"
 
 
 def test_new_submission_retry_ignores_historic_merged_pr(
@@ -808,7 +884,7 @@ def test_new_submission_retry_ignores_historic_merged_pr(
         deck.read_text(encoding="utf-8").replace("first answer", "second answer"),
         encoding="utf-8",
     )
-    original_push = GitRepository.push
+    original_push = GitRepository.push_force
     interrupted = False
 
     def interrupt_before_push(repository, remote_name, source_ref, branch):
@@ -818,7 +894,7 @@ def test_new_submission_retry_ignores_historic_merged_pr(
             raise subprocess.CalledProcessError(1, ["git", "push"])
         return original_push(repository, remote_name, source_ref, branch)
 
-    monkeypatch.setattr(GitRepository, "push", interrupt_before_push)
+    monkeypatch.setattr(GitRepository, "push_force", interrupt_before_push)
     with pytest.raises(ValueError, match="Submission prepared locally"):
         run_submit(SimpleNamespace(repository="owner/repo", title="Second round"))
 
@@ -830,7 +906,7 @@ def test_new_submission_retry_ignores_historic_merged_pr(
     assert pull["title"] == "Second round"
 
 
-def test_closed_submission_branch_is_deleted_with_lease_before_reuse(
+def test_closed_submission_reuses_the_managed_branch(
     collab_world, tmp_path, monkeypatch
 ):
     _collection, source, _remote = collab_world
@@ -844,36 +920,29 @@ def test_closed_submission_branch_is_deleted_with_lease_before_reuse(
     )
     run_submit(SimpleNamespace(repository="owner/repo", title="Closed round"))
     repository = GitRepository(source)
-    uploaded = repository.ref_sha(UPLOADED_REF)
+    first_snapshot = repository.ref_sha(SUBMISSION_REF)
     pull["state"] = "CLOSED"
-    deleted_with = []
-    original_delete = GitRepository.delete_remote_branch_with_lease
-
-    def record_delete(repository, remote_name, branch, expected_sha):
-        deleted_with.append(expected_sha)
-        return original_delete(repository, remote_name, branch, expected_sha)
-
-    monkeypatch.setattr(
-        GitRepository,
-        "delete_remote_branch_with_lease",
-        record_delete,
-    )
+    deck.write_text(deck.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
     run_submit(SimpleNamespace(repository="owner/repo", title="Replacement round"))
 
-    assert deleted_with == [uploaded]
+    replacement = repository.ref_sha(SUBMISSION_REF)
+    assert replacement != first_snapshot
+    assert (
+        _git(publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}").stdout.strip()
+        == replacement
+    )
     assert pull["state"] == "OPEN"
     assert pull["title"] == "Replacement round"
-    assert repository.ref_sha(UPLOADED_REF) == repository.ref_sha(SUBMISSION_REF)
 
 
-def test_submit_never_overwrites_remotely_changed_branch(
-    collab_world, tmp_path, monkeypatch
+def test_submit_force_replaces_managed_branch_and_reuses_open_pr(
+    collab_world, tmp_path, monkeypatch, capsys
 ):
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    _mock_submission_github(monkeypatch, publish)
+    pull = _mock_submission_github(monkeypatch, publish)
     deck = source / "Deck.md"
     deck.write_text(
         deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
@@ -888,14 +957,17 @@ def test_submit_never_overwrites_remotely_changed_branch(
     (attacker / "README.md").write_text("changed remotely\n", encoding="utf-8")
     changed = _commit(attacker, "Remote branch edit")
     _git(attacker, "push", "origin", CONTRIBUTION_BRANCH)
-    deck.write_text(deck.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="changed remotely"):
-        run_submit(SimpleNamespace(repository="owner/repo", title=None))
-    assert _git(publish, "rev-parse", CONTRIBUTION_BRANCH).stdout.strip() == changed
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+
+    snapshot = GitRepository(source).ref_sha(SUBMISSION_REF)
+    assert snapshot != changed
+    assert _git(publish, "rev-parse", CONTRIBUTION_BRANCH).stdout.strip() == snapshot
+    assert pull["state"] == "OPEN"
+    assert "pull request updated" in capsys.readouterr().out
 
 
-def test_status_reports_open_revised_and_remotely_changed_submission(
+def test_status_reports_open_and_locally_revised_submission(
     collab_world, tmp_path, monkeypatch, capsys
 ):
     _collection, source, _remote = collab_world
@@ -911,7 +983,9 @@ def test_status_reports_open_revised_and_remotely_changed_submission(
     capsys.readouterr()
 
     run_status(SimpleNamespace(repository="owner/repo"))
-    assert "Submission: pull request open" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Submission: pull request open" in output
+    assert "Next" not in output
 
     deck.write_text(deck.read_text(encoding="utf-8") + "\n", encoding="utf-8")
     run_status(SimpleNamespace(repository="owner/repo"))
@@ -919,21 +993,8 @@ def test_status_reports_open_revised_and_remotely_changed_submission(
         capsys.readouterr().out
     )
 
-    _git(source, "restore", "Deck.md")
-    attacker = tmp_path / "status-branch-editor"
-    _git(tmp_path, "clone", str(publish), str(attacker))
-    _configure(attacker)
-    _git(attacker, "checkout", CONTRIBUTION_BRANCH)
-    (attacker / "README.md").write_text("changed remotely\n", encoding="utf-8")
-    _commit(attacker, "Remote branch edit")
-    _git(attacker, "push", "origin", CONTRIBUTION_BRANCH)
-    run_status(SimpleNamespace(repository="owner/repo"))
-    output = capsys.readouterr().out
-    assert "Submission: changed remotely; protected" in output
-    assert "Inspect the remote contribution" in output
 
-
-def test_merged_submission_updates_from_uploaded_base_and_cleans_refs(
+def test_merged_submission_updates_from_snapshot_base_and_clears_local_ref(
     collab_world, tmp_path, monkeypatch
 ):
     _collection, source, upstream_remote = collab_world
@@ -946,6 +1007,7 @@ def test_merged_submission_updates_from_uploaded_base_and_cleans_refs(
         encoding="utf-8",
     )
     run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    submitted_snapshot = GitRepository(source).ref_sha(SUBMISSION_REF)
     merged = tmp_path / "merged"
     _git(tmp_path, "clone", str(upstream_remote), str(merged))
     _configure(merged)
@@ -964,8 +1026,10 @@ def test_merged_submission_updates_from_uploaded_base_and_cleans_refs(
 
     repository = GitRepository(source)
     assert repository.ref_sha(SUBMISSION_REF) is None
-    assert repository.ref_sha(UPLOADED_REF) is None
-    assert repository.remote_branch_sha("publish", CONTRIBUTION_BRANCH) is None
+    assert (
+        _git(publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}").stdout.strip()
+        == submitted_snapshot
+    )
     assert "submitted answer" in deck.read_text(encoding="utf-8")
 
 

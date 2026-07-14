@@ -268,9 +268,11 @@ ankiops collab submit owner/psychology-deck \
 
 Public subscriptions do not require GitHub authentication. After subscribing, run `ankiops fa`. An update recommends that command only when deck Markdown, referenced media, or note-type files changed; documentation-only updates do not affect Anki.
 
-`collab submit` checkpoints the complete non-ignored draft inside the selected source and opens a pull request. Staged, unstaged, untracked, and deleted files are all included; private decks and other subscriptions are excluded. Contributors without write permission use an authenticated fork automatically.
+`collab submit` checkpoints the complete non-ignored draft inside the selected source and opens a pull request. Staged, unstaged, untracked, and deleted files are all included; private decks and other subscriptions are excluded. Contributors without write permission use GitHub's standard same-name fork, `<account>/<upstream-repository>`.
 Further edits update the same open pull request as one synthetic commit on the
-deterministic `ankiops/contribution` branch. Before an update, AnkiOps commits
+`ankiops/contribution` branch. AnkiOps owns that branch and force-replaces it
+with each prepared contribution; GitHub-side edits to it are unsupported.
+Before an update, AnkiOps commits
 all non-ignored local work in that collab repository. If local and upstream
 edits overlap, the repository returns to that clean checkpoint and AnkiOps
 preserves editable base, local, and upstream copies. Edit only the conflict
@@ -278,7 +280,7 @@ copy and rerun the exact command it reports. The conflict stays pinned to the
 upstream commit that caused it; a newer upstream commit becomes a subsequent
 update.
 
-If GitHub authentication, upload, or pull-request creation fails, rerun the reported `collab submit` command. Git refs record the prepared and last confirmed uploaded snapshots, so a retry can adopt a completed push or an already-opened pull request without duplicating either. Your local Git configuration supplies the commit author; the authenticated GitHub account uploads it and opens the pull request.
+If GitHub authentication, upload, or pull-request creation fails, rerun the reported `collab submit` command. A Git ref records the prepared snapshot, so retry repeats the upload safely and reuses an already-open pull request. The managed branch remains on GitHub after merge or closure and is reused for the next contribution. Your local Git configuration supplies the commit author; the authenticated GitHub account uploads it and opens the pull request.
 
 ## Command Reference
 
@@ -321,7 +323,7 @@ Collab deck tools:
 - `ankiops collab publish <deck> <owner>/<repo>`
 - `ankiops collab subscribe <owner>/<repo>`
 - `ankiops collab status [owner/repo]`
-- `ankiops collab update [owner/repo]`
+- `ankiops collab update <owner>/<repo>`
 - `ankiops collab submit <owner>/<repo> [-t|--title text]`
 
 ## Contributing

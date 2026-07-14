@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ankiops.anki_manifest import anki_applicable_paths
+import ankiops.interchange as interchange
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
@@ -149,7 +149,7 @@ def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(tmp_path
     (media / "shared.png").write_bytes(b"shared")
     (media / "private.png").write_bytes(b"private")
 
-    paths = anki_applicable_paths(source)
+    paths = interchange.parse_source(source).applicable_paths
 
     assert paths == frozenset(
         {
@@ -176,16 +176,40 @@ def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(tmp_p
     media.mkdir()
     shared = media / "shared.png"
     shared.write_bytes(b"shared")
-    before = anki_applicable_paths(source)
+    before = interchange.parse_source(source).applicable_paths
 
     deck.write_text(
         "<!-- note_key: key -->\nQ: question\nA: no image\n",
         encoding="utf-8",
     )
     shared.unlink()
-    after = anki_applicable_paths(source)
+    after = interchange.parse_source(source).applicable_paths
 
     applicable = before | after
     assert "media/shared.png" not in after
     assert "media/shared.png" in applicable
     assert "media/private.png" not in applicable
+
+
+def test_parse_source_reads_each_deck_once(tmp_path, monkeypatch):
+    source = DeckSource.local(tmp_path)
+    DeckFileHarness().eject_default_note_types(source.note_types_dir)
+    for name in ("First.md", "Second.md"):
+        (source.root / name).write_text(
+            f"<!-- note_key: {name} -->\nQ: question\nA: answer\n",
+            encoding="utf-8",
+        )
+
+    actual_read = interchange.read_deck_file
+    calls = []
+
+    def counting_read(path, **kwargs):
+        calls.append(path)
+        return actual_read(path, **kwargs)
+
+    monkeypatch.setattr(interchange, "read_deck_file", counting_read)
+
+    parsed = interchange.parse_source(source)
+
+    assert [deck.path.name for deck in parsed.decks] == ["First.md", "Second.md"]
+    assert [path.name for path in calls] == ["First.md", "Second.md"]

@@ -29,7 +29,9 @@ from ankiops.deck_sources import (
 from ankiops.git import GitRepository, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
+    ParsedSource,
     apply_deserialization_plan,
+    parse_collection,
     plan_deserialize_from_file,
     serialize_to_file,
 )
@@ -58,10 +60,14 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def _sync_note_types(anki, collection_root, state):
+def _sync_note_types(anki, parsed_sources: tuple[ParsedSource, ...], state: SyncState):
     return sync_note_type_configs(
         anki,
-        load_note_types_for_collection(collection_root),
+        [
+            note_type
+            for parsed_source in parsed_sources
+            for note_type in parsed_source.note_types
+        ],
         sync_state=state,
     )
 
@@ -158,10 +164,11 @@ def run_af(args):
 
 def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
     logger.debug("Starting note sync (Anki -> files)")
+    parsed_sources = parse_collection(collection_root)
     export_summary: CollectionReport = sync_collection_from_anki(
         anki=anki,
         state=state,
-        collection_root=collection_root,
+        parsed_sources=parsed_sources,
     )
     note_summary = export_summary.summary
     deck_count = len(export_summary.results)
@@ -266,8 +273,10 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
+    parsed_sources = parse_collection(collection_root)
+
     logger.debug("Starting note type sync")
-    nt_summary = _sync_note_types(anki, collection_root, state)
+    nt_summary = _sync_note_types(anki, parsed_sources, state)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
@@ -275,7 +284,7 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
     import_summary: CollectionReport = sync_collection_to_anki(
         anki=anki,
         state=state,
-        collection_root=collection_root,
+        parsed_sources=parsed_sources,
     )
     note_summary = import_summary.summary
     deck_count = len(import_summary.results)
