@@ -105,6 +105,33 @@ def test_run_fa_has_no_untracked_warning_for_declared_collection(world, caplog):
     assert world.extract_note_keys("DeclaredDeck")
 
 
+def test_run_fa_counts_current_decks_and_removes_empty_deleted_decks(world, caplog):
+    world.write_qa_deck(
+        "KeepOne",
+        [("Q1", "A1", "keep-1"), ("Q2", "A2", "keep-2")],
+    )
+    world.write_qa_deck(
+        "KeepTwo",
+        [("Q3", "A3", "keep-3"), ("Q4", "A4", "keep-4")],
+    )
+    world.run_fa()
+
+    with world.db_session() as db:
+        for name in ("MissingOne", "MissingTwo"):
+            deck_id = world.mock_anki.invoke("createDeck", deck=name)
+            db.upsert_deck(name, deck_id, md_path=f"{name}.md")
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        world.run_fa()
+
+    assert "Files -> Anki: 2 decks with 4 notes — no changes" in caplog.text
+    assert "Deck removed from Anki after Markdown deletion: 'MissingOne'" in caplog.text
+    assert "Deck removed from Anki after Markdown deletion: 'MissingTwo'" in caplog.text
+    assert "MissingOne" not in world.mock_anki.decks
+    assert "MissingTwo" not in world.mock_anki.decks
+
+
 def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
     world.write_qa_deck("ProtectDeck", [("managed", "local", "managed-key")])
     keyless_id = world.add_anki_note(

@@ -10,12 +10,11 @@ from ankiops.cli_commands import (
     run_fa,
     run_fix_image_widths,
     run_init,
-    run_llm,
     run_note_type,
     run_serialize,
 )
 from ankiops.console import configure_logging, print_error
-from ankiops.llm.commands import configure_llm_parser
+from ankiops.llm.commands import configure_llm_parser, run_llm
 
 logger = logging.getLogger(__name__)
 

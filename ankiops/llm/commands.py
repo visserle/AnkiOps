@@ -26,7 +26,6 @@ from rich.progress import (
 
 from ankiops.collection import (
     LLM_DIR,
-    NOTE_TYPES_DIR,
     file_stem_to_deck_name,
     require_collection_root,
 )
@@ -87,21 +86,9 @@ def configure_llm_parser(
 
 def run_llm(
     args: argparse.Namespace,
-    *,
-    require_collection_root_fn: Callable[[], Path] = require_collection_root,
-    load_note_type_configs_fn: Callable[[Path], list[Any]] | None = None,
-    load_llm_task_catalog_fn: Callable[..., Any] = load_llm_task_catalog,
-    plan_task_fn: Callable[..., Any] = plan_task,
-    run_task_fn: Callable[..., Any] = run_task,
-    list_jobs_fn: Callable[..., Any] = list_llm_jobs,
-    show_job_fn: Callable[..., Any] = show_job,
 ) -> None:
     """Status/plan/run/show for LLM jobs."""
-    if load_note_type_configs_fn is None:
-        load_note_type_configs_fn = _load_note_type_configs
-
-    collection_root = require_collection_root_fn()
-    note_types_dir = collection_root / NOTE_TYPES_DIR
+    collection_root = require_collection_root()
     task_name = getattr(args, "task_name", None)
     run_mode = bool(getattr(args, "run", False))
     job_id = getattr(args, "job_id", None)
@@ -118,7 +105,6 @@ def run_llm(
             no_auto_commit=no_auto_commit,
             collection_root=collection_root,
             job_id=job_id,
-            show_job_fn=show_job_fn,
         )
         return
 
@@ -129,10 +115,6 @@ def run_llm(
             deck_override=deck_override,
             no_auto_commit=no_auto_commit,
             collection_root=collection_root,
-            note_types_dir=note_types_dir,
-            load_note_type_configs_fn=load_note_type_configs_fn,
-            load_llm_task_catalog_fn=load_llm_task_catalog_fn,
-            list_jobs_fn=list_jobs_fn,
         )
         return
 
@@ -146,7 +128,6 @@ def run_llm(
             model_override=model_override,
             deck_override=deck_override,
             no_auto_commit=no_auto_commit,
-            run_task_fn=run_task_fn,
         )
         return
 
@@ -155,7 +136,6 @@ def run_llm(
         task_name=task_name,
         model_override=model_override,
         deck_override=deck_override,
-        plan_task_fn=plan_task_fn,
     )
 
 
@@ -168,7 +148,6 @@ def _show_job(
     no_auto_commit: bool,
     collection_root: Path,
     job_id: str,
-    show_job_fn: Callable[..., Any],
 ) -> None:
     if task_name is not None:
         _usage_error("Cannot combine <task> with --job.")
@@ -182,7 +161,7 @@ def _show_job(
         _usage_error("--no-auto-commit requires <task> --run.")
 
     try:
-        detail = show_job_fn(collection_root=collection_root, job_id=job_id)
+        detail = show_job(collection_root=collection_root, job_id=job_id)
     except ValueError as error:
         logger.error(str(error))
         raise SystemExit(1) from error
@@ -283,10 +262,6 @@ def _show_status(
     deck_override: str | None,
     no_auto_commit: bool,
     collection_root: Path,
-    note_types_dir: Path,
-    load_note_type_configs_fn: Callable[[Path], list[Any]],
-    load_llm_task_catalog_fn: Callable[..., Any],
-    list_jobs_fn: Callable[..., Any],
 ) -> None:
     if run_mode:
         _usage_error("--run requires <task>.")
@@ -297,8 +272,8 @@ def _show_status(
     if no_auto_commit:
         _usage_error("--no-auto-commit requires <task> --run.")
 
-    note_type_configs = load_note_type_configs_fn(note_types_dir)
-    catalog = load_llm_task_catalog_fn(
+    note_type_configs = load_note_types_for_collection(collection_root)
+    catalog = load_llm_task_catalog(
         collection_root,
         note_type_configs=note_type_configs,
     )
@@ -319,7 +294,7 @@ def _show_status(
 
     logger.info("")
     logger.info("Recent jobs:")
-    jobs = list_jobs_fn(collection_root=collection_root)
+    jobs = list_llm_jobs(collection_root=collection_root)
     if not jobs:
         logger.info("  none")
     else:
@@ -351,11 +326,10 @@ def _run_task(
     model_override: str | None,
     deck_override: str | None,
     no_auto_commit: bool,
-    run_task_fn: Callable[..., Any],
 ) -> None:
     try:
         with _llm_progress_callback() as progress_callback:
-            result = run_task_fn(
+            result = run_task(
                 collection_root=collection_root,
                 task_name=task_name,
                 model_override=model_override,
@@ -392,10 +366,9 @@ def _show_plan(
     task_name: str,
     model_override: str | None,
     deck_override: str | None,
-    plan_task_fn: Callable[..., Any],
 ) -> None:
     try:
-        plan = plan_task_fn(
+        plan = plan_task(
             collection_root=collection_root,
             task_name=task_name,
             model_override=model_override,
@@ -458,10 +431,6 @@ def _show_plan(
     if deck_override is not None:
         run_command = f"{run_command} --deck {shlex.quote(deck_override)}"
     logger.info("To run this task: %s", run_command)
-
-
-def _load_note_type_configs(note_types_dir: Path) -> list[Any]:
-    return load_note_types_for_collection(note_types_dir.parent)
 
 
 def _normalize_deck_override(value: str | None) -> str | None:

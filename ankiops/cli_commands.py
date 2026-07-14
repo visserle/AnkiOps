@@ -24,7 +24,6 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
     is_deck_markdown_filename,
-    load_note_types_for_collection,
 )
 from ankiops.git import GitRepository, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
@@ -35,12 +34,6 @@ from ankiops.interchange import (
     plan_deserialize_from_file,
     serialize_to_file,
 )
-from ankiops.llm.commands import run_llm as run_llm_impl
-from ankiops.llm.execution import run_task
-from ankiops.llm.jobs import list_jobs as list_llm_jobs
-from ankiops.llm.jobs import show_job
-from ankiops.llm.planning import plan_task
-from ankiops.llm.tasks import load_llm_task_catalog
 from ankiops.media import (
     format_media_status,
     preflight_media_references,
@@ -287,7 +280,7 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
         parsed_sources=parsed_sources,
     )
     note_summary = import_summary.summary
-    deck_count = len(import_summary.results)
+    deck_count = sum(len(source.decks) for source in parsed_sources)
     note_count = note_summary.total
     untracked = import_summary.untracked_decks
     changes = note_summary.format()
@@ -456,22 +449,6 @@ def run_fix_image_widths(args):
     )
     if result.changed:
         logger.info("Only Markdown files were edited. Run 'ankiops fa' to sync.")
-
-
-def run_llm(args):
-    """Delegate LLM command handling to the LLM CLI module."""
-    run_llm_impl(
-        args,
-        require_collection_root_fn=require_collection_root,
-        load_note_type_configs_fn=(
-            lambda note_types_dir: load_note_types_for_collection(note_types_dir.parent)
-        ),
-        load_llm_task_catalog_fn=load_llm_task_catalog,
-        plan_task_fn=plan_task,
-        run_task_fn=run_task,
-        list_jobs_fn=list_llm_jobs,
-        show_job_fn=show_job,
-    )
 
 
 def run_note_type(args):

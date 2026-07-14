@@ -248,6 +248,11 @@ def sync_collection_to_anki(
             deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
             if deck_file.file_path in deleted_deck_paths:
                 state.delete_deck(deck_name)
+                if not anki.fetch_card_ids_in_deck(deck_name):
+                    anki.delete_empty_deck(deck_name)
+                    logger.info(
+                        f"Deck removed from Anki after Markdown deletion: '{deck_name}'"
+                    )
                 continue
             deck_id = deck_ids_by_name.get(deck_name)
             if deck_id is not None:
