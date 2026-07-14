@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
@@ -171,6 +173,26 @@ def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_pa
     assert "a(b)_" in content
     assert "a b_" in content
     assert "[sound:clip_" in content
+
+
+@pytest.mark.parametrize("destination", ["<>", "<media/>"])
+def test_sync_media_to_anki_ignores_an_empty_markdown_image_placeholder(
+    tmp_path, destination
+):
+    deck = tmp_path / "Deck.md"
+    content = f"Q: Empty image slot\nA: ![]({destination}){{width=799}}\n"
+    deck.write_text(content, encoding="utf-8")
+
+    anki_media_dir = tmp_path / "anki_media"
+    anki_media_dir.mkdir()
+    anki = _FakeMediaAnki(anki_media_dir)
+
+    result = _sync_to_anki(tmp_path, anki)
+
+    assert result.checked == 0
+    assert result.summary.synced == 0
+    assert anki.push_count == 0
+    assert deck.read_text(encoding="utf-8") == content
 
 
 def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path):

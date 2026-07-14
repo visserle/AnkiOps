@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+class RepositoryCollisionError(ValueError):
+    """A requested GitHub repository belongs to an unrelated history."""
+
+
+class RepositoryCreationUncertainError(ValueError):
+    """GitHub may have created a repository despite a failed client response."""
+
+
 def format_missing_note_keys_error(missing_count: int) -> str:
     note_label = "note" if missing_count == 1 else "notes"
     return (

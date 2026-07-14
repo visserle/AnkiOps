@@ -64,6 +64,7 @@ CREATE TABLE collab_operations (
     pushed_sha TEXT,
     pr_url TEXT,
     last_error TEXT,
+    requested_title TEXT,
     CHECK (operation_id <> ''),
     CHECK (kind <> ''),
     CHECK (state <> '')

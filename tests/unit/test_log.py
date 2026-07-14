@@ -2,6 +2,9 @@ import io
 import logging
 import sys
 
+from rich.console import Console
+
+import ankiops.console as console_module
 from ankiops.console import clickable_path, configure_logging
 
 
@@ -75,3 +78,25 @@ def test_configure_logging_requires_per_record_markup_opt_in(monkeypatch):
     assert "[bold]literal[/bold]" in rendered
     assert "rendered" in rendered
     assert "[bold]rendered[/bold]" not in rendered
+
+
+def test_terminal_messages_keep_long_commands_copyable(monkeypatch):
+    stream = io.StringIO()
+    console = Console(file=stream, width=20, color_system=None)
+    monkeypatch.setattr(console_module, "rich_get_console", lambda: console)
+
+    command = "  Retry: ankiops collab submit owner/a-very-long-repository-name"
+    console_module.print_line(command)
+
+    assert stream.getvalue() == f"{command}\n"
+
+
+def test_terminal_errors_keep_long_details_copyable(monkeypatch):
+    stream = io.StringIO()
+    console = Console(file=stream, width=20, color_system=None)
+    monkeypatch.setattr(console_module, "Console", lambda **_kwargs: console)
+
+    detail = "Failed for owner/a-very-long-repository-name. Choose a new name."
+    console_module.print_error(detail)
+
+    assert stream.getvalue() == f"Error: {detail}\n"

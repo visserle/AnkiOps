@@ -15,6 +15,7 @@ from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
 )
+from ankiops.media_paths import validate_local_media_path, validate_media_filename
 from ankiops.sync.report import Change, ChangeType, SyncReport
 from ankiops.sync.state import SyncState
 
@@ -28,11 +29,26 @@ MARKDOWN_IMAGE_PATTERN = (
 HTML_IMG_PATTERN = r'<img[^>]+src=["\']([^"\']+)["\']'
 
 
-def _normalize_media_path(path: str) -> str:
-    path = path.strip("<>")
-    if path.startswith(f"{LOCAL_MEDIA_DIR}/"):
-        path = path[len(LOCAL_MEDIA_DIR) + 1 :]
-    return path
+def _decode_media_reference(path: str) -> str:
+    decoded = path
+    while True:
+        next_decoded = unquote(decoded)
+        if next_decoded == decoded:
+            return decoded
+        decoded = next_decoded
+
+
+def _normalize_media_path(path: str) -> str | None:
+    decoded = _decode_media_reference(path).strip().strip("<>").strip()
+    if not decoded:
+        return None
+    if decoded.lower().startswith(("http://", "https://")):
+        return None
+    if decoded.startswith(f"{LOCAL_MEDIA_DIR}/"):
+        decoded = decoded[len(LOCAL_MEDIA_DIR) + 1 :]
+    if not decoded:
+        return None
+    return validate_media_filename(decoded)
 
 
 def _extract_media_references(text: str) -> set[str]:
@@ -48,11 +64,51 @@ def _extract_media_references(text: str) -> set[str]:
             if not raw_path:
                 continue
 
-            decoded_path = unquote(raw_path)
-            path = _normalize_media_path(decoded_path)
-            if path and not path.startswith(("http://", "https://")):
+            path = _normalize_media_path(raw_path)
+            if path:
                 media_files.add(path)
     return media_files
+
+
+def _validate_source_media(source: DeckSource) -> set[str]:
+    media_root = source.root / LOCAL_MEDIA_DIR
+    if media_root.is_symlink():
+        raise ValueError(
+            f"Unsafe media directory in {source.display_name}: symbolic links "
+            "are not allowed."
+        )
+    if media_root.exists() and not media_root.is_dir():
+        raise ValueError(
+            f"Unsafe media directory in {source.display_name}: expected media/."
+        )
+    if media_root.is_dir():
+        for path in media_root.iterdir():
+            if path.is_symlink():
+                raise ValueError(
+                    f"Unsafe media file in {source.display_name}: symbolic links "
+                    "are not allowed."
+                )
+
+    referenced: set[str] = set()
+    for md_file in source.deck_files():
+        try:
+            referenced.update(
+                _extract_media_references(md_file.read_text(encoding="utf-8"))
+            )
+        except ValueError as error:
+            raise ValueError(f"{source.display_name}: {error}") from error
+
+    for name in referenced:
+        validate_local_media_path(media_root / name, name)
+    return referenced
+
+
+def preflight_media_references(collection_root: Path) -> list[DeckSource]:
+    """Validate every source's flat media namespace without mutating sync state."""
+    sources = discover_deck_sources(collection_root)
+    for source in sources:
+        _validate_source_media(source)
+    return sources
 
 
 def _get_hashed_name(file_path: Path, digest: str) -> str:
@@ -172,7 +228,7 @@ def _collect_referenced_media(
             and cached_entry[0] == stat.st_mtime_ns
             and cached_entry[1] == stat.st_size
         ):
-            referenced.update(cached_entry[2])
+            referenced.update(validate_media_filename(name) for name in cached_entry[2])
             cache_hits += 1
             continue
 
@@ -335,6 +391,15 @@ def sync_media_to_anki(
     state: SyncState,
 ) -> SyncReport:
     """Push media from one deck source to Anki."""
+    _validate_source_media(source)
+    return _sync_media_to_anki(anki, source, state)
+
+
+def _sync_media_to_anki(
+    anki: Anki,
+    source: DeckSource,
+    state: SyncState,
+) -> SyncReport:
     result = SyncReport.for_media()
     media_root = (source.root / LOCAL_MEDIA_DIR).resolve()
 
@@ -480,6 +545,15 @@ def sync_media_from_anki(
     state: SyncState,
 ) -> SyncReport:
     """Pull referenced media from Anki into one deck source."""
+    _validate_source_media(source)
+    return _sync_media_from_anki(anki, source, state)
+
+
+def _sync_media_from_anki(
+    anki: Anki,
+    source: DeckSource,
+    state: SyncState,
+) -> SyncReport:
     result = SyncReport.for_media()
     media_root = source.root / LOCAL_MEDIA_DIR
     media_root.mkdir(parents=True, exist_ok=True)
@@ -543,12 +617,12 @@ def sync_all_media_to_anki(
     state: SyncState,
 ) -> SyncReport:
     """Push media from all active sync sources to Anki."""
-    selected_sources = discover_deck_sources(collection_root)
+    selected_sources = preflight_media_references(collection_root)
     _prune_media_cache_for_sources(state, collection_root, selected_sources)
     managed_before = state.list_managed_media()
     combined = SyncReport.for_media()
     for source in selected_sources:
-        source_result = sync_media_to_anki(anki, source, state)
+        source_result = _sync_media_to_anki(anki, source, state)
         _combine_media_result(combined, source_result)
 
     active_names: set[str] = set()
@@ -586,11 +660,11 @@ def sync_all_media_from_anki(
     state: SyncState,
 ) -> SyncReport:
     """Pull referenced media for all active sync sources from Anki."""
-    selected_sources = discover_deck_sources(collection_root)
+    selected_sources = preflight_media_references(collection_root)
     _prune_media_cache_for_sources(state, collection_root, selected_sources)
     combined = SyncReport.for_media()
     for source in selected_sources:
-        source_result = sync_media_from_anki(anki, source, state)
+        source_result = _sync_media_from_anki(anki, source, state)
         _combine_media_result(combined, source_result)
     return combined
 

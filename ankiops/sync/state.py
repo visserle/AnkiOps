@@ -113,7 +113,8 @@ class SyncState:
                 conn.execute(
                     "SELECT source_path, operation_id, kind, state, expected_head, "
                     "expected_fingerprint, prepared_head, upstream_tree, "
-                    "recovery_ref, publish_branch, pushed_sha, pr_url, last_error "
+                    "recovery_ref, publish_branch, pushed_sha, pr_url, last_error, "
+                    "requested_title "
                     "FROM collab_operations LIMIT 0"
                 )
 
@@ -828,6 +829,7 @@ class SyncState:
             "pushed_sha",
             "pr_url",
             "last_error",
+            "requested_title",
         )
         row = self._conn.execute(
             "SELECT " + ", ".join(columns) + " FROM collab_operations "
@@ -837,6 +839,29 @@ class SyncState:
         if row is None:
             return None
         return dict(zip(columns, row, strict=True))
+
+    def list_collab_operations(self) -> list[dict[str, str | None]]:
+        columns = (
+            "source_path",
+            "operation_id",
+            "kind",
+            "state",
+            "expected_head",
+            "expected_fingerprint",
+            "prepared_head",
+            "upstream_tree",
+            "recovery_ref",
+            "publish_branch",
+            "pushed_sha",
+            "pr_url",
+            "last_error",
+            "requested_title",
+        )
+        rows = self._conn.execute(
+            "SELECT " + ", ".join(columns) + " FROM collab_operations "
+            "ORDER BY source_path"
+        ).fetchall()
+        return [dict(zip(columns, row, strict=True)) for row in rows]
 
     def save_collab_operation(
         self,
@@ -856,6 +881,7 @@ class SyncState:
             "pushed_sha",
             "pr_url",
             "last_error",
+            "requested_title",
         )
         current = self.get_collab_operation(source_path) or {}
         row = [values.get(field, current.get(field)) for field in fields]
@@ -863,7 +889,7 @@ class SyncState:
             "INSERT INTO collab_operations "
             "(source_path, operation_id, kind, state, "
             + ", ".join(fields)
-            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(source_path) DO UPDATE SET "
             "operation_id = excluded.operation_id, kind = excluded.kind, "
             "state = excluded.state, expected_head = excluded.expected_head, "
@@ -873,7 +899,8 @@ class SyncState:
             "recovery_ref = excluded.recovery_ref, "
             "publish_branch = excluded.publish_branch, "
             "pushed_sha = excluded.pushed_sha, pr_url = excluded.pr_url, "
-            "last_error = excluded.last_error",
+            "last_error = excluded.last_error, "
+            "requested_title = excluded.requested_title",
             (source_path, operation_id, kind, state, *row),
         )
 

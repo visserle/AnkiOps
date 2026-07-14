@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 
 import pytest
@@ -580,6 +581,83 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert "OldDeck" not in world.mock_anki.decks
         card_id = world.mock_anki.notes[note_id]["cards"][0]
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
+
+
+def test_imp_run_rename_004_finalizes_persisted_unicode_sibling_rename(world, caplog):
+    """A real file rename drains and removes its persisted predecessor deck."""
+    note_key = "imp-run-rename-004"
+    old_deck = "Release Collab::Child — Déck Ω — Final"
+    new_deck = "Release Collab::Child — Déck Ω — Verified"
+    world.write_qa_deck(old_deck, [("Rename Q", "Rename A", note_key)])
+
+    with world.db_session() as db:
+        first_result = world.sync_import(db)
+        assert_summary(
+            first_result.summary, created=1, updated=0, moved=0, deleted=0, errors=0
+        )
+        note_id = db.resolve_note_ids([note_key])[note_key]
+        old_deck_id = db.resolve_deck_id(old_deck)
+        assert old_deck_id is not None
+
+        world.deck_path(old_deck).rename(world.deck_path(new_deck))
+
+        with caplog.at_level(logging.INFO, logger="ankiops.sync.to_anki"):
+            result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+        )
+        assert db.resolve_deck_id(old_deck) is None
+        new_deck_id = db.resolve_deck_id(new_deck)
+        assert new_deck_id is not None
+        assert db.list_decks() == [
+            (
+                new_deck_id,
+                new_deck,
+                ".",
+                str(world.deck_path(new_deck).relative_to(world.root)),
+            )
+        ]
+
+    assert old_deck not in world.mock_anki.decks
+    assert new_deck in world.mock_anki.decks
+    card_id = world.mock_anki.notes[note_id]["cards"][0]
+    assert world.mock_anki.cards[card_id]["deckName"] == new_deck
+    assert (
+        f"Deck renamed from markdown file: '{old_deck}' -> '{new_deck}'"
+        in caplog.messages
+    )
+
+
+def test_imp_run_rename_005_does_not_recreate_absent_persisted_predecessor(world):
+    """A deleted placeholder never recreates an already-absent Anki deck."""
+    note_key = "imp-run-rename-005"
+    persisted_deck = "Release Collab::Child — Déck Ω — Verified"
+    actual_deck = "Release Collab::Child — Déck Ω"
+    target_deck = "Release Collab::Child — Déck Ω — Release"
+    world.write_qa_deck(persisted_deck, [("Rename Q", "Rename A", note_key)])
+
+    with world.db_session() as db:
+        world.sync_import(db)
+        note_id = db.resolve_note_ids([note_key])[note_key]
+        card_id = world.mock_anki.notes[note_id]["cards"][0]
+
+        world.deck_path(persisted_deck).rename(world.deck_path(target_deck))
+        world.mock_anki.invoke("changeDeck", cards=[card_id], deck=actual_deck)
+        world.mock_anki.invoke("deleteDecks", decks=[persisted_deck], cardsToo=True)
+        assert persisted_deck not in world.mock_anki.decks
+
+        result = world.sync_import(db)
+
+        assert_summary(
+            result.summary, created=0, updated=0, moved=1, deleted=0, errors=0
+        )
+        assert persisted_deck not in world.mock_anki.decks
+        assert actual_deck not in world.mock_anki.decks
+        assert target_deck in world.mock_anki.decks
+        assert world.mock_anki.cards[card_id]["deckName"] == target_deck
+        assert db.resolve_deck_id(persisted_deck) is None
+        assert db.resolve_deck_id(target_deck) == world.mock_anki.decks[target_deck]
 
 
 def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(world):

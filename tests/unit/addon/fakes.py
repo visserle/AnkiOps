@@ -80,6 +80,10 @@ class _FakeModels:
         self.collection.models_by_name[model["name"]] = model
         self.collection.models_by_id[model["id"]] = model
 
+    def remove(self, model_id: int):
+        model = self.collection.models_by_id.pop(model_id)
+        self.collection.models_by_name.pop(model["name"])
+
     def change_notetype_info(self, old_notetype_id: int, new_notetype_id: int):
         self.collection.pending_new_model = self.collection.models_by_id[
             new_notetype_id
@@ -114,6 +118,7 @@ class _FakeCollection:
             self.new_model["id"]: self.new_model,
         }
         self.models = _FakeModels(self)
+        self.db = _FakeDB(self)
         self.notes = {}
         self.cards = {}
         self.pending_new_model = None
@@ -144,6 +149,18 @@ class _FakeCollection:
         }
 
 
+class _FakeDB:
+    def __init__(self, collection):
+        self.collection = collection
+
+    def scalar(self, query: str, model_id: int):
+        assert query == "select count() from notes where mid = ?"
+        return sum(
+            note.note_type()["id"] == model_id
+            for note in self.collection.notes.values()
+        )
+
+
 class _FakeDecks:
     def __init__(self):
         self.names_by_id = {1: "Default", 2: "Deck"}
@@ -166,6 +183,10 @@ class _FakeDecks:
 
     def name(self, deck_id):
         return self.names_by_id[deck_id]
+
+    def remove(self, deck_ids):
+        for deck_id in deck_ids:
+            self.names_by_id.pop(int(deck_id), None)
 
 
 class _FakeCard:

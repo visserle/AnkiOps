@@ -58,7 +58,9 @@ def test_concurrent_collab_update_preserves_private_root(tmp_path, monkeypatch):
     source.parent.mkdir(parents=True)
     _git(source.parent, "clone", "--origin", "upstream", str(remote), str(source))
     _identity(source, "local")
-    _git(source, "checkout", "-b", "ankiops/work", "upstream/main")
+    _git(source, "checkout", "-b", "ankiops/journal", "upstream/main")
+    _git(source, "branch", "--unset-upstream")
+    _git(source, "update-ref", "refs/ankiops/integrated", "upstream/main")
 
     (source / "Local.md").write_text(
         "<!-- note_key: local -->\nQ: local\nA: local\n", encoding="utf-8"

@@ -75,6 +75,73 @@ def test_sync_commands_close_state_when_sync_fails(tmp_path, command, sync_helpe
     assert state.closed
 
 
+@pytest.mark.parametrize(
+    ("command", "sync_helper"),
+    [
+        (run_af, "ankiops.cli_commands._run_af_with_state"),
+        (run_fa, "ankiops.cli_commands._run_fa_with_state"),
+    ],
+)
+def test_sync_rejects_a_collab_deck_symlink_before_any_mutation(
+    tmp_path, command, sync_helper
+):
+    class FakeAnki:
+        def get_active_profile(self):
+            return "Test"
+
+    private = tmp_path / "Private.md"
+    private.write_text("Q: private\nA: never read\n", encoding="utf-8")
+    source = tmp_path / "collab" / "owner" / "repo"
+    source.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=source, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Security Test"], cwd=source, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "security@example.test"],
+        cwd=source,
+        check=True,
+    )
+    deck = source / "Deck.md"
+    deck.write_text("<!-- note_key: safe-key -->\nQ: safe\nA: safe\n", encoding="utf-8")
+    subprocess.run(["git", "add", "Deck.md"], cwd=source, check=True)
+    subprocess.run(["git", "commit", "-m", "Add safe deck"], cwd=source, check=True)
+    deck.unlink()
+    deck.symlink_to("../../../Private.md")
+    private_before = private.read_bytes()
+
+    with (
+        patch("ankiops.cli_commands.connect_or_exit", return_value=FakeAnki()),
+        patch("ankiops.cli_commands.require_collection_root", return_value=tmp_path),
+        patch(
+            "ankiops.cli_commands.preflight_media_references",
+            side_effect=AssertionError("media preflight must not run"),
+        ),
+        patch(
+            "ankiops.cli_commands.git_snapshot",
+            side_effect=AssertionError("Git snapshot must not run"),
+        ),
+        patch(
+            "ankiops.cli_commands._checkpoint_collab_repositories",
+            side_effect=AssertionError("collab snapshot must not run"),
+        ),
+        patch(
+            "ankiops.cli_commands.SyncState.open",
+            side_effect=AssertionError("DB must not open"),
+        ),
+        patch(
+            sync_helper,
+            side_effect=AssertionError("Anki sync must not run"),
+        ),
+        pytest.raises(ValueError, match="symbolic link"),
+    ):
+        command(SimpleNamespace(no_auto_commit=False))
+
+    assert deck.is_symlink()
+    assert private.read_bytes() == private_before
+    assert not (tmp_path / ".ankiops.db").exists()
+
+
 def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
     world.add_anki_note(
         deck_name="AnkiOnlyDeck",
@@ -355,7 +422,7 @@ def test_cli_collab_publish_uses_public_only_contract():
     assert not hasattr(captured[0], "public")
 
 
-def test_cli_collab_submit_accepts_custom_message():
+def test_cli_collab_submit_accepts_custom_title_and_global_debug():
     captured = []
 
     with (
@@ -367,17 +434,19 @@ def test_cli_collab_submit_accepts_custom_message():
             "sys.argv",
             [
                 "ankiops",
+                "--debug",
                 "collab",
                 "submit",
                 "owner/repo",
-                "--message",
+                "--title",
                 "  Clarify collab history  ",
             ],
         ),
     ):
         main()
 
-    assert captured[0].message == "Clarify collab history"
+    assert captured[0].title == "Clarify collab history"
+    assert captured[0].debug is True
     assert not hasattr(captured[0], "commit")
 
 
@@ -444,12 +513,32 @@ def test_collab_submit_does_not_run_collection_export():
     run_af.assert_not_called()
 
 
+def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys):
+    args = SimpleNamespace(collab_command="status")
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_collab_impl",
+            side_effect=ValueError("Repository is unavailable"),
+        ),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        run_collab(args)
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: Repository is unavailable" in captured.err
+    assert "ERROR" not in captured.err
+
+
 @pytest.mark.parametrize(
     "argv",
     [
         ["ankiops", "collab", "submit", "owner/repo", "--commit"],
         ["ankiops", "collab", "submit", "owner/repo", "--from-anki"],
         ["ankiops", "collab", "update", "owner/repo", "--to-anki"],
+        ["ankiops", "collab", "status", "owner/repo", "--debug"],
     ],
 )
 def test_removed_collab_flags_are_rejected(argv):
@@ -472,13 +561,13 @@ def test_removed_collab_commands_are_rejected(command):
     assert excinfo.value.code == 2
 
 
-@pytest.mark.parametrize("message", ["   ", "line one\nline two"])
-def test_cli_collab_submit_rejects_invalid_message(message):
+@pytest.mark.parametrize("title", ["   ", "line one\nline two"])
+def test_cli_collab_submit_rejects_invalid_title(title):
     with (
         patch("ankiops.cli_commands.run_collab_impl") as run_collab,
         patch(
             "sys.argv",
-            ["ankiops", "collab", "submit", "owner/repo", "--message", message],
+            ["ankiops", "collab", "submit", "owner/repo", "--title", title],
         ),
         pytest.raises(SystemExit) as excinfo,
     ):
@@ -503,6 +592,40 @@ def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
 
     assert exc.value.code == 1
     assert "Error communicating with Anki" in caplog.text
+
+
+def test_cli_validation_error_is_concise_without_a_traceback(capsys):
+    message = (
+        "local: Unsafe media path '' outside the supported media namespace: "
+        "expected one filename inside media/."
+    )
+    with (
+        patch("ankiops.cli.run_af", side_effect=ValueError(message)),
+        patch("sys.argv", ["ankiops", "af"]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Error: {message}" in captured.err
+    assert "Traceback" not in captured.err
+    assert "ERROR" not in captured.err
+
+
+def test_cli_validation_error_retains_debug_exception_details(capsys):
+    error = ValueError("Invalid local deck")
+    with (
+        patch("ankiops.cli.run_af", side_effect=error),
+        patch("ankiops.cli.logger.debug") as debug,
+        patch("sys.argv", ["ankiops", "--debug", "af"]),
+        pytest.raises(SystemExit),
+    ):
+        main()
+
+    debug.assert_called_once_with("Command failed", exc_info=True)
+    capsys.readouterr()
 
 
 def test_cli_welcome_mentions_version_and_version_flag(capsys):

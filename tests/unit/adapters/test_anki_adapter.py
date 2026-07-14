@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ankiops.anki import Anki
@@ -328,3 +330,126 @@ def test_fetch_note_type_states_raises_on_malformed_styling_payload():
         match="Malformed modelStyling response",
     ):
         adapter.fetch_note_type_states(["MyType"])
+
+
+def test_pull_media_rejects_a_remote_path_outside_collection_media(tmp_path: Path):
+    profile = tmp_path / "profile"
+    media_dir = profile / "collection.media"
+    media_dir.mkdir(parents=True)
+    collection_db = profile / "collection.anki2"
+    collection_db.write_bytes(b"private collection")
+    local_media = tmp_path / "media"
+    local_media.mkdir()
+    target = local_media / "stolen.anki2"
+    adapter = Anki(invoke_func=_InvokeRecorder(str(media_dir)))
+
+    with pytest.raises(ValueError, match="Unsafe media"):
+        adapter.pull_media("../collection.anki2", target)
+
+    assert collection_db.read_bytes() == b"private collection"
+    assert not target.exists()
+
+
+def test_push_media_rejects_a_symlinked_local_file(tmp_path: Path):
+    local_media = tmp_path / "media"
+    local_media.mkdir()
+    private_file = tmp_path / "private.txt"
+    private_file.write_bytes(b"private")
+    local_file = local_media / "shared.txt"
+    local_file.symlink_to(private_file)
+    anki_media = tmp_path / "collection.media"
+    anki_media.mkdir()
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        adapter.push_media(local_file, "shared.txt")
+
+    assert not (anki_media / "shared.txt").exists()
+
+
+def test_push_media_rejects_a_remote_path_outside_collection_media(tmp_path: Path):
+    local_media = tmp_path / "local" / "media"
+    local_media.mkdir(parents=True)
+    local_file = local_media / "collection.anki2"
+    local_file.write_bytes(b"not a collection")
+    profile = tmp_path / "profile"
+    anki_media = profile / "collection.media"
+    anki_media.mkdir(parents=True)
+    collection_db = profile / "collection.anki2"
+    collection_db.write_bytes(b"private collection")
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    with pytest.raises(ValueError, match="Unsafe media"):
+        adapter.push_media(local_file, "../collection.anki2")
+
+    assert collection_db.read_bytes() == b"private collection"
+
+
+def test_push_media_rejects_local_parent_traversal_even_with_a_safe_name(
+    tmp_path: Path,
+):
+    (tmp_path / "media").mkdir()
+    private_media = tmp_path / "private" / "media"
+    private_media.mkdir(parents=True)
+    private_file = private_media / "secret.txt"
+    private_file.write_bytes(b"private")
+    traversing_path = tmp_path / "media" / ".." / "private" / "media" / "secret.txt"
+    anki_media = tmp_path / "collection.media"
+    anki_media.mkdir()
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    with pytest.raises(ValueError, match="Unsafe local media path"):
+        adapter.push_media(traversing_path, "secret.txt")
+
+    assert not (anki_media / "secret.txt").exists()
+
+
+def test_delete_media_rejects_a_symlink_without_deleting_its_target(tmp_path: Path):
+    anki_media = tmp_path / "collection.media"
+    anki_media.mkdir()
+    private_file = tmp_path / "private.txt"
+    private_file.write_bytes(b"private")
+    (anki_media / "shared.txt").symlink_to(private_file)
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    with pytest.raises(ValueError, match="symbolic links"):
+        adapter.delete_media_file("shared.txt")
+
+    assert private_file.read_bytes() == b"private"
+    assert (anki_media / "shared.txt").is_symlink()
+
+
+def test_delete_media_rejects_a_path_outside_collection_media(tmp_path: Path):
+    profile = tmp_path / "profile"
+    anki_media = profile / "collection.media"
+    anki_media.mkdir(parents=True)
+    collection_db = profile / "collection.anki2"
+    collection_db.write_bytes(b"private collection")
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    with pytest.raises(ValueError, match="Unsafe media"):
+        adapter.delete_media_file("../collection.anki2")
+
+    assert collection_db.read_bytes() == b"private collection"
+
+
+def test_adapter_media_operations_accept_regular_flat_media_files(tmp_path: Path):
+    source_media = tmp_path / "source" / "media"
+    source_media.mkdir(parents=True)
+    source = source_media / "shared image.png"
+    source.write_bytes(b"image")
+    anki_media = tmp_path / "collection.media"
+    anki_media.mkdir()
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    adapter.push_media(source, source.name)
+    assert (anki_media / source.name).read_bytes() == b"image"
+
+    target_media = tmp_path / "target" / "media"
+    target_media.mkdir(parents=True)
+    target = target_media / source.name
+    assert adapter.pull_media(source.name, target)
+    assert target.read_bytes() == b"image"
+
+    adapter.delete_media_file(source.name)
+    assert not (anki_media / source.name).exists()

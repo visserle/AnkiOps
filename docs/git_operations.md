@@ -30,21 +30,29 @@ commits it, creates a public GitHub repository with authenticated `gh`, and
 pushes `main`. A failed retry reuses the local repository and commit.
 
 `collab subscribe` establishes an ongoing local copy at
-`collab/<owner>/<repo>`.
+`collab/<owner>/<repo>` without requiring authentication for public
+repositories. Its local `ankiops/journal` branch has no upstream tracking
+branch. `refs/ankiops/integrated` and `refs/ankiops/uploaded` record the content
+bases needed for updates and submissions.
 
 `collab status` previews local changes, available updates, pending submissions,
-Anki application state, conflict recovery state, pull request URLs, and the
-next command. Validation runs automatically in every command that needs it.
+conflict recovery state, live pull request state, and the next collab command.
+It compares content trees rather than local commit topology and does not report
+Anki application state. Validation runs automatically in every command that
+needs it.
 
 `collab update` prepares the integration in an isolated transaction. It changes
-the subscribed repository only after integration succeeds, changes Markdown
-only, and tells the user to run `ankiops fa` after review.
+the subscribed repository only after integration succeeds. Its explicit content
+merge base preserves edits made after an uploaded contribution, including after
+a squash merge. It recommends `ankiops fa` only when top-level deck
+Markdown or files under `media/` or `note_types/` changed.
 
-`collab submit` automatically commits dirty files in only the selected source,
-integrates upstream, and compares content trees. Identical trees are a no-op. If
-changes remain, it uploads one reusable contribution and creates or reuses a
-native GitHub pull request. A contributor without write permission receives or
-reuses a fork.
+`collab submit` checkpoints all tracked, untracked, staged, unstaged, and deleted
+non-ignored files in only the selected source, integrates upstream, and compares
+content trees. Identical trees are a no-op. If changes remain, it uploads a
+single synthetic commit and creates or reuses a native GitHub pull request.
+Later drafts replace that commit with force-with-lease while retaining the same
+pull request. A contributor without write permission receives or reuses a fork.
 
 ## Conflict and retry behavior
 

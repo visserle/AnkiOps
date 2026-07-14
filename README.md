@@ -17,7 +17,7 @@ AnkiOps is a bridge between Anki and your filesystem. Each deck becomes a Markdo
 
 ### 1 Markdown Files
 
-AnkiOps is Markdown-first: Each file represents an Anki deck and notes are separated by a blank line, three dashes, and another blank line. Already existing decks can be exported from Anki, or created from scratch as in the following example:
+AnkiOps is Markdown-first: Each file represents an Anki deck and notes are separated by a blank line, three dashes, and another blank line. Already existing decks can be exported from Anki, or created from scratch as in the following example: 
 
 ```markdown
 Q: Question text here
@@ -45,8 +45,7 @@ C3: automatically randomized answers
 A: 1, 3
 ```
 
-The three notes represent three different notes types: a question-answer note, a cloze deletion note, and a multiple-choice note. They are 
-
+The three notes represent a question-answer note, a cloze deletion note, and a multiple-choice note. Notes types are inferred automatically by the used labels (e.g. `Q:`, `A:`) for the card fields (Question, Answer). Labels and note types are fully customizable.
 
 You can use any Markdown syntax (except the horizontal rule) in the note content, including italics, bold text, lists, tables, images, math equations, syntax-highlighted code blocks, and more. AnkiOps automatically converts Markdown to HTML for Anki, and back to Markdown when syncing from Anki.
 
@@ -141,7 +140,7 @@ AnkiOps has two sync commands:
 - `ankiops anki-to-files` or short **`ankiops af`** for syncing Anki to files, and 
 - `ankiops files-to-anki` or short **`ankiops fa`** for syncing files to Anki.
 
-The commands apply changes from one side to the other. Both operations create, update, move, and delete managed notes, and handle media files and note types. Before syncing, an automatic Git snapshot is created.
+The commands apply changes from one side to the other. Both operations create, update, move, and delete managed notes, and handle note types and media files. Before syncing, an automatic Git snapshot is created.
 
 ### 5 LLM Integration
 
@@ -198,7 +197,7 @@ Most Markdown-to-Anki tools import one way: you write Markdown and push it to An
 
 ### Is it safe to use?
 
-Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected, and you can safely mix managed and unmanaged notes within one deck. Additionally, AnkiOps only syncs if the activated profile matches the one it was initialized with. For Markdown files, AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always revert changes if needed.
+Yes, AnkiOps will never modify notes that are not defined within the `note_types/` folder. Your existing collection won't be affected, and you can safely mix managed and unmanaged notes within one deck. Additionally, AnkiOps only syncs if the activated profile matches the one it was initialized with. A unique hash is appended to media file names to prevent conflicts. AnkiOps automatically creates a Git commit of your collection folder before every sync, so you can always revert changes if needed.
 
 ### What is the recommended workflow?
 

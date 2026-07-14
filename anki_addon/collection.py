@@ -50,6 +50,10 @@ def find_notes_action(col, params: dict) -> list[int]:
     return [int(note_id) for note_id in col.find_notes(params.get("query") or "")]
 
 
+def find_cards_action(col, params: dict) -> list[int]:
+    return [int(card_id) for card_id in col.find_cards(params.get("query") or "")]
+
+
 def notes_info_action(col, params: dict) -> list[dict]:
     results = []
     for note_id in params.get("notes") or []:
@@ -96,6 +100,27 @@ def cards_info_action(col, params: dict) -> list[dict]:
 
 def create_deck_action(col, params: dict) -> int:
     return _deck_id(col, params.get("deck") or "", create=True)
+
+
+def delete_decks_action(col, params: dict) -> None:
+    if params.get("cardsToo") is not True:
+        raise AnkiOpsConnectActionError("deleteDecks requires cardsToo=true.")
+    deck_ids = [
+        deck_id
+        for deck_name in params.get("decks") or []
+        if (deck_id := _existing_deck_id(col, str(deck_name))) is not None
+    ]
+    if not deck_ids:
+        return None
+    decks = col.decks
+    if hasattr(decks, "remove"):
+        decks.remove(deck_ids)
+        return None
+    if hasattr(decks, "rem"):
+        for deck_id in deck_ids:
+            decks.rem(deck_id, cardsToo=True)
+        return None
+    raise AnkiOpsConnectActionError("Cannot delete Anki decks.")
 
 
 def change_deck_action(col, params: dict) -> None:

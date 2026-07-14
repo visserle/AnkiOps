@@ -114,7 +114,7 @@ def require_collection_root(active_profile: str | None = None) -> Path:
                 f"Profile mismatch: collection in {collection_root} is linked to "
                 f"'{expected_profile}', but Anki has '{active_profile}' "
                 "open. Nothing was changed. Switch Anki to the linked profile, "
-                f"then retry: {shlex.join(sys.argv)}"
+                f"then retry: {shlex.join(['ankiops', *sys.argv[1:]])}"
             )
             raise SystemExit(1)
     finally:

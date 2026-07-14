@@ -216,13 +216,23 @@ def sync_collection_to_anki(
         pending_writes: list[PendingDeckWrite] = []
         markdown_deck_ids = set()
         markdown_deck_names = {
-            file_stem_to_deck_name(deck_file.file_path.stem) for deck_file in deck_files
+            file_stem_to_deck_name(deck_file.file_path.stem)
+            for deck_file in deck_files
+            if deck_file.file_path not in deleted_deck_paths
         }
         rename_candidates: set[tuple[str, str]] = set()
 
         for source_deck_file in source_deck_files:
             deck_file = source_deck_file.file_state
             deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
+            if (
+                deck_file.file_path in deleted_deck_paths
+                and deck_name not in initial_deck_names
+            ):
+                # A persisted deleted placeholder exists only to reconcile an
+                # Anki deck that is still present. Never recreate one that is
+                # already gone.
+                continue
             file_anki_note_ids = note_ids_by_deck_name.get(deck_name, set())
 
             sync_result, pending_write, moved_from_decks = sync_deck_to_anki(

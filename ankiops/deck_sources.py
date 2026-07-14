@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from blake3 import blake3
-
 from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.git import GitRepository
 from ankiops.note_types import NoteType, load_note_types
@@ -172,15 +170,8 @@ def load_note_types_for_collection(
 
 
 def source_content_hash(source: DeckSource) -> str:
-    """Hash the visible source tree without reading repository metadata."""
-    digest = blake3()
-    for path in sorted(source.root.rglob("*")):
-        if not path.is_file() or ".git" in path.relative_to(source.root).parts:
-            continue
-        relative = path.relative_to(source.root).as_posix().encode()
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(65536), b""):
-                digest.update(chunk)
-    return digest.hexdigest()
+    """Hash only source files that can change files-to-Anki behavior."""
+    # Local import avoids a cycle: the manifest uses DeckSource and the deck parser.
+    from ankiops.anki_manifest import source_anki_manifest
+
+    return source_anki_manifest(source).content_hash()

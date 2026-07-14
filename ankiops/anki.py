@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ankiops.anki_rpc import AnkiConnectionError, invoke
+from ankiops.media_paths import validate_local_media_path, validate_media_filename
 from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
 from ankiops.notes import AnkiNote, normalize_tags
 from ankiops.sync.report import Change
@@ -541,16 +542,28 @@ class Anki:
             self._media_dir = cached
         return cached
 
+    def _anki_media_path(self, filename: str) -> Path:
+        safe_name = validate_media_filename(filename)
+        media_dir = self.get_media_dir().resolve()
+        target = media_dir / safe_name
+        if target.is_symlink() or target.resolve().parent != media_dir:
+            raise ValueError(
+                f"Unsafe media filename '{filename}': symbolic links are not allowed."
+            )
+        return target
+
     def push_media(self, local_path: Path, remote_filename: str) -> None:
-        shutil.copyfile(local_path, self.get_media_dir() / remote_filename)
+        safe_local = validate_local_media_path(local_path, remote_filename)
+        shutil.copyfile(safe_local, self._anki_media_path(remote_filename))
 
     def pull_media(self, remote_filename: str, local_path: Path) -> bool:
-        source = self.get_media_dir() / remote_filename
+        safe_local = validate_local_media_path(local_path, remote_filename)
+        source = self._anki_media_path(remote_filename)
         if not source.exists():
             return False
-        shutil.copyfile(source, local_path)
+        shutil.copyfile(source, safe_local)
         return True
 
     def delete_media_file(self, remote_filename: str) -> None:
         """Delete one AnkiOps-managed media file when no source references it."""
-        (self.get_media_dir() / remote_filename).unlink(missing_ok=True)
+        self._anki_media_path(remote_filename).unlink(missing_ok=True)

@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.markup import escape as rich_escape
 
 from ankiops.collab import run as run_collab_impl
+from ankiops.collab.source_security import validate_collection_collab_sources
 from ankiops.collection import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -18,7 +19,7 @@ from ankiops.collection import (
     initialize_collection,
     require_collection_root,
 )
-from ankiops.console import clickable_path, connect_or_exit
+from ankiops.console import clickable_path, connect_or_exit, print_error
 from ankiops.deck_sources import (
     RESERVED_MARKDOWN_FILES,
     DeckSource,
@@ -41,6 +42,7 @@ from ankiops.llm.planning import plan_task
 from ankiops.llm.tasks import load_llm_task_catalog
 from ankiops.media import (
     format_media_status,
+    preflight_media_references,
     sync_all_media_from_anki,
     sync_all_media_to_anki,
 )
@@ -151,7 +153,8 @@ def run_af(args):
 
     collection_root = require_collection_root(active_profile)
     logger.debug(f"Collection directory: {collection_root}")
-    discover_deck_sources(collection_root)
+    validate_collection_collab_sources(collection_root)
+    preflight_media_references(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-anki-to-files git snapshot")
@@ -174,7 +177,6 @@ def run_af(args):
 
 
 def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
-
     logger.debug("Starting note sync (Anki -> files)")
     export_summary: CollectionReport = sync_collection_from_anki(
         anki=anki,
@@ -252,7 +254,8 @@ def run_fa(args):
 
     collection_root = require_collection_root(active_profile)
     logger.debug(f"Collection directory: {collection_root}")
-    discover_deck_sources(collection_root)
+    validate_collection_collab_sources(collection_root)
+    preflight_media_references(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-files-to-anki git snapshot")
@@ -277,7 +280,6 @@ def run_fa(args):
 
 
 def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
-
     try:
         logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, collection_root, state)
@@ -494,9 +496,11 @@ def run_collab(args):
     try:
         run_collab_impl(args)
     except ValueError as error:
-        logger.error(str(error))
+        print_error(str(error))
+        logger.debug("Collab command failed", exc_info=True)
         raise SystemExit(1) from error
     except subprocess.CalledProcessError as error:
         output = ((error.stdout or "") + (error.stderr or "")).strip()
-        logger.error(output or f"git command failed with exit {error.returncode}")
+        print_error(output or f"Git command failed with exit {error.returncode}.")
+        logger.debug("Collab Git command failed", exc_info=True)
         raise SystemExit(1) from error
