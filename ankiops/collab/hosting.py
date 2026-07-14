@@ -9,6 +9,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ankiops.collab.errors import RepositoryCollisionError
+
+
+def _is_fork_of(repository: dict[str, Any] | None, upstream_slug: str) -> bool:
+    parent = (repository or {}).get("parent") or {}
+    parent_slug = parent.get("full_name")
+    return bool(
+        (repository or {}).get("fork")
+        and isinstance(parent_slug, str)
+        and parent_slug.casefold() == upstream_slug.casefold()
+    )
+
+
+@dataclass(frozen=True)
+class PullRequestInfo:
+    url: str
+    state: str
+    title: str
+    head_sha: str
+
 
 @dataclass(frozen=True)
 class GitHubHost:
@@ -42,24 +62,35 @@ class GitHubHost:
     def repo_info(self, slug: str) -> dict[str, Any] | None:
         result = self._gh(["api", f"repos/{slug}"], check=False)
         if result.returncode != 0:
-            return None
+            detail = result.stderr.strip() or result.stdout.strip()
+            if "HTTP 404" in detail or "Not Found" in detail:
+                return None
+            raise ValueError(
+                f"Could not inspect GitHub repository {slug}: "
+                f"{detail or 'unknown error'}"
+            )
         try:
             value = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return None
-        return value if isinstance(value, dict) else None
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"GitHub returned invalid repository state for {slug}."
+            ) from error
+        if not isinstance(value, dict):
+            raise ValueError(f"GitHub returned invalid repository state for {slug}.")
+        return value
 
     def create_repo(self, slug: str) -> None:
         self.ensure_authenticated()
-        if self.repo_info(slug) is not None:
-            return
         result = self._gh(
             ["repo", "create", slug, "--public"],
             check=False,
         )
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            raise ValueError(f"Could not create GitHub repository {slug}: {detail}")
+            raise ValueError(
+                f"Could not create GitHub repository {slug}: {detail}. "
+                "Retrying is safe."
+            )
 
     def login(self) -> str:
         result = self._gh(["api", "user", "--jq", ".login"], check=False)
@@ -85,46 +116,69 @@ class GitHubHost:
         repo_name = upstream_slug.split("/", 1)[1]
         fork_slug = f"{login}/{repo_name}"
         fork = self.repo_info(fork_slug)
-        if fork is None:
-            result = self._gh(
-                ["repo", "fork", upstream_slug, "--clone=false"], check=False
+        if _is_fork_of(fork, upstream_slug):
+            return fork_slug, login
+        if fork is not None:
+            raise RepositoryCollisionError(
+                f"Contribution repository {fork_slug} contains unrelated content. "
+                "Rename or remove it, then retry."
             )
-            if result.returncode != 0:
-                detail = (
-                    result.stderr.strip() or result.stdout.strip() or "unknown error"
-                )
-                raise ValueError(
-                    f"Could not create contributor fork {fork_slug}: {detail}. "
-                    "Nothing was pushed; retrying is safe."
-                )
-            fork = self.repo_info(fork_slug)
 
-        parent = (fork or {}).get("parent") or {}
-        if not (fork or {}).get("fork") or parent.get("full_name") != upstream_slug:
-            raise ValueError(
-                f"Cannot use {fork_slug}: it is not a fork of {upstream_slug}."
+        result = self._gh(
+            ["repo", "fork", upstream_slug, "--clone=false"],
+            check=False,
+        )
+        fork = self.repo_info(fork_slug)
+        if _is_fork_of(fork, upstream_slug):
+            return fork_slug, login
+        if fork is not None:
+            raise RepositoryCollisionError(
+                f"Contribution repository {fork_slug} contains unrelated content. "
+                "Rename or remove it, then retry."
             )
-        return fork_slug, login
+        detail = result.stderr.strip() or result.stdout.strip() or "not confirmed"
+        raise ValueError(
+            f"Could not create standard contributor fork {fork_slug}: {detail}. "
+            "AnkiOps does not search for renamed forks. Nothing was pushed."
+        )
 
-    def find_open_pr(self, upstream_slug: str, head: str) -> str | None:
+    def find_pull_request(
+        self, upstream_slug: str, head: str
+    ) -> PullRequestInfo | None:
         result = self._gh(
             [
-                "pr",
-                "list",
-                "--repo",
-                upstream_slug,
-                "--head",
-                head,
-                "--state",
-                "open",
-                "--json",
-                "url",
-                "--jq",
-                ".[0].url",
+                "api",
+                "-X",
+                "GET",
+                f"repos/{upstream_slug}/pulls",
+                "-f",
+                f"head={head}",
+                "-f",
+                "state=all",
+                "-f",
+                "per_page=1",
             ],
             check=False,
         )
-        return result.stdout.strip() or None if result.returncode == 0 else None
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise ValueError(f"Could not inspect pull requests: {detail}")
+        try:
+            values = json.loads(result.stdout)
+            if not values:
+                return None
+            return _parse_pull_request(values[0])
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise ValueError("GitHub returned invalid pull request state.") from error
+
+    def update_pr(self, url: str, *, title: str) -> None:
+        result = self._gh(
+            ["pr", "edit", url, "--title", title],
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise ValueError(f"GitHub did not update the pull request: {detail}")
 
     def create_pr(
         self,
@@ -135,9 +189,6 @@ class GitHubHost:
         title: str,
         body: str,
     ) -> str:
-        existing = self.find_open_pr(upstream_slug, head)
-        if existing:
-            return existing
         result = self._gh(
             [
                 "pr",
@@ -160,3 +211,12 @@ class GitHubHost:
             detail = result.stderr.strip() or url or "unknown error"
             raise ValueError(f"GitHub did not create the pull request: {detail}")
         return url
+
+
+def _parse_pull_request(value: dict[str, Any]) -> PullRequestInfo:
+    return PullRequestInfo(
+        url=str(value["html_url"]),
+        state="MERGED" if value.get("merged_at") else str(value["state"]).upper(),
+        title=str(value["title"]),
+        head_sha=str(value["head"]["sha"]),
+    )

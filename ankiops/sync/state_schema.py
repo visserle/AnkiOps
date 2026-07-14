@@ -41,34 +41,6 @@ CREATE TABLE app_state (
     )
 )
 """,
-    "source_sync_state": """
-CREATE TABLE source_sync_state (
-    source_path TEXT PRIMARY KEY,
-    applied_tree_hash TEXT,
-    applied_commit TEXT,
-    CHECK (source_path <> '')
-)
-""",
-    "collab_operations": """
-CREATE TABLE collab_operations (
-    source_path TEXT PRIMARY KEY,
-    operation_id TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
-    state TEXT NOT NULL,
-    expected_head TEXT,
-    expected_fingerprint TEXT,
-    prepared_head TEXT,
-    upstream_tree TEXT,
-    recovery_ref TEXT,
-    publish_branch TEXT,
-    pushed_sha TEXT,
-    pr_url TEXT,
-    last_error TEXT,
-    CHECK (operation_id <> ''),
-    CHECK (kind <> ''),
-    CHECK (state <> '')
-)
-""",
     "markdown_media_cache": """
 CREATE TABLE markdown_media_cache (
     md_path TEXT PRIMARY KEY,

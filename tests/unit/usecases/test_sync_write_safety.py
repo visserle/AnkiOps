@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from ankiops.html_to_markdown import HTMLToMarkdown
-from ankiops.markdown import NOTE_SEPARATOR, DeckFile
+from ankiops.markdown import NOTE_SEPARATOR, DeckFile, read_deck_file
 from ankiops.note_types import NoteField, NoteType
 from ankiops.notes import (
     AnkiNote,
@@ -201,6 +201,11 @@ def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
         card_ids=[1001],
     )
     pending_fingerprints: list[tuple[str, str, str]] = []
+    parsed_deck = read_deck_file(
+        deck_path,
+        note_types=[_qa_config()],
+        context_root=tmp_path,
+    )
 
     db = SyncState.open(tmp_path)
     try:
@@ -208,7 +213,7 @@ def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
             "Deck",
             [anki_note],
             {"AnkiOpsQA": _qa_config()},
-            deck_path,
+            parsed_deck,
             tmp_path,
             HTMLToMarkdown(),
             db,
@@ -247,6 +252,11 @@ def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path):
         },
         card_ids=[1001],
     )
+    parsed_deck = read_deck_file(
+        deck_path,
+        note_types=[_qa_config()],
+        context_root=tmp_path,
+    )
 
     db = SyncState.open(tmp_path)
     try:
@@ -254,7 +264,7 @@ def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path):
             "Deck",
             [anki_note],
             {"AnkiOpsQA": _qa_config()},
-            deck_path,
+            parsed_deck,
             tmp_path,
             HTMLToMarkdown(),
             db,

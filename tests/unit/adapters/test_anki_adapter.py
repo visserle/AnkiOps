@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ankiops.anki import Anki
@@ -328,3 +330,25 @@ def test_fetch_note_type_states_raises_on_malformed_styling_payload():
         match="Malformed modelStyling response",
     ):
         adapter.fetch_note_type_states(["MyType"])
+
+
+def test_adapter_media_operations_accept_regular_flat_media_files(tmp_path: Path):
+    source_media = tmp_path / "source" / "media"
+    source_media.mkdir(parents=True)
+    source = source_media / "shared image.png"
+    source.write_bytes(b"image")
+    anki_media = tmp_path / "collection.media"
+    anki_media.mkdir()
+    adapter = Anki(invoke_func=_InvokeRecorder(str(anki_media)))
+
+    adapter.push_media(source, source.name)
+    assert (anki_media / source.name).read_bytes() == b"image"
+
+    target_media = tmp_path / "target" / "media"
+    target_media.mkdir(parents=True)
+    target = target_media / source.name
+    assert adapter.pull_media(source.name, target)
+    assert target.read_bytes() == b"image"
+
+    adapter.delete_media_file(source.name)
+    assert not (anki_media / source.name).exists()

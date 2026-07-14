@@ -924,9 +924,7 @@ def _cloze_template_field_names(config: NoteType) -> set[str]:
     )
     field_names: set[str] = set()
     for template in config.templates:
-        for template_value in template.values():
-            if not isinstance(template_value, str):
-                continue
+        for template_value in (template.front, template.back):
             for match in cloze_template_field_pattern.finditer(template_value):
                 field_name = match.group(1).strip()
                 if field_name:

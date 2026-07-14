@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 from ankiops.anki import Anki
 from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.interchange import parse_collection
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
@@ -42,7 +43,7 @@ def _run_import(collection_root, mock_anki, *, preload_configs: bool = True):
         return sync_collection_to_anki(
             anki=anki,
             state=db,
-            collection_root=collection_root,
+            parsed_sources=parse_collection(collection_root),
         )
 
 
@@ -56,7 +57,7 @@ def _run_export(collection_root, mock_anki, *, preload_configs: bool = False):
         return sync_collection_from_anki(
             anki=anki,
             state=db,
-            collection_root=collection_root,
+            parsed_sources=parse_collection(collection_root),
         )
 
 

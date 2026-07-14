@@ -3,12 +3,54 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_URL_CREDENTIALS = re.compile(r"(?P<scheme>https?://)[^/@\s'\"]+@", re.IGNORECASE)
+_AUTHORIZATION_VALUE = re.compile(
+    r"(?P<label>\bauthorization\s*[:=]\s*(?:bearer|basic)\s+)[^\s'\"]+",
+    re.IGNORECASE,
+)
+_LABELED_CREDENTIAL = re.compile(
+    r"(?P<label>\b(?:access[_-]?token|password|passwd|token)\s*[:=]\s*)"
+    r"[^\s&'\"]+",
+    re.IGNORECASE,
+)
+_GITHUB_TOKEN = re.compile(
+    r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"
+)
+
+
+class GitCommandError(subprocess.CalledProcessError):
+    """A failed Git command with a useful, caller-facing diagnostic."""
+
+    def __str__(self) -> str:
+        detail = _concise_git_detail(self.stderr or self.stdout)
+        message = f"Git command failed with exit {self.returncode}"
+        return f"{message}: {detail}" if detail else message
+
+
+class _GitCompletedProcess(subprocess.CompletedProcess[str]):
+    def check_returncode(self) -> None:
+        if self.returncode:
+            raise GitCommandError(
+                self.returncode,
+                self.args,
+                output=self.stdout,
+                stderr=self.stderr,
+            )
+
+
+@dataclass(frozen=True)
+class GitPathChange:
+    status: str
+    paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -22,26 +64,74 @@ class GitRepository:
         args: list[str],
         *,
         check: bool = True,
+        input_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        logger.debug("git %s (in %s)", " ".join(args), self.root)
-        return subprocess.run(
-            ["git", *args],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            check=check,
+        command = ["git", *args]
+        safe_command = [_redact_git_text(part) for part in command]
+        logger.debug("%s (in %s)", " ".join(safe_command), self.root)
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                check=check,
+                input=input_text,
+            )
+        except subprocess.CalledProcessError as error:
+            safe_stdout = _redact_git_text(error.stdout)
+            safe_stderr = _redact_git_text(error.stderr)
+            detail = _concise_git_detail(safe_stderr or safe_stdout)
+            logger.debug(
+                "Git command failed with exit %s: %s",
+                error.returncode,
+                detail or "no diagnostic output",
+            )
+            raise GitCommandError(
+                error.returncode,
+                safe_command,
+                output=safe_stdout,
+                stderr=safe_stderr,
+            ) from error
+        if result.returncode == 0:
+            return result
+        safe_result = _GitCompletedProcess(
+            safe_command,
+            result.returncode,
+            stdout=_redact_git_text(result.stdout),
+            stderr=_redact_git_text(result.stderr),
         )
+        logger.debug(
+            "Git command failed with exit %s: %s",
+            safe_result.returncode,
+            _concise_git_detail(safe_result.stderr or safe_result.stdout)
+            or "no diagnostic output",
+        )
+        if check:
+            safe_result.check_returncode()
+        return safe_result
 
     @classmethod
     def clone(
-        cls, url: str, target: Path, *, remote: str = "upstream"
+        cls,
+        url: str,
+        target: Path,
+        *,
+        remote: str = "upstream",
+        anonymous: bool = False,
     ) -> "GitRepository":
         target.parent.mkdir(parents=True, exist_ok=True)
+        args = ["git"]
+        if anonymous:
+            args.extend(["-c", "credential.helper="])
+        args.extend(["clone", "--origin", remote, url, str(target)])
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"} if anonymous else None
         subprocess.run(
-            ["git", "clone", "--origin", remote, url, str(target)],
+            args,
             text=True,
             capture_output=True,
             check=True,
+            env=env,
         )
         return cls(target)
 
@@ -73,12 +163,64 @@ class GitRepository:
         result = self.run(["rev-parse", f"{ref}^{{tree}}"], check=False)
         return result.stdout.strip() or None if result.returncode == 0 else None
 
-    def trees_equal(self, left: str, right: str) -> bool:
-        left_tree = self.tree(left)
-        right_tree = self.tree(right)
-        return (
-            left_tree is not None and right_tree is not None and left_tree == right_tree
-        )
+    def create_commit(self, tree: str, parent: str | None, message: str) -> str:
+        """Create a commit object without moving the current branch."""
+        args = ["commit-tree", tree]
+        if parent is not None:
+            args.extend(["-p", parent])
+        args.extend(["-m", message])
+        result = self.run(args)
+        return result.stdout.strip()
+
+    def worktree_matches(self, ref: str) -> bool:
+        """Compare the final non-ignored worktree to a ref without writing objects."""
+        untracked = self.run(
+            ["ls-files", "--others", "--exclude-standard", "-z"]
+        ).stdout
+        if untracked:
+            return False
+        result = self.run(["diff", "--quiet", "--no-ext-diff", ref, "--"], check=False)
+        if result.returncode not in (0, 1):
+            result.check_returncode()
+        return result.returncode == 0
+
+    def ref_sha(self, ref: str) -> str | None:
+        result = self.run(["rev-parse", "--verify", ref], check=False)
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    def update_ref(self, ref: str, value: str) -> None:
+        self.run(["update-ref", ref, value])
+
+    def update_refs(self, values: dict[str, str]) -> None:
+        commands = "".join(f"update {ref} {value}\n" for ref, value in values.items())
+        self.run(["update-ref", "--stdin"], input_text=commands)
+
+    def delete_ref(self, ref: str) -> None:
+        self.run(["update-ref", "-d", ref], check=False)
+
+    def delete_refs(self, refs: Sequence[str]) -> None:
+        commands = "".join(f"delete {ref}\n" for ref in refs)
+        self.run(["update-ref", "--stdin"], input_text=commands)
+
+    def config_get(self, key: str) -> str | None:
+        result = self.run(["config", "--local", "--get", key], check=False)
+        return result.stdout.strip() or None if result.returncode == 0 else None
+
+    def config_set(self, key: str, value: str) -> None:
+        self.run(["config", "--local", key, value])
+
+    def config_unset(self, key: str) -> None:
+        self.run(["config", "--local", "--unset-all", key], check=False)
+
+    def copy_identity_from(self, source: "GitRepository") -> None:
+        for key in ("user.name", "user.email"):
+            value = source.run(["config", "--get", key], check=False).stdout.strip()
+            if value:
+                self.run(["config", key, value])
+
+    def commit_message(self, ref: str) -> str | None:
+        result = self.run(["show", "-s", "--format=%B", ref], check=False)
+        return result.stdout.rstrip("\n") if result.returncode == 0 else None
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         result = self.run(
@@ -91,15 +233,45 @@ class GitRepository:
 
     def status_lines(self, pathspec: list[str] | None = None) -> list[str]:
         args = [
-            "-c",
-            "core.quotePath=false",
             "status",
-            "--short",
+            "--porcelain=v1",
+            "-z",
             "--untracked-files=all",
         ]
         if pathspec:
             args.extend(["--", *pathspec])
-        return self.run(args).stdout.splitlines()
+        fields = self.run(args).stdout.split("\0")
+        lines = []
+        index = 0
+        while index < len(fields) and fields[index]:
+            entry = fields[index]
+            status = entry[:2]
+            path = entry[3:]
+            index += 1
+            if any(marker in status for marker in ("R", "C")):
+                old_path = fields[index]
+                index += 1
+                path = f"{old_path} -> {path}"
+            lines.append(f"{status} {path}")
+        return lines
+
+    def diff_name_status(
+        self, base_ref: str, target_ref: str | None = None
+    ) -> list[GitPathChange]:
+        args = ["diff", "--name-status", "--find-renames", "-z", base_ref]
+        if target_ref is not None:
+            args.append(target_ref)
+        fields = self.run(args).stdout.split("\0")
+        changes = []
+        index = 0
+        while index < len(fields) and fields[index]:
+            status = fields[index]
+            index += 1
+            path_count = 2 if status.startswith(("R", "C")) else 1
+            paths = tuple(fields[index : index + path_count])
+            index += path_count
+            changes.append(GitPathChange(status, paths))
+        return changes
 
     def tracked(self, rel_path: str) -> bool:
         return (
@@ -195,17 +367,8 @@ class GitRepository:
     def push(self, remote: str, source_ref: str, branch: str) -> None:
         self.run(["push", remote, f"{source_ref}:refs/heads/{branch}"])
 
-    def delete_remote_branch(self, remote: str, branch: str) -> None:
-        self.run(["push", remote, "--delete", branch], check=False)
-
-    def remote_branch_sha(self, remote: str, branch: str) -> str | None:
-        result = self.run(
-            ["ls-remote", "--heads", remote, f"refs/heads/{branch}"],
-            check=False,
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
-        return result.stdout.split()[0]
+    def push_force(self, remote: str, source_ref: str, branch: str) -> None:
+        self.run(["push", "--force", remote, f"{source_ref}:refs/heads/{branch}"])
 
     def rel_path(self, path: Path) -> str:
         return str(path.relative_to(self.root))
@@ -217,6 +380,20 @@ class GitRepository:
             if rel_path not in rel_paths and (path.exists() or self.tracked(rel_path)):
                 rel_paths.append(rel_path)
         return rel_paths
+
+
+def _redact_git_text(value: str | None) -> str:
+    if not value:
+        return ""
+    redacted = _URL_CREDENTIALS.sub(r"\g<scheme><redacted>@", value)
+    redacted = _AUTHORIZATION_VALUE.sub(r"\g<label><redacted>", redacted)
+    redacted = _LABELED_CREDENTIAL.sub(r"\g<label><redacted>", redacted)
+    return _GITHUB_TOKEN.sub("<redacted>", redacted)
+
+
+def _concise_git_detail(output: str | None) -> str:
+    detail = " ".join(_redact_git_text(output).split())
+    return f"{detail[:497]}..." if len(detail) > 500 else detail
 
 
 def git_snapshot(
@@ -233,7 +410,14 @@ def git_snapshot(
         if not rel_paths:
             return False
         collection_git.run(["add", "-A", "--", *rel_paths])
-        if not collection_git.cached_diff_exists(rel_paths):
+        staged_paths = [
+            path
+            for path in collection_git.run(
+                ["diff", "--cached", "--name-only", "-z", "--", *rel_paths]
+            ).stdout.split("\0")
+            if path
+        ]
+        if not staged_paths:
             return False
         collection_git.run(
             [
@@ -241,7 +425,7 @@ def git_snapshot(
                 "-m",
                 f"AnkiOps: snapshot before {action}",
                 "--",
-                *rel_paths,
+                *staged_paths,
             ]
         )
         logger.info("Auto-committed snapshot before %s", action)

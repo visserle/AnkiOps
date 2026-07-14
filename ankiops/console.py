@@ -12,8 +12,10 @@ from typing import Any
 
 from rich import get_console as rich_get_console
 from rich import reconfigure as rich_reconfigure
+from rich.console import Console
 from rich.highlighter import NullHighlighter
 from rich.markup import escape as rich_escape
+from rich.text import Text
 
 from ankiops.anki import Anki
 
@@ -34,6 +36,33 @@ def clickable_path(file_path: Path | str) -> str:
     text = path.name if path.name else str(path)
     file_uri = path.as_uri()
     return f"[link={file_uri}]{rich_escape(text)}[/link]"
+
+
+def print_line(value: str = "") -> None:
+    rich_get_console().print(value, markup=False, highlight=False, soft_wrap=True)
+
+
+def print_result(action: str, subject: str, summary: str) -> None:
+    heading = Text()
+    heading.append("✓ ", style="bold green")
+    heading.append(f"{action.capitalize()} {subject}", style="bold")
+    rich_get_console().print(heading)
+    print_line(f"  {summary}")
+
+
+def print_next_steps(steps: list[str]) -> None:
+    if not steps:
+        return
+    print_line()
+    rich_get_console().print(Text("Next", style="bold"))
+    for step in steps:
+        print_line(f"  {step}")
+
+
+def print_error(value: str) -> None:
+    message = Text("Error: ", style="bold red")
+    message.append(value)
+    Console(stderr=True).print(message, soft_wrap=True)
 
 
 def configure_logging(

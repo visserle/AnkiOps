@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
 
-import yaml
-
-from ankiops.collab.errors import format_missing_note_keys_error
+from ankiops.collab.errors import RepositoryCollisionError
+from ankiops.collab.git_state import (
+    INTEGRATED_REF,
+    JOURNAL_BRANCH,
+    PUBLISH_DECK_CONFIG,
+    PUBLISH_PREPARED_REF,
+)
 from ankiops.collab.hosting import GitHubHost
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
 from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
-from ankiops.markdown import DeckFile, read_deck_file, render_notes_to_markdown
+from ankiops.interchange import ParsedDeck, parse_source, require_note_keys
+from ankiops.markdown import render_notes_to_markdown
 from ankiops.media import extract_media_references
-from ankiops.note_types import NoteType, load_note_types
+from ankiops.note_types import NoteType
 from ankiops.sync.state import SyncState
 
 
@@ -28,13 +32,43 @@ class _RenderedPublishFile:
 
 
 @dataclass(frozen=True)
+class _PublishAsset:
+    relative_path: Path
+    content: bytes
+
+
+@dataclass(frozen=True)
 class _PublishPlan:
     deck: str
     source: DeckSource
     files: list[_RenderedPublishFile]
-    note_types_used: set[str]
-    media_used: set[str]
     note_keys: set[str]
+    assets: tuple[_PublishAsset, ...]
+
+
+@dataclass(frozen=True)
+class PreparedPublish:
+    prepared_commit: str
+    deck: str
+
+
+def prepared_publish(repository: GitRepository) -> PreparedPublish | None:
+    """Read the durable state of an interrupted publish."""
+    prepared_commit = repository.ref_sha(PUBLISH_PREPARED_REF)
+    deck = repository.config_get(PUBLISH_DECK_CONFIG)
+    if prepared_commit is None and deck is None:
+        return None
+    if deck is None:
+        raise ValueError(
+            f"The prepared publish state at {repository.root} is incomplete."
+        )
+    if prepared_commit is None:
+        prepared_commit = repository.head()
+    if prepared_commit is None:
+        raise ValueError(
+            f"The prepared publish state at {repository.root} has no commit."
+        )
+    return PreparedPublish(prepared_commit, deck)
 
 
 def publish_collab_deck(
@@ -46,95 +80,147 @@ def publish_collab_deck(
     collection_git.ensure_repo(
         "AnkiOps collections require a Git repository at the root."
     )
-    source_git = GitRepository(source.root) if source.root.exists() else None
-    if source_git is not None and not source_git.is_repo():
-        raise ValueError(
-            f"Collab source path exists but is not a Git repository: {source.root}"
-        )
-    if source_git is not None:
-        try:
-            _selected_deck_files(collection_root, deck)
-        except ValueError:
-            return
+    source_git = GitRepository(source.root)
+    prepared_head: str | None
+    if source.root.exists():
+        if not source_git.is_repo():
+            raise RepositoryCollisionError(
+                f"Local collab source already exists and is not a Git repository: "
+                f"{source.root}"
+            )
+        preparation = prepared_publish(source_git)
+        if preparation is None:
+            raise RepositoryCollisionError(
+                f"Local collab source already exists: {source.display_name}. "
+                "It was not prepared by this publish, so it was left untouched."
+            )
+        if preparation.deck != deck:
+            raise ValueError(
+                f"The interrupted publish at {source.root} is for "
+                f"'{preparation.deck}', "
+                f"not '{deck}'. Retry with that deck name."
+            )
+        prepared_marker = source_git.ref_sha(PUBLISH_PREPARED_REF)
+        prepared_head = preparation.prepared_commit
+        current_head = source_git.head()
+        if current_head is None or source_git.status_lines():
+            raise ValueError(
+                f"The prepared publish repository changed at {source.root}. "
+                "Review it before retrying."
+            )
+        if prepared_marker is None:
+            if source_git.ref_sha(INTEGRATED_REF) == current_head:
+                source_git.config_unset(PUBLISH_DECK_CONFIG)
+                return
+            source_git.update_ref(PUBLISH_PREPARED_REF, prepared_head)
+        elif current_head != prepared_head:
+            raise ValueError(
+                f"The prepared publish repository changed at {source.root}. "
+                "Review it before retrying."
+            )
+        plan = _prepare_publish_recovery_plan(collection_root, deck, source)
+    else:
+        plan = _prepare_publish_plan(collection_root, deck, source)
+        _write_publish_files(plan)
+        source_git.init_repo(initial_branch="main")
+        source_git.copy_identity_from(collection_git)
+        source_git.checkpoint(f"Publish collab deck {deck}")
+        prepared_head = source_git.head()
+        if prepared_head is None:
+            raise ValueError(f"Could not prepare {source.display_name} for publish.")
+        source_git.config_set(PUBLISH_DECK_CONFIG, deck)
+        source_git.update_ref(PUBLISH_PREPARED_REF, prepared_head)
 
-    plan = _prepare_publish_plan(collection_root, deck, source)
     github = GitHubHost(collection_root)
-    github.create_repo(source.display_name)
-    originals = {
-        rendered.source_path: rendered.source_path.read_bytes()
-        for rendered in plan.files
-    }
-    try:
-        if source_git is None:
-            _write_publish_files(collection_root, plan)
-            source_git = GitRepository(source.root)
-            source_git.init_repo(initial_branch="main")
-            _copy_git_identity(collection_git, source_git)
-            source_git.checkpoint(f"Publish collab deck {deck}")
-        source_git.set_remote("upstream", str(source.github_url))
-        source_git.set_remote("publish", str(source.github_url))
+    source_git.set_remote("upstream", str(source.github_url))
+    source_git.set_remote("publish", str(source.github_url))
+    if github.repo_info(source.display_name) is None:
+        github.create_repo(source.display_name)
+    remote_head = _publish_remote_head(source_git, source, prepared_head)
+    if remote_head is None:
         source_git.push("upstream", "HEAD", "main")
-        source_git.checkout_or_create_branch("ankiops/work", "main")
 
-        _remove_published_local_files(plan)
-        collection_git.commit_paths(
-            [rendered.source_path for rendered in plan.files],
-            f"Move {deck} into collab source {source.source_path}",
+    source_git.checkout_or_create_branch(JOURNAL_BRANCH, prepared_head)
+    source_git.run(["branch", "--unset-upstream"], check=False)
+    source_git.update_ref(INTEGRATED_REF, prepared_head)
+    _remove_published_local_files(plan)
+    collection_git.commit_paths(
+        [rendered.source_path for rendered in plan.files],
+        f"Move {deck} into collab source {source.source_path}",
+    )
+    _transfer_sync_ownership(collection_root, plan)
+    source_git.delete_ref(PUBLISH_PREPARED_REF)
+    source_git.config_unset(PUBLISH_DECK_CONFIG)
+
+
+def _publish_remote_head(
+    repository: GitRepository,
+    source: DeckSource,
+    prepared_head: str,
+) -> str | None:
+    result = repository.run(["ls-remote", "upstream"], check=False)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unreachable"
+        raise ValueError(
+            f"Could not verify GitHub repository {source.display_name}: {detail}"
         )
-        _transfer_sync_ownership(collection_root, plan)
-    except Exception:
-        for path, content in originals.items():
-            if not path.exists():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-        raise
-
-
-def _copy_git_identity(
-    collection_git: GitRepository,
-    source_git: GitRepository,
-) -> None:
-    for key in ("user.name", "user.email"):
-        value = collection_git.run(["config", "--get", key], check=False).stdout.strip()
-        if value:
-            source_git.run(["config", key, value])
+    refs = {
+        ref: sha
+        for line in result.stdout.splitlines()
+        if "\t" in line
+        for sha, ref in [line.split("\t", 1)]
+    }
+    if not refs:
+        return None
+    allowed_refs = {"HEAD", "refs/heads/main"}
+    if (
+        "refs/heads/main" in refs
+        and set(refs).issubset(allowed_refs)
+        and all(sha == prepared_head for sha in refs.values())
+    ):
+        return prepared_head
+    raise RepositoryCollisionError(
+        f"GitHub repository {source.display_name} contains unrelated content. "
+        "Nothing was overwritten. Choose a new name."
+    )
 
 
 def _transfer_sync_ownership(collection_root: Path, plan: _PublishPlan) -> None:
     state = SyncState.open(collection_root)
     try:
-        note_ids = state.resolve_note_ids(plan.note_keys)
-        state.upsert_note_links(
-            [(note_key, note_id) for note_key, note_id in note_ids.items()],
-            source_path=plan.source.source_path,
-        )
-        for rendered in plan.files:
-            deck_name = file_stem_to_deck_name(rendered.source_path.stem)
-            deck_id = state.resolve_deck_id(deck_name)
-            if deck_id is None:
-                continue
-            state.upsert_deck(
-                deck_name,
-                deck_id,
+        with state.write_tx():
+            note_ids = state.resolve_note_ids(plan.note_keys)
+            state.upsert_note_links(
+                [(note_key, note_id) for note_key, note_id in note_ids.items()],
                 source_path=plan.source.source_path,
-                md_path=str(rendered.target_path.relative_to(collection_root)),
             )
+            for rendered in plan.files:
+                deck_name = file_stem_to_deck_name(rendered.source_path.stem)
+                deck_id = state.resolve_deck_id(deck_name)
+                if deck_id is None:
+                    continue
+                state.upsert_deck(
+                    deck_name,
+                    deck_id,
+                    source_path=plan.source.source_path,
+                    md_path=str(rendered.target_path.relative_to(collection_root)),
+                )
     finally:
         state.close()
 
 
-def _selected_deck_files(collection_root: Path, deck: str) -> list[Path]:
+def _select_decks(decks: tuple[ParsedDeck, ...], deck: str) -> list[ParsedDeck]:
     deck_filter = deck.strip()
     subdeck_scope = f"{deck_filter}::"
-    files = []
-    local_source = DeckSource.local(collection_root)
-    for md_file in local_source.deck_files():
-        deck_name = file_stem_to_deck_name(md_file.stem)
-        if deck_name == deck_filter or deck_name.startswith(subdeck_scope):
-            files.append(md_file)
-    if not files:
+    selected = [
+        parsed_deck
+        for parsed_deck in decks
+        if parsed_deck.deck_name == deck_filter
+        or parsed_deck.deck_name.startswith(subdeck_scope)
+    ]
+    if not selected:
         raise ValueError(f"No local deck files found for '{deck}'")
-    return files
+    return selected
 
 
 def _scoped_configs(
@@ -152,50 +238,28 @@ def _prepare_publish_plan(
     deck: str,
     source: DeckSource,
 ) -> _PublishPlan:
-    root_configs = load_note_types(collection_root / NOTE_TYPES_DIR)
+    parsed_source = parse_source(DeckSource.local(collection_root))
+    root_configs = list(parsed_source.note_types)
     root_config_by_name = {config.name: config for config in root_configs}
 
-    selected_files = _selected_deck_files(collection_root, deck)
-    parsed_files: list[tuple[Path, DeckFile]] = []
+    selected_decks = _select_decks(parsed_source.decks, deck)
     note_types_used: set[str] = set()
     media_used: set[str] = set()
-    note_keys: set[str] = set()
-    missing_note_keys: list[str] = []
 
-    for md_file in selected_files:
-        parsed = read_deck_file(
-            md_file,
-            note_types=root_configs,
-            context_root=collection_root,
-        )
-        parsed_files.append((md_file, parsed))
-        for index, note in enumerate(parsed.notes, start=1):
-            if not note.note_key:
-                missing_note_keys.append(f"{md_file.name} note {index}")
-            elif note.note_key in note_keys:
-                raise ValueError(
-                    f"Duplicate note_key in collab publish set: {note.note_key}"
-                )
-            else:
-                note_keys.add(note.note_key)
+    for parsed_deck in selected_decks:
+        for note in parsed_deck.parsed.notes:
             note_types_used.add(note.note_type)
             for field_value in note.fields.values():
                 media_used.update(extract_media_references(field_value))
 
-    if missing_note_keys:
-        raise ValueError(format_missing_note_keys_error(len(missing_note_keys)))
+    note_keys = require_note_keys(deck.parsed for deck in selected_decks)
 
-    unknown_note_types = sorted(note_types_used - set(root_config_by_name))
-    if unknown_note_types:
-        raise ValueError(
-            "Unknown note type(s) while publishing collab deck: "
-            + ", ".join(unknown_note_types)
-        )
-
-    missing_media = sorted(
-        media_name
+    media_paths = {
+        media_name: collection_root / LOCAL_MEDIA_DIR / media_name
         for media_name in media_used
-        if not (collection_root / LOCAL_MEDIA_DIR / media_name).exists()
+    }
+    missing_media = sorted(
+        media_name for media_name, path in media_paths.items() if not path.exists()
     )
     if missing_media:
         raise ValueError(
@@ -207,14 +271,17 @@ def _prepare_publish_plan(
     scoped_configs = _scoped_configs(source, used_configs)
     scoped_config_by_name = {config.name: config for config in scoped_configs}
     rendered_files: list[_RenderedPublishFile] = []
-    for md_file, parsed in parsed_files:
-        for note in parsed.notes:
+    for parsed_deck in selected_decks:
+        for note in parsed_deck.parsed.notes:
             note.note_type = source.scope_note_type_name(note.note_type)
         rendered_files.append(
             _RenderedPublishFile(
-                source_path=md_file,
-                target_path=source.root / md_file.name,
-                content=render_notes_to_markdown(parsed.notes, scoped_config_by_name),
+                source_path=parsed_deck.path,
+                target_path=source.root / parsed_deck.path.name,
+                content=render_notes_to_markdown(
+                    parsed_deck.parsed.notes,
+                    scoped_config_by_name,
+                ),
             )
         )
 
@@ -222,85 +289,82 @@ def _prepare_publish_plan(
         deck=deck,
         source=source,
         files=rendered_files,
-        note_types_used=note_types_used,
-        media_used=media_used,
         note_keys=note_keys,
+        assets=_capture_publish_assets(
+            collection_root,
+            used_note_types=used_configs,
+            media_used=media_used,
+        ),
     )
 
 
-def _styling_refs(note_type_dir: Path) -> list[str]:
-    with open(note_type_dir / "note_type.yaml", encoding="utf-8") as file:
-        info = yaml.safe_load(file) or {}
-    styling = info.get("styling")
-    if isinstance(styling, str):
-        return [styling]
-    if isinstance(styling, list):
-        styling_refs: list[str] = []
-        for css_file in styling:
-            if not isinstance(css_file, str) or not css_file.strip():
-                raise ValueError(
-                    f"Note type '{note_type_dir.name}' has invalid styling entry "
-                    f"'{css_file}'. Expected non-empty file names."
-                )
-            styling_refs.append(css_file.strip())
-        if styling_refs:
-            return styling_refs
-    raise ValueError(
-        f"Note type '{note_type_dir.name}' must reference at least one styling file."
-    )
-
-
-def _relative_note_type_asset_path(
-    note_types_dir: Path,
-    note_type: str,
-    asset_path: Path,
-    asset_ref: str,
-) -> Path:
-    try:
-        return asset_path.resolve().relative_to(note_types_dir.resolve())
-    except ValueError as error:
-        raise ValueError(
-            f"Note type '{note_type}' references styling file '{asset_ref}' "
-            "outside the note_types directory."
-        ) from error
-
-
-def _copy_note_type_styling_assets(
-    source_note_types_dir: Path,
-    target_note_types_dir: Path,
-    note_type: str,
-) -> list[Path]:
-    source_note_type_dir = source_note_types_dir / note_type
-    touched: list[Path] = []
-
-    for asset_ref in _styling_refs(source_note_type_dir):
-        source_asset = source_note_type_dir / asset_ref
-        if not source_asset.exists():
-            raise ValueError(
-                f"Note type '{note_type}' references missing styling file "
-                f"'{asset_ref}'."
+def _prepare_publish_recovery_plan(
+    collection_root: Path,
+    deck: str,
+    source: DeckSource,
+) -> _PublishPlan:
+    parsed_source = parse_source(source)
+    selected_decks = _select_decks(parsed_source.decks, deck)
+    rendered_files: list[_RenderedPublishFile] = []
+    for parsed_deck in selected_decks:
+        rendered_files.append(
+            _RenderedPublishFile(
+                source_path=collection_root / parsed_deck.path.name,
+                target_path=parsed_deck.path,
+                content=parsed_deck.parsed.raw_content,
             )
-        relative_asset = _relative_note_type_asset_path(
-            source_note_types_dir,
-            note_type,
-            source_asset,
-            asset_ref,
         )
-        target_asset = target_note_types_dir / relative_asset
-        target_asset.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_asset, target_asset)
-        touched.append(target_asset)
+    note_keys = require_note_keys(deck.parsed for deck in selected_decks)
+    return _PublishPlan(
+        deck=deck,
+        source=source,
+        files=rendered_files,
+        note_keys=note_keys,
+        assets=(),
+    )
 
-    return touched
+
+def _capture_publish_assets(
+    collection_root: Path,
+    *,
+    used_note_types: list[NoteType],
+    media_used: set[str],
+) -> tuple[_PublishAsset, ...]:
+    root = collection_root.absolute()
+    note_types_dir = root / NOTE_TYPES_DIR
+    paths = [
+        note_types_dir / relative_path
+        for note_type in used_note_types
+        for relative_path in note_type.source_files
+    ]
+    media_dir = root / LOCAL_MEDIA_DIR
+    paths.extend(media_dir / media_name for media_name in sorted(media_used))
+
+    entries: dict[Path, _PublishAsset] = {}
+    for path in paths:
+        path = path.absolute()
+        if not path.is_file():
+            raise ValueError(
+                f"Publish-applicable path '{path.relative_to(root)}' is not a "
+                "regular file."
+            )
+        relative_path = path.relative_to(root)
+        entry = _PublishAsset(
+            relative_path=relative_path,
+            content=path.read_bytes(),
+        )
+        entries[relative_path] = entry
+    return tuple(
+        entries[path] for path in sorted(entries, key=lambda item: item.as_posix())
+    )
 
 
-def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path]:
+def _write_publish_files(plan: _PublishPlan) -> None:
     source = plan.source
     source.root.mkdir(parents=True, exist_ok=False)
     (source.root / LOCAL_MEDIA_DIR).mkdir(parents=True, exist_ok=True)
     source.note_types_dir.mkdir(parents=True, exist_ok=True)
 
-    touched: list[Path] = [source.root]
     readme_template = (
         resources.files("ankiops.collab")
         .joinpath("resources/README.md")
@@ -313,36 +377,22 @@ def _write_publish_files(collection_root: Path, plan: _PublishPlan) -> list[Path
         ),
         encoding="utf-8",
     )
-    touched.append(readme)
+    gitignore = source.root / ".gitignore"
+    gitignore.write_text(
+        resources.files("ankiops.collab")
+        .joinpath("resources/.gitignore")
+        .read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     for rendered in plan.files:
         rendered.target_path.write_text(rendered.content, encoding="utf-8")
-        touched.extend([rendered.target_path, rendered.source_path])
 
-    for note_type in sorted(plan.note_types_used):
-        src = collection_root / NOTE_TYPES_DIR / note_type
-        dst = source.note_types_dir / note_type
-        shutil.copytree(src, dst, dirs_exist_ok=True)
-        touched.append(dst)
-        touched.extend(
-            _copy_note_type_styling_assets(
-                collection_root / NOTE_TYPES_DIR,
-                source.note_types_dir,
-                note_type,
-            )
-        )
-
-    root_media = collection_root / LOCAL_MEDIA_DIR
-    collab_media = source.root / LOCAL_MEDIA_DIR
-    for media_name in sorted(plan.media_used):
-        src = root_media / media_name
-        dst = collab_media / media_name
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        touched.append(dst)
-
-    return touched
+    for entry in plan.assets:
+        target = source.root / entry.relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(entry.content)
 
 
 def _remove_published_local_files(plan: _PublishPlan) -> None:
     for rendered in plan.files:
-        rendered.source_path.unlink()
+        rendered.source_path.unlink(missing_ok=True)

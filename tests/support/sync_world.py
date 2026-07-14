@@ -18,6 +18,7 @@ from ankiops.collection import (
     NOTE_TYPES_DIR,
     deck_name_to_file_stem,
 )
+from ankiops.interchange import parse_collection
 from ankiops.markdown import NOTE_SEPARATOR, format_tags_comment
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
@@ -88,14 +89,14 @@ class SyncWorld:
         return sync_collection_to_anki(
             anki=self.anki,
             state=db,
-            collection_root=self.root,
+            parsed_sources=parse_collection(self.root),
         )
 
     def sync_export(self, db: SyncState):
         return sync_collection_from_anki(
             anki=self.anki,
             state=db,
-            collection_root=self.root,
+            parsed_sources=parse_collection(self.root),
         )
 
     def sync_media_to_anki(self, db: SyncState):

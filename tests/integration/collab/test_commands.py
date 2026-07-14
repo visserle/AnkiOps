@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import logging
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,13 +8,18 @@ from types import SimpleNamespace
 
 import pytest
 
-from ankiops.collab.commands import (
-    run_publish,
-    run_status,
-    run_submit,
-    run_subscribe,
-    run_update,
+from ankiops.collab.commands import run_publish, run_status, run_submit, run_update
+from ankiops.collab.git_state import (
+    CONFLICT_BASE_REF,
+    CONFLICT_LOCAL_REF,
+    CONFLICT_UPSTREAM_REF,
+    CONTRIBUTION_BRANCH,
+    INTEGRATED_REF,
+    PUBLISH_DECK_CONFIG,
+    PUBLISH_PREPARED_REF,
+    SUBMISSION_REF,
 )
+from ankiops.collab.hosting import GitHubHost, PullRequestInfo
 from ankiops.git import GitRepository
 from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
@@ -52,11 +57,14 @@ def _setup_collection(tmp_path: Path) -> Path:
         "/collab/\n.ankiops.db\n.ankiops.db-shm\n.ankiops.db-wal\n.ankiops/\n",
         encoding="utf-8",
     )
-    (collection / "Private.md").write_text("private baseline\n", encoding="utf-8")
+    (collection / "Private.md").write_text(
+        "Q: private baseline\nA: private answer\n",
+        encoding="utf-8",
+    )
     _commit(collection, "Initialize private collection")
-    db = SyncState.open(collection)
-    db.set_profile_name("Test")
-    db.close()
+    state = SyncState.open(collection)
+    state.set_profile_name("Test")
+    state.close()
     return collection
 
 
@@ -78,7 +86,9 @@ def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
     source.parent.mkdir(parents=True)
     _git(source.parent, "clone", "--origin", "upstream", str(remote), str(source))
     _configure(source, "Contributor")
-    _git(source, "checkout", "-b", "ankiops/work", "upstream/main")
+    _git(source, "checkout", "-b", "ankiops/journal", "upstream/main")
+    _git(source, "branch", "--unset-upstream")
+    _git(source, "update-ref", INTEGRATED_REF, "upstream/main")
     return source, remote
 
 
@@ -104,1021 +114,991 @@ def collab_world(tmp_path, monkeypatch, collab_world_template):
     return collection, source, remote
 
 
-def _upstream_edit(tmp_path: Path, remote: Path, old: str, new: str) -> str:
-    clone = tmp_path / f"upstream-edit-{new.replace(' ', '-')}"
+def _upstream_edit(
+    tmp_path: Path,
+    remote: Path,
+    old: str,
+    new: str,
+    *,
+    filename: str = "Deck.md",
+) -> str:
+    clone = tmp_path / f"upstream-{len(list(tmp_path.iterdir()))}"
     _git(tmp_path, "clone", str(remote), str(clone))
     _configure(clone, "Other Contributor")
-    deck = clone / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(old, new), encoding="utf-8"
+    path = clone / filename
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8"
     )
     head = _commit(clone, f"Change {old} to {new}")
     _git(clone, "push", "origin", "main")
     return head
 
 
-def test_update_noop_creates_no_commit(collab_world, caplog):
-    caplog.set_level(logging.INFO)
+def _conflict_root(collection: Path) -> Path:
+    return collection / ".ankiops" / "conflicts" / "owner" / "repo"
+
+
+def test_clean_update_is_a_noop(collab_world, capsys):
     _collection, source, _remote = collab_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
 
     run_update(SimpleNamespace(repository="owner/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
-    assert _git(source, "branch", "--list", "ankiops/recovery/*").stdout == ""
-    assert "Collab update: owner/repo — already up to date" in caplog.text
-    assert "Apply to Anki: ankiops fa" in caplog.text
+    assert "already up to date" in capsys.readouterr().out
 
 
-def test_update_reports_preserved_local_contribution(collab_world, caplog):
-    caplog.set_level(logging.INFO)
-    _collection, source, _remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "locally committed answer"
-        ),
-        encoding="utf-8",
-    )
-    before = _commit(source, "Local contribution")
+def test_update_recommends_fa_for_anki_applicable_changes(
+    collab_world, tmp_path, capsys
+):
+    _collection, _source, remote = collab_world
+    _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
 
     run_update(SimpleNamespace(repository="owner/repo"))
 
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == before
-    assert "Collab update: owner/repo — no upstream changes" in caplog.text
-    assert "Local contribution: ready to submit" in caplog.text
-    assert "Apply to Anki: ankiops fa" in caplog.text
-    assert "Submit contribution: ankiops collab submit owner/repo" in caplog.text
+    output = capsys.readouterr().out
+    assert "Anki: changes available" in output
+    assert "Apply to Anki: ankiops fa" in output
 
 
-def test_submit_noop_creates_no_commit_branch_push_or_pr(collab_world, monkeypatch):
-    collection, source, _remote = collab_world
-    before_head = _git(source, "rev-parse", "HEAD").stdout.strip()
-    before_branches = _git(source, "branch", "--format=%(refname)").stdout
-    publish = monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: pytest.fail("no-op submit must not publish"),
+def test_update_rejects_invalid_source_before_git_operations(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, remote = collab_world
+    upstream = _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
+    config = source / "note_types" / "AnkiOpsQA" / "note_type.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "    back: Back.template.anki\n",
+            "",
+        ),
+        encoding="utf-8",
     )
-    assert publish is None
+    head_before = _git(source, "rev-parse", "HEAD").stdout.strip()
+    integrated_before = _git(source, "rev-parse", INTEGRATED_REF).stdout.strip()
+    tracking_before = _git(source, "rev-parse", "upstream/main").stdout.strip()
+    status_before = _git(source, "status", "--short").stdout
+    config_before = config.read_text(encoding="utf-8")
 
-    run_submit(SimpleNamespace(repository="owner/repo", message=None))
+    def unexpected_git_operation(*_args, **_kwargs):
+        pytest.fail("Git activity started before source parsing completed")
+
+    monkeypatch.setattr(GitRepository, "checkpoint", unexpected_git_operation)
+    monkeypatch.setattr(GitRepository, "fetch", unexpected_git_operation)
+
+    with pytest.raises(ValueError, match="template with invalid 'back'"):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert tracking_before != upstream
+    assert _git(source, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == integrated_before
+    assert _git(source, "rev-parse", "upstream/main").stdout.strip() == tracking_before
+    assert _git(source, "status", "--short").stdout == status_before
+    assert config.read_text(encoding="utf-8") == config_before
+
+
+def test_update_rejects_unknown_source_without_touching_another_repository(
+    collab_world,
+):
+    _collection, source, _remote = collab_world
+    other_deck = source / "Deck.md"
+    other_deck.write_text(
+        other_deck.read_text(encoding="utf-8").replace(
+            "upstream answer",
+            "unsaved work",
+        ),
+        encoding="utf-8",
+    )
+    before_head = _git(source, "rev-parse", "HEAD").stdout.strip()
+    before_status = _git(source, "status", "--short").stdout
+
+    with pytest.raises(ValueError, match="Unknown collab source: other/repo"):
+        run_update(SimpleNamespace(repository="other/repo"))
 
     assert _git(source, "rev-parse", "HEAD").stdout.strip() == before_head
-    assert _git(source, "branch", "--format=%(refname)").stdout == before_branches
-    db = SyncState.open(collection)
-    try:
-        assert db.get_collab_operation("collab/owner/repo") is None
-    finally:
-        db.close()
+    assert _git(source, "status", "--short").stdout == before_status
+    assert "unsaved work" in other_deck.read_text(encoding="utf-8")
 
 
-def test_subscribe_clones_independent_repository(tmp_path, monkeypatch):
-    collection = _setup_collection(tmp_path)
-    _source, remote = _setup_source(tmp_path, collection)
-    shutil_source = collection / "collab" / "owner" / "repo"
-    shutil.rmtree(shutil_source)
-    original_clone = GitRepository.clone.__func__
-
-    def local_clone(cls, _url, target, *, remote="upstream"):
-        return original_clone(cls, str(remote_path), target, remote=remote)
-
-    remote_path = remote
-    monkeypatch.setattr(GitRepository, "clone", classmethod(local_clone))
-    monkeypatch.setattr(
-        "ankiops.collab.commands.require_collection_root", lambda: collection
+def test_update_commits_staged_unstaged_and_untracked_changes(
+    collab_world, tmp_path, capsys
+):
+    _collection, source, remote = collab_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
+        encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.ensure_authenticated", lambda *_: None
+    _git(source, "add", "Deck.md")
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("local answer", "final answer"),
+        encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.repo_info",
-        lambda *_: {"default_branch": "main"},
+    (source / "notes.txt").write_text("untracked contribution\n", encoding="utf-8")
+    upstream_clone = tmp_path / "nonconflicting-upstream"
+    _git(tmp_path, "clone", str(remote), str(upstream_clone))
+    _configure(upstream_clone, "Other Contributor")
+    (upstream_clone / "README.md").write_text("upstream docs\n", encoding="utf-8")
+    upstream = _commit(upstream_clone, "Add upstream documentation")
+    _git(upstream_clone, "push", "origin", "main")
+
+    run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert _git(source, "status", "--short").stdout == ""
+    assert _git(source, "ls-files", "notes.txt").stdout.strip() == "notes.txt"
+    assert "final answer" in deck.read_text(encoding="utf-8")
+    assert (source / "README.md").read_text() == "upstream docs\n"
+    assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == upstream
+    assert "ankiops fa" not in capsys.readouterr().out
+
+
+def test_text_conflict_commits_local_checkpoint_and_preserves_evidence(
+    collab_world, tmp_path
+):
+    collection, source, remote = collab_world
+    before = _git(source, "rev-parse", "HEAD").stdout.strip()
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
+        encoding="utf-8",
+    )
+    (source / "draft.txt").write_text("keep me\n", encoding="utf-8")
+    upstream = _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
+
+    with pytest.raises(ValueError, match="Local contribution committed"):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    local = _git(source, "rev-parse", "HEAD").stdout.strip()
+    root = _conflict_root(collection)
+    assert local != before
+    assert _git(source, "status", "--short").stdout == ""
+    assert _git(source, "ls-files", "draft.txt").stdout.strip() == "draft.txt"
+    assert json.loads((root / "conflict.json").read_text()) == {
+        "kind": "update",
+        "requested_title": None,
+    }
+    assert (root / "Deck.md.base").exists()
+    assert (root / "Deck.md.local").exists()
+    assert (root / "Deck.md.upstream").exists()
+    assert _git(source, "rev-parse", CONFLICT_LOCAL_REF).stdout.strip() == local
+    assert _git(source, "rev-parse", CONFLICT_UPSTREAM_REF).stdout.strip() == upstream
+    assert _git(source, "rev-parse", CONFLICT_BASE_REF).stdout.strip()
+
+
+def test_conflict_retry_uses_frozen_upstream_then_recommends_next_update(
+    collab_world, tmp_path, capsys
+):
+    collection, source, remote = collab_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
+        encoding="utf-8",
+    )
+    frozen = _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    later = tmp_path / "later"
+    _git(tmp_path, "clone", str(remote), str(later))
+    _configure(later, "Later Contributor")
+    (later / "README.md").write_text("later update\n", encoding="utf-8")
+    newest = _commit(later, "Later upstream update")
+    _git(later, "push", "origin", "main")
+    (_conflict_root(collection) / "Deck.md").write_text(
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: resolved answer\n",
+        encoding="utf-8",
     )
 
-    run_subscribe(SimpleNamespace(repository="owner/repo"))
+    run_update(SimpleNamespace(repository="owner/repo"))
 
-    assert GitRepository(shutil_source).is_repo()
-    assert _git(shutil_source, "branch", "--show-current").stdout.strip() == (
-        "ankiops/work"
+    output = capsys.readouterr().out
+    assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == frozen
+    assert "resolved frozen conflict" in output
+    assert "Integrate the newer update: ankiops collab update owner/repo" in output
+    assert "Apply to Anki: ankiops fa" in output
+    assert not _conflict_root(collection).exists()
+
+    run_update(SimpleNamespace(repository="owner/repo"))
+    assert _git(source, "rev-parse", INTEGRATED_REF).stdout.strip() == newest
+
+
+def test_submit_conflict_keeps_requested_title_across_newer_update(
+    collab_world, tmp_path, monkeypatch, capsys
+):
+    collection, source, remote = collab_world
+    publish = tmp_path / "title-fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
+        encoding="utf-8",
     )
-    assert _git(collection, "status", "--short").stdout == ""
+    frozen = _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
+
+    with pytest.raises(ValueError, match="Local contribution committed"):
+        run_submit(
+            SimpleNamespace(repository="owner/repo", title="Keep this exact title")
+        )
+
+    later = tmp_path / "title-later"
+    _git(tmp_path, "clone", str(remote), str(later))
+    _configure(later)
+    (later / "README.md").write_text("newer update\n", encoding="utf-8")
+    newest = _commit(later, "Newer upstream update")
+    _git(later, "push", "origin", "main")
+    (_conflict_root(collection) / "Deck.md").write_text(
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: resolved answer\n",
+        encoding="utf-8",
+    )
+
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+
+    repository = GitRepository(source)
+    snapshot = repository.ref_sha(SUBMISSION_REF)
+    assert snapshot is not None
+    assert repository.commit_message(snapshot).splitlines()[0] == (
+        "Keep this exact title"
+    )
+    assert repository.ref_sha(INTEGRATED_REF) == frozen
+    assert repository.remote_url("publish") is None
+    output = capsys.readouterr().out
+    assert "submission prepared locally" in output
+    assert "Integrate the newer update: ankiops collab update owner/repo" in output
+
+    run_update(SimpleNamespace(repository="owner/repo"))
+    assert repository.ref_sha(INTEGRATED_REF) == newest
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["state"] == "OPEN"
+    assert pull["title"] == "Keep this exact title"
 
 
-def test_publish_moves_deck_into_independent_repository(tmp_path, monkeypatch):
+def test_source_edits_are_rejected_while_conflict_is_pending(collab_world, tmp_path):
+    _collection, source, remote = collab_world
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
+        encoding="utf-8",
+    )
+    _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
+    deck.write_text(
+        deck.read_text(encoding="utf-8") + "source edit\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="Do not edit the subscribed source"):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+
+def test_binary_conflict_uses_placeholder_and_raw_evidence(collab_world, tmp_path):
+    collection, source, remote = collab_world
+    seed = tmp_path / "binary-seed"
+    _git(tmp_path, "clone", str(remote), str(seed))
+    _configure(seed)
+    (seed / "asset.bin").write_bytes(b"base\x00bytes")
+    _commit(seed, "Add binary")
+    _git(seed, "push", "origin", "main")
+    run_update(SimpleNamespace(repository="owner/repo"))
+    (source / "asset.bin").write_bytes(b"local\x00bytes")
+    upstream = tmp_path / "binary-upstream"
+    _git(tmp_path, "clone", str(remote), str(upstream))
+    _configure(upstream)
+    (upstream / "asset.bin").write_bytes(b"remote\x00bytes")
+    _commit(upstream, "Change binary")
+    _git(upstream, "push", "origin", "main")
+
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    root = _conflict_root(collection)
+    assert b"AnkiOps unresolved conflict" in (root / "asset.bin").read_bytes()
+    assert (root / "asset.bin.local").read_bytes() == b"local\x00bytes"
+    assert (root / "asset.bin.upstream").read_bytes() == b"remote\x00bytes"
+
+
+def test_delete_modify_conflict_can_resolve_to_deletion(collab_world, tmp_path):
+    collection, source, remote = collab_world
+    seed = tmp_path / "delete-seed"
+    _git(tmp_path, "clone", str(remote), str(seed))
+    _configure(seed)
+    (seed / "notes.txt").write_text("base\n", encoding="utf-8")
+    _commit(seed, "Add auxiliary notes")
+    _git(seed, "push", "origin", "main")
+    run_update(SimpleNamespace(repository="owner/repo"))
+    (source / "notes.txt").unlink()
+    _upstream_edit(tmp_path, remote, "base", "remote edit", filename="notes.txt")
+
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
+    resolution = _conflict_root(collection) / "notes.txt"
+    resolution.unlink()
+    run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert not (source / "notes.txt").exists()
+    assert _git(source, "status", "--short").stdout == ""
+
+
+def test_rename_conflict_preserves_both_names_and_accepts_one(collab_world, tmp_path):
+    collection, source, remote = collab_world
+    _git(source, "mv", "Deck.md", "Local.md")
+    upstream = tmp_path / "rename-upstream"
+    _git(tmp_path, "clone", str(remote), str(upstream))
+    _configure(upstream)
+    _git(upstream, "mv", "Deck.md", "Remote.md")
+    _commit(upstream, "Rename deck remotely")
+    _git(upstream, "push", "origin", "main")
+
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
+
+    root = _conflict_root(collection)
+    assert list(root.glob("Local.md.*"))
+    assert list(root.glob("Remote.md.*"))
+    local_resolution = root / "Local.md"
+    local_resolution.write_text(
+        "<!-- note_key: collab-key -->\nQ: collab question\nA: kept local name\n",
+        encoding="utf-8",
+    )
+    (root / "Remote.md").unlink(missing_ok=True)
+    (root / "Deck.md").unlink(missing_ok=True)
+    run_update(SimpleNamespace(repository="owner/repo"))
+
+    assert (source / "Local.md").exists()
+    assert not (source / "Remote.md").exists()
+    assert not (source / "Deck.md").exists()
+
+
+def _setup_publish_deck(tmp_path: Path) -> tuple[Path, Path, Path]:
     collection = _setup_collection(tmp_path)
     DeckFileHarness().eject_default_note_types(collection / "note_types")
     deck = collection / "Deck.md"
     deck.write_text(
-        "<!-- note_key: create-key -->\nQ: create\nA: answer\n",
+        "<!-- note_key: publish-key -->\nQ: publish\nA: answer\n",
         encoding="utf-8",
     )
-    _commit(collection, "Add private deck")
-    db = SyncState.open(collection)
-    db.upsert_note_links([("create-key", 123)])
-    db.upsert_deck("Deck", 456)
-    db.close()
-    remote = tmp_path / "created.git"
+    _commit(collection, "Add publish deck")
+    state = SyncState.open(collection)
+    state.upsert_note_links([("publish-key", 123)])
+    state.upsert_deck("Deck", 456)
+    state.close()
+    remote = tmp_path / "published.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
-    original_set_remote = GitRepository.set_remote
+    return collection, deck, remote
 
-    def local_remote(source_git, name, _url):
-        original_set_remote(source_git, name, str(remote))
+
+def _redirect_publish_remote(monkeypatch, remote: Path) -> None:
+    original = GitRepository.set_remote
+
+    def local_remote(repository, name, _url):
+        original(repository, name, str(remote))
 
     monkeypatch.setattr(GitRepository, "set_remote", local_remote)
     monkeypatch.setattr(
-        "ankiops.collab.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
+        "ankiops.collab.hosting.GitHubHost.repo_info",
+        lambda *_args: {"full_name": "owner/repo"},
     )
+
+
+def test_publish_handoff_is_git_native_and_clears_preparation(
+    tmp_path, monkeypatch, capsys
+):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
 
     run_publish(SimpleNamespace(deck="Deck", repository="owner/repo"))
 
-    source = collection / "collab" / "owner" / "repo"
+    source = GitRepository(collection / "collab" / "owner" / "repo")
     assert not deck.exists()
-    assert GitRepository(source).is_repo()
-    assert "collab/owner/repo/AnkiOpsQA" in (source / "Deck.md").read_text(
-        encoding="utf-8"
-    )
-    readme = (source / "README.md").read_text(encoding="utf-8")
-    assert readme.startswith("# Deck\n")
-    assert "ankiops collab subscribe owner/repo" in readme
-    assert "{{" not in readme
-    assert _git(remote, "show", "main:README.md").stdout == readme
-    assert _git(source, "branch", "--show-current").stdout.strip() == "ankiops/work"
-    assert _git(remote, "rev-parse", "refs/heads/main").stdout.strip()
-    db = SyncState.open(collection)
-    try:
-        assert db.resolve_note_sources(["create-key"])["create-key"] == (
-            "collab/owner/repo"
-        )
-        assert db.resolve_deck_source(456) == "collab/owner/repo"
-    finally:
-        db.close()
+    assert source.ref_sha(PUBLISH_PREPARED_REF) is None
+    assert source.config_get(PUBLISH_DECK_CONFIG) is None
+    assert source.ref_sha(INTEGRATED_REF) == source.head()
+    assert _git(remote, "rev-parse", "main").stdout.strip() == source.head()
+    assert "ankiops fa" not in capsys.readouterr().out
 
 
-def test_publish_retry_reuses_local_repository_after_push_failure(
-    tmp_path, monkeypatch
-):
-    collection = _setup_collection(tmp_path)
-    DeckFileHarness().eject_default_note_types(collection / "note_types")
-    deck = collection / "Deck.md"
-    deck.write_text(
-        "<!-- note_key: retry-key -->\nQ: retry\nA: answer\n",
-        encoding="utf-8",
-    )
-    _commit(collection, "Add retry deck")
-    remote = tmp_path / "retry.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(remote))
-    original_set_remote = GitRepository.set_remote
-    original_push = GitRepository.push
-    attempts = 0
-
-    def local_remote(source_git, name, _url):
-        original_set_remote(source_git, name, str(remote))
-
-    def fail_once(source_git, remote_name, source_ref, branch):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise subprocess.CalledProcessError(1, ["git", "push"])
-        original_push(source_git, remote_name, source_ref, branch)
-
-    monkeypatch.setattr(GitRepository, "set_remote", local_remote)
-    monkeypatch.setattr(GitRepository, "push", fail_once)
-    monkeypatch.setattr(
-        "ankiops.collab.publish.GitHubHost.create_repo", lambda *_args, **_kwargs: None
-    )
+def test_publish_retry_adopts_completed_push(tmp_path, monkeypatch):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
         "ankiops.collab.commands.require_collection_root", lambda: collection
     )
+    original_push = GitRepository.push
+    failed = False
+
+    def push_then_interrupt(repository, remote_name, source_ref, branch):
+        nonlocal failed
+        original_push(repository, remote_name, source_ref, branch)
+        if not failed:
+            failed = True
+            raise subprocess.CalledProcessError(1, ["git", "push"])
+
+    monkeypatch.setattr(GitRepository, "push", push_then_interrupt)
     args = SimpleNamespace(deck="Deck", repository="owner/repo")
 
-    with pytest.raises(ValueError, match="Retrying is safe"):
+    with pytest.raises(ValueError, match="Retry exactly: ankiops collab publish"):
         run_publish(args)
-    source = collection / "collab" / "owner" / "repo"
-    first_head = _git(source, "rev-parse", "HEAD").stdout.strip()
+    source = GitRepository(collection / "collab" / "owner" / "repo")
+    prepared = source.ref_sha(PUBLISH_PREPARED_REF)
+    assert prepared == _git(remote, "rev-parse", "main").stdout.strip()
+
     run_publish(args)
-
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == first_head
-    assert _git(source, "rev-list", "--count", "HEAD").stdout.strip() == "1"
     assert not deck.exists()
+    assert source.ref_sha(PUBLISH_PREPARED_REF) is None
 
 
-def test_update_checkpoints_local_edit_and_integrates_remote(collab_world, tmp_path):
-    collection, source, remote = collab_world
-    private_before = (collection / "Private.md").read_bytes()
-    (source / "Local.md").write_text(
-        "<!-- note_key: local-key -->\nQ: local\nA: edit\n", encoding="utf-8"
+def test_status_reports_prepared_publish_and_exact_retry(tmp_path, monkeypatch, capsys):
+    collection, _deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
+    monkeypatch.setattr(
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
-    _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
-
-    run_update(SimpleNamespace(repository="owner/repo"))
-
-    assert (source / "Local.md").exists()
-    assert "remote answer" in (source / "Deck.md").read_text(encoding="utf-8")
-    assert (collection / "Private.md").read_bytes() == private_before
-    assert (
-        "Save local deck changes for owner/repo"
-        in _git(source, "log", "--format=%s").stdout
-    )
-
-
-def test_conflict_preserves_versions_and_leaves_source_unchanged(
-    collab_world, tmp_path, caplog
-):
-    caplog.set_level(logging.INFO)
-    collection, source, remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
-        encoding="utf-8",
-    )
-    _git(source, "add", "Deck.md")
-    (source / "Draft.md").write_text("unstaged draft\n", encoding="utf-8")
-    before_head = _git(source, "rev-parse", "HEAD").stdout.strip()
-    before_status = _git(source, "status", "--porcelain=v1").stdout
-    before_deck = deck.read_bytes()
-    _upstream_edit(tmp_path, remote, "upstream answer", "github answer")
-
-    with pytest.raises(ValueError, match="failure"):
-        run_update(SimpleNamespace(repository="owner/repo"))
-
-    assert deck.read_bytes() == before_deck
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == before_head
-    assert _git(source, "status", "--porcelain=v1").stdout == before_status
-    conflicts = collection / ".ankiops" / "conflicts"
-    assert list(conflicts.rglob("Deck.md"))
-    assert list(conflicts.rglob("Deck.md.local"))
-    assert list(conflicts.rglob("Deck.md.upstream"))
-    assert list(conflicts.rglob("Deck.md.base"))
-    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
-
-
-def test_conflict_preserves_versions_for_unicode_deck_path(collab_world, tmp_path):
-    collection, source, remote = collab_world
-    deck_name = "Déck Ω — punctuation!.md"
-    _git(source, "mv", "Deck.md", deck_name)
-    _commit(source, "Rename collab deck with Unicode")
-    _git(source, "push", "upstream", "HEAD:main")
-
-    deck = source / deck_name
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "local Unicode answer"
-        ),
-        encoding="utf-8",
-    )
-    upstream = tmp_path / "unicode-upstream-edit"
-    _git(tmp_path, "clone", str(remote), str(upstream))
-    _configure(upstream, "Unicode Upstream")
-    upstream_deck = upstream / deck_name
-    upstream_deck.write_text(
-        upstream_deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "upstream Unicode answer"
-        ),
-        encoding="utf-8",
-    )
-    _commit(upstream, "Edit Unicode deck upstream")
-    _git(upstream, "push", "origin", "main")
-
-    with pytest.raises(ValueError, match=deck_name):
-        run_update(SimpleNamespace(repository="owner/repo"))
-
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        conflict_root = Path(str(operation["recovery_ref"]))
-    finally:
-        db.close()
-    assert (conflict_root / deck_name).read_text(encoding="utf-8")
-    for suffix in ("base", "local", "upstream"):
-        assert (conflict_root / f"{deck_name}.{suffix}").read_text(encoding="utf-8")
-
-
-def test_conflict_can_be_resolved_by_editing_preserved_markdown_and_retrying_update(
-    collab_world, tmp_path
-):
-    collection, source, remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
-        encoding="utf-8",
-    )
-    _upstream_edit(tmp_path, remote, "upstream answer", "github answer")
-    with pytest.raises(ValueError):
-        run_update(SimpleNamespace(repository="owner/repo"))
-    conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
-    conflict_file.write_text(
-        "<!-- note_key: collab-key -->\nQ: collab question\nA: combined answer\n",
-        encoding="utf-8",
-    )
-
-    run_update(SimpleNamespace(repository="owner/repo"))
-
-    assert not GitRepository(source).unmerged_paths()
-    assert "combined answer" in deck.read_text(encoding="utf-8")
-    assert not list((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
-    db = SyncState.open(collection)
-    try:
-        assert db.get_collab_operation("collab/owner/repo") is None
-    finally:
-        db.close()
-
-
-def test_submit_conflict_is_resumed_with_update(collab_world, tmp_path):
-    collection, source, remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "local contribution"
-        ),
-        encoding="utf-8",
-    )
-    _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
-
-    with pytest.raises(ValueError, match="collab update owner/repo"):
-        run_submit(SimpleNamespace(repository="owner/repo", message=None))
-
-    conflict_file = next((collection / ".ankiops" / "conflicts").rglob("Deck.md"))
-    conflict_file.write_text(
-        "<!-- note_key: collab-key -->\nQ: collab question\nA: combined\n",
-        encoding="utf-8",
-    )
-    run_update(SimpleNamespace(repository="owner/repo"))
-
-    assert "combined" in deck.read_text(encoding="utf-8")
-    db = SyncState.open(collection)
-    try:
-        assert db.get_collab_operation("collab/owner/repo") is None
-    finally:
-        db.close()
-
-
-def test_failed_update_fetch_leaves_repository_exactly_unchanged(
-    collab_world, monkeypatch
-):
-    collection, source, _remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "local edit"),
-        encoding="utf-8",
-    )
-    _git(source, "add", "Deck.md")
-    before_head = _git(source, "rev-parse", "HEAD").stdout
-    before_status = _git(source, "status", "--porcelain=v1").stdout
-    before_bytes = deck.read_bytes()
     monkeypatch.setattr(
         GitRepository,
-        "fetch",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            subprocess.CalledProcessError(1, ["git", "fetch"])
+        "push",
+        lambda *_args: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, ["git", "push"])
         ),
     )
+    args = SimpleNamespace(deck="Deck", repository="owner/repo")
+    with pytest.raises(ValueError):
+        run_publish(args)
 
-    with pytest.raises(ValueError, match="Retrying is safe"):
-        run_update(SimpleNamespace(repository="owner/repo"))
+    run_status(SimpleNamespace(repository="owner/repo"))
 
-    assert _git(source, "rev-parse", "HEAD").stdout == before_head
-    assert _git(source, "status", "--porcelain=v1").stdout == before_status
-    assert deck.read_bytes() == before_bytes
-    db = SyncState.open(collection)
+    output = capsys.readouterr().out
+    assert "Publish: prepared; handoff incomplete" in output
+    assert "Retry publish: ankiops collab publish Deck owner/repo" in output
+
+
+def test_publish_retry_finishes_interrupted_ownership_transfer(tmp_path, monkeypatch):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
+    monkeypatch.setattr(
+        "ankiops.collab.commands.require_collection_root", lambda: collection
+    )
+    from ankiops.collab import publish as publish_module
+
+    original_transfer = publish_module._transfer_sync_ownership
+    failed = False
+
+    def fail_once(root, plan):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise ValueError("simulated ownership interruption")
+        original_transfer(root, plan)
+
+    monkeypatch.setattr(publish_module, "_transfer_sync_ownership", fail_once)
+    args = SimpleNamespace(deck="Deck", repository="owner/repo")
+
+    with pytest.raises(ValueError, match="Prepared repository"):
+        run_publish(args)
+    assert not deck.exists()
+    run_publish(args)
+    state = SyncState.open(collection)
     try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "integrating"
+        assert state.resolve_note_sources(["publish-key"])["publish-key"] == (
+            "collab/owner/repo"
+        )
     finally:
-        db.close()
+        state.close()
 
 
-def test_submit_commits_only_source_and_reuses_operation(
-    collab_world, tmp_path, monkeypatch
-):
-    collection, source, _remote = collab_world
-    publish = tmp_path / "fork.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    private = collection / "Private.md"
-    private.write_text("private dirty\n", encoding="utf-8")
-    (source / "Deck.md").write_text(
-        (source / "Deck.md")
-        .read_text(encoding="utf-8")
-        .replace("upstream answer", "submitted answer"),
-        encoding="utf-8",
-    )
-
-    original_set_remote = GitRepository.set_remote
-
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+def test_publish_retry_finishes_after_root_removal(tmp_path, monkeypatch):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
+        "ankiops.collab.commands.require_collection_root", lambda: collection
     )
-    created_pr = []
-
-    def create_pr(*_args, **kwargs):
-        created_pr.append(kwargs)
-        return "https://github.test/owner/repo/pull/1"
-
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        create_pr,
-    )
-
-    args = SimpleNamespace(repository="owner/repo", message="Clarify collab answer")
-    run_submit(args)
-    first_head = _git(source, "rev-parse", "HEAD").stdout.strip()
-    first_refs = _git(publish, "for-each-ref", "--format=%(refname)").stdout
-    run_submit(args)
-
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == first_head
-    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout == first_refs
-    assert created_pr[0]["head"].startswith("contributor:ankiops/")
-    assert _git(source, "log", "-1", "--format=%s").stdout.strip() == (
-        "Save local deck changes for owner/repo"
-    )
-    assert private.read_text(encoding="utf-8") == "private dirty\n"
-    assert _git(collection, "status", "--short").stdout.strip() == "M Private.md"
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "pr_open"
-        assert operation["pr_url"] == "https://github.test/owner/repo/pull/1"
-    finally:
-        db.close()
-
-
-def test_submit_retry_after_failed_integration(collab_world, tmp_path, monkeypatch):
-    _collection, source, _remote = collab_world
-    publish = tmp_path / "integration-retry.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "integration retry answer"
-        ),
-        encoding="utf-8",
-    )
-    original_fetch = GitRepository.fetch
-    original_set_remote = GitRepository.set_remote
-    fetches = 0
-
-    def fail_once(source_git, remote_name):
-        nonlocal fetches
-        fetches += 1
-        if fetches == 1:
-            raise subprocess.CalledProcessError(1, ["git", "fetch"])
-        original_fetch(source_git, remote_name)
-
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    monkeypatch.setattr(GitRepository, "fetch", fail_once)
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/integration",
-    )
-    args = SimpleNamespace(repository="owner/repo", message="Retry integration")
-
-    with pytest.raises(ValueError, match="Retrying is safe"):
-        run_submit(args)
-    run_submit(args)
-
-    assert fetches == 2
-    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout.strip()
-
-
-def test_submit_retry_after_interruption_while_applying(
-    collab_world, tmp_path, monkeypatch
-):
-    collection, source, _remote = collab_world
-    publish = tmp_path / "apply-retry.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "apply retry answer"
-        ),
-        encoding="utf-8",
-    )
-    original_reset_hard = GitRepository.reset_hard
-    original_set_remote = GitRepository.set_remote
+    original_commit_paths = GitRepository.commit_paths
     interrupted = False
 
-    def interrupt_after_reset(source_git, ref):
+    def interrupt_collection_commit(repository, paths, message):
         nonlocal interrupted
-        original_reset_hard(source_git, ref)
-        if source_git.root == source and not interrupted:
+        if repository.root == collection and not interrupted:
             interrupted = True
-            raise KeyboardInterrupt
+            raise ValueError("simulated interruption after root removal")
+        return original_commit_paths(repository, paths, message)
 
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
+    monkeypatch.setattr(GitRepository, "commit_paths", interrupt_collection_commit)
+    args = SimpleNamespace(deck="Deck", repository="owner/repo")
 
-    monkeypatch.setattr(GitRepository, "reset_hard", interrupt_after_reset)
+    with pytest.raises(ValueError, match="Prepared repository"):
+        run_publish(args)
+    assert not deck.exists()
+
+    run_publish(args)
+    source = GitRepository(collection / "collab" / "owner" / "repo")
+    assert source.ref_sha(PUBLISH_PREPARED_REF) is None
+
+
+def test_publish_retry_finishes_interrupted_preparation_cleanup(tmp_path, monkeypatch):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    _redirect_publish_remote(monkeypatch, remote)
+    monkeypatch.setattr(
+        "ankiops.collab.commands.require_collection_root", lambda: collection
+    )
+    original_unset = GitRepository.config_unset
+    interrupted = False
+
+    def interrupt_cleanup(repository, key):
+        nonlocal interrupted
+        if key == PUBLISH_DECK_CONFIG and not interrupted:
+            interrupted = True
+            raise ValueError("simulated interruption during preparation cleanup")
+        return original_unset(repository, key)
+
+    monkeypatch.setattr(GitRepository, "config_unset", interrupt_cleanup)
+    args = SimpleNamespace(deck="Deck", repository="owner/repo")
+
+    with pytest.raises(ValueError, match="Prepared repository"):
+        run_publish(args)
+    source = GitRepository(collection / "collab" / "owner" / "repo")
+    assert source.ref_sha(PUBLISH_PREPARED_REF) is None
+    assert source.config_get(PUBLISH_DECK_CONFIG) == "Deck"
+    assert not deck.exists()
+
+    run_publish(args)
+    assert source.config_get(PUBLISH_DECK_CONFIG) is None
+
+
+def test_publish_never_overwrites_unrelated_local_or_remote_repository(
+    tmp_path, monkeypatch
+):
+    collection, deck, remote = _setup_publish_deck(tmp_path)
+    source = collection / "collab" / "owner" / "repo"
+    source.mkdir(parents=True)
+    (source / "mine.txt").write_text("mine\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "ankiops.collab.commands.require_collection_root", lambda: collection
+    )
+    with pytest.raises(ValueError, match="not a Git repository"):
+        run_publish(SimpleNamespace(deck="Deck", repository="owner/repo"))
+    assert deck.exists()
+    assert (source / "mine.txt").exists()
+
+    shutil.rmtree(source)
+    unrelated = tmp_path / "unrelated"
+    _git(tmp_path, "clone", str(remote), str(unrelated))
+    _configure(unrelated)
+    (unrelated / "unrelated.txt").write_text("remote data\n", encoding="utf-8")
+    _commit(unrelated, "Unrelated history")
+    _git(unrelated, "push", "origin", "main")
+    _redirect_publish_remote(monkeypatch, remote)
+    with pytest.raises(ValueError, match="unrelated content"):
+        run_publish(SimpleNamespace(deck="Deck", repository="owner/repo"))
+    assert deck.exists()
+    assert (source / "Deck.md").exists()
+
+
+def _mock_submission_github(monkeypatch, publish: Path):
+    original_set_remote = GitRepository.set_remote
+    pull = {
+        "state": None,
+        "url": "https://github.test/owner/repo/pull/1",
+        "title": None,
+    }
+
+    def local_publish(repository, name, _url):
+        original_set_remote(repository, name, str(publish))
+
+    def remote_sha() -> str:
+        result = _git(
+            publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}", check=False
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def pull_request(*_args):
+        if pull["state"] is None:
+            return None
+        return PullRequestInfo(
+            url=str(pull["url"]),
+            state=str(pull["state"]),
+            title=str(pull["title"] or ""),
+            head_sha=remote_sha(),
+        )
+
+    def create_pr(*_args, **kwargs):
+        pull["state"] = "OPEN"
+        pull["title"] = kwargs["title"]
+        return pull["url"]
+
+    def update_pr(_self, _url, *, title):
+        pull["title"] = title
+
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
+    monkeypatch.setattr(
+        "ankiops.collab.commands._github_slug_from_remote",
+        lambda url: "contributor/repo" if url == str(publish) else None,
+    )
     monkeypatch.setattr(
         "ankiops.collab.commands.GitHubHost.publish_target",
         lambda *_args: ("contributor/repo", "contributor"),
     )
     monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/apply",
+        "ankiops.collab.commands.GitHubHost.find_pull_request", pull_request
     )
-    args = SimpleNamespace(repository="owner/repo", message="Retry apply")
-
-    with pytest.raises(KeyboardInterrupt):
-        run_submit(args)
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "applying"
-    finally:
-        db.close()
-
-    run_submit(args)
-
-    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout.strip()
+    monkeypatch.setattr("ankiops.collab.commands.GitHubHost.create_pr", create_pr)
+    monkeypatch.setattr("ankiops.collab.commands.GitHubHost.update_pr", update_pr)
+    return pull
 
 
-def test_submit_retry_after_failed_pr_reuses_pushed_branch(
-    collab_world, tmp_path, monkeypatch
+def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
+    collab_world, tmp_path, monkeypatch, capsys
 ):
-    collection, source, _remote = collab_world
-    publish = tmp_path / "pr-retry.git"
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
     deck = source / "Deck.md"
     deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "PR retry answer"),
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
         encoding="utf-8",
     )
-    original_set_remote = GitRepository.set_remote
+    _git(source, "add", "Deck.md")
+    (source / "draft.txt").write_text("untracked\n", encoding="utf-8")
+    (source / ".gitignore").write_text("scratch.tmp\n", encoding="utf-8")
+    (source / "scratch.tmp").write_text("ignored\n", encoding="utf-8")
+    args = SimpleNamespace(repository="owner/repo", title="Improve shared deck")
 
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    calls = 0
-
-    def fail_once(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise ValueError("simulated PR failure")
-        return "https://github.test/owner/repo/pull/2"
-
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
-    )
-    monkeypatch.setattr("ankiops.collab.commands.GitHubHost.create_pr", fail_once)
-    args = SimpleNamespace(repository="owner/repo", message="Retry PR")
-
-    with pytest.raises(ValueError, match="reached GitHub"):
-        run_submit(args)
-    refs_after_failure = _git(
-        publish, "for-each-ref", "--format=%(refname):%(objectname)"
-    ).stdout
-    head_after_failure = _git(source, "rev-parse", "HEAD").stdout.strip()
     run_submit(args)
 
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == head_after_failure
-    assert (
-        _git(publish, "for-each-ref", "--format=%(refname):%(objectname)").stdout
-        == refs_after_failure
+    repository = GitRepository(source)
+    remote = _git(
+        publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}"
+    ).stdout.strip()
+    assert repository.ref_sha(SUBMISSION_REF) == remote
+    assert repository.commit_message(SUBMISSION_REF).splitlines()[0] == (
+        "Improve shared deck"
     )
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "pr_open"
-        assert operation["pr_url"] == "https://github.test/owner/repo/pull/2"
-    finally:
-        db.close()
+    assert _git(publish, "show", f"{remote}:draft.txt").stdout == "untracked\n"
+    assert _git(publish, "show", f"{remote}:scratch.tmp", check=False).returncode != 0
+    assert pull["state"] == "OPEN"
+    assert "pull request opened" in capsys.readouterr().out
+
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert "pull request open" in capsys.readouterr().out
 
 
-def test_submit_retry_after_failed_push_reuses_commit_and_branch(
-    collab_world, tmp_path, monkeypatch
-):
-    collection, source, _remote = collab_world
-    publish = tmp_path / "push-retry.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "push retry answer"
-        ),
-        encoding="utf-8",
-    )
-    original_set_remote = GitRepository.set_remote
-    original_push = GitRepository.push
-    pushes = 0
-
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    def fail_once(source_git, remote_name, source_ref, branch):
-        nonlocal pushes
-        pushes += 1
-        if pushes == 1:
-            raise subprocess.CalledProcessError(1, ["git", "push"])
-        original_push(source_git, remote_name, source_ref, branch)
-
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(GitRepository, "push", fail_once)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/3",
-    )
-    args = SimpleNamespace(repository="owner/repo", message="Retry push")
-
-    with pytest.raises(ValueError, match="did not reach GitHub"):
-        run_submit(args)
-    failed_head = _git(source, "rev-parse", "HEAD").stdout.strip()
-    db = SyncState.open(collection)
-    try:
-        failed_operation = db.get_collab_operation("collab/owner/repo")
-        assert failed_operation is not None
-        branch = failed_operation["publish_branch"]
-        assert failed_operation["state"] == "push_failed"
-    finally:
-        db.close()
-    run_submit(args)
-
-    assert _git(source, "rev-parse", "HEAD").stdout.strip() == failed_head
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["publish_branch"] == branch
-        assert operation["state"] == "pr_open"
-    finally:
-        db.close()
-
-
-def test_submit_retry_after_interruption_after_push(
+def test_submit_retry_force_pushes_again_after_interrupted_push(
     collab_world, tmp_path, monkeypatch
 ):
     _collection, source, _remote = collab_world
-    publish = tmp_path / "pushed-retry.git"
+    publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
     deck = source / "Deck.md"
     deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "pushed retry answer"
-        ),
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
         encoding="utf-8",
     )
-    original_set_remote = GitRepository.set_remote
-    original_push = GitRepository.push
+    original_push = GitRepository.push_force
+    interrupted = False
     pushes = 0
 
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    def interrupt_after_push(source_git, remote_name, source_ref, branch):
-        nonlocal pushes
+    def push_then_interrupt(repository, remote_name, source_ref, branch):
+        nonlocal interrupted, pushes
         pushes += 1
-        original_push(source_git, remote_name, source_ref, branch)
-        if pushes == 1:
-            raise KeyboardInterrupt
+        original_push(repository, remote_name, source_ref, branch)
+        if branch == CONTRIBUTION_BRANCH and not interrupted:
+            interrupted = True
+            raise subprocess.CalledProcessError(1, ["git", "push"])
 
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(GitRepository, "push", interrupt_after_push)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/pushed",
-    )
-    args = SimpleNamespace(repository="owner/repo", message="Retry pushed commit")
+    monkeypatch.setattr(GitRepository, "push_force", push_then_interrupt)
+    args = SimpleNamespace(repository="owner/repo", title="Retry title")
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(ValueError, match="Submission prepared locally"):
         run_submit(args)
-    run_submit(args)
+    repository = GitRepository(source)
+    assert _git(
+        publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}"
+    ).stdout.strip() == repository.ref_sha(SUBMISSION_REF)
 
-    assert pushes == 1
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["state"] == "OPEN"
+    assert pushes == 2
 
 
-def test_submit_retry_after_interruption_after_pr_creation(
+def test_submit_retry_reuses_pr_created_before_interruption(
     collab_world, tmp_path, monkeypatch
 ):
-    collection, source, _remote = collab_world
-    publish = tmp_path / "pr-created-retry.git"
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
     deck = source / "Deck.md"
     deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "PR-created retry answer"
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
+        encoding="utf-8",
+    )
+    interrupted = False
+    pushes = []
+    original_push = GitRepository.push_force
+
+    def record_push(repository, remote_name, source_ref, branch):
+        pushes.append(source_ref)
+        original_push(repository, remote_name, source_ref, branch)
+
+    def create_then_interrupt(*_args, **kwargs):
+        nonlocal interrupted
+        pull["state"] = "OPEN"
+        pull["title"] = kwargs["title"]
+        if not interrupted:
+            interrupted = True
+            raise ValueError("lost response after creation")
+        return pull["url"]
+
+    monkeypatch.setattr(
+        "ankiops.collab.commands.GitHubHost.create_pr", create_then_interrupt
+    )
+    monkeypatch.setattr(GitRepository, "push_force", record_push)
+    args = SimpleNamespace(repository="owner/repo", title="Recovered PR")
+
+    with pytest.raises(ValueError, match="Submission pushed"):
+        run_submit(args)
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["state"] == "OPEN"
+    assert len(pushes) == 2
+
+
+def test_submit_retry_restores_title_after_interrupted_pr_update(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "first answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title="First title"))
+
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("first answer", "revised answer"),
+        encoding="utf-8",
+    )
+    original_update = GitHubHost.update_pr
+    interrupted = False
+
+    def interrupt_update(host, url, *, title):
+        nonlocal interrupted
+        if not interrupted:
+            interrupted = True
+            raise ValueError("lost response before title update")
+        original_update(host, url, title=title)
+
+    monkeypatch.setattr(GitHubHost, "update_pr", interrupt_update)
+
+    with pytest.raises(ValueError, match="Submission pushed"):
+        run_submit(SimpleNamespace(repository="owner/repo", title="Revised title"))
+    assert pull["title"] == "First title"
+
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["title"] == "Revised title"
+
+
+def test_new_submission_retry_ignores_historic_merged_pr(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, upstream_remote = collab_world
+    publish = tmp_path / "reused-fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "first answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title="First round"))
+    first_snapshot = GitRepository(source).ref_sha(SUBMISSION_REF)
+
+    merged = tmp_path / "first-merged"
+    _git(tmp_path, "clone", str(upstream_remote), str(merged))
+    _configure(merged)
+    merged_deck = merged / "Deck.md"
+    merged_deck.write_text(
+        merged_deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "first answer"
         ),
         encoding="utf-8",
     )
-    original_set_remote = GitRepository.set_remote
-    pr_calls = 0
-    created_pr = None
+    _commit(merged, "Merge first contribution")
+    _git(merged, "push", "origin", "main")
+    pull["state"] = "MERGED"
+    run_update(SimpleNamespace(repository="owner/repo"))
 
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
-
-    def interrupt_after_pr(*_args, **_kwargs):
-        nonlocal created_pr, pr_calls
-        pr_calls += 1
-        if created_pr is None:
-            created_pr = "https://github.test/owner/repo/pull/existing"
-            raise KeyboardInterrupt
-        return created_pr
-
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
-    )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr", interrupt_after_pr
-    )
-    args = SimpleNamespace(repository="owner/repo", message="Retry created PR")
-
-    with pytest.raises(KeyboardInterrupt):
-        run_submit(args)
-    run_submit(args)
-
-    assert pr_calls == 2
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "pr_open"
-        assert operation["pr_url"] == "https://github.test/owner/repo/pull/existing"
-    finally:
-        db.close()
-
-
-def test_update_after_squash_merge_cleans_submission_state(
-    collab_world, tmp_path, monkeypatch
-):
-    collection, source, upstream_remote = collab_world
-    publish = tmp_path / "merged-fork.git"
-    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
-    deck = source / "Deck.md"
     deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "merged answer"),
+        deck.read_text(encoding="utf-8").replace("first answer", "second answer"),
         encoding="utf-8",
     )
-    original_set_remote = GitRepository.set_remote
+    original_push = GitRepository.push_force
+    interrupted = False
 
-    def local_publish(source_git, name, _url):
-        original_set_remote(source_git, name, str(publish))
+    def interrupt_before_push(repository, remote_name, source_ref, branch):
+        nonlocal interrupted
+        if branch == CONTRIBUTION_BRANCH and not interrupted:
+            interrupted = True
+            raise subprocess.CalledProcessError(1, ["git", "push"])
+        return original_push(repository, remote_name, source_ref, branch)
 
-    monkeypatch.setattr(GitRepository, "set_remote", local_publish)
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: ("contributor/repo", "contributor"),
+    monkeypatch.setattr(GitRepository, "push_force", interrupt_before_push)
+    with pytest.raises(ValueError, match="Submission prepared locally"):
+        run_submit(SimpleNamespace(repository="owner/repo", title="Second round"))
+
+    repository = GitRepository(source)
+    second_snapshot = repository.ref_sha(SUBMISSION_REF)
+    assert second_snapshot != first_snapshot
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    assert pull["state"] == "OPEN"
+    assert pull["title"] == "Second round"
+
+
+def test_closed_submission_reuses_the_managed_branch(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "closed-fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
+        encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.create_pr",
-        lambda *_args, **_kwargs: "https://github.test/owner/repo/pull/4",
-    )
-    run_submit(SimpleNamespace(repository="owner/repo", message="Merged change"))
+    run_submit(SimpleNamespace(repository="owner/repo", title="Closed round"))
+    repository = GitRepository(source)
+    first_snapshot = repository.ref_sha(SUBMISSION_REF)
+    pull["state"] = "CLOSED"
+    deck.write_text(deck.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
-    merged = tmp_path / "squash-merge"
+    run_submit(SimpleNamespace(repository="owner/repo", title="Replacement round"))
+
+    replacement = repository.ref_sha(SUBMISSION_REF)
+    assert replacement != first_snapshot
+    assert (
+        _git(publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}").stdout.strip()
+        == replacement
+    )
+    assert pull["state"] == "OPEN"
+    assert pull["title"] == "Replacement round"
+
+
+def test_submit_force_replaces_managed_branch_and_reuses_open_pr(
+    collab_world, tmp_path, monkeypatch, capsys
+):
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+
+    attacker = tmp_path / "branch-editor"
+    _git(tmp_path, "clone", str(publish), str(attacker))
+    _configure(attacker)
+    _git(attacker, "checkout", CONTRIBUTION_BRANCH)
+    (attacker / "README.md").write_text("changed remotely\n", encoding="utf-8")
+    changed = _commit(attacker, "Remote branch edit")
+    _git(attacker, "push", "origin", CONTRIBUTION_BRANCH)
+
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+
+    snapshot = GitRepository(source).ref_sha(SUBMISSION_REF)
+    assert snapshot != changed
+    assert _git(publish, "rev-parse", CONTRIBUTION_BRANCH).stdout.strip() == snapshot
+    assert pull["state"] == "OPEN"
+    assert "pull request updated" in capsys.readouterr().out
+
+
+def test_status_reports_open_and_locally_revised_submission(
+    collab_world, tmp_path, monkeypatch, capsys
+):
+    _collection, source, _remote = collab_world
+    publish = tmp_path / "fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    capsys.readouterr()
+
+    run_status(SimpleNamespace(repository="owner/repo"))
+    output = capsys.readouterr().out
+    assert "Submission: pull request open" in output
+    assert "Next" not in output
+
+    deck.write_text(deck.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    run_status(SimpleNamespace(repository="owner/repo"))
+    assert "Update pull request: ankiops collab submit owner/repo" in (
+        capsys.readouterr().out
+    )
+
+
+def test_merged_submission_updates_from_snapshot_base_and_clears_local_ref(
+    collab_world, tmp_path, monkeypatch
+):
+    _collection, source, upstream_remote = collab_world
+    publish = tmp_path / "fork.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
+    pull = _mock_submission_github(monkeypatch, publish)
+    deck = source / "Deck.md"
+    deck.write_text(
+        deck.read_text(encoding="utf-8").replace("upstream answer", "submitted answer"),
+        encoding="utf-8",
+    )
+    run_submit(SimpleNamespace(repository="owner/repo", title=None))
+    submitted_snapshot = GitRepository(source).ref_sha(SUBMISSION_REF)
+    merged = tmp_path / "merged"
     _git(tmp_path, "clone", str(upstream_remote), str(merged))
-    _configure(merged, "Maintainer")
-    (merged / "Deck.md").write_bytes(deck.read_bytes())
-    _commit(merged, "Squash merged contribution")
+    _configure(merged)
+    merged_deck = merged / "Deck.md"
+    merged_deck.write_text(
+        merged_deck.read_text(encoding="utf-8").replace(
+            "upstream answer", "submitted answer"
+        ),
+        encoding="utf-8",
+    )
+    _commit(merged, "Merge contribution")
     _git(merged, "push", "origin", "main")
+    pull["state"] = "MERGED"
 
     run_update(SimpleNamespace(repository="owner/repo"))
 
-    db = SyncState.open(collection)
-    try:
-        assert db.get_collab_operation("collab/owner/repo") is None
-    finally:
-        db.close()
-    assert _git(publish, "for-each-ref", "--format=%(refname)").stdout == ""
-
-
-def test_submit_auth_failure_reports_simple_retry(collab_world, monkeypatch):
-    collection, source, _remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "locally committed answer"
-        ),
-        encoding="utf-8",
+    repository = GitRepository(source)
+    assert repository.ref_sha(SUBMISSION_REF) is None
+    assert (
+        _git(publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}").stdout.strip()
+        == submitted_snapshot
     )
-    monkeypatch.setattr(
-        "ankiops.collab.commands.GitHubHost.publish_target",
-        lambda *_args: (_ for _ in ()).throw(
-            ValueError("GitHub CLI is not authenticated. Run: gh auth login")
-        ),
-    )
-
-    with pytest.raises(ValueError) as error:
-        run_submit(SimpleNamespace(repository="owner/repo", message="Local change"))
-
-    message = str(error.value)
-    assert "was committed locally" in message
-    assert "Nothing was uploaded" in message
-    assert "Retrying is safe: ankiops collab submit owner/repo" in message
-    db = SyncState.open(collection)
-    try:
-        operation = db.get_collab_operation("collab/owner/repo")
-        assert operation is not None
-        assert operation["state"] == "ready"
-    finally:
-        db.close()
-    assert _git(source, "branch", "--list", "ankiops/*").stdout.strip() == (
-        "* ankiops/work"
-    )
+    assert "submitted answer" in deck.read_text(encoding="utf-8")
 
 
-def test_status_reports_local_state_when_fetch_fails(collab_world, monkeypatch, caplog):
-    caplog.set_level(logging.INFO)
-    _collection, source, _remote = collab_world
-    (source / "Draft.md").write_text("draft\n", encoding="utf-8")
-    monkeypatch.setattr(
-        GitRepository,
-        "fetch",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            subprocess.CalledProcessError(1, ["git", "fetch"])
-        ),
-    )
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert "Working tree: 1 changed path" in caplog.text
-    assert "Upstream: unavailable" in caplog.text
-    assert "collection changes" not in caplog.text.lower()
-    assert "Retry status: ankiops collab status owner/repo" in caplog.text
-
-
-def test_status_reports_committed_local_contribution(collab_world, caplog):
-    caplog.set_level(logging.INFO)
-    _collection, source, _remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "locally committed answer"
-        ),
-        encoding="utf-8",
-    )
-    _commit(source, "Local contribution")
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert "Collab status: owner/repo" in caplog.text
-    assert "Working tree: clean" in caplog.text
-    assert "Local contribution: 1 commit ready to submit" in caplog.text
-    assert "Upstream: up to date" in caplog.text
-    assert "Anki: changes not applied" in caplog.text
-    assert "Apply to Anki: ankiops fa" in caplog.text
-    assert "Submit contribution: ankiops collab submit owner/repo" in caplog.text
-
-
-def test_status_reports_available_upstream_update(collab_world, tmp_path, caplog):
-    caplog.set_level(logging.INFO)
-    _collection, _source, remote = collab_world
-    _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert "Local contribution: none" in caplog.text
-    assert "Upstream: 1 commit available" in caplog.text
-    assert "Integrate upstream: ankiops collab update owner/repo" in caplog.text
-    assert "Submit contribution:" not in caplog.text
-
-
-def test_status_reports_diverged_contributions(collab_world, tmp_path, caplog):
-    caplog.set_level(logging.INFO)
+def test_status_reports_frozen_conflict_and_exact_retry(collab_world, tmp_path, capsys):
     _collection, source, remote = collab_world
-    (source / "Local.md").write_text("local\n", encoding="utf-8")
-    _commit(source, "Local contribution")
-    _upstream_edit(tmp_path, remote, "upstream answer", "upstream correction")
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert "Local contribution: 1 commit ready to submit" in caplog.text
-    assert "Upstream: 1 commit available; update before submitting" in caplog.text
-    assert "Integrate upstream: ankiops collab update owner/repo" in caplog.text
-    assert "Submit contribution:" not in caplog.text
-
-
-def test_status_reports_contribution_accepted_upstream(collab_world, tmp_path, caplog):
-    caplog.set_level(logging.INFO)
-    collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
-        deck.read_text(encoding="utf-8").replace("upstream answer", "accepted answer"),
+        deck.read_text(encoding="utf-8").replace("upstream answer", "local answer"),
         encoding="utf-8",
     )
-    prepared_head = _commit(source, "Local contribution")
-    upstream_tree = _git(source, "rev-parse", "upstream/main^{tree}").stdout.strip()
-    _upstream_edit(tmp_path, remote, "upstream answer", "accepted answer")
-    db = SyncState.open(collection)
-    try:
-        db.save_collab_operation(
-            "collab/owner/repo",
-            "accepted-operation",
-            "submit",
-            "pr_open",
-            prepared_head=prepared_head,
-            upstream_tree=upstream_tree,
-            publish_branch="ankiops/accepted-operation",
-            pr_url="https://github.test/owner/repo/pull/1",
-        )
-    finally:
-        db.close()
+    _upstream_edit(tmp_path, remote, "upstream answer", "remote answer")
+    with pytest.raises(ValueError):
+        run_update(SimpleNamespace(repository="owner/repo"))
 
     run_status(SimpleNamespace(repository="owner/repo"))
 
-    assert "Local contribution: none" in caplog.text
-    assert "Upstream: up to date" in caplog.text
-    assert "Submission: accepted upstream; cleanup pending" in caplog.text
-    assert "Finalize submission: ankiops collab update owner/repo" in caplog.text
-    assert "Review pull request:" not in caplog.text
-
-
-def test_status_omits_unrelated_collection_changes(collab_world, caplog):
-    caplog.set_level(logging.INFO)
-    collection, _source, _remote = collab_world
-    private_deck = collection / "Private.md"
-    private_deck.write_text("private edit\n", encoding="utf-8")
-    generated_config = collection / "note_types" / "Generated.yaml"
-    generated_config.parent.mkdir()
-    generated_config.write_text("generated\n", encoding="utf-8")
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert "collection changes" not in caplog.text.lower()
-    assert "Private.md" not in caplog.text
-    assert "Generated.yaml" not in caplog.text
-
-
-def test_status_prints_unicode_collab_paths_without_git_quoting(collab_world, caplog):
-    caplog.set_level(logging.INFO)
-    _collection, source, _remote = collab_world
-    unicode_name = "Déck Ω — punctuation!.md"
-    (source / unicode_name).write_text("draft\n", encoding="utf-8")
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert unicode_name in caplog.text
-    assert "\\303" not in caplog.text
-
-
-@pytest.mark.parametrize(
-    ("state", "submission_status"),
-    [
-        ("push_failed", "not uploaded"),
-        ("pr_failed", "uploaded; pull request not created"),
-    ],
-)
-def test_status_gives_submit_retry_as_next_command(
-    collab_world, caplog, state, submission_status
-):
-    caplog.set_level(logging.INFO)
-    collection, source, _remote = collab_world
-    deck = source / "Deck.md"
-    deck.write_text(
-        deck.read_text(encoding="utf-8").replace(
-            "upstream answer", "local contribution"
-        ),
-        encoding="utf-8",
-    )
-    prepared_head = _commit(source, "Local contribution")
-    db = SyncState.open(collection)
-    try:
-        db.save_collab_operation(
-            "collab/owner/repo",
-            "retry-operation",
-            "submit",
-            state,
-            upstream_tree=_git(
-                source, "rev-parse", "upstream/main^{tree}"
-            ).stdout.strip(),
-            prepared_head=prepared_head,
-            publish_branch="ankiops/retry-operation",
-        )
-    finally:
-        db.close()
-
-    run_status(SimpleNamespace(repository="owner/repo"))
-
-    assert f"Submission: {submission_status}" in caplog.text
-    assert "Retry submission: ankiops collab submit owner/repo" in caplog.text
+    output = capsys.readouterr().out
+    assert "Conflict: frozen update" in output
+    assert "Resolve and retry: ankiops collab update owner/repo" in output

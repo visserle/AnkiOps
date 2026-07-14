@@ -30,30 +30,42 @@ commits it, creates a public GitHub repository with authenticated `gh`, and
 pushes `main`. A failed retry reuses the local repository and commit.
 
 `collab subscribe` establishes an ongoing local copy at
-`collab/<owner>/<repo>`.
+`collab/<owner>/<repo>` without requiring authentication for public
+repositories. Its local `ankiops/journal` branch has no upstream tracking
+branch. `refs/ankiops/integrated` records the integrated upstream commit and
+`refs/ankiops/submission` records the prepared contribution.
 
 `collab status` previews local changes, available updates, pending submissions,
-Anki application state, conflict recovery state, pull request URLs, and the
-next command. Validation runs automatically in every command that needs it.
+conflict recovery state, live pull request state, and the next collab command.
+It compares content trees rather than local commit topology and does not report
+Anki application state. Validation runs automatically in every command that
+needs it.
 
-`collab update` prepares the integration in an isolated transaction. It changes
-the subscribed repository only after integration succeeds, changes Markdown
-only, and tells the user to run `ankiops fa` after review.
+`collab update` commits all non-ignored local changes directly in the subscribed
+repository before fetching. It performs the content merge there and records the
+upstream commit in `refs/ankiops/integrated`. Its explicit content merge base
+preserves edits made after an accepted contribution, including after a squash
+merge.
 
-`collab submit` automatically commits dirty files in only the selected source,
-integrates upstream, and compares content trees. Identical trees are a no-op. If
-changes remain, it uploads one reusable contribution and creates or reuses a
-native GitHub pull request. A contributor without write permission receives or
-reuses a fork.
+`collab submit` checkpoints all tracked, untracked, staged, unstaged, and deleted
+non-ignored files in only the selected source, integrates upstream, and compares
+content trees. Identical trees are a no-op. If changes remain, it uploads a
+single synthetic commit on `ankiops/contribution` and creates or reuses a native
+GitHub pull request. AnkiOps owns `ankiops/contribution` and unconditionally
+force-replaces it with each later draft while retaining the same pull request.
+The branch remains after merge or closure and is reused for the next contribution.
+A contributor without write permission receives or reuses GitHub's standard
+same-name fork.
 
 ## Conflict and retry behavior
 
-An overlapping update does not alter the subscribed repository. It writes an
-editable conflict file plus base, local, and upstream copies under
-`.ankiops/conflicts/`. Edit the reported conflict file, remove its markers, and
-rerun the same `collab update` command. Failed uploads and failed pull-request
-creation retain one reusable submission; rerunning `collab submit` does not
-duplicate the contribution or pull request.
+An overlapping update leaves the subscribed repository at its committed local
+checkpoint. It records the frozen base, local, and upstream commits under
+`refs/ankiops/conflict/` and writes editable files plus evidence under
+`.ankiops/conflicts/<owner>/<repo>/`. Edit the reported conflict copy and rerun
+the exact command. The retry uses those frozen commits even if GitHub advances;
+newer work is integrated by the next update. Failed uploads and pull-request
+creation retain one reusable submission, so retrying does not duplicate either.
 
 An unexpected database schema or corrupt database is moved to
 `.ankiops.db.corrupt`, then AnkiOps creates the current schema and retries once.

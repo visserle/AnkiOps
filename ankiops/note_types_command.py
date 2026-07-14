@@ -11,7 +11,7 @@ from rich.table import Table
 from ankiops.collection import NOTE_TYPES_DIR, require_collection_root
 from ankiops.console import clickable_path, connect_or_exit
 from ankiops.markdown import FIELD_LABEL_NAME_RE
-from ankiops.note_types import NoteField, NoteType, load_note_types
+from ankiops.note_types import CardTemplate, NoteField, NoteType, load_note_types
 
 logger = logging.getLogger(__name__)
 _TABLE_MAX_WIDTH = 120
@@ -352,11 +352,11 @@ def run(args) -> None:
         is_choice=is_choice,
         is_cloze=is_cloze,
         templates=[
-            {
-                "Name": template_name,
-                "Front": str(template_data.get("Front", "")),
-                "Back": str(template_data.get("Back", "")),
-            }
+            CardTemplate(
+                name=template_name,
+                front=str(template_data.get("Front", "")),
+                back=str(template_data.get("Back", "")),
+            )
             for template_name, template_data in templates.items()
         ],
     )

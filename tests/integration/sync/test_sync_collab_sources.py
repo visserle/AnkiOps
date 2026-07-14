@@ -227,12 +227,8 @@ def test_import_rejects_duplicate_deck_names_across_sources(world):
     )
 
     with world.db_session() as db:
-        try:
+        with pytest.raises(ValueError, match="Duplicate deck name 'Deck'"):
             world.sync_import(db)
-        except ValueError as error:
-            assert "deck ownership conflicts" in str(error)
-        else:  # pragma: no cover - assertion clarity
-            raise AssertionError("expected deck ownership conflict")
 
 
 def test_import_rejects_duplicate_ankiops_key_across_root_and_collab_models(world):

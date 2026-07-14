@@ -46,6 +46,34 @@ def test_media_references_use_local_anki_filenames_and_roundtrip_widths(
     assert html_to_md.convert(html) == markdown
 
 
+def test_external_image_urls_roundtrip_without_a_local_media_prefix(
+    md_to_html, html_to_md
+):
+    html = (
+        '<img src="http://ww3.haverford.edu/psychology/ble/continuous_ios/'
+        'gfx/IOS-original.gif" alt="">'
+    )
+
+    markdown = html_to_md.convert(html)
+
+    assert markdown == (
+        "![](<http://ww3.haverford.edu/psychology/ble/continuous_ios/"
+        "gfx/IOS-original.gif>)"
+    )
+    assert md_to_html.convert(markdown) == html
+
+
+def test_empty_image_placeholder_roundtrips_without_becoming_local_media(
+    md_to_html, html_to_md
+):
+    markdown = "![](<>){width=799}"
+
+    html = md_to_html.convert(markdown)
+
+    assert html == '<img src="" alt="" style="width: 799px;">'
+    assert html_to_md.convert(html) == markdown
+
+
 def test_links_with_parentheses_are_wrapped_for_stable_roundtrips(
     md_to_html, html_to_md
 ):

@@ -147,7 +147,11 @@ def _prepare_custom_tag_placeholders(html: str) -> tuple[str, dict[str, str]]:
             f"{{width={int(float(width_match.group(1)))}}}" if width_match else ""
         )
         token = _token()
-        replacements[token] = f"![{alt}](<{LOCAL_MEDIA_DIR}/{src}>){width_attr}"
+        if not src or src.lower().startswith(("http://", "https://")):
+            markdown_src = src
+        else:
+            markdown_src = f"{LOCAL_MEDIA_DIR}/{src}"
+        replacements[token] = f"![{alt}](<{markdown_src}>){width_attr}"
         image.replace_with(token)
 
     for underline in soup.find_all("u"):

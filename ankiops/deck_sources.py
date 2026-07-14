@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-
-from blake3 import blake3
 
 from ankiops.collection import NOTE_TYPES_DIR
 from ankiops.git import GitRepository
@@ -23,15 +22,43 @@ RESERVED_MARKDOWN_FILES = {
     "SECURITY.MD",
     "SUPPORT.MD",
 }
+_SAFE_OWNER_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?$")
+_SAFE_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def _parse_github_slug(github_slug: str) -> tuple[str, str]:
-    parts = github_slug.split("/")
-    if len(parts) != 2 or any(not part or part in {".", ".."} for part in parts):
-        raise ValueError("Expected collab source as owner/repo")
-    if any("\\" in part for part in parts):
-        raise ValueError("Expected collab source as owner/repo")
-    return parts[0], parts[1]
+def parse_github_slug(github_slug: str) -> str:
+    """Return the canonical owner/repository identity used by collab."""
+    value = github_slug.strip().removesuffix(".git")
+    parts = value.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError("Expected GitHub repository as owner/repo")
+    owner, repository = parts
+    if (
+        not _SAFE_OWNER_RE.fullmatch(owner)
+        or not _SAFE_REPOSITORY_RE.fullmatch(repository)
+        or repository in {".", ".."}
+    ):
+        raise ValueError(
+            f"Invalid collab deck identity '{github_slug}': owner may use ASCII "
+            "letters, digits, hyphens, and internal underscores; repository may "
+            "use ASCII letters, digits, hyphens, underscores, and periods."
+        )
+    return value
+
+
+def is_deck_markdown_filename(filename: str) -> bool:
+    """Return whether a root filename is a deck Markdown file."""
+    path = Path(filename)
+    if path.name != filename or path.suffix.lower() != ".md":
+        return False
+    if path.name.upper() in RESERVED_MARKDOWN_FILES:
+        return False
+    if "___" in path.stem:
+        raise ValueError(
+            f"Ambiguous deck filename '{path.name}': do not place '_' next to "
+            "the '__' subdeck separator."
+        )
+    return True
 
 
 @dataclass(frozen=True)
@@ -51,7 +78,7 @@ class DeckSource:
             or parts[0] != COLLAB_DIR
         ):
             raise ValueError("Expected source path as . or collab/owner/repo")
-        _parse_github_slug("/".join(parts[1:]))
+        parse_github_slug("/".join(parts[1:]))
 
     @classmethod
     def local(cls, collection_root: Path) -> "DeckSource":
@@ -59,7 +86,7 @@ class DeckSource:
 
     @classmethod
     def collab(cls, collection_root: Path, github_slug: str) -> "DeckSource":
-        owner, repository = _parse_github_slug(github_slug)
+        owner, repository = parse_github_slug(github_slug).split("/", 1)
         return cls(
             collection_root=collection_root,
             relative_path=Path(COLLAB_DIR) / owner / repository,
@@ -109,17 +136,11 @@ class DeckSource:
         return name[len(prefix) :] if name.startswith(prefix) else name
 
     def deck_files(self) -> list[Path]:
-        files = []
-        for path in sorted(self.root.glob("*.md")):
-            if path.name.upper() in RESERVED_MARKDOWN_FILES:
-                continue
-            if "___" in path.stem:
-                raise ValueError(
-                    f"Ambiguous deck filename '{path.name}': do not place '_' "
-                    "next to the '__' subdeck separator."
-                )
-            files.append(path)
-        return files
+        return [
+            path
+            for path in sorted(self.root.iterdir())
+            if path.is_file() and is_deck_markdown_filename(path.name)
+        ]
 
 
 def discover_deck_sources(
@@ -169,18 +190,3 @@ def load_note_types_for_collection(
     for source in discover_deck_sources(collection_root):
         note_types.extend(load_note_types_for_source(source))
     return note_types
-
-
-def source_content_hash(source: DeckSource) -> str:
-    """Hash the visible source tree without reading repository metadata."""
-    digest = blake3()
-    for path in sorted(source.root.rglob("*")):
-        if not path.is_file() or ".git" in path.relative_to(source.root).parts:
-            continue
-        relative = path.relative_to(source.root).as_posix().encode()
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(65536), b""):
-                digest.update(chunk)
-    return digest.hexdigest()

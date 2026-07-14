@@ -106,17 +106,6 @@ class SyncState:
                     "SELECT source_path, name, mtime_ns, size, digest, hashed_name, "
                     "pushed_digest FROM media_files LIMIT 0"
                 )
-                conn.execute(
-                    "SELECT source_path, applied_tree_hash, applied_commit "
-                    "FROM source_sync_state LIMIT 0"
-                )
-                conn.execute(
-                    "SELECT source_path, operation_id, kind, state, expected_head, "
-                    "expected_fingerprint, prepared_head, upstream_tree, "
-                    "recovery_ref, publish_branch, pushed_sha, pr_url, last_error "
-                    "FROM collab_operations LIMIT 0"
-                )
-
         except (sqlite3.DatabaseError, sqlite3.OperationalError) as error:
             if conn:
                 conn.close()
@@ -327,9 +316,6 @@ class SyncState:
             )
         self._write_many(statements)
 
-    def delete_note_link_by_id(self, note_id: int) -> None:
-        self._write("DELETE FROM note_state WHERE note_id = ?", (note_id,))
-
     # -- Note fingerprints --------------------------------------------------
 
     def _resolve_directional_hashes(
@@ -408,29 +394,6 @@ class SyncState:
                 ],
             )
 
-    def _clear_directional_hashes(
-        self,
-        note_keys: Iterable[str],
-        *,
-        md_column: str,
-        anki_column: str,
-    ) -> None:
-        note_key_list = list(note_keys)
-        if not note_key_list:
-            return
-        statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(note_key_list):
-            placeholders = ",".join("?" * len(chunk))
-            statements.append(
-                (
-                    f"UPDATE note_state SET {md_column} = NULL, "
-                    f"{anki_column} = NULL "
-                    f"WHERE note_key IN ({placeholders})",
-                    tuple(chunk),
-                )
-            )
-        self._write_many(statements)
-
     def resolve_import_hashes(
         self, note_keys: Iterable[str]
     ) -> dict[str, tuple[str, str]]:
@@ -459,20 +422,6 @@ class SyncState:
     def upsert_export_hashes(self, rows: Iterable[tuple[str, str, str]]) -> None:
         self._upsert_directional_hashes(
             rows,
-            md_column="export_md_hash",
-            anki_column="export_anki_hash",
-        )
-
-    def clear_import_hashes(self, note_keys: Iterable[str]) -> None:
-        self._clear_directional_hashes(
-            note_keys,
-            md_column="import_md_hash",
-            anki_column="import_anki_hash",
-        )
-
-    def clear_export_hashes(self, note_keys: Iterable[str]) -> None:
-        self._clear_directional_hashes(
-            note_keys,
             md_column="export_md_hash",
             anki_column="export_anki_hash",
         )
@@ -755,27 +704,6 @@ class SyncState:
                         f"Cannot set push digest for unknown media '{name}'"
                     )
 
-    def clear_media_push_digests(
-        self,
-        names: Iterable[str],
-        *,
-        source_path: str = ".",
-    ) -> None:
-        name_list = list(names)
-        if not name_list:
-            return
-        statements: list[tuple[str, tuple]] = []
-        for chunk in self._chunked(name_list):
-            placeholders = ",".join("?" * len(chunk))
-            statements.append(
-                (
-                    "UPDATE media_files SET pushed_digest = NULL WHERE source_path = ? "
-                    f"AND name IN ({placeholders})",
-                    (source_path, *chunk),
-                )
-            )
-        self._write_many(statements)
-
     def list_managed_media(self) -> list[tuple[str, str, str | None]]:
         rows = self._conn.execute(
             "SELECT source_path, name, pushed_digest FROM media_files"
@@ -784,103 +712,6 @@ class SyncState:
             (source_path, name, pushed_digest)
             for source_path, name, pushed_digest in rows
         ]
-
-    # -- Source sync state -------------------------------------------------
-
-    def set_source_applied_state(
-        self,
-        source_path: str,
-        tree_hash: str,
-        commit: str | None,
-    ) -> None:
-        self._write(
-            "INSERT INTO source_sync_state "
-            "(source_path, applied_tree_hash, applied_commit) VALUES (?, ?, ?) "
-            "ON CONFLICT(source_path) DO UPDATE SET "
-            "applied_tree_hash = excluded.applied_tree_hash, "
-            "applied_commit = excluded.applied_commit",
-            (source_path, tree_hash, commit),
-        )
-
-    def get_source_applied_state(
-        self, source_path: str
-    ) -> tuple[str, str | None] | None:
-        row = self._conn.execute(
-            "SELECT applied_tree_hash, applied_commit FROM source_sync_state "
-            "WHERE source_path = ?",
-            (source_path,),
-        ).fetchone()
-        return (row[0], row[1]) if row else None
-
-    # -- Interrupted collab operations ------------------------------------
-
-    def get_collab_operation(self, source_path: str) -> dict[str, str | None] | None:
-        columns = (
-            "operation_id",
-            "kind",
-            "state",
-            "expected_head",
-            "expected_fingerprint",
-            "prepared_head",
-            "upstream_tree",
-            "recovery_ref",
-            "publish_branch",
-            "pushed_sha",
-            "pr_url",
-            "last_error",
-        )
-        row = self._conn.execute(
-            "SELECT " + ", ".join(columns) + " FROM collab_operations "
-            "WHERE source_path = ?",
-            (source_path,),
-        ).fetchone()
-        if row is None:
-            return None
-        return dict(zip(columns, row, strict=True))
-
-    def save_collab_operation(
-        self,
-        source_path: str,
-        operation_id: str,
-        kind: str,
-        state: str,
-        **values: str | None,
-    ) -> None:
-        fields = (
-            "expected_head",
-            "expected_fingerprint",
-            "prepared_head",
-            "upstream_tree",
-            "recovery_ref",
-            "publish_branch",
-            "pushed_sha",
-            "pr_url",
-            "last_error",
-        )
-        current = self.get_collab_operation(source_path) or {}
-        row = [values.get(field, current.get(field)) for field in fields]
-        self._write(
-            "INSERT INTO collab_operations "
-            "(source_path, operation_id, kind, state, "
-            + ", ".join(fields)
-            + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(source_path) DO UPDATE SET "
-            "operation_id = excluded.operation_id, kind = excluded.kind, "
-            "state = excluded.state, expected_head = excluded.expected_head, "
-            "expected_fingerprint = excluded.expected_fingerprint, "
-            "prepared_head = excluded.prepared_head, "
-            "upstream_tree = excluded.upstream_tree, "
-            "recovery_ref = excluded.recovery_ref, "
-            "publish_branch = excluded.publish_branch, "
-            "pushed_sha = excluded.pushed_sha, pr_url = excluded.pr_url, "
-            "last_error = excluded.last_error",
-            (source_path, operation_id, kind, state, *row),
-        )
-
-    def clear_collab_operation(self, source_path: str) -> None:
-        self._write(
-            "DELETE FROM collab_operations WHERE source_path = ?", (source_path,)
-        )
 
     # -- Singleton metadata -------------------------------------------------
 

@@ -105,4 +105,5 @@ node_modules/
 .claude/
 AGENTS.md
 .gitignore
+!ankiops/collab/resources/.gitignore
 _stuff.ipynb

@@ -187,7 +187,9 @@ class Anki:
                     inOrderFields=fields,
                     css=model_config.css,
                     isCloze=model_config.is_cloze,
-                    cardTemplates=model_config.templates,
+                    cardTemplates=[
+                        template.as_anki_dict() for template in model_config.templates
+                    ],
                 )
             )
             # Apply descriptions / fonts
@@ -274,31 +276,31 @@ class Anki:
             for template_index, expected in enumerate(model_config.templates):
                 if (
                     template_index < len(current_names)
-                    and current_names[template_index] != expected["Name"]
+                    and current_names[template_index] != expected.name
                 ):
                     actions.append(
                         _action(
                             "modelTemplateRename",
                             modelName=model_config.name,
                             oldTemplateName=current_names[template_index],
-                            newTemplateName=expected["Name"],
+                            newTemplateName=expected.name,
                         )
                     )
-                    current_names[template_index] = expected["Name"]
+                    current_names[template_index] = expected.name
 
             templates_dict = {}
             for template_index, expected in enumerate(model_config.templates):
                 if template_index < len(current_names):
                     templates_dict[current_names[template_index]] = {
-                        "Front": expected["Front"],
-                        "Back": expected["Back"],
+                        "Front": expected.front,
+                        "Back": expected.back,
                     }
                 else:
                     actions.append(
                         _action(
                             "modelTemplateAdd",
                             modelName=model_config.name,
-                            template=expected,
+                            template=expected.as_anki_dict(),
                         )
                     )
 

@@ -10,12 +10,11 @@ from ankiops.cli_commands import (
     run_fa,
     run_fix_image_widths,
     run_init,
-    run_llm,
     run_note_type,
     run_serialize,
 )
-from ankiops.console import configure_logging
-from ankiops.llm.commands import configure_llm_parser
+from ankiops.console import configure_logging, print_error
+from ankiops.llm.commands import configure_llm_parser, run_llm
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +204,7 @@ def main():
     collab_publish.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Collab deck identity (letters, digits, hyphens)",
+        help="GitHub repository identity",
     )
     collab_publish.set_defaults(handler=run_collab)
 
@@ -216,7 +215,7 @@ def main():
     collab_subscribe.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Collab deck identity (letters, digits, hyphens)",
+        help="GitHub repository identity",
     )
     collab_subscribe.set_defaults(handler=run_collab)
 
@@ -227,8 +226,7 @@ def main():
     collab_update.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        nargs="?",
-        help="Collab deck identity (letters, digits, hyphens)",
+        help="GitHub repository identity",
     )
     collab_update.set_defaults(handler=run_collab)
 
@@ -239,13 +237,13 @@ def main():
     collab_submit.add_argument(
         "repository",
         metavar="OWNER/REPO",
-        help="Collab deck identity (letters, digits, hyphens)",
+        help="GitHub repository identity",
     )
     collab_submit.add_argument(
-        "--message",
-        "-m",
+        "--title",
+        "-t",
         type=_single_line_text,
-        help="Pull request title and commit message for new changes",
+        help="Pull request title and commit message",
     )
     collab_submit.set_defaults(handler=run_collab)
 
@@ -257,7 +255,7 @@ def main():
         "repository",
         metavar="OWNER/REPO",
         nargs="?",
-        help="Collab deck identity (letters, digits, hyphens)",
+        help="GitHub repository identity",
     )
     collab_status.set_defaults(handler=run_collab)
 
@@ -291,6 +289,10 @@ def main():
                 "either AnkiOpsConnect or AnkiConnect is enabled."
             )
             logger.debug(f"Anki connection error details: {error}")
+            raise SystemExit(1) from error
+        except ValueError as error:
+            print_error(str(error))
+            logger.debug("Command failed", exc_info=True)
             raise SystemExit(1) from error
     else:
         # Show welcome screen when no command is provided

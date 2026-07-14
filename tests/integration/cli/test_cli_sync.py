@@ -105,6 +105,33 @@ def test_run_fa_has_no_untracked_warning_for_declared_collection(world, caplog):
     assert world.extract_note_keys("DeclaredDeck")
 
 
+def test_run_fa_counts_current_decks_and_removes_empty_deleted_decks(world, caplog):
+    world.write_qa_deck(
+        "KeepOne",
+        [("Q1", "A1", "keep-1"), ("Q2", "A2", "keep-2")],
+    )
+    world.write_qa_deck(
+        "KeepTwo",
+        [("Q3", "A3", "keep-3"), ("Q4", "A4", "keep-4")],
+    )
+    world.run_fa()
+
+    with world.db_session() as db:
+        for name in ("MissingOne", "MissingTwo"):
+            deck_id = world.mock_anki.invoke("createDeck", deck=name)
+            db.upsert_deck(name, deck_id, md_path=f"{name}.md")
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        world.run_fa()
+
+    assert "Files -> Anki: 2 decks with 4 notes — no changes" in caplog.text
+    assert "Deck removed from Anki after Markdown deletion: 'MissingOne'" in caplog.text
+    assert "Deck removed from Anki after Markdown deletion: 'MissingTwo'" in caplog.text
+    assert "MissingOne" not in world.mock_anki.decks
+    assert "MissingTwo" not in world.mock_anki.decks
+
+
 def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
     world.write_qa_deck("ProtectDeck", [("managed", "local", "managed-key")])
     keyless_id = world.add_anki_note(
@@ -174,11 +201,15 @@ def test_run_fa_auto_commit_snapshots_declared_state_before_sync_mutates_media(
         check=True,
     ).stdout
     working = world.read_deck("MediaDeck")
+    note_id = world.assert_anki_note(deck_name="MediaDeck", question="prompt")
+    anki_answer = world.mock_anki.notes[note_id]["fields"]["Answer"]["value"]
 
     assert "media/img.png" in committed
     assert "<!-- note_key:" not in committed
     assert "media/img_" in working
     assert "<!-- note_key:" in working
+    assert "img_" in anki_answer
+    assert "img.png" not in anki_answer
 
 
 def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
@@ -355,7 +386,7 @@ def test_cli_collab_publish_uses_public_only_contract():
     assert not hasattr(captured[0], "public")
 
 
-def test_cli_collab_submit_accepts_custom_message():
+def test_cli_collab_submit_accepts_custom_title_and_global_debug():
     captured = []
 
     with (
@@ -367,17 +398,19 @@ def test_cli_collab_submit_accepts_custom_message():
             "sys.argv",
             [
                 "ankiops",
+                "--debug",
                 "collab",
                 "submit",
                 "owner/repo",
-                "--message",
+                "--title",
                 "  Clarify collab history  ",
             ],
         ),
     ):
         main()
 
-    assert captured[0].message == "Clarify collab history"
+    assert captured[0].title == "Clarify collab history"
+    assert captured[0].debug is True
     assert not hasattr(captured[0], "commit")
 
 
@@ -444,16 +477,46 @@ def test_collab_submit_does_not_run_collection_export():
     run_af.assert_not_called()
 
 
+def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys):
+    args = SimpleNamespace(collab_command="status")
+
+    with (
+        patch(
+            "ankiops.cli_commands.run_collab_impl",
+            side_effect=ValueError("Repository is unavailable"),
+        ),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        run_collab(args)
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: Repository is unavailable" in captured.err
+    assert "ERROR" not in captured.err
+
+
 @pytest.mark.parametrize(
     "argv",
     [
         ["ankiops", "collab", "submit", "owner/repo", "--commit"],
         ["ankiops", "collab", "submit", "owner/repo", "--from-anki"],
         ["ankiops", "collab", "update", "owner/repo", "--to-anki"],
+        ["ankiops", "collab", "status", "owner/repo", "--debug"],
     ],
 )
 def test_removed_collab_flags_are_rejected(argv):
     with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 2
+
+
+def test_collab_update_requires_one_repository():
+    with (
+        patch("sys.argv", ["ankiops", "collab", "update"]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
         main()
 
     assert excinfo.value.code == 2
@@ -472,13 +535,13 @@ def test_removed_collab_commands_are_rejected(command):
     assert excinfo.value.code == 2
 
 
-@pytest.mark.parametrize("message", ["   ", "line one\nline two"])
-def test_cli_collab_submit_rejects_invalid_message(message):
+@pytest.mark.parametrize("title", ["   ", "line one\nline two"])
+def test_cli_collab_submit_rejects_invalid_title(title):
     with (
         patch("ankiops.cli_commands.run_collab_impl") as run_collab,
         patch(
             "sys.argv",
-            ["ankiops", "collab", "submit", "owner/repo", "--message", message],
+            ["ankiops", "collab", "submit", "owner/repo", "--title", title],
         ),
         pytest.raises(SystemExit) as excinfo,
     ):
@@ -503,6 +566,40 @@ def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
 
     assert exc.value.code == 1
     assert "Error communicating with Anki" in caplog.text
+
+
+def test_cli_validation_error_is_concise_without_a_traceback(capsys):
+    message = (
+        "local: Invalid media reference 'nested/image.png': "
+        "expected one filename in media/."
+    )
+    with (
+        patch("ankiops.cli.run_af", side_effect=ValueError(message)),
+        patch("sys.argv", ["ankiops", "af"]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"Error: {message}" in captured.err
+    assert "Traceback" not in captured.err
+    assert "ERROR" not in captured.err
+
+
+def test_cli_validation_error_retains_debug_exception_details(capsys):
+    error = ValueError("Invalid local deck")
+    with (
+        patch("ankiops.cli.run_af", side_effect=error),
+        patch("ankiops.cli.logger.debug") as debug,
+        patch("sys.argv", ["ankiops", "--debug", "af"]),
+        pytest.raises(SystemExit),
+    ):
+        main()
+
+    debug.assert_called_once_with("Command failed", exc_info=True)
+    capsys.readouterr()
 
 
 def test_cli_welcome_mentions_version_and_version_flag(capsys):

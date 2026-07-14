@@ -140,30 +140,20 @@ def test_media_fingerprints_are_scoped_by_source(db):
     )
 
 
-def test_source_sync_and_operation_state(db):
-    db.set_source_applied_state("collab/owner/repo", "tree", "commit")
-    db.save_collab_operation(
-        "collab/owner/repo",
-        "op-1",
-        "submit",
-        "pushed",
-        expected_head="before",
-        expected_fingerprint="fingerprint",
-        prepared_head="after",
-        upstream_tree="tree",
-        publish_branch="ankiops/op-1",
-        pushed_sha="abc",
-    )
+def test_open_recreates_a_database_with_the_removed_operation_table(tmp_path):
+    state = SyncState.open(tmp_path)
+    state.close()
 
-    assert db.get_source_applied_state("collab/owner/repo") == ("tree", "commit")
-    operation = db.get_collab_operation("collab/owner/repo")
-    assert operation is not None
-    assert operation["expected_head"] == "before"
-    assert operation["expected_fingerprint"] == "fingerprint"
-    assert operation["prepared_head"] == "after"
-    assert operation["upstream_tree"] == "tree"
-    assert operation["publish_branch"] == "ankiops/op-1"
-    assert operation["pushed_sha"] == "abc"
+    db_path = tmp_path / ANKIOPS_DB
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE collab_operations (source_path TEXT PRIMARY KEY)"
+        )
+
+    recreated = SyncState.open(tmp_path)
+    recreated.close()
+
+    assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
 
 
 def test_overwrite_mapping(db):
@@ -199,20 +189,6 @@ def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path):
         replacement.close()
 
     assert (tmp_path / f"{ANKIOPS_DB}.corrupt").read_bytes() == original
-
-
-def test_remove_note_by_id(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        assert adapter.resolve_note_ids(["k1"]).get("k1") == 101
-
-        adapter.delete_note_link_by_id(101)
-
-        assert adapter.resolve_note_ids(["k1"]).get("k1") is None
-        assert adapter.resolve_note_keys([101]).get(101) is None
-    finally:
-        adapter.close()
 
 
 def test_delete_deck(tmp_path):
@@ -393,36 +369,6 @@ def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
         adapter.close()
 
 
-def test_clear_import_hashes_does_not_clear_export_hashes(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
-        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
-
-        adapter.clear_import_hashes(["k1"])
-
-        assert adapter.resolve_import_hashes(["k1"]) == {}
-        assert adapter.resolve_export_hashes(["k1"]) == {"k1": ("emd1", "ea1")}
-    finally:
-        adapter.close()
-
-
-def test_clear_export_hashes_does_not_clear_import_hashes(tmp_path):
-    adapter = SyncState.open(tmp_path)
-    try:
-        adapter.upsert_note_links([("k1", 101)])
-        adapter.upsert_import_hashes([("k1", "imd1", "ia1")])
-        adapter.upsert_export_hashes([("k1", "emd1", "ea1")])
-
-        adapter.clear_export_hashes(["k1"])
-
-        assert adapter.resolve_import_hashes(["k1"]) == {"k1": ("imd1", "ia1")}
-        assert adapter.resolve_export_hashes(["k1"]) == {}
-    finally:
-        adapter.close()
-
-
 def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
     adapter = SyncState.open(tmp_path)
     try:
@@ -504,7 +450,5 @@ def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
             "b.png": "d3",
         }
 
-        adapter.clear_media_push_digests(["a.png"])
-        assert adapter.resolve_media_push_digests(["a.png", "b.png"]) == {"b.png": "d3"}
     finally:
         adapter.close()

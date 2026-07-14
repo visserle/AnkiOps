@@ -2,6 +2,19 @@
 
 With LLM tasks, you can run programmable, customizable tasks on your collection such as content review, grammar fixes, translations, and more. The tasks are for enhancing, rewriting, completing already existing notes. In contrast to edits by automated agents (i.e. Codex), tasks divide edits into separate requests to the API. This improves attention to detail significantly.
 
+## Quickstart
+
+Each task is a YAML file in `llm/` that specifies its prompts, model, request settings, and access to fields and tags. AnkiOps uses OpenAI models through the Responses API by default. Set the API key, validate the configuration, inspect the plan, then run the task:
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+ankiops llm
+ankiops llm fix-grammar
+ankiops llm fix-grammar --run
+```
+
+Review the Git diff and use `ankiops fa` to sync accepted changes to Anki. 
+
 ## Architecture of a task
 
 LLM tasks read notes from your Markdown decks and write selected fields or tags back to those files. Each `.yaml` file (except `_models.yaml`) defines one task. The filename becomes the task name, so `fix-grammar.yaml` runs as `ankiops llm fix-grammar`.

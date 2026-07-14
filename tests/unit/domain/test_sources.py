@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import ankiops.interchange as interchange
 from ankiops.deck_sources import (
     DeckSource,
     discover_deck_sources,
@@ -45,7 +46,7 @@ def test_discover_deck_sources_rejects_non_repository_collab_directory(tmp_path)
     [Path("owner/repo"), Path("collab/owner"), Path("collab/../repo")],
 )
 def test_deck_source_rejects_noncanonical_relative_paths(tmp_path, relative_path):
-    with pytest.raises(ValueError, match="Expected .*source"):
+    with pytest.raises(ValueError, match="Expected .*source|Invalid collab deck"):
         DeckSource(tmp_path, relative_path)
 
 
@@ -133,3 +134,82 @@ def test_source_location_and_kind_are_derived_from_identity(tmp_path):
     assert not local.is_collab
     assert collab.root == tmp_path / "collab" / "owner" / "repo"
     assert collab.is_collab
+
+
+def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(tmp_path):
+    source = DeckSource.collab(tmp_path, "owner/repo")
+    DeckFileHarness().eject_default_note_types(source.note_types_dir)
+    (source.root / "Deck.md").write_text(
+        "<!-- note_key: key -->\nQ: question\nA: ![image](media/shared.png)\n",
+        encoding="utf-8",
+    )
+    (source.root / "README.md").write_text("docs\n", encoding="utf-8")
+    media = source.root / "media"
+    media.mkdir()
+    (media / "shared.png").write_bytes(b"shared")
+    (media / "private.png").write_bytes(b"private")
+
+    paths = interchange.parse_source(source).applicable_paths
+
+    assert paths == frozenset(
+        {
+            "Deck.md",
+            "media/shared.png",
+            "note_types/AnkiOpsQA/Back.template.anki",
+            "note_types/AnkiOpsQA/Front.template.anki",
+            "note_types/AnkiOpsQA/note_type.yaml",
+            "note_types/AnkiOpsStyling.css",
+            "note_types/SyntaxHighlighting.css",
+        }
+    )
+
+
+def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(tmp_path):
+    source = DeckSource.local(tmp_path)
+    DeckFileHarness().eject_default_note_types(source.note_types_dir)
+    deck = source.root / "Deck.md"
+    deck.write_text(
+        "<!-- note_key: key -->\nQ: question\nA: ![image](media/shared.png)\n",
+        encoding="utf-8",
+    )
+    media = source.root / "media"
+    media.mkdir()
+    shared = media / "shared.png"
+    shared.write_bytes(b"shared")
+    before = interchange.parse_source(source).applicable_paths
+
+    deck.write_text(
+        "<!-- note_key: key -->\nQ: question\nA: no image\n",
+        encoding="utf-8",
+    )
+    shared.unlink()
+    after = interchange.parse_source(source).applicable_paths
+
+    applicable = before | after
+    assert "media/shared.png" not in after
+    assert "media/shared.png" in applicable
+    assert "media/private.png" not in applicable
+
+
+def test_parse_source_reads_each_deck_once(tmp_path, monkeypatch):
+    source = DeckSource.local(tmp_path)
+    DeckFileHarness().eject_default_note_types(source.note_types_dir)
+    for name in ("First.md", "Second.md"):
+        (source.root / name).write_text(
+            f"<!-- note_key: {name} -->\nQ: question\nA: answer\n",
+            encoding="utf-8",
+        )
+
+    actual_read = interchange.read_deck_file
+    calls = []
+
+    def counting_read(path, **kwargs):
+        calls.append(path)
+        return actual_read(path, **kwargs)
+
+    monkeypatch.setattr(interchange, "read_deck_file", counting_read)
+
+    parsed = interchange.parse_source(source)
+
+    assert [deck.path.name for deck in parsed.decks] == ["First.md", "Second.md"]
+    assert [path.name for path in calls] == ["First.md", "Second.md"]

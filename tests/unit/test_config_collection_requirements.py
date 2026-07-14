@@ -46,12 +46,13 @@ def test_require_collection_root_exits_on_profile_mismatch(
     finally:
         db.close()
     _init_git(tmp_path)
-    monkeypatch.setattr("sys.argv", ["ankiops", "fa"])
+    monkeypatch.setattr("sys.argv", ["/tmp/release/.venv/bin/ankiops", "fa"])
 
     with pytest.raises(SystemExit):
         require_collection_root("Default")
     assert "Nothing was changed" in caplog.text
     assert "retry: ankiops fa" in caplog.text
+    assert ".venv/bin/ankiops" not in caplog.text
 
 
 def test_require_collection_root_returns_path_on_profile_match(tmp_path, monkeypatch):

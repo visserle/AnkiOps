@@ -1,19 +1,14 @@
 """Collection-level Markdown-to-Anki sync."""
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 
 from ankiops.anki import Anki
 from ankiops.collection import file_stem_to_deck_name
-from ankiops.deck_sources import (
-    DeckSource,
-    discover_deck_sources,
-    load_note_types_for_source,
-)
-from ankiops.markdown import DeckFile, read_deck_file
+from ankiops.deck_sources import DeckSource
+from ankiops.interchange import ParsedDeck, ParsedSource
+from ankiops.markdown import DeckFile
 from ankiops.markdown_to_html import MarkdownToHTML
-from ankiops.note_types import NoteType
 from ankiops.sync.identity import resolve_import_note_identity
 from ankiops.sync.report import (
     CollectionReport,
@@ -33,51 +28,20 @@ from ankiops.sync.to_anki_deck import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class _SourceDeckFile:
-    source: DeckSource
-    file_state: DeckFile
-
-
-def _load_source_deck_files(
-    collection_root: Path,
-) -> tuple[list[_SourceDeckFile], dict[str, NoteType], list[DeckSource]]:
-    selected_sources = discover_deck_sources(collection_root)
-    note_types_by_name: dict[str, NoteType] = {}
-
-    source_deck_files: list[_SourceDeckFile] = []
-    for source in selected_sources:
-        note_types = load_note_types_for_source(source)
-        note_types_by_name.update(
-            {note_type.name: note_type for note_type in note_types}
-        )
-        for deck_path in source.deck_files():
-            source_deck_files.append(
-                _SourceDeckFile(
-                    source=source,
-                    file_state=read_deck_file(
-                        deck_path,
-                        note_types=note_types,
-                        context_root=source.root,
-                    ),
-                )
-            )
-
-    return source_deck_files, note_types_by_name, selected_sources
-
-
 def _add_deleted_deck_files(
     collection_root: Path,
     state: SyncState,
-    source_deck_files: list[_SourceDeckFile],
-    sources: list[DeckSource],
+    parsed_decks: list[tuple[DeckSource, ParsedDeck]],
+    parsed_sources: tuple[ParsedSource, ...],
 ) -> set[Path]:
-    source_by_path = {source.source_path: source for source in sources}
-    existing_paths = {
-        source_deck_file.file_state.file_path for source_deck_file in source_deck_files
+    source_by_path = {
+        parsed_source.source.source_path: parsed_source.source
+        for parsed_source in parsed_sources
     }
+    existing_paths = {deck.path for _source, deck in parsed_decks}
+    existing_deck_names = {deck.deck_name for _source, deck in parsed_decks}
     deleted_paths: set[Path] = set()
-    for _deck_id, _name, source_path, md_path in state.list_decks():
+    for _deck_id, name, source_path, md_path in state.list_decks():
         source = source_by_path.get(source_path)
         if source is None or not md_path:
             continue
@@ -88,85 +52,63 @@ def _add_deleted_deck_files(
             or not path.is_relative_to(source.root)
         ):
             continue
-        source_deck_files.append(
-            _SourceDeckFile(
-                source=source,
-                file_state=DeckFile(file_path=path, raw_content="", notes=[]),
+        if name in existing_deck_names:
+            raise ValueError(
+                f"Deck '{name}' is still present at another Markdown path."
+            )
+        parsed_decks.append(
+            (
+                source,
+                ParsedDeck(
+                    path=path,
+                    deck_name=name,
+                    parsed=DeckFile(file_path=path, raw_content="", notes=[]),
+                ),
             )
         )
+        existing_deck_names.add(name)
         deleted_paths.add(path)
     return deleted_paths
-
-
-def _check_deck_ownership(source_deck_files: list[_SourceDeckFile]) -> None:
-    deck_sources: dict[str, str] = {}
-    duplicates: list[str] = []
-
-    for source_deck_file in source_deck_files:
-        deck_name = file_stem_to_deck_name(source_deck_file.file_state.file_path.stem)
-        previous = deck_sources.get(deck_name)
-        current = (
-            f"{source_deck_file.source.display_name}:"
-            f"{source_deck_file.file_state.file_path.name}"
-        )
-        if previous is not None:
-            duplicates.append(
-                f"Deck '{deck_name}' is defined by both {previous} and {current}"
-            )
-            continue
-        deck_sources[deck_name] = current
-
-    if duplicates:
-        raise ValueError(
-            "Aborting import: deck ownership conflicts found: " + "; ".join(duplicates)
-        )
-
-
-def _collect_global_note_keys(deck_files: list[DeckFile]) -> set[str]:
-    note_key_locations: dict[str, str] = {}
-    duplicates: list[str] = []
-
-    for deck_file in deck_files:
-        for note in deck_file.notes:
-            if not note.note_key:
-                continue
-            if note.note_key in note_key_locations:
-                duplicates.append(f"Duplicate note_key {note.note_key}")
-            else:
-                note_key_locations[note.note_key] = str(deck_file.file_path)
-
-    if duplicates:
-        raise ValueError(f"Aborting import: Duplicates found: {duplicates}")
-
-    return set(note_key_locations)
 
 
 def sync_collection_to_anki(
     anki: Anki,
     state: SyncState,
-    collection_root: Path,
+    parsed_sources: tuple[ParsedSource, ...],
 ) -> CollectionReport:
-    source_deck_files, note_types_by_name, selected_sources = _load_source_deck_files(
-        collection_root,
-    )
+    collection_root = parsed_sources[0].source.collection_root
+    parsed_decks = [
+        (parsed_source.source, deck)
+        for parsed_source in parsed_sources
+        for deck in parsed_source.decks
+    ]
+    note_types_by_name = {
+        note_type.name: note_type
+        for source in parsed_sources
+        for note_type in source.note_types
+    }
     deleted_deck_paths = _add_deleted_deck_files(
         collection_root,
         state,
-        source_deck_files,
-        selected_sources,
+        parsed_decks,
+        parsed_sources,
     )
-    _check_deck_ownership(source_deck_files)
 
-    deck_files = [source_deck_file.file_state for source_deck_file in source_deck_files]
-    global_note_keys = _collect_global_note_keys(deck_files)
+    deck_files = [deck.parsed for _source, deck in parsed_decks]
+    global_note_keys = {
+        note.note_key
+        for deck_file in deck_files
+        for note in deck_file.notes
+        if note.note_key
+    }
     required_note_types = sorted(note_types_by_name)
     markdown_to_html = MarkdownToHTML()
 
     note_import_fingerprints_by_note_key = state.resolve_import_hashes(global_note_keys)
     source_by_note_key = {
-        note.note_key: source_deck_file.source.source_path
-        for source_deck_file in source_deck_files
-        for note in source_deck_file.file_state.notes
+        note.note_key: source.source_path
+        for source, deck in parsed_decks
+        for note in deck.parsed.notes
         if note.note_key
     }
     recorded_sources = state.resolve_note_sources(global_note_keys)
@@ -216,13 +158,23 @@ def sync_collection_to_anki(
         pending_writes: list[PendingDeckWrite] = []
         markdown_deck_ids = set()
         markdown_deck_names = {
-            file_stem_to_deck_name(deck_file.file_path.stem) for deck_file in deck_files
+            file_stem_to_deck_name(deck_file.file_path.stem)
+            for deck_file in deck_files
+            if deck_file.file_path not in deleted_deck_paths
         }
         rename_candidates: set[tuple[str, str]] = set()
 
-        for source_deck_file in source_deck_files:
-            deck_file = source_deck_file.file_state
+        for _source, parsed_deck in parsed_decks:
+            deck_file = parsed_deck.parsed
             deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
+            if (
+                deck_file.file_path in deleted_deck_paths
+                and deck_name not in initial_deck_names
+            ):
+                # A persisted deleted placeholder exists only to reconcile an
+                # Anki deck that is still present. Never recreate one that is
+                # already gone.
+                continue
             file_anki_note_ids = note_ids_by_deck_name.get(deck_name, set())
 
             sync_result, pending_write, moved_from_decks = sync_deck_to_anki(
@@ -274,9 +226,9 @@ def sync_collection_to_anki(
         if pending_note_mappings:
             state.upsert_note_links(pending_note_mappings)
         source_links: dict[str, list[tuple[str, int]]] = {}
-        for source_deck_file in source_deck_files:
-            source_path = source_deck_file.source.source_path
-            for note in source_deck_file.file_state.notes:
+        for source, parsed_deck in parsed_decks:
+            source_path = source.source_path
+            for note in parsed_deck.parsed.notes:
                 if not note.note_key:
                     continue
                 note_id = note_ids_by_note_key.get(note.note_key)
@@ -291,18 +243,23 @@ def sync_collection_to_anki(
 
         flush_deck_metadata_writes(pending_writes)
 
-        for source_deck_file in source_deck_files:
-            deck_file = source_deck_file.file_state
+        for source, parsed_deck in parsed_decks:
+            deck_file = parsed_deck.parsed
             deck_name = file_stem_to_deck_name(deck_file.file_path.stem)
             if deck_file.file_path in deleted_deck_paths:
                 state.delete_deck(deck_name)
+                if not anki.fetch_card_ids_in_deck(deck_name):
+                    anki.delete_empty_deck(deck_name)
+                    logger.info(
+                        f"Deck removed from Anki after Markdown deletion: '{deck_name}'"
+                    )
                 continue
             deck_id = deck_ids_by_name.get(deck_name)
             if deck_id is not None:
                 state.upsert_deck(
                     deck_name,
                     deck_id,
-                    source_path=source_deck_file.source.source_path,
+                    source_path=source.source_path,
                     md_path=str(deck_file.file_path.relative_to(collection_root)),
                 )
 

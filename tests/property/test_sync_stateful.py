@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from ankiops.anki import Anki
 from ankiops.collection import ANKIOPS_DB, NOTE_TYPES_DIR, deck_name_to_file_stem
+from ankiops.interchange import parse_collection
 from ankiops.sync.from_anki import sync_collection_from_anki
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
@@ -64,7 +65,7 @@ def _sync_import(anki, fs, db, collection_root: Path):
     return sync_collection_to_anki(
         anki=anki,
         state=db,
-        collection_root=collection_root,
+        parsed_sources=parse_collection(collection_root),
     )
 
 
@@ -72,7 +73,7 @@ def _sync_export(anki, fs, db, collection_root: Path):
     return sync_collection_from_anki(
         anki=anki,
         state=db,
-        collection_root=collection_root,
+        parsed_sources=parse_collection(collection_root),
     )
 
 

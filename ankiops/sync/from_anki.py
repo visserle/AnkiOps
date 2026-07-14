@@ -8,19 +8,15 @@ from ankiops.collection import (
     deck_name_to_file_stem,
     file_stem_to_deck_name,
 )
-from ankiops.deck_sources import (
-    DeckSource,
-    discover_deck_sources,
-    load_note_types_for_source,
-)
+from ankiops.deck_sources import DeckSource
 from ankiops.html_to_markdown import HTMLToMarkdown
+from ankiops.interchange import ParsedSource
 from ankiops.markdown import (
     NOTE_SEPARATOR,
     DeckFile,
     format_note_type_comment,
     is_code_fence_line,
     is_note_type_comment,
-    read_deck_file,
     render_notes_to_markdown,
     write_deck_file,
 )
@@ -92,39 +88,15 @@ def _from_html(
 
 def _load_deck_markdown_state(
     deck_name: str,
-    existing_file_path: Path | None,
+    existing_file: DeckFile | None,
     collection_root: Path,
-    note_types: list[NoteType],
 ) -> tuple[Path, DeckFile, bool]:
-    if existing_file_path and existing_file_path.exists():
-        return (
-            existing_file_path,
-            read_deck_file(
-                existing_file_path,
-                note_types=note_types,
-                context_root=collection_root,
-            ),
-            False,
-        )
+    if existing_file and existing_file.file_path.exists():
+        return existing_file.file_path, existing_file, False
 
     file_path = collection_root / f"{deck_name_to_file_stem(deck_name)}.md"
-    if file_path.exists():
-        return (
-            file_path,
-            read_deck_file(
-                file_path,
-                note_types=note_types,
-                context_root=collection_root,
-            ),
-            False,
-        )
-
     write_deck_file(file_path, "")
-    return (
-        file_path,
-        read_deck_file(file_path, note_types=note_types, context_root=collection_root),
-        True,
-    )
+    return file_path, DeckFile(file_path=file_path, raw_content="", notes=[]), True
 
 
 def _resolve_deck_notes(
@@ -411,7 +383,7 @@ def _sync_deck(
     deck_name: str,
     anki_notes: list[AnkiNote],
     config_by_name: dict[str, NoteType],
-    existing_file_path: Path | None,
+    existing_file: DeckFile | None,
     collection_root: Path,
     html_to_markdown: HTMLToMarkdown,
     state: SyncState,
@@ -420,12 +392,14 @@ def _sync_deck(
     note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_export_fingerprints: list[tuple[str, str, str]],
 ) -> SyncReport:
-    result = SyncReport.for_notes(name=deck_name, file_path=existing_file_path)
+    result = SyncReport.for_notes(
+        name=deck_name,
+        file_path=existing_file.file_path if existing_file else None,
+    )
     file_path, fs, is_first_export = _load_deck_markdown_state(
         deck_name=deck_name,
-        existing_file_path=existing_file_path,
+        existing_file=existing_file,
         collection_root=collection_root,
-        note_types=list(config_by_name.values()),
     )
     result.file_path = file_path
 
@@ -502,24 +476,8 @@ def _sync_deck(
 
 
 def _split_orphan_file_notes(
-    *,
-    md_file: Path,
-    collection_root: Path,
-    note_types: list[NoteType],
-) -> tuple[list[Note], list[Note]] | None:
-    try:
-        file_state = read_deck_file(
-            md_file,
-            note_types=note_types,
-            context_root=collection_root,
-        )
-    except Exception as error:  # pragma: no cover - defensive fail-safe
-        logger.warning(
-            f"Preserving orphan markdown file '{md_file.name}' because it "
-            f"could not be parsed during export cleanup: {error}"
-        )
-        return None
-
+    file_state: DeckFile,
+) -> tuple[list[Note], list[Note]]:
     keyless_notes: list[Note] = []
     keyed_notes: list[Note] = []
     for note in file_state.notes:
@@ -533,12 +491,15 @@ def _split_orphan_file_notes(
 def sync_collection_from_anki(
     anki: Anki,
     state: SyncState,
-    collection_root: Path,
+    parsed_sources: tuple[ParsedSource, ...],
 ) -> CollectionReport:
-    sources = discover_deck_sources(collection_root)
+    collection_root = parsed_sources[0].source.collection_root
+    sources = [parsed_source.source for parsed_source in parsed_sources]
     local_source = sources[0]
     configs = [
-        config for source in sources for config in load_note_types_for_source(source)
+        config
+        for parsed_source in parsed_sources
+        for config in parsed_source.note_types
     ]
     config_by_name = {config.name: config for config in configs}
     html_to_markdown = HTMLToMarkdown()
@@ -581,29 +542,16 @@ def sync_collection_from_anki(
                 continue
             notes_by_deck.setdefault(deck_name, []).append(anki_note)
 
-        md_files: list[Path] = []
-        source_by_file: dict[Path, DeckSource] = {}
-        file_map_by_deck_name: dict[str, tuple[DeckSource, Path]] = {}
-        deck_conflicts: list[str] = []
-        for source in sources:
-            for md_file in source.deck_files():
-                md_files.append(md_file)
-                source_by_file[md_file] = source
-                deck_name = file_stem_to_deck_name(md_file.stem)
-                previous = file_map_by_deck_name.get(deck_name)
-                if previous is not None:
-                    deck_conflicts.append(
-                        f"Deck '{deck_name}' is defined by both "
-                        f"{previous[0].display_name}:{previous[1].name} and "
-                        f"{source.display_name}:{md_file.name}"
-                    )
-                    continue
-                file_map_by_deck_name[deck_name] = (source, md_file)
-        if deck_conflicts:
-            raise ValueError(
-                "Aborting export: deck ownership conflicts found: "
-                + "; ".join(deck_conflicts)
-            )
+        parsed_decks = [
+            (parsed_source.source, deck)
+            for parsed_source in parsed_sources
+            for deck in parsed_source.decks
+        ]
+        md_files = [deck.path for _source, deck in parsed_decks]
+        file_state_by_path = {deck.path: deck.parsed for _source, deck in parsed_decks}
+        file_map_by_deck_name = {
+            deck.deck_name: (source, deck.parsed) for source, deck in parsed_decks
+        }
 
         source_by_path = {source.source_path: source for source in sources}
         ownership_conflicts = []
@@ -660,12 +608,12 @@ def sync_collection_from_anki(
             if old_name and old_name != deck_name:
                 old_entry = file_map_by_deck_name.get(old_name)
                 if old_entry is not None:
-                    old_source, old_path = old_entry
+                    old_source, old_file = old_entry
+                    old_path = old_file.file_path
                     new_path = old_path.parent / f"{safe_name}.md"
                     old_path.rename(new_path)
-                    source_by_file.pop(old_path, None)
-                    source_by_file[new_path] = old_source
-                    file_map_by_deck_name[deck_name] = (old_source, new_path)
+                    old_file.file_path = new_path
+                    file_map_by_deck_name[deck_name] = (old_source, old_file)
                     del file_map_by_deck_name[old_name]
                     logger.info(f"Deck renamed: '{old_name}' → '{deck_name}'")
 
@@ -739,16 +687,9 @@ def sync_collection_from_anki(
                 continue
             if md_file not in active_files:
                 deck_name = file_stem_to_deck_name(md_file.stem)
-                source = source_by_file.get(md_file, local_source)
-                orphan_split = _split_orphan_file_notes(
-                    md_file=md_file,
-                    collection_root=source.root,
-                    note_types=configs,
+                keyless_notes, keyed_notes = _split_orphan_file_notes(
+                    file_state_by_path[md_file]
                 )
-                if orphan_split is None:
-                    state.delete_deck(deck_name)
-                    continue
-                keyless_notes, keyed_notes = orphan_split
                 stale_orphan_note_keys = sorted(
                     {
                         note.note_key

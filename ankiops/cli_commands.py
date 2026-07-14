@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.markup import escape as rich_escape
 
 from ankiops.collab import run as run_collab_impl
+from ankiops.collab.source_security import validate_collection_collab_sources
 from ankiops.collection import (
     LOCAL_MEDIA_DIR,
     NOTE_TYPES_DIR,
@@ -18,29 +19,24 @@ from ankiops.collection import (
     initialize_collection,
     require_collection_root,
 )
-from ankiops.console import clickable_path, connect_or_exit
+from ankiops.console import clickable_path, connect_or_exit, print_error
 from ankiops.deck_sources import (
-    RESERVED_MARKDOWN_FILES,
     DeckSource,
     discover_deck_sources,
-    load_note_types_for_collection,
-    source_content_hash,
+    is_deck_markdown_filename,
 )
 from ankiops.git import GitRepository, git_snapshot
 from ankiops.image_widths import fix_image_widths_collection
 from ankiops.interchange import (
+    ParsedSource,
     apply_deserialization_plan,
+    parse_collection,
     plan_deserialize_from_file,
     serialize_to_file,
 )
-from ankiops.llm.commands import run_llm as run_llm_impl
-from ankiops.llm.execution import run_task
-from ankiops.llm.jobs import list_jobs as list_llm_jobs
-from ankiops.llm.jobs import show_job
-from ankiops.llm.planning import plan_task
-from ankiops.llm.tasks import load_llm_task_catalog
 from ankiops.media import (
     format_media_status,
+    preflight_media_references,
     sync_all_media_from_anki,
     sync_all_media_to_anki,
 )
@@ -57,10 +53,14 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def _sync_note_types(anki, collection_root, state):
+def _sync_note_types(anki, parsed_sources: tuple[ParsedSource, ...], state: SyncState):
     return sync_note_type_configs(
         anki,
-        load_note_types_for_collection(collection_root),
+        [
+            note_type
+            for parsed_source in parsed_sources
+            for note_type in parsed_source.note_types
+        ],
         sync_state=state,
     )
 
@@ -74,20 +74,6 @@ def _checkpoint_collab_repositories(collection_root: Path, action: str) -> None:
             logger.info(
                 "Auto-committed %s checkpoint %s", source.display_name, commit[:7]
             )
-
-
-def _record_applied_collab_sources(
-    state: SyncState,
-    collection_root: Path,
-) -> None:
-    for source in discover_deck_sources(collection_root)[1:]:
-        source_git = GitRepository(source.root)
-        clean_commit = source_git.head() if not source_git.status_lines() else None
-        state.set_source_applied_state(
-            source.source_path,
-            source_content_hash(source),
-            clean_commit,
-        )
 
 
 def _local_markdown_paths(collection_root: Path) -> list[Path]:
@@ -118,12 +104,7 @@ def _deleted_local_markdown_paths(collection_root: Path) -> list[Path]:
 
 
 def _is_local_markdown_deck_path(collection_root: Path, path: Path) -> bool:
-    return (
-        path.parent == collection_root
-        and path.suffix == ".md"
-        and path.name.upper() not in RESERVED_MARKDOWN_FILES
-        and "___" not in path.stem
-    )
+    return path.parent == collection_root and is_deck_markdown_filename(path.name)
 
 
 def run_init(args):
@@ -151,7 +132,8 @@ def run_af(args):
 
     collection_root = require_collection_root(active_profile)
     logger.debug(f"Collection directory: {collection_root}")
-    discover_deck_sources(collection_root)
+    validate_collection_collab_sources(collection_root)
+    preflight_media_references(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-anki-to-files git snapshot")
@@ -174,12 +156,12 @@ def run_af(args):
 
 
 def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
-
     logger.debug("Starting note sync (Anki -> files)")
+    parsed_sources = parse_collection(collection_root)
     export_summary: CollectionReport = sync_collection_from_anki(
         anki=anki,
         state=state,
-        collection_root=collection_root,
+        parsed_sources=parsed_sources,
     )
     note_summary = export_summary.summary
     deck_count = len(export_summary.results)
@@ -219,7 +201,6 @@ def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
         logger.debug("Starting media pull (Anki -> local)")
         media_result = sync_media_from_anki(anki, collection_root, state)
         logger.info(format_media_status(media_result, from_anki=True))
-        _record_applied_collab_sources(state, collection_root)
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
@@ -252,7 +233,8 @@ def run_fa(args):
 
     collection_root = require_collection_root(active_profile)
     logger.debug(f"Collection directory: {collection_root}")
-    discover_deck_sources(collection_root)
+    validate_collection_collab_sources(collection_root)
+    preflight_media_references(collection_root)
 
     if not args.no_auto_commit:
         logger.debug("Creating pre-files-to-anki git snapshot")
@@ -277,7 +259,6 @@ def run_fa(args):
 
 
 def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
-
     try:
         logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, collection_root, state)
@@ -285,8 +266,10 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
     except Exception as error:
         logger.warning(f"Media sync failed: {error}")
 
+    parsed_sources = parse_collection(collection_root)
+
     logger.debug("Starting note type sync")
-    nt_summary = _sync_note_types(anki, collection_root, state)
+    nt_summary = _sync_note_types(anki, parsed_sources, state)
     if nt_summary:
         logger.info(f"Note types: {nt_summary}")
 
@@ -294,10 +277,10 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
     import_summary: CollectionReport = sync_collection_to_anki(
         anki=anki,
         state=state,
-        collection_root=collection_root,
+        parsed_sources=parsed_sources,
     )
     note_summary = import_summary.summary
-    deck_count = len(import_summary.results)
+    deck_count = sum(len(source.decks) for source in parsed_sources)
     note_count = note_summary.total
     untracked = import_summary.untracked_decks
     changes = note_summary.format()
@@ -344,8 +327,6 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
             "Review and resolve errors above, then re-run files -> Anki — "
             "or you risk losing notes with the next Anki -> files sync."
         )
-    else:
-        _record_applied_collab_sources(state, collection_root)
 
 
 def run_serialize(args):
@@ -470,22 +451,6 @@ def run_fix_image_widths(args):
         logger.info("Only Markdown files were edited. Run 'ankiops fa' to sync.")
 
 
-def run_llm(args):
-    """Delegate LLM command handling to the LLM CLI module."""
-    run_llm_impl(
-        args,
-        require_collection_root_fn=require_collection_root,
-        load_note_type_configs_fn=(
-            lambda note_types_dir: load_note_types_for_collection(note_types_dir.parent)
-        ),
-        load_llm_task_catalog_fn=load_llm_task_catalog,
-        plan_task_fn=plan_task,
-        run_task_fn=run_task,
-        list_jobs_fn=list_llm_jobs,
-        show_job_fn=show_job,
-    )
-
-
 def run_note_type(args):
     run_note_type_impl(args)
 
@@ -494,9 +459,11 @@ def run_collab(args):
     try:
         run_collab_impl(args)
     except ValueError as error:
-        logger.error(str(error))
+        print_error(str(error))
+        logger.debug("Collab command failed", exc_info=True)
         raise SystemExit(1) from error
     except subprocess.CalledProcessError as error:
         output = ((error.stdout or "") + (error.stderr or "")).strip()
-        logger.error(output or f"git command failed with exit {error.returncode}")
+        print_error(output or f"Git command failed with exit {error.returncode}.")
+        logger.debug("Collab Git command failed", exc_info=True)
         raise SystemExit(1) from error
