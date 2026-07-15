@@ -69,7 +69,7 @@ T: Text with
 - {{c2::cloze deletions}}.
 E: Some *extra* info:
 
-![image with set width](media/im.png){width=700}
+![image with set width](media/im_hash.png){width=700}
 
 ---
 
