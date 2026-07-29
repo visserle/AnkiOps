@@ -54,6 +54,12 @@ blockquote {
 	max-width: 80%;
 }
 
+blockquote > ul,
+blockquote > ol,
+blockquote > dl {
+    display: block;
+}
+
 .night-mode blockquote {
 	border-left-color: #666;
 }
