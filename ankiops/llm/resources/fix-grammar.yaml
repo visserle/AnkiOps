@@ -1,4 +1,4 @@
-model: gpt-5.4-mini
+model: gpt-5.6-luna
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
@@ -15,4 +15,4 @@ fields:
 
 request:
   max_notes_per_request: 3
-  reasoning: low
+  reasoning: medium

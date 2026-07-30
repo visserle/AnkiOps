@@ -1,4 +1,4 @@
-model: gpt-5.4-mini
+model: gpt-5.6-luna
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Translate the following text from English to German.
@@ -16,3 +16,4 @@ tags: editable
 
 request:
   max_notes_per_request: 3
+  reasoning: high

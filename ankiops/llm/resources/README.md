@@ -126,11 +126,11 @@ ankiops llm --job 12
 
 A sample entry for `_models.yaml`:
 ```yaml
-- model: gpt-5.4-mini
-  model_id: gpt-5.4-mini
+- model: gpt-5.6-luna
+  model_id: gpt-5.6-luna
   base_url: https://api.openai.com/v1
   api_key: $OPENAI_API_KEY
   concurrency: 8
-  input_usd_per_mtok: 0.75
-  output_usd_per_mtok: 4.5
+  input_usd_per_mtok: 0.2
+  output_usd_per_mtok: 1.2
 ```

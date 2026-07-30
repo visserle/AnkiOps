@@ -1,4 +1,4 @@
-model: gpt-5.4-mini
+model: gpt-5.6-luna
 system_prompt: !file _system_prompt.md
 user_prompt: |
   Review the following note. If the information is correct, comprehensive and up to date, return nothing. 
