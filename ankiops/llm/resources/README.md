@@ -42,6 +42,9 @@ tags: hidden
 request:
   max_notes_per_request: 3
   reasoning: low
+
+input_files:
+  - references/terminology.pdf
 ```
 
 Apart from the prompts, the most important part of a task is the `fields` section. It controls which fields the model can read and write. There are three access levels:
@@ -56,26 +59,10 @@ Task files accept these top-level keys:
 
 - `model`: An alias from `_models.yaml`
 - `system_prompt` and `user_prompt`: Inline text or a `file` mapping. File paths are relative to the task YAML and must stay within the collection.
-- `input_files`: Optional relative file paths sent to every request for the task. Files are uploaded once per run and deleted afterward. Their combined size must not exceed 50 MB.
 - `fields`: Sets `default_access` and field rules for `editable`, `read_only`, or `hidden` access. Rules map note-type patterns to field-name patterns. Patterns use shell-style wildcards such as `*`.
 - `tags`: Sets tag access to `editable`, `read_only`, or `hidden`. Tags default to `hidden` when you omit this key.
 - `request`: Requires `max_notes_per_request`. It can also set `temperature` and `reasoning`. AnkiOps accepts `none`, `low`, `medium`, `high`, or `xhigh`, but each model supports a subset.
-
-For example, a task can use a shared prompt file and attach reference material:
-
-```yaml
-system_prompt:
-  file: _system_prompt.md
-user_prompt: |
-  Review each note against the attached reference material.
-input_files:
-  - references/rubric.pdf
-  - references/terminology.md
-```
-
-Input files are passed directly to the Responses API. PDF processing uses the
-API's automatic detail setting. The dry-run cost estimate does not include
-tokens derived from input files.
+- `input_files`: Optional relative file paths sent to every request for the task. Files are uploaded once per run and deleted afterward. Their combined size must not exceed 50 MB.
 
 ## Running tasks
 
