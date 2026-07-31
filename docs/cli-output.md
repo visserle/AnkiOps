@@ -587,8 +587,9 @@ row confirms that AnkiOps did not call the API or edit files.
   Scope      all decks
   Notes      128 checked · 116 eligible · 12 skipped
   Requests   39 estimated · up to 3 notes each · low reasoning
-  Cost       $0.18 estimated
+  Cost       $0.18 estimated · excludes input-file tokens
   Prompts    llm/fix-grammar.yaml · llm/_system_prompt.md
+  Inputs     llm/references/rubric.pdf
   Dry run    API not called · files unchanged
 
   Field access
@@ -602,9 +603,10 @@ row confirms that AnkiOps did not call the API or edit files.
     ankiops llm fix-grammar --run
 ```
 
-Keep prompt paths clickable. Do not print the full prompt in default output;
-the task and prompt files provide the review surface in VS Code. Preserve model
-and deck overrides in the run command under `Next`.
+Keep prompt and input-file paths clickable. Do not print the full prompt in
+default output; the task, prompt, and input files provide the review surface in
+VS Code. State that cost estimates exclude tokens derived from input files.
+Preserve model and deck overrides in the run command under `Next`.
 
 If the plan finds no eligible notes, use `No notes eligible for LLM task`, show
 the skipped count and reason, and omit the run command.

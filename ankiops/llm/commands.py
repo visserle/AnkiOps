@@ -385,6 +385,8 @@ def _show_plan(
         logger.info("System prompt file: %s", plan.system_prompt_path)
     if plan.user_prompt_path is not None:
         logger.info("User prompt file: %s", plan.user_prompt_path)
+    if plan.input_file_paths:
+        logger.info("Input files: %s", ", ".join(plan.input_file_paths))
     logger.info("Request defaults: %s", plan.request_defaults)
     logger.info(
         "Discovery: decks_seen=%d decks_matched=%d notes_seen=%d "
@@ -425,6 +427,8 @@ def _show_plan(
         "Cost estimate (assuming number of input tokens equals output tokens): %s",
         plan.format_cost_estimate(),
     )
+    if plan.input_file_paths:
+        logger.info("Cost estimate excludes tokens derived from input files.")
     run_command = f"ankiops llm {plan.task_name} --run"
     if model_override:
         run_command = f"{run_command} --model {model_override}"

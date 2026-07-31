@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from yaml.nodes import ScalarNode
 
 from ankiops.collection import LLM_DIR
 from ankiops.note_types import NoteType
@@ -27,10 +26,12 @@ _SUPPORTED_TASK_KEYS = (
     "model",
     "system_prompt",
     "user_prompt",
+    "input_files",
     "request",
     "fields",
     "tags",
 )
+_MAX_INPUT_FILE_BYTES = 50 * 1024 * 1024
 _SUPPORTED_REQUEST_KEYS = (
     "max_notes_per_request",
     "temperature",
@@ -103,6 +104,7 @@ class TaskConfig:
     user_prompt: str
     system_prompt_path: Path | None = None
     user_prompt_path: Path | None = None
+    input_files: tuple[Path, ...] = ()
     decks: DeckScope = field(default_factory=DeckScope)
     default_field_access: FieldAccess = FieldAccess.EDITABLE
     field_rules: list[FieldAccessRule] = field(default_factory=list)
@@ -133,43 +135,6 @@ class TaskConfig:
 class TaskCatalog:
     tasks_by_name: dict[str, TaskConfig]
     errors: dict[str, str]
-
-
-class _FileSource:
-    def __init__(self, text: str, path: Path) -> None:
-        self.text = text
-        self.path = path
-
-
-class _TaskConfigLoader(yaml.SafeLoader):
-    task_path: Path
-    llm_dir: Path
-
-
-def _construct_file_source(
-    loader: _TaskConfigLoader,
-    node: Any,
-) -> _FileSource:
-    if not isinstance(node, ScalarNode):
-        raise LlmConfigError(
-            f"{loader.task_path}: !file tag must be used with a scalar path"
-        )
-
-    raw_reference = loader.construct_scalar(node).strip()
-    if not raw_reference:
-        raise LlmConfigError(
-            f"{loader.task_path}: !file path must be a non-empty string"
-        )
-
-    resolved_path = _resolve_relative_file(
-        loader.task_path,
-        raw_reference,
-        llm_dir=loader.llm_dir,
-    )
-    return _FileSource(text=_read_text_file(resolved_path), path=resolved_path)
-
-
-_TaskConfigLoader.add_constructor("!file", _construct_file_source)
 
 
 def is_task_config_file(path: Path) -> bool:
@@ -210,7 +175,7 @@ def load_llm_task_catalog(
             task = _parse_task(
                 path,
                 note_type_configs=note_type_configs,
-                llm_dir=llm_dir,
+                collection_root=collection_root,
                 model_registry=model_registry,
             )
             if task.name in tasks_by_name:
@@ -226,10 +191,10 @@ def _parse_task(
     path: Path,
     *,
     note_type_configs: list[NoteType],
-    llm_dir: Path,
+    collection_root: Path,
     model_registry: ModelRegistry,
 ) -> TaskConfig:
-    mapping = _read_yaml_mapping(path, llm_dir=llm_dir)
+    mapping = _read_yaml_mapping(path)
     _validate_task_keys(mapping, path)
 
     model_name = _require_str(mapping, "model", path)
@@ -243,11 +208,18 @@ def _parse_task(
         mapping,
         key="system_prompt",
         path=path,
+        collection_root=collection_root,
     )
     user_prompt, user_prompt_path = _parse_text_source(
         mapping,
         key="user_prompt",
         path=path,
+        collection_root=collection_root,
+    )
+    input_files = _parse_input_files(
+        mapping.get("input_files"),
+        task_path=path,
+        collection_root=collection_root,
     )
     default_field_access, field_rules = _parse_field_rules(
         mapping.get("fields"),
@@ -264,6 +236,7 @@ def _parse_task(
         user_prompt=user_prompt,
         system_prompt_path=system_prompt_path,
         user_prompt_path=user_prompt_path,
+        input_files=input_files,
         default_field_access=default_field_access,
         field_rules=field_rules,
         tag_access=tag_access,
@@ -275,17 +248,12 @@ def _iter_yaml_files(directory: Path) -> list[Path]:
     return sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")])
 
 
-def _read_yaml_mapping(path: Path, *, llm_dir: Path) -> dict[str, Any]:
+def _read_yaml_mapping(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
-        loader = _TaskConfigLoader(handle)
-        loader.task_path = path
-        loader.llm_dir = llm_dir
         try:
-            raw = loader.get_single_data() or {}
+            raw = yaml.safe_load(handle) or {}
         except yaml.YAMLError as error:
             raise LlmConfigError(f"{path}: invalid YAML ({error})") from error
-        finally:
-            loader.dispose()
     if not isinstance(raw, dict):
         raise LlmConfigError(f"{path}: config must be a YAML mapping")
     return raw
@@ -313,37 +281,102 @@ def _parse_text_source(
     *,
     key: str,
     path: Path,
+    collection_root: Path,
 ) -> tuple[str, Path | None]:
     raw_value = mapping.get(key)
-    if isinstance(raw_value, _FileSource):
-        return raw_value.text, raw_value.path
     if isinstance(raw_value, str) and raw_value.strip():
         return raw_value.strip(), None
-    raise LlmConfigError(f"{path}: '{key}' must be a non-empty string")
+    if not isinstance(raw_value, dict):
+        raise LlmConfigError(
+            f"{path}: '{key}' must be inline text or a mapping with 'file'"
+        )
+    unknown = sorted(set(raw_value) - {"file"})
+    if unknown:
+        raise LlmConfigError(f"{path}: unknown '{key}' key(s): {', '.join(unknown)}")
+    if set(raw_value) != {"file"}:
+        raise LlmConfigError(f"{path}: '{key}.file' is required")
+    resolved_path = _resolve_file_reference(
+        task_path=path,
+        raw_reference=raw_value["file"],
+        collection_root=collection_root,
+        key=f"{key}.file",
+    )
+    return _read_text_file(resolved_path), resolved_path
+
+
+def _parse_input_files(
+    value: Any,
+    *,
+    task_path: Path,
+    collection_root: Path,
+) -> tuple[Path, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise LlmConfigError(f"{task_path}: 'input_files' must be a list")
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    total_bytes = 0
+    for index, raw_reference in enumerate(value):
+        path = _resolve_file_reference(
+            task_path=task_path,
+            raw_reference=raw_reference,
+            collection_root=collection_root,
+            key=f"input_files[{index}]",
+        )
+        if path in seen:
+            raise LlmConfigError(
+                f"{task_path}: 'input_files' contains duplicate path '{raw_reference}'"
+            )
+        size = path.stat().st_size
+        if size >= _MAX_INPUT_FILE_BYTES:
+            raise LlmConfigError(
+                f"{task_path}: 'input_files[{index}]' must be under 50 MB"
+            )
+        total_bytes += size
+        if total_bytes > _MAX_INPUT_FILE_BYTES:
+            raise LlmConfigError(
+                f"{task_path}: combined 'input_files' size must not exceed 50 MB"
+            )
+        seen.add(path)
+        resolved.append(path)
+    return tuple(resolved)
 
 
 def _read_text_file(path: Path) -> str:
-    if not path.exists() or not path.is_file():
-        raise LlmConfigError(f"{path}: file not found")
-    value = path.read_text(encoding="utf-8")
+    try:
+        value = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise LlmConfigError(f"{path}: prompt file must be UTF-8 text") from error
     if not value.strip():
         raise LlmConfigError(f"{path}: file must be non-empty")
     return value.strip()
 
 
-def _resolve_relative_file(
-    task_path: Path,
-    raw_reference: str,
+def _resolve_file_reference(
     *,
-    llm_dir: Path,
+    task_path: Path,
+    raw_reference: Any,
+    collection_root: Path,
+    key: str,
 ) -> Path:
-    candidate = (task_path.parent / raw_reference).resolve()
+    if not isinstance(raw_reference, str) or not raw_reference.strip():
+        raise LlmConfigError(f"{task_path}: '{key}' must be a non-empty relative path")
+    reference = Path(raw_reference.strip())
+    if reference.is_absolute():
+        raise LlmConfigError(f"{task_path}: '{key}' must be a relative path")
+    candidate = (task_path.parent / reference).resolve()
     try:
-        candidate.relative_to(llm_dir.resolve())
+        candidate.relative_to(collection_root.resolve())
     except ValueError as error:
         raise LlmConfigError(
-            f"{task_path}: !file path must stay within {llm_dir}"
+            f"{task_path}: '{key}' must stay within {collection_root}"
         ) from error
+    if not candidate.exists() or not candidate.is_file():
+        raise LlmConfigError(f"{task_path}: '{key}' file not found: {candidate}")
+    if candidate.stat().st_size == 0:
+        raise LlmConfigError(f"{task_path}: '{key}' file must be non-empty")
     return candidate
 
 

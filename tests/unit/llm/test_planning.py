@@ -58,6 +58,7 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
         AI: private
         """,
     )
+    write_file(llm_collection / "llm/references/reference.txt", "Reference material")
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -66,6 +67,8 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
           You are a strict editor.
         user_prompt: |
           Fix grammar.
+        input_files:
+          - references/reference.txt
         request:
           max_notes_per_request: 4
         fields:
@@ -85,6 +88,9 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
     assert plan.summary.notes_seen == 3
     assert plan.summary.eligible == 3
     assert plan.requests_estimate == 2
+    assert plan.input_file_paths == (
+        str((llm_collection / "llm/references/reference.txt").resolve()),
+    )
     assert plan.input_tokens_estimate > 0
     expected_cost = plan.model.estimate_cost(
         input_tokens=plan.input_tokens_estimate,
