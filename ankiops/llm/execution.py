@@ -644,13 +644,32 @@ async def _upload_input_files(
                 )
             file_id = uploaded.id
         except asyncio.CancelledError:
-            await _delete_uploaded_files(client=client, file_ids=tuple(file_ids))
+            await _delete_uploaded_files_after_cancellation(
+                client=client,
+                file_ids=tuple(file_ids),
+            )
             raise
         except Exception as error:
             await _delete_uploaded_files(client=client, file_ids=tuple(file_ids))
             raise RuntimeError(_format_file_upload_error(path, error)) from error
         file_ids.append(file_id)
     return tuple(file_ids)
+
+
+async def _delete_uploaded_files_after_cancellation(
+    *,
+    client: AsyncOpenAI,
+    file_ids: tuple[str, ...],
+) -> None:
+    cleanup_task = asyncio.create_task(
+        _delete_uploaded_files(client=client, file_ids=file_ids)
+    )
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            continue
+    await cleanup_task
 
 
 async def _delete_uploaded_files(

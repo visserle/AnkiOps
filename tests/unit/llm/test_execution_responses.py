@@ -204,6 +204,38 @@ def test_upload_input_files_cleans_up_completed_uploads_on_cancellation(tmp_path
     assert files.deleted == ["file-first"]
 
 
+def test_upload_cleanup_survives_repeated_cancellation(tmp_path):
+    class _RepeatedlyCancelingFiles:
+        def __init__(self):
+            self.upload_count = 0
+            self.upload_task = None
+            self.deleted = []
+
+        async def create(self, *, file, purpose):
+            self.upload_task = asyncio.current_task()
+            self.upload_count += 1
+            if self.upload_count == 4:
+                raise asyncio.CancelledError
+            return SimpleNamespace(id=f"file-{self.upload_count}")
+
+        async def delete(self, file_id):
+            if file_id == "file-1":
+                self.upload_task.cancel()
+                await asyncio.sleep(0)
+            self.deleted.append(file_id)
+
+    paths = tuple(tmp_path / f"input-{index}.txt" for index in range(4))
+    for path in paths:
+        path.write_text(path.name)
+    files = _RepeatedlyCancelingFiles()
+    client = SimpleNamespace(files=files)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_upload_input_files(client=client, paths=paths))
+
+    assert files.deleted == ["file-1", "file-2", "file-3"]
+
+
 def test_response_model_accepts_only_known_note_keys_and_editable_fields():
     response_model = build_response_model(
         note_type="AnkiOpsQA",
