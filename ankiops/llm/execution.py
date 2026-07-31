@@ -285,12 +285,14 @@ class LlmTaskExecutor:
             timeout=60.0,
             max_retries=0,
         )
-        uploaded_file_ids: tuple[str, ...] = ()
+        uploaded_file_ids: list[str] = []
         try:
-            uploaded_file_ids = await _upload_input_files(
+            await _upload_input_files(
                 client=client,
                 paths=task.input_files,
+                file_ids=uploaded_file_ids,
             )
+            input_file_ids = tuple(uploaded_file_ids)
             batches = build_candidate_batches(
                 candidates,
                 max_notes_per_request=task.request.max_notes_per_request,
@@ -310,7 +312,7 @@ class LlmTaskExecutor:
                         task=task,
                         client=client,
                         batch=batch,
-                        input_file_ids=uploaded_file_ids,
+                        input_file_ids=input_file_ids,
                     )
                 )
                 in_flight[task_handle] = batch
@@ -353,11 +355,10 @@ class LlmTaskExecutor:
                     start(batches[next_index])
                     next_index += 1
         finally:
-            await _delete_uploaded_files(
+            await _finalize_openai_client(
                 client=client,
-                file_ids=uploaded_file_ids,
+                file_ids=tuple(uploaded_file_ids),
             )
-            await client.close()
 
     async def _process_batch(
         self,
@@ -633,8 +634,8 @@ async def _upload_input_files(
     *,
     client: AsyncOpenAI,
     paths: tuple[Path, ...],
-) -> tuple[str, ...]:
-    file_ids: list[str] = []
+    file_ids: list[str],
+) -> None:
     for path in paths:
         try:
             with path.open("rb") as handle:
@@ -643,33 +644,32 @@ async def _upload_input_files(
                     purpose="user_data",
                 )
             file_id = uploaded.id
-        except asyncio.CancelledError:
-            await _delete_uploaded_files_after_cancellation(
-                client=client,
-                file_ids=tuple(file_ids),
-            )
-            raise
         except Exception as error:
-            await _delete_uploaded_files(client=client, file_ids=tuple(file_ids))
             raise RuntimeError(_format_file_upload_error(path, error)) from error
         file_ids.append(file_id)
-    return tuple(file_ids)
 
 
-async def _delete_uploaded_files_after_cancellation(
+async def _finalize_openai_client(
     *,
     client: AsyncOpenAI,
     file_ids: tuple[str, ...],
 ) -> None:
-    cleanup_task = asyncio.create_task(
-        _delete_uploaded_files(client=client, file_ids=file_ids)
-    )
+    async def cleanup() -> None:
+        try:
+            await _delete_uploaded_files(client=client, file_ids=file_ids)
+        finally:
+            await client.close()
+
+    cleanup_task = asyncio.create_task(cleanup())
+    cancellation: asyncio.CancelledError | None = None
     while not cleanup_task.done():
         try:
             await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError:
-            continue
+        except asyncio.CancelledError as error:
+            cancellation = error
     await cleanup_task
+    if cancellation is not None:
+        raise cancellation
 
 
 async def _delete_uploaded_files(

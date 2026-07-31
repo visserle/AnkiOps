@@ -12,6 +12,7 @@ from ankiops.llm.execution import (
     _apply_batch_parsed_response,
     _build_request_content,
     _delete_uploaded_files,
+    _finalize_openai_client,
     _upload_input_files,
     build_response_model,
 )
@@ -171,11 +172,10 @@ def test_delete_uploaded_files_logs_cleanup_failures(caplog):
     assert "Could not delete uploaded OpenAI file file-a" in caplog.text
 
 
-def test_upload_input_files_cleans_up_completed_uploads_on_cancellation(tmp_path):
+def test_upload_input_files_retains_completed_ids_on_cancellation(tmp_path):
     class _CancelingFiles:
         def __init__(self):
             self.upload_count = 0
-            self.deleted = []
 
         async def create(self, *, file, purpose):
             self.upload_count += 1
@@ -183,57 +183,63 @@ def test_upload_input_files_cleans_up_completed_uploads_on_cancellation(tmp_path
                 raise asyncio.CancelledError
             return SimpleNamespace(id="file-first")
 
-        async def delete(self, file_id):
-            self.deleted.append(file_id)
-
     first = tmp_path / "first.txt"
     second = tmp_path / "second.txt"
     first.write_text("first")
     second.write_text("second")
     files = _CancelingFiles()
     client = SimpleNamespace(files=files)
+    file_ids = []
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(
             _upload_input_files(
                 client=client,
                 paths=(first, second),
+                file_ids=file_ids,
             )
         )
 
-    assert files.deleted == ["file-first"]
+    assert file_ids == ["file-first"]
 
 
-def test_upload_cleanup_survives_repeated_cancellation(tmp_path):
-    class _RepeatedlyCancelingFiles:
+def test_final_cleanup_survives_repeated_cancellation():
+    class _CancelingFiles:
         def __init__(self):
-            self.upload_count = 0
-            self.upload_task = None
+            self.owner = None
             self.deleted = []
-
-        async def create(self, *, file, purpose):
-            self.upload_task = asyncio.current_task()
-            self.upload_count += 1
-            if self.upload_count == 4:
-                raise asyncio.CancelledError
-            return SimpleNamespace(id=f"file-{self.upload_count}")
 
         async def delete(self, file_id):
             if file_id == "file-1":
-                self.upload_task.cancel()
+                self.owner.cancel()
                 await asyncio.sleep(0)
             self.deleted.append(file_id)
 
-    paths = tuple(tmp_path / f"input-{index}.txt" for index in range(4))
-    for path in paths:
-        path.write_text(path.name)
-    files = _RepeatedlyCancelingFiles()
-    client = SimpleNamespace(files=files)
+    class _Client:
+        def __init__(self):
+            self.files = _CancelingFiles()
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    client = _Client()
+
+    async def finalize():
+        client.files.owner = asyncio.current_task()
+        try:
+            raise asyncio.CancelledError
+        finally:
+            await _finalize_openai_client(
+                client=client,
+                file_ids=("file-1", "file-2", "file-3"),
+            )
 
     with pytest.raises(asyncio.CancelledError):
-        asyncio.run(_upload_input_files(client=client, paths=paths))
+        asyncio.run(finalize())
 
-    assert files.deleted == ["file-1", "file-2", "file-3"]
+    assert client.files.deleted == ["file-1", "file-2", "file-3"]
+    assert client.closed
 
 
 def test_response_model_accepts_only_known_note_keys_and_editable_fields():
