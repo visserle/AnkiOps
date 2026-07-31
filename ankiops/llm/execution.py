@@ -643,6 +643,9 @@ async def _upload_input_files(
                     purpose="user_data",
                 )
             file_id = uploaded.id
+        except asyncio.CancelledError:
+            await _delete_uploaded_files(client=client, file_ids=tuple(file_ids))
+            raise
         except Exception as error:
             await _delete_uploaded_files(client=client, file_ids=tuple(file_ids))
             raise RuntimeError(_format_file_upload_error(path, error)) from error

@@ -12,6 +12,7 @@ from ankiops.llm.execution import (
     _apply_batch_parsed_response,
     _build_request_content,
     _delete_uploaded_files,
+    _upload_input_files,
     build_response_model,
 )
 from ankiops.llm.jobs import LlmItemStatus
@@ -168,6 +169,39 @@ def test_delete_uploaded_files_logs_cleanup_failures(caplog):
     )
 
     assert "Could not delete uploaded OpenAI file file-a" in caplog.text
+
+
+def test_upload_input_files_cleans_up_completed_uploads_on_cancellation(tmp_path):
+    class _CancelingFiles:
+        def __init__(self):
+            self.upload_count = 0
+            self.deleted = []
+
+        async def create(self, *, file, purpose):
+            self.upload_count += 1
+            if self.upload_count == 2:
+                raise asyncio.CancelledError
+            return SimpleNamespace(id="file-first")
+
+        async def delete(self, file_id):
+            self.deleted.append(file_id)
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("first")
+    second.write_text("second")
+    files = _CancelingFiles()
+    client = SimpleNamespace(files=files)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            _upload_input_files(
+                client=client,
+                paths=(first, second),
+            )
+        )
+
+    assert files.deleted == ["file-first"]
 
 
 def test_response_model_accepts_only_known_note_keys_and_editable_fields():
