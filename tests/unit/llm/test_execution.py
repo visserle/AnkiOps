@@ -17,17 +17,14 @@ from tests.support.deck_files import DeckFileHarness
 class _FakeFiles:
     def __init__(self) -> None:
         self.created: list[tuple[str, bytes]] = []
-        self.deleted: list[str] = []
 
-    async def create(self, *, file, purpose):
+    async def create(self, *, file, purpose, expires_after):
         assert purpose == "user_data"
+        assert expires_after == {"anchor": "created_at", "seconds": 3600}
         content = file.read()
         file_id = f"file-{len(self.created) + 1}"
         self.created.append((file.name, content))
         return SimpleNamespace(id=file_id)
-
-    async def delete(self, file_id):
-        self.deleted.append(file_id)
 
 
 class _FakeAsyncOpenAI:
@@ -208,7 +205,7 @@ def test_executor_persists_successful_field_updates(
     assert "Q: Already good" in content
 
 
-def test_executor_uploads_input_file_once_for_multiple_batches_and_deletes_it(
+def test_executor_uploads_expiring_input_file_once_for_multiple_batches(
     llm_collection,
     write_file,
     monkeypatch,
@@ -271,19 +268,22 @@ def test_executor_uploads_input_file_once_for_multiple_batches_and_deletes_it(
             b"Shared reference\n",
         )
     ]
-    assert client.files.deleted == ["file-1"]
 
 
-def test_executor_deletes_partial_uploads_after_upload_failure(
+def test_executor_partial_uploads_expire_after_upload_failure(
     llm_collection,
     write_file,
     monkeypatch,
 ):
     class _FailingFiles(_FakeFiles):
-        async def create(self, *, file, purpose):
+        async def create(self, *, file, purpose, expires_after):
             if self.created:
                 raise RuntimeError("upload failed")
-            return await super().create(file=file, purpose=purpose)
+            return await super().create(
+                file=file,
+                purpose=purpose,
+                expires_after=expires_after,
+            )
 
     class _FailingAsyncOpenAI(_FakeAsyncOpenAI):
         def __init__(self, **_kwargs) -> None:
@@ -330,10 +330,10 @@ def test_executor_deletes_partial_uploads_after_upload_failure(
     client = _FailingAsyncOpenAI.instances[-1]
     assert result.failed
     assert result.summary.canceled == 1
-    assert client.files.deleted == ["file-1"]
+    assert len(client.files.created) == 1
 
 
-def test_executor_deletes_uploaded_files_after_fatal_request_error(
+def test_executor_uses_expiring_files_before_fatal_request_error(
     llm_collection,
     write_file,
     monkeypatch,
@@ -380,7 +380,7 @@ def test_executor_deletes_uploaded_files_after_fatal_request_error(
 
     client = _FakeAsyncOpenAI.instances[-1]
     assert result.failed
-    assert client.files.deleted == ["file-1"]
+    assert len(client.files.created) == 1
 
 
 def test_executor_does_not_upload_files_without_eligible_notes(

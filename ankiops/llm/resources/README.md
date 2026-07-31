@@ -62,7 +62,7 @@ Task files accept these top-level keys:
 - `fields`: Sets `default_access` and field rules for `editable`, `read_only`, or `hidden` access. Rules map note-type patterns to field-name patterns. Patterns use shell-style wildcards such as `*`.
 - `tags`: Sets tag access to `editable`, `read_only`, or `hidden`. Tags default to `hidden` when you omit this key.
 - `request`: Requires `max_notes_per_request`. It can also set `temperature` and `reasoning`. AnkiOps accepts `none`, `low`, `medium`, `high`, or `xhigh`, but each model supports a subset.
-- `input_files`: Optional relative file paths sent to every request for the task. Files are uploaded once per run and deleted afterward. Their combined size must not exceed 50 MB.
+- `input_files`: Optional relative file paths sent to every request for the task. Files are uploaded once per run and expire automatically after one hour. Their combined size must not exceed 50 MB.
 
 ## Running tasks
 

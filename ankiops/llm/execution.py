@@ -285,14 +285,11 @@ class LlmTaskExecutor:
             timeout=60.0,
             max_retries=0,
         )
-        uploaded_file_ids: list[str] = []
         try:
-            await _upload_input_files(
+            input_file_ids = await _upload_input_files(
                 client=client,
                 paths=task.input_files,
-                file_ids=uploaded_file_ids,
             )
-            input_file_ids = tuple(uploaded_file_ids)
             batches = build_candidate_batches(
                 candidates,
                 max_notes_per_request=task.request.max_notes_per_request,
@@ -355,10 +352,7 @@ class LlmTaskExecutor:
                     start(batches[next_index])
                     next_index += 1
         finally:
-            await _finalize_openai_client(
-                client=client,
-                file_ids=tuple(uploaded_file_ids),
-            )
+            await client.close()
 
     async def _process_batch(
         self,
@@ -634,56 +628,21 @@ async def _upload_input_files(
     *,
     client: AsyncOpenAI,
     paths: tuple[Path, ...],
-    file_ids: list[str],
-) -> None:
+) -> tuple[str, ...]:
+    file_ids: list[str] = []
     for path in paths:
         try:
             with path.open("rb") as handle:
                 uploaded = await client.files.create(
                     file=handle,
                     purpose="user_data",
+                    expires_after={"anchor": "created_at", "seconds": 3600},
                 )
             file_id = uploaded.id
         except Exception as error:
             raise RuntimeError(_format_file_upload_error(path, error)) from error
         file_ids.append(file_id)
-
-
-async def _finalize_openai_client(
-    *,
-    client: AsyncOpenAI,
-    file_ids: tuple[str, ...],
-) -> None:
-    async def cleanup() -> None:
-        try:
-            await _delete_uploaded_files(client=client, file_ids=file_ids)
-        finally:
-            await client.close()
-
-    cleanup_task = asyncio.create_task(cleanup())
-    cancellation: asyncio.CancelledError | None = None
-    while not cleanup_task.done():
-        try:
-            await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError as error:
-            cancellation = error
-    await cleanup_task
-    if cancellation is not None:
-        raise cancellation
-
-
-async def _delete_uploaded_files(
-    *,
-    client: AsyncOpenAI,
-    file_ids: tuple[str, ...],
-) -> None:
-    for file_id in file_ids:
-        try:
-            await client.files.delete(file_id)
-        except Exception as error:
-            logger.warning(
-                "Could not delete uploaded OpenAI file %s: %s", file_id, error
-            )
+    return tuple(file_ids)
 
 
 def _format_file_upload_error(path: Path, error: Exception) -> str:
