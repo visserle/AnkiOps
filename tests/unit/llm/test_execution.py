@@ -14,9 +14,25 @@ from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
 
+class _FakeFiles:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, bytes]] = []
+
+    async def create(self, *, file, purpose, expires_after):
+        assert purpose == "user_data"
+        assert expires_after == {"anchor": "created_at", "seconds": 3600}
+        content = file.read()
+        file_id = f"file-{len(self.created) + 1}"
+        self.created.append((file.name, content))
+        return SimpleNamespace(id=file_id)
+
+
 class _FakeAsyncOpenAI:
+    instances: list[_FakeAsyncOpenAI] = []
+
     def __init__(self, **_kwargs) -> None:
-        pass
+        self.files = _FakeFiles()
+        self.instances.append(self)
 
     async def close(self) -> None:
         pass
@@ -187,6 +203,230 @@ def test_executor_persists_successful_field_updates(
     assert "<!-- tags: keep-me -->" in content
     assert "E: Book" in content
     assert "Q: Already good" in content
+
+
+def test_executor_uploads_expiring_input_file_once_for_multiple_batches(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: First
+        A: Answer
+
+        ---
+
+        <!-- note_key: nk-2 -->
+        Q: Second
+        A: Answer
+        """,
+    )
+    write_file(llm_collection / "llm/references/reference.txt", "Shared reference")
+    write_file(
+        llm_collection / "llm/review.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        input_files:
+          - references/reference.txt
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
+    seen_file_ids: list[tuple[str, ...]] = []
+
+    async def fake_call_openai(*, input_file_ids, **_kwargs):
+        seen_file_ids.append(input_file_ids)
+        return _success(_parsed_response(), input_tokens=5, output_tokens=1)
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
+
+    result = run_task(
+        collection_root=llm_collection,
+        task_name="review",
+        no_auto_commit=True,
+    )
+
+    client = _FakeAsyncOpenAI.instances[-1]
+    assert not result.failed
+    assert result.summary.requests == 2
+    assert seen_file_ids == [("file-1",), ("file-1",)]
+    assert client.files.created == [
+        (
+            str(llm_collection / "llm/references/reference.txt"),
+            b"Shared reference\n",
+        )
+    ]
+
+
+def test_executor_partial_uploads_expire_after_upload_failure(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    class _FailingFiles(_FakeFiles):
+        async def create(self, *, file, purpose, expires_after):
+            if self.created:
+                raise RuntimeError("upload failed")
+            return await super().create(
+                file=file,
+                purpose=purpose,
+                expires_after=expires_after,
+            )
+
+    class _FailingAsyncOpenAI(_FakeAsyncOpenAI):
+        def __init__(self, **_kwargs) -> None:
+            self.files = _FailingFiles()
+            self.instances.append(self)
+
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Question
+        A: Answer
+        """,
+    )
+    write_file(llm_collection / "llm/references/first.txt", "First")
+    write_file(llm_collection / "llm/references/second.txt", "Second")
+    write_file(
+        llm_collection / "llm/review.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        input_files:
+          - references/first.txt
+          - references/second.txt
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FailingAsyncOpenAI)
+
+    result = run_task(
+        collection_root=llm_collection,
+        task_name="review",
+        no_auto_commit=True,
+    )
+
+    client = _FailingAsyncOpenAI.instances[-1]
+    assert result.failed
+    assert result.summary.canceled == 1
+    assert len(client.files.created) == 1
+
+
+def test_executor_uses_expiring_files_before_fatal_request_error(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Question
+        A: Answer
+        """,
+    )
+    write_file(llm_collection / "llm/references/reference.txt", "Reference")
+    write_file(
+        llm_collection / "llm/review.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        input_files:
+          - references/reference.txt
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+          editable:
+            "AnkiOpsQA": ["Question"]
+        """,
+    )
+
+    async def fake_call_openai(**_kwargs):
+        return _fatal_error()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", _FakeAsyncOpenAI)
+    monkeypatch.setattr("ankiops.llm.execution._call_openai", fake_call_openai)
+
+    result = run_task(
+        collection_root=llm_collection,
+        task_name="review",
+        no_auto_commit=True,
+    )
+
+    client = _FakeAsyncOpenAI.instances[-1]
+    assert result.failed
+    assert len(client.files.created) == 1
+
+
+def test_executor_does_not_upload_files_without_eligible_notes(
+    llm_collection,
+    write_file,
+    monkeypatch,
+):
+    _init_collection(llm_collection)
+    write_file(
+        llm_collection / "Deck.md",
+        """
+        <!-- note_key: nk-1 -->
+        Q: Question
+        A: Answer
+        """,
+    )
+    write_file(llm_collection / "llm/references/reference.txt", "Reference")
+    write_file(
+        llm_collection / "llm/review.yaml",
+        """
+        model: test
+        system_prompt: system
+        user_prompt: user
+        input_files:
+          - references/reference.txt
+        request:
+          max_notes_per_request: 1
+        fields:
+          default_access: hidden
+        """,
+    )
+
+    def fail_if_created(**_kwargs):
+        raise AssertionError("OpenAI client should not be created")
+
+    monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", fail_if_created)
+
+    result = run_task(
+        collection_root=llm_collection,
+        task_name="review",
+        no_auto_commit=True,
+    )
+
+    assert not result.failed
+    assert result.summary.skipped == 1
+    assert result.summary.requests == 0
 
 
 def test_executor_snapshots_only_queued_local_deck_paths(

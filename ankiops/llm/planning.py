@@ -92,6 +92,7 @@ class TaskPlanResult:
     serializer_scope: str
     system_prompt_path: str | None
     user_prompt_path: str | None
+    input_file_paths: tuple[str, ...]
     system_prompt: str
     user_prompt: str
     request_defaults: str
@@ -578,6 +579,7 @@ def _build_task_plan_result(
         user_prompt_path=(
             str(task.user_prompt_path) if task.user_prompt_path is not None else None
         ),
+        input_file_paths=tuple(str(path) for path in task.input_files),
         system_prompt=task.system_prompt,
         user_prompt=task.user_prompt,
         request_defaults=_format_request_defaults(task.request),

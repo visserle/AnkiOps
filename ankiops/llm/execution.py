@@ -286,6 +286,10 @@ class LlmTaskExecutor:
             max_retries=0,
         )
         try:
+            input_file_ids = await _upload_input_files(
+                client=client,
+                paths=task.input_files,
+            )
             batches = build_candidate_batches(
                 candidates,
                 max_notes_per_request=task.request.max_notes_per_request,
@@ -305,6 +309,7 @@ class LlmTaskExecutor:
                         task=task,
                         client=client,
                         batch=batch,
+                        input_file_ids=input_file_ids,
                     )
                 )
                 in_flight[task_handle] = batch
@@ -357,11 +362,13 @@ class LlmTaskExecutor:
         task: TaskConfig,
         client: AsyncOpenAI,
         batch: EligibleBatch,
+        input_file_ids: tuple[str, ...],
     ) -> _BatchProcessResult:
         result = await _call_openai(
             client=client,
             task=task,
             batch=batch,
+            input_file_ids=input_file_ids,
         )
         if result.parsed_response is None:
             status = (
@@ -617,17 +624,56 @@ def _record_discovery_item(
     )
 
 
+async def _upload_input_files(
+    *,
+    client: AsyncOpenAI,
+    paths: tuple[Path, ...],
+) -> tuple[str, ...]:
+    file_ids: list[str] = []
+    for path in paths:
+        try:
+            with path.open("rb") as handle:
+                uploaded = await client.files.create(
+                    file=handle,
+                    purpose="user_data",
+                    expires_after={"anchor": "created_at", "seconds": 3600},
+                )
+            file_id = uploaded.id
+        except Exception as error:
+            raise RuntimeError(_format_file_upload_error(path, error)) from error
+        file_ids.append(file_id)
+    return tuple(file_ids)
+
+
+def _format_file_upload_error(path: Path, error: Exception) -> str:
+    if isinstance(error, AuthenticationError):
+        return f"OpenAI authentication failed while uploading '{path.name}': {error}"
+    if isinstance(error, APIConnectionError):
+        return f"OpenAI connection error while uploading '{path.name}': {error}"
+    if isinstance(error, APIStatusError):
+        status_code = getattr(error, "status_code", "unknown")
+        return (
+            f"OpenAI returned HTTP {status_code} while uploading '{path.name}': {error}"
+        )
+    return f"Could not upload input file '{path.name}': {error}"
+
+
 async def _call_openai(
     *,
     client: AsyncOpenAI,
     task: TaskConfig,
     batch: EligibleBatch,
+    input_file_ids: tuple[str, ...],
 ) -> OpenAIResult:
     response_model = build_response_model(
         note_type=batch.note_type,
         payloads=batch.payloads,
     )
-    instructions, user_input = _build_request_content(task=task, batch=batch)
+    instructions, user_input = _build_request_content(
+        task=task,
+        batch=batch,
+        input_file_ids=input_file_ids,
+    )
     request_kwargs: dict[str, Any] = {
         "model": task.model.model_id,
         "instructions": instructions,
@@ -724,7 +770,8 @@ def _build_request_content(
     *,
     task: TaskConfig,
     batch: EligibleBatch,
-) -> tuple[str, str]:
+    input_file_ids: tuple[str, ...],
+) -> tuple[str, str | list[dict[str, Any]]]:
     payload = {
         "user_prompt": task.user_prompt,
         "note_type": batch.note_type,
@@ -733,10 +780,13 @@ def _build_request_content(
             for candidate in batch.candidates
         ],
     }
-    return (
-        task.system_prompt.strip(),
-        json.dumps(payload, ensure_ascii=False),
-    )
+    user_input = json.dumps(payload, ensure_ascii=False)
+    if not input_file_ids:
+        return task.system_prompt.strip(), user_input
+
+    content = [{"type": "input_file", "file_id": file_id} for file_id in input_file_ids]
+    content.append({"type": "input_text", "text": user_input})
+    return task.system_prompt.strip(), [{"role": "user", "content": content}]
 
 
 def _openai_error_result(

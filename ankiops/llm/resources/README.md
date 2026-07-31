@@ -22,7 +22,8 @@ LLM tasks read notes from your Markdown decks and write selected fields or tags 
 ```yaml
 # fix-grammar.yaml
 model: gpt-5.4-mini
-system_prompt: !file _system_prompt.md
+system_prompt:
+  file: _system_prompt.md
 user_prompt: |
   Correct grammar, spelling, and punctuation in editable fields.
   Preserve meaning, Markdown structure, cloze syntax, code fences, math, and URLs.
@@ -41,6 +42,9 @@ tags: hidden
 request:
   max_notes_per_request: 3
   reasoning: low
+
+input_files:
+  - references/terminology.pdf
 ```
 
 Apart from the prompts, the most important part of a task is the `fields` section. It controls which fields the model can read and write. There are three access levels:
@@ -54,10 +58,11 @@ Further, field access can be set for specific note types or via `*` wildcards. F
 Task files accept these top-level keys:
 
 - `model`: An alias from `_models.yaml`
-- `system_prompt` and `user_prompt`: Inline text or `!file path.md` (file paths stay within this `llm` folder)
+- `system_prompt` and `user_prompt`: Inline text or a `file` mapping. File paths are relative to the task YAML and must stay within the collection.
 - `fields`: Sets `default_access` and field rules for `editable`, `read_only`, or `hidden` access. Rules map note-type patterns to field-name patterns. Patterns use shell-style wildcards such as `*`.
 - `tags`: Sets tag access to `editable`, `read_only`, or `hidden`. Tags default to `hidden` when you omit this key.
 - `request`: Requires `max_notes_per_request`. It can also set `temperature` and `reasoning`. AnkiOps accepts `none`, `low`, `medium`, `high`, or `xhigh`, but each model supports a subset.
+- `input_files`: Optional relative file paths sent to every request for the task. Files are uploaded once per run and expire automatically after one hour. Their combined size must not exceed 50 MB.
 
 ## Running tasks
 

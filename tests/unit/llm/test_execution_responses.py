@@ -7,9 +7,15 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from ankiops.llm.execution import _apply_batch_parsed_response, build_response_model
+from ankiops.llm.execution import (
+    _apply_batch_parsed_response,
+    _build_request_content,
+    build_response_model,
+)
 from ankiops.llm.jobs import LlmItemStatus
+from ankiops.llm.models import ModelSpec
 from ankiops.llm.planning import EligibleBatch, EligibleCandidate, NotePayload
+from ankiops.llm.tasks import TaskConfig
 
 
 def _parsed_response(*updates, tag_updates=()):
@@ -89,6 +95,60 @@ def _batch(candidate: EligibleCandidate) -> EligibleBatch:
         note_type_config=candidate.note_type_config,
         candidates=(candidate,),
     )
+
+
+def _task() -> TaskConfig:
+    return TaskConfig(
+        name="test",
+        model=ModelSpec(
+            model="test",
+            model_id="gpt-test",
+            base_url="https://api.openai.com/v1",
+            api_key="$OPENAI_API_KEY",
+        ),
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+
+def test_build_request_content_preserves_text_input_without_files(llm_qa_config):
+    instructions, user_input = _build_request_content(
+        task=_task(),
+        batch=_batch(_candidate(llm_qa_config)),
+        input_file_ids=(),
+    )
+
+    assert instructions == "system"
+    assert isinstance(user_input, str)
+    assert '"user_prompt": "user"' in user_input
+
+
+def test_build_request_content_places_files_before_text(llm_qa_config):
+    instructions, user_input = _build_request_content(
+        task=_task(),
+        batch=_batch(_candidate(llm_qa_config)),
+        input_file_ids=("file-a", "file-b"),
+    )
+
+    assert instructions == "system"
+    assert user_input == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_file", "file_id": "file-a"},
+                {"type": "input_file", "file_id": "file-b"},
+                {
+                    "type": "input_text",
+                    "text": (
+                        '{"user_prompt": "user", "note_type": "AnkiOpsQA", '
+                        '"notes": [{"note_key": "nk-1", "editable_fields": '
+                        '{"Question": "Broken"}, "read_only_fields": '
+                        '{"Extra": "Book"}}]}'
+                    ),
+                },
+            ],
+        }
+    ]
 
 
 def test_response_model_accepts_only_known_note_keys_and_editable_fields():
