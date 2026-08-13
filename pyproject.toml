@@ -19,15 +19,15 @@ classifiers = [
     "Topic :: Education",
 ]
 dependencies = [
-    "beautifulsoup4>=4.14.3",
-    "blake3>=1.0.8",
-    "html-to-markdown>=3.5.0, <3.6.0",
-    "mistune>=3.2.0",
-    "openai>=2.36.0",
+    "beautifulsoup4>=4.15.0",
+    "blake3>=1.0.9",
+    "html-to-markdown>=3.10.6",
+    "mistune>=3.3.4",
+    "openai>=3.0.0",
     "pydantic>=2.13.4",
     "pygments>=2.20.0",
-    "PyYAML>=6.0.3",
-    "requests>=2.33.1",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
     "rich>=15.0.0",
 ]
 [project.urls]
