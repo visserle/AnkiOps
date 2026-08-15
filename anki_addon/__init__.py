@@ -6,7 +6,9 @@ from __future__ import annotations
 def _setup() -> None:
     from aqt import gui_hooks, mw
 
+    from .highlights import add_highlight_shortcut
     from .host import AnkiOpsConnectHost
+    from .reviewer_highlight import add_reviewer_highlight_shortcut
     from .toolbar import AnkiOpsCommandRunner, add_toolbar_links
 
     toolbar_runner = AnkiOpsCommandRunner(mw=mw, addon_module_name=__name__)
@@ -22,10 +24,13 @@ def _setup() -> None:
         connect_host.start()
 
     gui_hooks.top_toolbar_did_init_links.append(on_toolbar_init)
+    gui_hooks.editor_did_init_shortcuts.append(add_highlight_shortcut)
     if hasattr(gui_hooks, "profile_did_open"):
         gui_hooks.profile_did_open.append(start_ankiops_connect)
     else:
         start_ankiops_connect()
+
+    add_reviewer_highlight_shortcut()
 
 
 try:

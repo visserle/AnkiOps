@@ -1,6 +1,6 @@
 # AnkiOps add-on
 
-Adds file sync buttons (**af** and **fa**) to Anki's top toolbar that shell out to the `ankiops` CLI (`ankiops af` and `ankiops fa`).
+Adds file sync buttons (**af** and **fa**) to Anki's top toolbar that shell out to the `ankiops` CLI (`ankiops af` and `ankiops fa`). In the note editor, press **Cmd+J** on macOS (**Ctrl+J** on other platforms) to wrap selected text in `<mark>` tags.
 
 ## Setup
 
