@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from ankiops.html_to_markdown import HTMLToMarkdown
 from ankiops.markdown import (
@@ -14,16 +15,16 @@ from ankiops.note_types import NoteType, eject_default_note_types, load_note_typ
 
 
 class DeckFileHarness:
-    def __init__(self) -> None:
+    def __init__(self: Any) -> None:
         self._note_types: list[NoteType] = []
         self._md_to_html = MarkdownToHTML()
         self._html_to_md = HTMLToMarkdown()
 
-    def set_note_types(self, note_types: list[NoteType]) -> None:
+    def set_note_types(self: Any, note_types: list[NoteType]) -> None:
         self._note_types = note_types
 
     def read_deck_file(
-        self,
+        self: Any,
         file_path: Path,
         *,
         context_root: Path | None = None,
@@ -34,40 +35,40 @@ class DeckFileHarness:
             context_root=context_root,
         )
 
-    def write_deck_file(self, file_path: Path, content: str) -> None:
+    def write_deck_file(self: Any, file_path: Path, content: str) -> None:
         write_deck_file(file_path, content)
 
-    def find_deck_files(self, directory: Path) -> list[Path]:
+    def find_deck_files(self: Any, directory: Path) -> list[Path]:
         return find_deck_files(directory)
 
-    def load_note_types(self, note_types_dir: Path) -> list[NoteType]:
+    def load_note_types(self: Any, note_types_dir: Path) -> list[NoteType]:
         note_types = load_note_types(note_types_dir)
         self.set_note_types(note_types)
         return note_types
 
     def _infer_note_type(
-        self,
+        self: Any,
         fields: dict[str, str],
         *,
         labels: set[str] | None = None,
     ) -> str:
         return infer_note_type(self._note_types, fields, labels=labels)
 
-    def eject_default_note_types(self, dst_dir: Path) -> None:
+    def eject_default_note_types(self: Any, dst_dir: Path) -> None:
         eject_default_note_types(dst_dir)
 
-    def calculate_blake3(self, file_path: Path) -> str:
+    def calculate_blake3(self: Any, file_path: Path) -> str:
         return calculate_blake3(file_path)
 
     def update_media_references(
-        self,
+        self: Any,
         directory: Path,
         rename_map: dict[str, str],
     ) -> int:
         return update_references(directory, rename_map)
 
-    def convert_to_html(self, markdown_text: str) -> str:
-        return self._md_to_html.convert(markdown_text)
+    def convert_to_html(self: Any, markdown_text: str) -> str:
+        return str(self._md_to_html.convert(markdown_text))
 
-    def convert_to_markdown(self, html_text: str) -> str:
-        return self._html_to_md.convert(html_text)
+    def convert_to_markdown(self: Any, html_text: str) -> str:
+        return str(self._html_to_md.convert(html_text))

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tests.support.assertions import assert_summary
 
 
-def test_collab_import_move_without_db_mapping_moves_existing_note(world):
+def test_collab_import_move_without_db_mapping_moves_existing_note(world: Any) -> None:
     """With empty DB, import should still move by embedded AnkiOps Key."""
     note_key = "collab-move-001"
     note_id = world.add_qa_note(
@@ -35,7 +37,7 @@ def test_collab_import_move_without_db_mapping_moves_existing_note(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "TargetDeck"
 
 
-def test_collab_import_recovers_all_keys_without_db(world):
+def test_collab_import_recovers_all_keys_without_db(world: Any) -> None:
     """With empty DB, import recovers note_key->note_id mapping from Anki."""
     note_key_a = "collab-recover-001-a"
     note_key_b = "collab-recover-001-b"
@@ -71,7 +73,7 @@ def test_collab_import_recovers_all_keys_without_db(world):
         assert db.resolve_note_ids([note_key_b]).get(note_key_b) == note_id_b
 
 
-def test_collab_export_recovers_mapping_from_embedded_note_key(world):
+def test_collab_export_recovers_mapping_from_embedded_note_key(world: Any) -> None:
     """With empty DB, export should keep stable note_key identity."""
     note_key = "collab-export-001"
     note_id = world.add_qa_note(

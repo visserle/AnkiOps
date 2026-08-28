@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .collection import (
     add_notes_action,
     can_add_notes_with_error_detail_action,
@@ -44,7 +46,7 @@ from .protocol import (
 )
 
 
-def dispatch_action(col, action: str, params: dict):
+def dispatch_action(col: Any, action: str, params: dict[str, Any]) -> Any:
     try:
         handler = _ACTIONS[action]
     except KeyError as error:
@@ -54,12 +56,12 @@ def dispatch_action(col, action: str, params: dict):
     return handler(col, params)
 
 
-def version_action(_col, _params: dict) -> int:
+def version_action(_col: Any, _params: dict[str, Any]) -> int:
     return ANKIOPS_CONNECT_VERSION
 
 
-def multi_action(col, params: dict) -> list:
-    results = []
+def multi_action(col: Any, params: dict[str, Any]) -> list[Any]:
+    results: list[Any] = []
     for action in params.get("actions") or []:
         try:
             results.append(

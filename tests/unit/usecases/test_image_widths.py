@@ -1,7 +1,9 @@
+from typing import Any
+
 from ankiops.image_widths import fix_image_widths_in_data
 
 
-def _data(answer: str, extra: str = ""):
+def _data(answer: str, extra: str = "") -> Any:
     return {
         "decks": [
             {
@@ -18,7 +20,7 @@ def _data(answer: str, extra: str = ""):
     }
 
 
-def test_auto_normalizes_near_equal_widths_to_first_width():
+def test_auto_normalizes_near_equal_widths_to_first_width() -> None:
     data = _data(
         "![a](<media/a.png>){width=700}\n"
         "![b](<media/b.png>){width=703}\n"
@@ -33,7 +35,7 @@ def test_auto_normalizes_near_equal_widths_to_first_width():
     assert fields["Answer"].count("{width=700}") == 3
 
 
-def test_auto_keeps_separate_clusters_within_one_note():
+def test_auto_keeps_separate_clusters_within_one_note() -> None:
     data = _data(
         "![a](a.png){width=40}\n"
         "![b](b.png){width=39}\n"
@@ -50,7 +52,7 @@ def test_auto_keeps_separate_clusters_within_one_note():
     assert fields["Answer"].count("{width=100}") == 2
 
 
-def test_auto_ignores_images_without_explicit_width():
+def test_auto_ignores_images_without_explicit_width() -> None:
     data = _data("![a](a.png)\n![b](b.png){width=402}\n![c](c.png){width=400}")
 
     result = fix_image_widths_in_data(data, tolerance=5)
@@ -63,7 +65,7 @@ def test_auto_ignores_images_without_explicit_width():
     assert "{width=400}" not in fields["Answer"]
 
 
-def test_auto_uses_one_cluster_set_across_fields_in_note():
+def test_auto_uses_one_cluster_set_across_fields_in_note() -> None:
     data = _data(
         "![a](a.png){width=500}",
         extra="![b](b.png){width=504}",
@@ -76,7 +78,7 @@ def test_auto_uses_one_cluster_set_across_fields_in_note():
     assert fields["Extra"] == "![b](b.png){width=500}"
 
 
-def test_force_replaces_existing_widths_and_adds_missing_widths():
+def test_force_replaces_existing_widths_and_adds_missing_widths() -> None:
     data = _data(
         "![a](<media/a.png>){width=700}\n![b](<media/b.png>)\n![c](c.png){width=250}"
     )

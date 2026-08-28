@@ -25,11 +25,11 @@ class AnkiOpsConnectHost:
     def __init__(
         self,
         *,
-        get_collection: Callable[[], object | None],
+        get_collection: Callable[[], Any],
         run_on_main: Callable[[Callable[[], None]], None],
         dispatch_action: Callable[
-            [object, str, dict],
-            object,
+            [Any, str, dict[str, Any]],
+            Any,
         ] = default_dispatch_action,
         host: str = ANKIOPS_CONNECT_HOST,
         port: int = ANKIOPS_CONNECT_PORT,
@@ -72,7 +72,7 @@ class AnkiOpsConnectHost:
         except Exception as error:
             return {"result": None, "error": str(error)}
 
-    def dispatch_payload(self, payload: dict[str, Any]):
+    def dispatch_payload(self, payload: dict[str, Any]) -> Any:
         action = payload.get("action")
         params = payload.get("params", {})
         if not isinstance(action, str) or not isinstance(params, dict):
@@ -93,12 +93,17 @@ class AnkiOpsConnectHost:
         if length > self._body_limit:
             raise ValueError("AnkiOpsConnect request body is too large.")
         raw = handler.rfile.read(length)
-        payload = json.loads(raw.decode("utf-8"))
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(
+                "AnkiOpsConnect request body must be valid JSON."
+            ) from error
         if not isinstance(payload, dict):
             raise ValueError("AnkiOpsConnect request body must be a JSON object.")
         return payload
 
-    def _run_action_on_main(self, action: str, params: dict[str, Any]):
+    def _run_action_on_main(self, action: str, params: dict[str, Any]) -> Any:
         done = threading.Event()
         box: dict[str, Any] = {}
 
@@ -120,7 +125,7 @@ class AnkiOpsConnectHost:
             raise RuntimeError(box["error"])
         return box.get("result")
 
-    def _handler_class(self):
+    def _handler_class(self) -> type[BaseHTTPRequestHandler]:
         connect_host = self
 
         class _AnkiOpsConnectHandler(BaseHTTPRequestHandler):
@@ -132,7 +137,7 @@ class AnkiOpsConnectHost:
                     response = {"result": None, "error": str(error)}
                 self._send_json(response)
 
-            def log_message(self, _format: str, *_args) -> None:
+            def log_message(self, format: str, *args: Any) -> None:
                 return
 
             def _send_json(self, payload: dict[str, Any]) -> None:

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -25,11 +26,11 @@ from tests.support.deck_files import DeckFileHarness
 
 
 class _FailingProfileAnki:
-    def get_active_profile(self):
+    def get_active_profile(self: Any) -> Any:
         raise AnkiConnectionError("Connection reset by peer")
 
 
-def test_connect_failure_is_concise(monkeypatch, caplog):
+def test_connect_failure_is_concise(monkeypatch: Any, caplog: Any) -> None:
     monkeypatch.setattr("ankiops.console.Anki", lambda: _FailingProfileAnki())
     monkeypatch.setattr("sys.argv", ["ankiops", "fa"])
 
@@ -50,15 +51,17 @@ def test_connect_failure_is_concise(monkeypatch, caplog):
         (run_fa, "ankiops.cli_commands._run_fa_with_state"),
     ],
 )
-def test_sync_commands_close_state_when_sync_fails(tmp_path, command, sync_helper):
+def test_sync_commands_close_state_when_sync_fails(
+    tmp_path: Any, command: Any, sync_helper: Any
+) -> None:
     class FakeAnki:
-        def get_active_profile(self):
+        def get_active_profile(self: Any) -> Any:
             return "Test"
 
     class FakeState:
         closed = False
 
-        def close(self):
+        def close(self: Any) -> Any:
             self.closed = True
 
     state = FakeState()
@@ -75,7 +78,7 @@ def test_sync_commands_close_state_when_sync_fails(tmp_path, command, sync_helpe
     assert state.closed
 
 
-def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
+def test_run_fa_warns_for_untracked_anki_decks(world: Any, caplog: Any) -> None:
     world.add_anki_note(
         deck_name="AnkiOnlyDeck",
         fields={"Question": "remote", "Answer": "remote"},
@@ -90,7 +93,9 @@ def test_run_fa_warns_for_untracked_anki_decks(world, caplog):
     world.assert_anki_note(deck_name="AnkiOnlyDeck", note_key="remote-key")
 
 
-def test_run_fa_has_no_untracked_warning_for_declared_collection(world, caplog):
+def test_run_fa_has_no_untracked_warning_for_declared_collection(
+    world: Any, caplog: Any
+) -> None:
     world.write_deck("DeclaredDeck", "Q: local\nA: answer")
 
     with caplog.at_level(logging.WARNING):
@@ -105,7 +110,9 @@ def test_run_fa_has_no_untracked_warning_for_declared_collection(world, caplog):
     assert world.extract_note_keys("DeclaredDeck")
 
 
-def test_run_fa_counts_current_decks_and_removes_empty_deleted_decks(world, caplog):
+def test_run_fa_counts_current_decks_and_removes_empty_deleted_decks(
+    world: Any, caplog: Any
+) -> None:
     world.write_qa_deck(
         "KeepOne",
         [("Q1", "A1", "keep-1"), ("Q2", "A2", "keep-2")],
@@ -132,7 +139,9 @@ def test_run_fa_counts_current_decks_and_removes_empty_deleted_decks(world, capl
     assert "MissingTwo" not in world.mock_anki.decks
 
 
-def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
+def test_run_fa_warns_for_keyless_anki_notes_it_protects(
+    world: Any, caplog: Any
+) -> None:
     world.write_qa_deck("ProtectDeck", [("managed", "local", "managed-key")])
     keyless_id = world.add_anki_note(
         deck_name="ProtectDeck",
@@ -147,7 +156,9 @@ def test_run_fa_warns_for_keyless_anki_notes_it_protects(world, caplog):
     assert keyless_id in world.mock_anki.notes
 
 
-def test_run_af_warns_for_keyless_markdown_notes_it_protects(world, caplog):
+def test_run_af_warns_for_keyless_markdown_notes_it_protects(
+    world: Any, caplog: Any
+) -> None:
     world.write_deck("DraftDeck", "Q: draft\nA: keep me")
 
     with caplog.at_level(logging.WARNING):
@@ -159,7 +170,9 @@ def test_run_af_warns_for_keyless_markdown_notes_it_protects(world, caplog):
     world.assert_deck_contains("DraftDeck", "Q: draft")
 
 
-def test_run_fa_logs_sync_errors_with_actionable_details(world, caplog):
+def test_run_fa_logs_sync_errors_with_actionable_details(
+    world: Any, caplog: Any
+) -> None:
     world.write_deck(
         "Rhetorik",
         (
@@ -185,8 +198,8 @@ def test_run_fa_logs_sync_errors_with_actionable_details(world, caplog):
 
 
 def test_run_fa_auto_commit_snapshots_declared_state_before_sync_mutates_media(
-    world,
-):
+    world: Any,
+) -> None:
     world.init_git()
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
@@ -212,7 +225,9 @@ def test_run_fa_auto_commit_snapshots_declared_state_before_sync_mutates_media(
     assert "img.png" not in anki_answer
 
 
-def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
+def test_run_af_auto_commit_snapshots_markdown_before_export_updates(
+    world: Any,
+) -> None:
     world.write_deck(
         "ExportDeck",
         "<!-- note_key: key-1 -->\nQ: prompt\nA: committed answer",
@@ -244,7 +259,7 @@ def test_run_af_auto_commit_snapshots_markdown_before_export_updates(world):
     assert "A: Anki answer" in working
 
 
-def test_run_fa_auto_commit_snapshots_deleted_markdown_deck_file(world):
+def test_run_fa_auto_commit_snapshots_deleted_markdown_deck_file(world: Any) -> None:
     world.write_deck("DeletedDeck", "Q: prompt\nA: answer")
     world.init_git()
     world.deck_path("DeletedDeck").unlink()
@@ -270,7 +285,7 @@ def test_run_fa_auto_commit_snapshots_deleted_markdown_deck_file(world):
     assert "D\tDeletedDeck.md" in committed_paths
 
 
-def test_run_fa_logs_real_media_status(world, caplog):
+def test_run_fa_logs_real_media_status(world: Any, caplog: Any) -> None:
     world.write_deck("MediaDeck", "Q: prompt\nA: ![img](media/img.png)")
     world.write_media("img.png", b"image-content")
 
@@ -282,7 +297,9 @@ def test_run_fa_logs_real_media_status(world, caplog):
     assert "1 synced" in caplog.text
 
 
-def test_run_fa_reuses_note_type_sync_cache_on_second_run(world, caplog):
+def test_run_fa_reuses_note_type_sync_cache_on_second_run(
+    world: Any, caplog: Any
+) -> None:
     for path in world.note_types_dir.iterdir():
         if path.is_dir() and path.name != "AnkiOpsQA":
             shutil.rmtree(path)
@@ -324,7 +341,7 @@ def test_run_fa_reuses_note_type_sync_cache_on_second_run(world, caplog):
     ]
 
 
-def test_run_af_logs_missing_anki_media_summary(world, caplog):
+def test_run_af_logs_missing_anki_media_summary(world: Any, caplog: Any) -> None:
     world.write_deck(
         "MediaDeck",
         "<!-- note_key: key-1 -->\nQ: prompt\nA: ![missing](media/missing.png)",
@@ -343,7 +360,7 @@ def test_run_af_logs_missing_anki_media_summary(world, caplog):
     assert "0 pulled, 1 missing in Anki" in caplog.text
 
 
-def test_cli_version_flag_prints_package_version(capsys):
+def test_cli_version_flag_prints_package_version(capsys: Any) -> None:
     with (
         patch("ankiops.cli._get_cli_version", return_value="9.9.9"),
         patch("sys.argv", ["ankiops", "--version"]),
@@ -356,7 +373,7 @@ def test_cli_version_flag_prints_package_version(capsys):
     assert captured.out.strip() == "ankiops 9.9.9"
 
 
-def test_cli_help_lists_version_flag(capsys):
+def test_cli_help_lists_version_flag(capsys: Any) -> None:
     with patch("sys.argv", ["ankiops", "--help"]):
         with pytest.raises(SystemExit) as exc:
             main()
@@ -366,7 +383,7 @@ def test_cli_help_lists_version_flag(capsys):
     assert "--version" in captured.out
 
 
-def test_cli_collab_publish_uses_public_only_contract():
+def test_cli_collab_publish_uses_public_only_contract() -> None:
     captured = []
 
     with (
@@ -386,7 +403,7 @@ def test_cli_collab_publish_uses_public_only_contract():
     assert not hasattr(captured[0], "public")
 
 
-def test_cli_collab_submit_accepts_custom_title_and_global_debug():
+def test_cli_collab_submit_accepts_custom_title_and_global_debug() -> None:
     captured = []
 
     with (
@@ -414,7 +431,7 @@ def test_cli_collab_submit_accepts_custom_title_and_global_debug():
     assert not hasattr(captured[0], "commit")
 
 
-def test_cli_collab_status_accepts_repo():
+def test_cli_collab_status_accepts_repo() -> None:
     captured = []
 
     with (
@@ -433,7 +450,7 @@ def test_cli_collab_status_accepts_repo():
     assert captured[0].repository == "owner/repo"
 
 
-def test_cli_collab_subscribe_accepts_repo():
+def test_cli_collab_subscribe_accepts_repo() -> None:
     captured = []
 
     with (
@@ -452,7 +469,7 @@ def test_cli_collab_subscribe_accepts_repo():
     assert captured[0].repository == "owner/repo"
 
 
-def test_cli_collab_help_exposes_only_intention_commands(capsys):
+def test_cli_collab_help_exposes_only_intention_commands(capsys: Any) -> None:
     with patch("sys.argv", ["ankiops", "collab", "--help"]):
         with pytest.raises(SystemExit) as excinfo:
             main()
@@ -465,7 +482,7 @@ def test_cli_collab_help_exposes_only_intention_commands(capsys):
         assert command not in output
 
 
-def test_collab_submit_does_not_run_collection_export():
+def test_collab_submit_does_not_run_collection_export() -> None:
     args = SimpleNamespace(collab_command="submit")
 
     with (
@@ -477,7 +494,7 @@ def test_collab_submit_does_not_run_collection_export():
     run_af.assert_not_called()
 
 
-def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys):
+def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys: Any) -> None:
     args = SimpleNamespace(collab_command="status")
 
     with (
@@ -505,14 +522,14 @@ def test_collab_error_is_plain_stderr_without_a_logging_gutter(capsys):
         ["ankiops", "collab", "status", "owner/repo", "--debug"],
     ],
 )
-def test_removed_collab_flags_are_rejected(argv):
+def test_removed_collab_flags_are_rejected(argv: Any) -> None:
     with patch("sys.argv", argv), pytest.raises(SystemExit) as excinfo:
         main()
 
     assert excinfo.value.code == 2
 
 
-def test_collab_update_requires_one_repository():
+def test_collab_update_requires_one_repository() -> None:
     with (
         patch("sys.argv", ["ankiops", "collab", "update"]),
         pytest.raises(SystemExit) as excinfo,
@@ -525,7 +542,7 @@ def test_collab_update_requires_one_repository():
 @pytest.mark.parametrize(
     "command", ["create", "add", "doctor", "resolve", "abort", "list"]
 )
-def test_removed_collab_commands_are_rejected(command):
+def test_removed_collab_commands_are_rejected(command: Any) -> None:
     with (
         patch("sys.argv", ["ankiops", "collab", command]),
         pytest.raises(SystemExit) as excinfo,
@@ -536,7 +553,7 @@ def test_removed_collab_commands_are_rejected(command):
 
 
 @pytest.mark.parametrize("title", ["   ", "line one\nline two"])
-def test_cli_collab_submit_rejects_invalid_title(title):
+def test_cli_collab_submit_rejects_invalid_title(title: Any) -> None:
     with (
         patch("ankiops.cli_commands.run_collab_impl") as run_collab,
         patch(
@@ -551,7 +568,7 @@ def test_cli_collab_submit_rejects_invalid_title(title):
     run_collab.assert_not_called()
 
 
-def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
+def test_cli_init_exits_cleanly_on_anki_connection_error(caplog: Any) -> None:
     with (
         patch(
             "ankiops.cli_commands.connect_or_exit",
@@ -568,7 +585,7 @@ def test_cli_init_exits_cleanly_on_anki_connection_error(caplog):
     assert "Error communicating with Anki" in caplog.text
 
 
-def test_cli_validation_error_is_concise_without_a_traceback(capsys):
+def test_cli_validation_error_is_concise_without_a_traceback(capsys: Any) -> None:
     message = (
         "local: Invalid media reference 'nested/image.png': "
         "expected one filename in media/."
@@ -588,7 +605,7 @@ def test_cli_validation_error_is_concise_without_a_traceback(capsys):
     assert "ERROR" not in captured.err
 
 
-def test_cli_validation_error_retains_debug_exception_details(capsys):
+def test_cli_validation_error_retains_debug_exception_details(capsys: Any) -> None:
     error = ValueError("Invalid local deck")
     with (
         patch("ankiops.cli.run_af", side_effect=error),
@@ -602,7 +619,7 @@ def test_cli_validation_error_retains_debug_exception_details(capsys):
     capsys.readouterr()
 
 
-def test_cli_welcome_mentions_version_and_version_flag(capsys):
+def test_cli_welcome_mentions_version_and_version_flag(capsys: Any) -> None:
     with (
         patch("ankiops.cli._get_cli_version", return_value="9.9.9"),
         patch("sys.argv", ["ankiops"]),
@@ -614,7 +631,7 @@ def test_cli_welcome_mentions_version_and_version_flag(capsys):
     assert "ankiops --version" in captured.out
 
 
-def test_run_serialize_rejects_no_subdecks_without_deck():
+def test_run_serialize_rejects_no_subdecks_without_deck() -> None:
     args = SimpleNamespace(
         output=None,
         deck=None,
@@ -627,7 +644,7 @@ def test_run_serialize_rejects_no_subdecks_without_deck():
     assert exc.value.code == 2
 
 
-def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
+def test_run_serialize_passes_deck_scope_to_serializer(tmp_path: Any) -> None:
     output = tmp_path / "deck.json"
     args = SimpleNamespace(
         output=str(output),
@@ -649,7 +666,7 @@ def test_run_serialize_passes_deck_scope_to_serializer(tmp_path):
     )
 
 
-def test_run_serialize_defaults_output_to_deck_name(tmp_path):
+def test_run_serialize_defaults_output_to_deck_name(tmp_path: Any) -> None:
     args = SimpleNamespace(
         output=None,
         deck="Parent::Child",
@@ -670,7 +687,7 @@ def test_run_serialize_defaults_output_to_deck_name(tmp_path):
     )
 
 
-def test_run_deserialize_snapshots_by_default(tmp_path):
+def test_run_deserialize_snapshots_by_default(tmp_path: Any) -> None:
     DeckFileHarness().eject_default_note_types(tmp_path / "note_types")
     json_file = tmp_path / "in.json"
     payload = {
@@ -710,7 +727,7 @@ def test_run_deserialize_snapshots_by_default(tmp_path):
     )
 
 
-def test_run_deserialize_can_skip_snapshot(tmp_path):
+def test_run_deserialize_can_skip_snapshot(tmp_path: Any) -> None:
     json_file = tmp_path / "in.json"
     json_file.write_text('{"decks": []}', encoding="utf-8")
     args = SimpleNamespace(
@@ -736,7 +753,7 @@ def test_run_deserialize_can_skip_snapshot(tmp_path):
     )
 
 
-def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
+def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path: Any) -> None:
     (tmp_path / "Parent.md").write_text("Q: old\nA: old\n", encoding="utf-8")
     (tmp_path / "Parent__Child.md").write_text("Q: child\nA: child\n", encoding="utf-8")
     (tmp_path / "Other.md").write_text("Q: other\nA: other\n", encoding="utf-8")
@@ -781,8 +798,8 @@ def test_run_fix_image_widths_passes_deck_scope_and_snapshots(tmp_path):
 
 
 def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
-    tmp_path, caplog
-):
+    tmp_path: Any, caplog: Any
+) -> None:
     args = SimpleNamespace(
         deck=None,
         no_subdecks=False,
@@ -805,7 +822,7 @@ def test_run_fix_image_widths_can_skip_snapshot_and_logs_sync_reminder(
     assert "ankiops fa" in caplog.text
 
 
-def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path):
+def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path: Any) -> None:
     (tmp_path / "Deck.md").write_text("Q: old\nA: old\n", encoding="utf-8")
     (tmp_path / "collab" / "owner" / "repo").mkdir(parents=True)
     args = SimpleNamespace(
@@ -833,7 +850,7 @@ def test_run_fix_image_widths_snapshots_only_private_paths(tmp_path):
     )
 
 
-def test_run_fix_image_widths_rejects_no_subdecks_without_deck():
+def test_run_fix_image_widths_rejects_no_subdecks_without_deck() -> None:
     args = SimpleNamespace(
         deck=None,
         no_subdecks=True,

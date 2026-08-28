@@ -1,5 +1,7 @@
 """Editor highlighting shortcut for the AnkiOps add-on."""
 
+from typing import Any
+
 _HIGHLIGHT_SELECTION_SCRIPT = """
 (function () {
     const activeElement = document.activeElement;
@@ -55,6 +57,6 @@ _HIGHLIGHT_SELECTION_SCRIPT = """
 """
 
 
-def add_highlight_shortcut(shortcuts: list, editor) -> None:
+def add_highlight_shortcut(shortcuts: list[Any], editor: Any) -> None:
     """Register Ctrl+J to toggle a <mark> around the selected editor text."""
     shortcuts.append(("Ctrl+J", lambda: editor.web.eval(_HIGHLIGHT_SELECTION_SCRIPT)))

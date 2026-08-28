@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+from importlib import import_module
+from typing import Any, cast
+
 from .note_types import field_names, required_note_type
 from .protocol import AnkiOpsConnectActionError
+
+logger = logging.getLogger(__name__)
 
 CARD_SNAPSHOT_COLUMNS = (
     "id",
@@ -23,21 +29,22 @@ CARD_SNAPSHOT_COLUMNS = (
 )
 
 
-def get_active_profile_action(col, _params: dict) -> str:
+def get_active_profile_action(col: Any, _params: dict[str, Any]) -> str:
     if hasattr(col, "ankiops_connect_active_profile"):
         return str(col.ankiops_connect_active_profile)
     try:
-        from aqt import mw
+        aqt: Any = import_module("aqt")
     except Exception:
         return ""
-    profile_manager = getattr(mw, "pm", None)
+    profile_manager = getattr(aqt, "mw", None)
+
     name = getattr(profile_manager, "name", "")
     if callable(name):
         return str(name())
     return str(name)
 
 
-def deck_names_and_ids_action(col, _params: dict) -> dict[str, int]:
+def deck_names_and_ids_action(col: Any, _params: dict[str, Any]) -> dict[str, int]:
     decks = col.decks
     if hasattr(decks, "all_names_and_ids"):
         return {deck.name: int(deck.id) for deck in decks.all_names_and_ids()}
@@ -46,16 +53,16 @@ def deck_names_and_ids_action(col, _params: dict) -> dict[str, int]:
     raise AnkiOpsConnectActionError("Cannot read Anki deck names.")
 
 
-def find_notes_action(col, params: dict) -> list[int]:
+def find_notes_action(col: Any, params: dict[str, Any]) -> list[int]:
     return [int(note_id) for note_id in col.find_notes(params.get("query") or "")]
 
 
-def find_cards_action(col, params: dict) -> list[int]:
+def find_cards_action(col: Any, params: dict[str, Any]) -> list[int]:
     return [int(card_id) for card_id in col.find_cards(params.get("query") or "")]
 
 
-def notes_info_action(col, params: dict) -> list[dict]:
-    results = []
+def notes_info_action(col: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
     for note_id in params.get("notes") or []:
         note = _get_note_or_none(col, int(note_id))
         if note is None:
@@ -79,8 +86,8 @@ def notes_info_action(col, params: dict) -> list[dict]:
     return results
 
 
-def cards_info_action(col, params: dict) -> list[dict]:
-    results = []
+def cards_info_action(col: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
     for card_id in params.get("cards") or []:
         card = _get_card_or_none(col, int(card_id))
         if card is None:
@@ -98,12 +105,13 @@ def cards_info_action(col, params: dict) -> list[dict]:
     return results
 
 
-def create_deck_action(col, params: dict) -> int:
+def create_deck_action(col: Any, params: dict[str, Any]) -> int:
     return _deck_id(col, params.get("deck") or "", create=True)
 
 
-def delete_decks_action(col, params: dict) -> None:
-    if params.get("cardsToo") is not True:
+def delete_decks_action(col: Any, params: dict[str, Any]) -> None:
+    cards_too = params.get("cardsToo")
+    if not isinstance(cards_too, bool) or not cards_too:
         raise AnkiOpsConnectActionError("deleteDecks requires cardsToo=true.")
     deck_ids = [
         deck_id
@@ -123,11 +131,11 @@ def delete_decks_action(col, params: dict) -> None:
     raise AnkiOpsConnectActionError("Cannot delete Anki decks.")
 
 
-def change_deck_action(col, params: dict) -> None:
+def change_deck_action(col: Any, params: dict[str, Any]) -> None:
     card_ids = [int(card_id) for card_id in params.get("cards") or []]
     deck_id = _deck_id(col, params.get("deck") or "", create=True)
     sched = getattr(col, "sched", None)
-    if hasattr(sched, "set_deck"):
+    if sched is not None and hasattr(sched, "set_deck"):
         sched.set_deck(card_ids, deck_id)
         return None
     for card_id in card_ids:
@@ -139,8 +147,9 @@ def change_deck_action(col, params: dict) -> None:
     return None
 
 
-def update_note_action(col, params: dict) -> None:
+def update_note_action(col: Any, params: dict[str, Any]) -> None:
     payload = params.get("note") or {}
+    # pi-lens-ignore: unchecked-throwing-call-python
     note = _get_note_or_none(col, int(payload.get("id") or 0))
     if note is None:
         raise AnkiOpsConnectActionError(f"Note not found: {payload.get('id')}")
@@ -152,7 +161,8 @@ def update_note_action(col, params: dict) -> None:
     return None
 
 
-def delete_notes_action(col, params: dict) -> None:
+def delete_notes_action(col: Any, params: dict[str, Any]) -> None:
+    # pi-lens-ignore: unchecked-throwing-call-python
     note_ids = [int(note_id) for note_id in params.get("notes") or []]
     if hasattr(col, "remove_notes"):
         col.remove_notes(note_ids)
@@ -160,8 +170,10 @@ def delete_notes_action(col, params: dict) -> None:
     raise AnkiOpsConnectActionError("Cannot delete Anki notes.")
 
 
-def can_add_notes_with_error_detail_action(col, params: dict) -> list[dict]:
-    results = []
+def can_add_notes_with_error_detail_action(
+    col: Any, params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
     for note_payload in params.get("notes") or []:
         try:
             _validate_note_payload_for_add(col, note_payload)
@@ -172,8 +184,8 @@ def can_add_notes_with_error_detail_action(col, params: dict) -> list[dict]:
     return results
 
 
-def add_notes_action(col, params: dict) -> list[int | str]:
-    results = []
+def add_notes_action(col: Any, params: dict[str, Any]) -> list[int | str]:
+    results: list[int | str] = []
     for note_payload in params.get("notes") or []:
         try:
             results.append(_add_note(col, note_payload))
@@ -182,7 +194,7 @@ def add_notes_action(col, params: dict) -> list[int | str]:
     return results
 
 
-def get_media_dir_path_action(col, _params: dict) -> str:
+def get_media_dir_path_action(col: Any, _params: dict[str, Any]) -> str:
     media = getattr(col, "media", None)
     directory = getattr(media, "dir", None)
     if callable(directory):
@@ -192,8 +204,8 @@ def get_media_dir_path_action(col, _params: dict) -> str:
     raise AnkiOpsConnectActionError("Cannot read Anki media directory.")
 
 
-def load_notes(col, note_ids: list[int]) -> dict[int, object]:
-    notes = {}
+def load_notes(col: Any, note_ids: list[int]) -> dict[int, Any]:
+    notes: dict[int, Any] = {}
     for note_id in note_ids:
         try:
             note = col.get_note(note_id)
@@ -205,16 +217,16 @@ def load_notes(col, note_ids: list[int]) -> dict[int, object]:
     return notes
 
 
-def note_type_name(note) -> str:
+def note_type_name(note: Any) -> str:
     if note is None:
         return ""
     notetype = note.note_type()
     if notetype:
-        return notetype.get("name", "")
+        return cast(str, notetype.get("name", ""))
     return ""
 
 
-def note_field_values(note, model) -> dict[str, str]:
+def note_field_values(note: Any, model: Any) -> dict[str, str]:
     names = field_names(model)
     raw_fields = getattr(note, "fields", None)
     if isinstance(raw_fields, dict):
@@ -227,9 +239,12 @@ def note_field_values(note, model) -> dict[str, str]:
     return {}
 
 
-def card_snapshot(col, note_ids: list[int]) -> dict[int, tuple]:
+def card_snapshot(col: Any, note_ids: list[int]) -> dict[int, tuple[Any, ...]]:
     if hasattr(col, "ankiops_connect_cards_snapshot"):
-        return col.ankiops_connect_cards_snapshot(note_ids)
+        return cast(
+            dict[int, tuple[Any, ...]],
+            col.ankiops_connect_cards_snapshot(note_ids),
+        )
 
     placeholders = ",".join("?" for _ in note_ids)
     columns = ", ".join(CARD_SNAPSHOT_COLUMNS)
@@ -237,43 +252,46 @@ def card_snapshot(col, note_ids: list[int]) -> dict[int, tuple]:
         f"select {columns} from cards where nid in ({placeholders})",
         *note_ids,
     )
-    snapshot = {}
+    snapshot: dict[int, tuple[Any, ...]] = {}
     for row in rows:
         values = tuple(row)
+        # pi-lens-ignore: unchecked-throwing-call-python
         snapshot[int(values[0])] = values
     return snapshot
 
 
-def _get_note_or_none(col, note_id: int):
+def _get_note_or_none(col: Any, note_id: int) -> Any | None:
     try:
         return col.get_note(note_id)
     except Exception:
         return None
 
 
-def _get_card_or_none(col, card_id: int):
+def _get_card_or_none(col: Any, card_id: int) -> Any | None:
     try:
         return col.get_card(card_id)
     except Exception:
         return None
 
 
-def _note_card_ids(col, note_id: int) -> list[int]:
+def _note_card_ids(col: Any, note_id: int) -> list[int]:
     try:
         return [int(card_id) for card_id in col.find_cards(f"nid:{note_id}")]
     except Exception:
         return []
 
 
-def _card_note_id(card) -> int:
+def _card_note_id(card: Any) -> int:
+    # pi-lens-ignore: unchecked-throwing-call-python
     return int(getattr(card, "nid", getattr(card, "note", 0)))
 
 
-def _card_deck_id(card) -> int:
+def _card_deck_id(card: Any) -> int:
+    # pi-lens-ignore: unchecked-throwing-call-python
     return int(getattr(card, "did", getattr(card, "deck_id", 0)))
 
 
-def _deck_name(col, deck_id: int) -> str:
+def _deck_name(col: Any, deck_id: int) -> str:
     decks = col.decks
     if hasattr(decks, "name"):
         return decks.name(deck_id) or ""
@@ -282,20 +300,22 @@ def _deck_name(col, deck_id: int) -> str:
     return ""
 
 
-def _existing_deck_id(col, deck_name: str) -> int | None:
+def _existing_deck_id(col: Any, deck_name: str) -> int | None:
     decks = col.decks
     if hasattr(decks, "all_names_and_ids"):
         for deck in decks.all_names_and_ids():
             if deck.name == deck_name:
+                # pi-lens-ignore: unchecked-throwing-call-python
                 return int(deck.id)
     if hasattr(decks, "by_name"):
         deck = decks.by_name(deck_name)
         if deck:
+            # pi-lens-ignore: unchecked-throwing-call-python
             return int(deck["id"])
     return None
 
 
-def _deck_id(col, deck_name: str, *, create: bool) -> int:
+def _deck_id(col: Any, deck_name: str, *, create: bool) -> int:
     if not deck_name:
         raise AnkiOpsConnectActionError("deck is required.")
     deck_id = _existing_deck_id(col, deck_name)
@@ -305,33 +325,34 @@ def _deck_id(col, deck_name: str, *, create: bool) -> int:
         raise AnkiOpsConnectActionError(f"deck was not found: {deck_name}")
     decks = col.decks
     if hasattr(decks, "id"):
+        # pi-lens-ignore: unchecked-throwing-call-python
         return int(decks.id(deck_name))
     raise AnkiOpsConnectActionError(f"Cannot create deck: {deck_name}")
 
 
-def _save_card(col, card) -> None:
+def _save_card(col: Any, card: Any) -> None:
     if hasattr(col, "update_card"):
         col.update_card(card)
     elif hasattr(card, "flush"):
         card.flush()
 
 
-def _validate_note_payload_for_add(col, note_payload: dict) -> None:
+def _validate_note_payload_for_add(col: Any, note_payload: dict[str, Any]) -> None:
     required_note_type(col, note_payload.get("modelName") or "")
     _deck_id(col, note_payload.get("deckName") or "", create=False)
 
 
-def _new_note(col, model):
+def _new_note(col: Any, model: Any) -> Any:
     if hasattr(col, "new_note"):
         return col.new_note(model)
     try:
-        from anki.notes import Note
+        anki_notes: Any = import_module("anki.notes")
     except Exception as error:
         raise AnkiOpsConnectActionError("Cannot create Anki note.") from error
-    return Note(col, model)
+    return anki_notes.Note(col, model)
 
 
-def _add_note(col, note_payload: dict) -> int:
+def _add_note(col: Any, note_payload: dict[str, Any]) -> int:
     _validate_note_payload_for_add(col, note_payload)
     model = required_note_type(col, note_payload.get("modelName") or "")
     deck_id = _deck_id(col, note_payload.get("deckName") or "", create=False)
@@ -346,16 +367,17 @@ def _add_note(col, note_payload: dict) -> int:
             return result
         note_id = getattr(note, "id", 0)
         if note_id:
+            # pi-lens-ignore: unchecked-throwing-call-python
             return int(note_id)
     raise AnkiOpsConnectActionError("Cannot add Anki note.")
 
 
-def set_note_field(note, field_name: str, value: str) -> None:
+def set_note_field(note: Any, field_name: str, value: str) -> None:
     try:
         note[field_name] = value
         return
-    except Exception:
-        pass
+    except Exception as error:
+        logger.debug("Note mapping assignment failed for %s: %s", field_name, error)
 
     raw_fields = getattr(note, "fields", None)
     if isinstance(raw_fields, dict):
@@ -371,7 +393,7 @@ def set_note_field(note, field_name: str, value: str) -> None:
     raise AnkiOpsConnectActionError(f"Cannot update field: {field_name}")
 
 
-def _save_note(col, note) -> None:
+def _save_note(col: Any, note: Any) -> None:
     if hasattr(col, "update_note"):
         col.update_note(note)
     elif hasattr(col, "updateNote"):

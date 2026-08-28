@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.collection import deck_name_to_file_stem
@@ -15,7 +17,7 @@ from ankiops.interchange import (
 from ankiops.sync.state import SyncState
 
 
-def _set_collection_paths(monkeypatch, collection_root):
+def _set_collection_paths(monkeypatch: Any, collection_root: Any) -> Any:
     monkeypatch.setattr(
         "ankiops.collection.get_collection_root", lambda: collection_root
     )
@@ -25,7 +27,7 @@ def _set_collection_paths(monkeypatch, collection_root):
     )
 
 
-def _init_collection(collection_root, fs):
+def _init_collection(collection_root: Any, fs: Any) -> Any:
     db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
@@ -39,13 +41,13 @@ def _init_collection(collection_root, fs):
 
 def _serialized_deck(
     *,
-    source="local",
-    name="TestDeck",
-    note_key="nk-1",
-    note_type="AnkiOpsQA",
-    fields=None,
-    tags=None,
-):
+    source: Any = "local",
+    name: Any = "TestDeck",
+    note_key: Any = "nk-1",
+    note_type: Any = "AnkiOpsQA",
+    fields: Any = None,
+    tags: Any = None,
+) -> Any:
     return {
         "source": source,
         "name": name,
@@ -61,7 +63,7 @@ def _serialized_deck(
 
 
 @pytest.fixture
-def collection(tmp_path, fs, monkeypatch):
+def collection(tmp_path: Any, fs: Any, monkeypatch: Any) -> Any:
     """Create a minimal collection with DB, note types, and one deck file."""
     _set_collection_paths(monkeypatch, tmp_path)
     _init_collection(tmp_path, fs)
@@ -81,7 +83,7 @@ def collection(tmp_path, fs, monkeypatch):
     return tmp_path
 
 
-def test_basic_serialize(collection, tmp_path, monkeypatch):
+def test_basic_serialize(collection: Any, tmp_path: Any, monkeypatch: Any) -> None:
     _set_collection_paths(monkeypatch, collection)
     output = tmp_path / "out.json"
     result = serialize_to_file(collection, output)
@@ -92,7 +94,7 @@ def test_basic_serialize(collection, tmp_path, monkeypatch):
     assert result["decks"][0]["notes"][0]["note_key"] == "nk-1"
 
 
-def test_in_memory_serialize(collection, monkeypatch):
+def test_in_memory_serialize(collection: Any, monkeypatch: Any) -> None:
     _set_collection_paths(monkeypatch, collection)
     result = serialize(collection)
 
@@ -102,7 +104,7 @@ def test_in_memory_serialize(collection, monkeypatch):
     assert result["decks"][0]["notes"][1]["note_key"] == "nk-2"
 
 
-def test_serialize_includes_tags(collection, monkeypatch):
+def test_serialize_includes_tags(collection: Any, monkeypatch: Any) -> None:
     _set_collection_paths(monkeypatch, collection)
     deck_file = collection / f"{deck_name_to_file_stem('TestDeck')}.md"
     deck_file.write_text(
@@ -120,8 +122,8 @@ def test_serialize_includes_tags(collection, monkeypatch):
 
 
 def test_serialize_includes_collab_sources_and_ignores_reserved_docs(
-    collection, fs, monkeypatch
-):
+    collection: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     (collection / "README.md").write_text(
         "Q: local docs\nA: local docs",
@@ -155,8 +157,8 @@ def test_serialize_includes_collab_sources_and_ignores_reserved_docs(
 
 
 def test_serialize_orders_local_before_sorted_collab_sources(
-    collection, fs, monkeypatch
-):
+    collection: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     collab_b = collection / "collab" / "z-owner" / "deck"
     collab_a = collection / "collab" / "a-owner" / "deck"
@@ -183,8 +185,8 @@ def test_serialize_orders_local_before_sorted_collab_sources(
 
 
 def test_serialize_global_validation_rejects_duplicate_deck_names(
-    collection, fs, monkeypatch
-):
+    collection: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     collab_root = collection / "collab" / "owner" / "repo"
     fs.eject_default_note_types(collab_root / "note_types")
@@ -199,8 +201,8 @@ def test_serialize_global_validation_rejects_duplicate_deck_names(
 
 
 def test_serialize_global_validation_rejects_duplicate_note_keys(
-    collection, monkeypatch
-):
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     (collection / "OtherDeck.md").write_text(
         "<!-- note_key: nk-1 -->\nQ: duplicate\nA: duplicate",
@@ -211,7 +213,9 @@ def test_serialize_global_validation_rejects_duplicate_note_keys(
         serialize(collection)
 
 
-def test_serialize_global_validation_allows_missing_note_keys(collection, monkeypatch):
+def test_serialize_global_validation_allows_missing_note_keys(
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     (collection / "MissingKey.md").write_text(
         "Q: missing key\nA: missing key",
@@ -226,7 +230,9 @@ def test_serialize_global_validation_allows_missing_note_keys(collection, monkey
     assert missing_deck["notes"][0]["note_key"] is None
 
 
-def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypatch):
+def test_serialize_single_deck_includes_subdecks_by_default(
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
 
     (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
@@ -245,8 +251,8 @@ def test_serialize_single_deck_includes_subdecks_by_default(collection, monkeypa
 
 
 def test_serialize_single_deck_excludes_subdecks_with_no_subdecks(
-    collection, monkeypatch
-):
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
 
     (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
@@ -263,7 +269,9 @@ def test_serialize_single_deck_excludes_subdecks_with_no_subdecks(
     assert [deck["name"] for deck in result["decks"]] == ["TestDeck"]
 
 
-def test_serialize_to_file_accepts_deck_scope(collection, tmp_path, monkeypatch):
+def test_serialize_to_file_accepts_deck_scope(
+    collection: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
 
     (collection / f"{deck_name_to_file_stem('TestDeck::Child')}.md").write_text(
@@ -283,8 +291,8 @@ def test_serialize_to_file_accepts_deck_scope(collection, tmp_path, monkeypatch)
 
 
 def test_serialize_validates_whole_collection_before_deck_scope(
-    collection, monkeypatch
-):
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     (collection / "OtherDeck.md").write_text(
         "<!-- note_key: nk-1 -->\nQ: duplicate outside scope\nA: duplicate",
@@ -295,7 +303,9 @@ def test_serialize_validates_whole_collection_before_deck_scope(
         serialize(collection, deck="TestDeck", no_subdecks=True)
 
 
-def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatch):
+def test_serialize_fails_fast_on_parsing_error_by_default(
+    collection: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
 
     broken_name = f"{deck_name_to_file_stem('BrokenDeck')}.md"
@@ -304,9 +314,11 @@ def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatc
 
     import ankiops.interchange as interchange
 
-    original_read = interchange.read_deck_file
+    original_read = getattr(interchange, "read_deck_file")
 
-    def _fake_read_deck_file(md_file, *, note_types, context_root=None):
+    def _fake_read_deck_file(
+        md_file: Any, *, note_types: Any, context_root: Any = None
+    ) -> Any:
         if md_file.name == broken_name:
             raise ValueError("synthetic parse failure")
         return original_read(md_file, note_types=note_types, context_root=context_root)
@@ -324,7 +336,7 @@ def test_serialize_fails_fast_on_parsing_error_by_default(collection, monkeypatc
         serialize(collection)
 
 
-def test_roundtrip(collection, tmp_path, fs, monkeypatch):
+def test_roundtrip(collection: Any, tmp_path: Any, fs: Any, monkeypatch: Any) -> None:
     """Serialize then deserialize should preserve deck note content."""
     _set_collection_paths(monkeypatch, collection)
 
@@ -345,7 +357,9 @@ def test_roundtrip(collection, tmp_path, fs, monkeypatch):
     assert "What is 3+3?" in content
 
 
-def test_roundtrip_in_memory(collection, tmp_path, fs, monkeypatch):
+def test_roundtrip_in_memory(
+    collection: Any, tmp_path: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
 
     serialized_data = serialize(collection)
@@ -368,7 +382,9 @@ def test_roundtrip_in_memory(collection, tmp_path, fs, monkeypatch):
     assert "What is 3+3?" in content
 
 
-def test_roundtrip_preserves_tags(collection, tmp_path, fs, monkeypatch):
+def test_roundtrip_preserves_tags(
+    collection: Any, tmp_path: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, collection)
     deck_file = collection / f"{deck_name_to_file_stem('TestDeck')}.md"
     deck_file.write_text(
@@ -399,7 +415,7 @@ def test_roundtrip_preserves_tags(collection, tmp_path, fs, monkeypatch):
     assert "<!-- tags: high-yield z -->" in content
 
 
-def test_deserialize_requires_initialized_collection(tmp_path, fs):
+def test_deserialize_requires_initialized_collection(tmp_path: Any, fs: Any) -> None:
     note_types_dir = tmp_path / "note_types"
     fs.eject_default_note_types(note_types_dir)
 
@@ -484,7 +500,9 @@ def test_deserialize_requires_initialized_collection(tmp_path, fs):
         ),
     ],
 )
-def test_deserialize_rejects_invalid_data_before_writes(tmp_path, fs, data, message):
+def test_deserialize_rejects_invalid_data_before_writes(
+    tmp_path: Any, fs: Any, data: Any, message: Any
+) -> None:
     _init_collection(tmp_path, fs)
 
     with pytest.raises(ValueError, match=message):
@@ -497,7 +515,7 @@ def test_deserialize_rejects_invalid_data_before_writes(tmp_path, fs, data, mess
     assert not list(tmp_path.glob("*.md"))
 
 
-def test_deserialize_accepts_null_note_key(tmp_path, fs):
+def test_deserialize_accepts_null_note_key(tmp_path: Any, fs: Any) -> None:
     _init_collection(tmp_path, fs)
 
     deserialize(
@@ -512,7 +530,7 @@ def test_deserialize_accepts_null_note_key(tmp_path, fs):
     assert "Q: Q" in content
 
 
-def test_deserialize_writes_final_newline(tmp_path, fs):
+def test_deserialize_writes_final_newline(tmp_path: Any, fs: Any) -> None:
     _init_collection(tmp_path, fs)
 
     deserialize(
@@ -526,7 +544,9 @@ def test_deserialize_writes_final_newline(tmp_path, fs):
     )
 
 
-def test_deserialize_rejects_collab_source_with_missing_note_types(tmp_path, fs):
+def test_deserialize_rejects_collab_source_with_missing_note_types(
+    tmp_path: Any, fs: Any
+) -> None:
     _init_collection(tmp_path, fs)
     collab_root = tmp_path / "collab" / "owner" / "repo"
     collab_root.mkdir(parents=True)
@@ -550,7 +570,9 @@ def test_deserialize_rejects_collab_source_with_missing_note_types(tmp_path, fs)
     assert not (tmp_path / "collab" / "owner" / "repo" / "Collab.md").exists()
 
 
-def test_deserialize_writes_local_and_collab_decks_to_owning_sources(tmp_path, fs):
+def test_deserialize_writes_local_and_collab_decks_to_owning_sources(
+    tmp_path: Any, fs: Any
+) -> None:
     _init_collection(tmp_path, fs)
     collab_root = tmp_path / "collab" / "owner" / "repo"
     fs.eject_default_note_types(collab_root / "note_types")
@@ -581,7 +603,9 @@ def test_deserialize_writes_local_and_collab_decks_to_owning_sources(tmp_path, f
     assert "Q: CQ" in collab_content
 
 
-def test_deserialize_skips_existing_targets_without_overwrite(tmp_path, fs):
+def test_deserialize_skips_existing_targets_without_overwrite(
+    tmp_path: Any, fs: Any
+) -> None:
     _init_collection(tmp_path, fs)
     target = tmp_path / "Existing.md"
     target.write_text("keep me", encoding="utf-8")
@@ -595,7 +619,9 @@ def test_deserialize_skips_existing_targets_without_overwrite(tmp_path, fs):
     assert target.read_text(encoding="utf-8") == "keep me"
 
 
-def test_deserialize_from_file_uses_source_schema(tmp_path, fs, monkeypatch):
+def test_deserialize_from_file_uses_source_schema(
+    tmp_path: Any, fs: Any, monkeypatch: Any
+) -> None:
     _set_collection_paths(monkeypatch, tmp_path)
     _init_collection(tmp_path, fs)
     json_file = tmp_path / "in.json"

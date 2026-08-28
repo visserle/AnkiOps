@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,7 @@ from ankiops.sync.state import SyncState
 
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Any) -> Any:
     adapter = SyncState.open(tmp_path)
     try:
         yield adapter
@@ -19,7 +20,7 @@ def db(tmp_path):
         adapter.close()
 
 
-def test_load_creates_tables(db, tmp_path):
+def test_load_creates_tables(db: Any, tmp_path: Any) -> None:
     db_path = tmp_path / ANKIOPS_DB
     assert db_path.exists()
     assert db._conn.execute(
@@ -28,14 +29,14 @@ def test_load_creates_tables(db, tmp_path):
     ).fetchall() == [(1, None, None, None)]
 
 
-def test_load_empty(db):
+def test_load_empty(db: Any) -> None:
     assert db.resolve_note_ids(["any-key"]).get("any-key") is None
     assert db.resolve_deck_id("any-name") is None
     assert db.get_profile_name() is None
     assert db.get_note_type_sync_state() is None
 
 
-def test_persistence(tmp_path):
+def test_persistence(tmp_path: Any) -> None:
     db1 = SyncState.open(tmp_path)
     try:
         db1.upsert_deck("TestDeck", 100)
@@ -56,7 +57,7 @@ def test_persistence(tmp_path):
         db2.close()
 
 
-def test_profile_mapping(db):
+def test_profile_mapping(db: Any) -> None:
     db.set_profile_name("Default")
     assert db.get_profile_name() == "Default"
 
@@ -64,7 +65,7 @@ def test_profile_mapping(db):
     assert db.get_profile_name() == "Work"
 
 
-def test_note_type_sync_state_mapping(db):
+def test_note_type_sync_state_mapping(db: Any) -> None:
     db.set_note_type_sync_state("hash-a", "AnkiOpsQA")
     assert db.get_note_type_sync_state() == ("hash-a", "AnkiOpsQA")
 
@@ -72,7 +73,7 @@ def test_note_type_sync_state_mapping(db):
     assert db.get_note_type_sync_state() == ("hash-b", "AnkiOpsQA,AnkiOpsCloze")
 
 
-def test_note_type_sync_state_requires_complete_pair(db):
+def test_note_type_sync_state_requires_complete_pair(db: Any) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         db._write(
             "UPDATE app_state "
@@ -82,7 +83,7 @@ def test_note_type_sync_state_requires_complete_pair(db):
         )
 
 
-def test_note_mapping(db):
+def test_note_mapping(db: Any) -> None:
     note_key = "test-note-key"
     note_id = 67890
 
@@ -92,7 +93,7 @@ def test_note_mapping(db):
     assert db.resolve_note_ids(["key-2"]).get("key-2") is None
 
 
-def test_deck_mapping(db):
+def test_deck_mapping(db: Any) -> None:
     db.upsert_deck("MyDeck::Sub", 12345)
     assert db.resolve_deck_id("MyDeck::Sub") == 12345
     assert db.resolve_deck_name(12345) == "MyDeck::Sub"
@@ -103,7 +104,7 @@ def test_deck_mapping(db):
     assert db.resolve_deck_id("MyDeck::Sub") is None
 
 
-def test_note_and_deck_ownership(db):
+def test_note_and_deck_ownership(db: Any) -> None:
     db.upsert_note_links([("collab-key", 101)], source_path="collab/owner/repo")
     db.upsert_deck(
         "Collab",
@@ -118,7 +119,7 @@ def test_note_and_deck_ownership(db):
     assert db.resolve_deck_source(202) == "collab/owner/repo"
 
 
-def test_media_fingerprints_are_scoped_by_source(db):
+def test_media_fingerprints_are_scoped_by_source(db: Any) -> None:
     row = [("same.png", 1, 2, "digest-a", "same_a.png")]
     db.upsert_media_fingerprints(row, source_path="collab/owner/one")
     db.upsert_media_fingerprints(
@@ -140,7 +141,9 @@ def test_media_fingerprints_are_scoped_by_source(db):
     )
 
 
-def test_open_recreates_a_database_with_the_removed_operation_table(tmp_path):
+def test_open_recreates_a_database_with_the_removed_operation_table(
+    tmp_path: Any,
+) -> None:
     state = SyncState.open(tmp_path)
     state.close()
 
@@ -156,7 +159,7 @@ def test_open_recreates_a_database_with_the_removed_operation_table(tmp_path):
     assert (tmp_path / f"{ANKIOPS_DB}.corrupt").exists()
 
 
-def test_overwrite_mapping(db):
+def test_overwrite_mapping(db: Any) -> None:
     db.upsert_note_links([("key-1", 101)])
     db.upsert_note_links([("key-1", 999)])
 
@@ -164,13 +167,13 @@ def test_overwrite_mapping(db):
     assert db.resolve_note_keys([101]).get(101) is None
 
 
-def test_generate_note_key(db):
+def test_generate_note_key(db: Any) -> None:
     note_key = db.generate_note_key()
     assert isinstance(note_key, str)
     assert len(note_key) > 10
 
 
-def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path):
+def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path: Any) -> None:
     db = SyncState.open(tmp_path)
     try:
         db.upsert_note_links([("n1", 100)])
@@ -191,7 +194,7 @@ def test_schema_or_corruption_is_backed_up_and_recreated(tmp_path):
     assert (tmp_path / f"{ANKIOPS_DB}.corrupt").read_bytes() == original
 
 
-def test_delete_deck(tmp_path):
+def test_delete_deck(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_deck("Deck::Sub", 42)
@@ -205,7 +208,7 @@ def test_delete_deck(tmp_path):
         adapter.close()
 
 
-def test_same_id_reassignment_replaces_old_key(tmp_path):
+def test_same_id_reassignment_replaces_old_key(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("old-key", 500)])
@@ -218,7 +221,7 @@ def test_same_id_reassignment_replaces_old_key(tmp_path):
         adapter.close()
 
 
-def test_bulk_note_mapping_roundtrip(tmp_path):
+def test_bulk_note_mapping_roundtrip(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102), ("k3", 103)])
@@ -235,7 +238,7 @@ def test_bulk_note_mapping_roundtrip(tmp_path):
         adapter.close()
 
 
-def test_bulk_note_mapping_last_write_wins(tmp_path):
+def test_bulk_note_mapping_last_write_wins(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links(
@@ -257,7 +260,7 @@ def test_bulk_note_mapping_last_write_wins(tmp_path):
         adapter.close()
 
 
-def test_transaction_rolls_back_on_error(tmp_path):
+def test_transaction_rolls_back_on_error(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(RuntimeError):
@@ -270,7 +273,7 @@ def test_transaction_rolls_back_on_error(tmp_path):
         adapter.close()
 
 
-def test_bulk_import_note_fingerprints_roundtrip(tmp_path):
+def test_bulk_import_note_fingerprints_roundtrip(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102)])
@@ -288,7 +291,7 @@ def test_bulk_import_note_fingerprints_roundtrip(tmp_path):
         adapter.close()
 
 
-def test_bulk_export_note_fingerprints_roundtrip(tmp_path):
+def test_bulk_export_note_fingerprints_roundtrip(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101), ("k2", 102)])
@@ -306,7 +309,7 @@ def test_bulk_export_note_fingerprints_roundtrip(tmp_path):
         adapter.close()
 
 
-def test_import_note_fingerprints_last_write_wins(tmp_path):
+def test_import_note_fingerprints_last_write_wins(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
@@ -321,7 +324,7 @@ def test_import_note_fingerprints_last_write_wins(tmp_path):
         adapter.close()
 
 
-def test_export_note_fingerprints_last_write_wins(tmp_path):
+def test_export_note_fingerprints_last_write_wins(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
@@ -336,7 +339,9 @@ def test_export_note_fingerprints_last_write_wins(tmp_path):
         adapter.close()
 
 
-def test_remove_note_by_note_key_removes_directional_fingerprints(tmp_path):
+def test_remove_note_by_note_key_removes_directional_fingerprints(
+    tmp_path: Any,
+) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_note_links([("k1", 101)])
@@ -351,7 +356,7 @@ def test_remove_note_by_note_key_removes_directional_fingerprints(tmp_path):
         adapter.close()
 
 
-def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path):
+def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
@@ -360,7 +365,7 @@ def test_unknown_note_key_import_fingerprint_is_rejected(tmp_path):
         adapter.close()
 
 
-def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
+def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         with pytest.raises(sqlite3.IntegrityError):
@@ -369,7 +374,7 @@ def test_unknown_note_key_export_fingerprint_is_rejected(tmp_path):
         adapter.close()
 
 
-def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
+def test_markdown_media_cache_roundtrip_and_replace(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_markdown_media_cache([("Deck.md", 10, 200, {"a.png", "b.png"})])
@@ -388,7 +393,7 @@ def test_markdown_media_cache_roundtrip_and_replace(tmp_path):
         adapter.close()
 
 
-def test_prune_markdown_media_cache_removes_stale_paths(tmp_path):
+def test_prune_markdown_media_cache_removes_stale_paths(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_markdown_media_cache(
@@ -408,7 +413,7 @@ def test_prune_markdown_media_cache_removes_stale_paths(tmp_path):
         adapter.close()
 
 
-def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
+def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_media_fingerprints(
@@ -432,7 +437,7 @@ def test_media_fingerprints_roundtrip_and_last_write_wins(tmp_path):
         adapter.close()
 
 
-def test_media_push_state_roundtrip_and_last_write_wins(tmp_path):
+def test_media_push_state_roundtrip_and_last_write_wins(tmp_path: Any) -> None:
     adapter = SyncState.open(tmp_path)
     try:
         adapter.upsert_media_fingerprints(

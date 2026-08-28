@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.collection import LLM_DB_FILENAME
@@ -12,7 +14,7 @@ from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
 
-def _init_collection_db(collection_root):
+def _init_collection_db(collection_root: Any) -> Any:
     db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
@@ -20,15 +22,15 @@ def _init_collection_db(collection_root):
         db.close()
 
 
-def _eject_note_types(collection_root):
+def _eject_note_types(collection_root: Any) -> Any:
     _init_collection_db(collection_root)
     DeckFileHarness().eject_default_note_types(collection_root / "note_types")
 
 
 def test_plan_task_summarizes_scope_surface_and_does_not_persist(
-    llm_collection,
-    write_file,
-):
+    llm_collection: Any,
+    write_file: Any,
+) -> None:
     _eject_note_types(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -108,9 +110,9 @@ def test_plan_task_summarizes_scope_surface_and_does_not_persist(
 
 
 def test_plan_task_rejects_missing_note_key_before_discovery(
-    llm_collection,
-    write_file,
-):
+    llm_collection: Any,
+    write_file: Any,
+) -> None:
     _eject_note_types(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -139,9 +141,9 @@ def test_plan_task_rejects_missing_note_key_before_discovery(
 
 
 def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes(
-    llm_collection,
-    write_file,
-):
+    llm_collection: Any,
+    write_file: Any,
+) -> None:
     _eject_note_types(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -199,7 +201,9 @@ def test_plan_task_summarizes_autotagger_tag_surface_and_skips_contextless_notes
     assert surface_by_type["AnkiOpsReversed"].candidate_notes == 0
 
 
-def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_file):
+def test_plan_task_discovers_collab_notes_with_sources(
+    llm_collection: Any, write_file: Any
+) -> None:
     _init_collection_db(llm_collection)
     fs = DeckFileHarness()
     fs.eject_default_note_types(llm_collection / "note_types")
@@ -247,9 +251,9 @@ def test_plan_task_discovers_collab_notes_with_sources(llm_collection, write_fil
 
 
 def test_plan_task_allows_note_type_access_rule_absent_from_deck_scope(
-    llm_collection,
-    write_file,
-):
+    llm_collection: Any,
+    write_file: Any,
+) -> None:
     _eject_note_types(llm_collection)
     write_file(
         llm_collection / "Psychotherapie__Stoerungen.md",

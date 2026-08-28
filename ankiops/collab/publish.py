@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, replace
 from importlib import resources
 from pathlib import Path
+from typing import Protocol
 
 from ankiops.collab.errors import RepositoryCollisionError
 from ankiops.collab.git_state import (
@@ -51,6 +53,12 @@ class _PublishPlan:
 class PreparedPublish:
     prepared_commit: str
     deck: str
+
+
+class _RemoteRepository(Protocol):
+    def run(
+        self, args: list[str], *, check: bool = True
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 def prepared_publish(repository: GitRepository) -> PreparedPublish | None:
@@ -155,7 +163,7 @@ def publish_collab_deck(
 
 
 def _publish_remote_head(
-    repository: GitRepository,
+    repository: _RemoteRepository,
     source: DeckSource,
     prepared_head: str,
 ) -> str | None:

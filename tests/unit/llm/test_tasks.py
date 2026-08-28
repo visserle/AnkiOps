@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.llm import tasks as tasks_module
@@ -9,11 +11,11 @@ from ankiops.llm.tasks import FieldAccess, TaskRequestOptions, load_llm_task_cat
 
 
 def test_load_llm_task_catalog_loads_prompt_and_input_files_fields_and_request(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-    llm_choice_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+    llm_choice_config: Any,
+) -> None:
     write_file(llm_collection / "llm/prompts/system.md", "System rules")
     write_file(llm_collection / "llm/prompts/user.md", "Fix grammar")
     write_file(llm_collection / "references/rubric.md", "Reference rubric")
@@ -68,10 +70,10 @@ def test_load_llm_task_catalog_loads_prompt_and_input_files_fields_and_request(
 
 
 def test_load_llm_task_catalog_defaults_tags_hidden(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -168,12 +170,12 @@ def test_load_llm_task_catalog_defaults_tags_hidden(
     ],
 )
 def test_load_llm_task_catalog_reports_invalid_task_config(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-    task_yaml,
-    expected_error,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+    task_yaml: Any,
+    expected_error: Any,
+) -> None:
     write_file(llm_collection / "llm/grammar.yaml", task_yaml)
 
     catalog = load_llm_task_catalog(
@@ -186,10 +188,10 @@ def test_load_llm_task_catalog_reports_invalid_task_config(
 
 
 def test_load_llm_task_catalog_requires_max_notes_per_request(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -212,10 +214,10 @@ def test_load_llm_task_catalog_requires_max_notes_per_request(
 
 
 def test_load_llm_task_catalog_rejects_legacy_file_tag(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     write_file(
         llm_collection / "llm/grammar.yaml",
         """
@@ -245,12 +247,12 @@ def test_load_llm_task_catalog_rejects_legacy_file_tag(
     ],
 )
 def test_load_llm_task_catalog_rejects_invalid_prompt_file_mapping(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-    prompt_value,
-    expected_error,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+    prompt_value: Any,
+    expected_error: Any,
+) -> None:
     write_file(
         llm_collection / "llm/grammar.yaml",
         f"""
@@ -271,10 +273,10 @@ def test_load_llm_task_catalog_rejects_invalid_prompt_file_mapping(
 
 
 def test_load_llm_task_catalog_rejects_paths_outside_collection(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     write_file(llm_collection.parent / "outside.md", "outside")
     write_file(
         llm_collection / "llm/grammar.yaml",
@@ -299,10 +301,10 @@ def test_load_llm_task_catalog_rejects_paths_outside_collection(
 
 
 def test_load_llm_task_catalog_rejects_absolute_input_file_path(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     input_path = llm_collection / "reference.md"
     write_file(input_path, "reference")
     write_file(
@@ -330,10 +332,10 @@ def test_load_llm_task_catalog_rejects_absolute_input_file_path(
 
 
 def test_load_llm_task_catalog_rejects_input_symlink_outside_collection(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     outside = llm_collection.parent / "outside.md"
     write_file(outside, "outside")
     link = llm_collection / "reference.md"
@@ -362,10 +364,10 @@ def test_load_llm_task_catalog_rejects_input_symlink_outside_collection(
 
 
 def test_load_llm_task_catalog_rejects_missing_empty_and_duplicate_input_files(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+) -> None:
     empty = llm_collection / "empty.txt"
     empty.touch()
     write_file(
@@ -429,11 +431,11 @@ def test_load_llm_task_catalog_rejects_missing_empty_and_duplicate_input_files(
 
 
 def test_load_llm_task_catalog_enforces_combined_input_file_size(
-    llm_collection,
-    write_file,
-    llm_qa_config,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    llm_qa_config: Any,
+    monkeypatch: Any,
+) -> None:
     monkeypatch.setattr(tasks_module, "_MAX_INPUT_FILE_BYTES", 10)
     write_file(llm_collection / "first.txt", "12345")
     write_file(llm_collection / "second.txt", "1234")

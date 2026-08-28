@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from typing import Any
 
 import pytest
 
 from ankiops.git import GitRepository, git_snapshot
 
 
-def _init_git_repo(collection_root):
+def _init_git_repo(collection_root: Any) -> Any:
     subprocess.run(
         ["git", "init"], cwd=collection_root, check=True, capture_output=True
     )
@@ -24,12 +25,12 @@ def _init_git_repo(collection_root):
     )
 
 
-def _commit_all(collection_root, message):
+def _commit_all(collection_root: Any, message: Any) -> Any:
     subprocess.run(["git", "add", "."], cwd=collection_root, check=True)
     subprocess.run(["git", "commit", "-m", message], cwd=collection_root, check=True)
 
 
-def _git_status(collection_root):
+def _git_status(collection_root: Any) -> Any:
     result = subprocess.run(
         ["git", "status", "--short"],
         cwd=collection_root,
@@ -40,7 +41,7 @@ def _git_status(collection_root):
     return result.stdout
 
 
-def _git_head(collection_root):
+def _git_head(collection_root: Any) -> Any:
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=collection_root,
@@ -51,7 +52,7 @@ def _git_head(collection_root):
     return result.stdout.strip()
 
 
-def _head_subject(collection_root):
+def _head_subject(collection_root: Any) -> Any:
     result = subprocess.run(
         ["git", "log", "-1", "--format=%s"],
         cwd=collection_root,
@@ -62,7 +63,7 @@ def _head_subject(collection_root):
     return result.stdout.strip()
 
 
-def _head_name_status(collection_root):
+def _head_name_status(collection_root: Any) -> Any:
     result = subprocess.run(
         ["git", "show", "--name-status", "--format=", "HEAD"],
         cwd=collection_root,
@@ -73,10 +74,12 @@ def _head_name_status(collection_root):
     return result.stdout
 
 
-def test_anonymous_clone_disables_credentials_and_prompts(tmp_path, monkeypatch):
+def test_anonymous_clone_disables_credentials_and_prompts(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     calls = []
 
-    def fake_run(args, **kwargs):
+    def fake_run(args: Any, **kwargs: Any) -> Any:
         calls.append((args, kwargs))
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
@@ -91,9 +94,9 @@ def test_anonymous_clone_disables_credentials_and_prompts(tmp_path, monkeypatch)
 
 
 def test_failed_git_command_exposes_stderr_to_callers_and_debug_log(
-    tmp_path, monkeypatch, caplog
-):
-    def fail_run(args, **_kwargs):
+    tmp_path: Any, monkeypatch: Any, caplog: Any
+) -> None:
+    def fail_run(args: Any, **_kwargs: Any) -> Any:
         raise subprocess.CalledProcessError(
             1,
             args,
@@ -115,12 +118,12 @@ def test_failed_git_command_exposes_stderr_to_callers_and_debug_log(
 
 
 def test_failed_git_command_redacts_credentials_from_exception_and_debug_log(
-    tmp_path, monkeypatch, caplog
-):
+    tmp_path: Any, monkeypatch: Any, caplog: Any
+) -> None:
     secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
     remote_url = f"https://oauth2:{secret}@github.com/owner/repo.git"
 
-    def fail_run(args, **_kwargs):
+    def fail_run(args: Any, **_kwargs: Any) -> Any:
         raise subprocess.CalledProcessError(
             128,
             args,
@@ -147,10 +150,12 @@ def test_failed_git_command_redacts_credentials_from_exception_and_debug_log(
     assert "<redacted>" in exposed
 
 
-def test_unchecked_git_result_raises_with_actionable_safe_detail(tmp_path, monkeypatch):
+def test_unchecked_git_result_raises_with_actionable_safe_detail(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     secret = "github_pat_0123456789abcdefghijklmnopqrstuvwxyz"
 
-    def failed_result(args, **_kwargs):
+    def failed_result(args: Any, **_kwargs: Any) -> Any:
         return subprocess.CompletedProcess(
             args,
             128,
@@ -170,7 +175,7 @@ def test_unchecked_git_result_raises_with_actionable_safe_detail(tmp_path, monke
     assert secret not in (raised.value.stderr or "")
 
 
-def test_git_snapshot_commits_only_scoped_paths(tmp_path):
+def test_git_snapshot_commits_only_scoped_paths(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     scoped = tmp_path / "Deck.md"
     outside = tmp_path / "Other.md"
@@ -190,7 +195,7 @@ def test_git_snapshot_commits_only_scoped_paths(tmp_path):
     assert _git_status(tmp_path) == " M Other.md\n"
 
 
-def test_git_snapshot_ignores_scoped_empty_directories(tmp_path):
+def test_git_snapshot_ignores_scoped_empty_directories(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     baseline = tmp_path / ".gitignore"
     baseline.write_text(".ankiops.db\n", encoding="utf-8")
@@ -211,7 +216,7 @@ def test_git_snapshot_ignores_scoped_empty_directories(tmp_path):
     assert _git_status(tmp_path) == ""
 
 
-def test_git_snapshot_commits_deleted_tracked_scoped_path(tmp_path):
+def test_git_snapshot_commits_deleted_tracked_scoped_path(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     deck = tmp_path / "Deck.md"
     deck.write_text("old\n", encoding="utf-8")
@@ -224,7 +229,7 @@ def test_git_snapshot_commits_deleted_tracked_scoped_path(tmp_path):
     assert _git_status(tmp_path) == ""
 
 
-def test_git_snapshot_skips_clean_scope(tmp_path):
+def test_git_snapshot_skips_clean_scope(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     scoped = tmp_path / "Deck.md"
     outside = tmp_path / "Other.md"
@@ -240,7 +245,7 @@ def test_git_snapshot_skips_clean_scope(tmp_path):
     assert _git_status(tmp_path) == " M Other.md\n"
 
 
-def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path):
+def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     first = tmp_path / "Deck.md"
     second = tmp_path / "Other.md"
@@ -259,7 +264,7 @@ def test_git_snapshot_collection_path_keeps_broad_behavior(tmp_path):
     assert _git_status(tmp_path) == ""
 
 
-def test_status_lines_keep_unicode_paths_readable(tmp_path):
+def test_status_lines_keep_unicode_paths_readable(tmp_path: Any) -> None:
     _init_git_repo(tmp_path)
     path = tmp_path / "Déck Ω — punctuation!.md"
     path.write_text("content\n", encoding="utf-8")
@@ -267,7 +272,9 @@ def test_status_lines_keep_unicode_paths_readable(tmp_path):
     assert GitRepository(tmp_path).status_lines() == ["?? Déck Ω — punctuation!.md"]
 
 
-def test_diff_name_status_preserves_unicode_spaces_and_rename_paths(tmp_path):
+def test_diff_name_status_preserves_unicode_spaces_and_rename_paths(
+    tmp_path: Any,
+) -> None:
     _init_git_repo(tmp_path)
     old_path = tmp_path / "Old déck Ω.md"
     old_path.write_text("content\n", encoding="utf-8")
@@ -288,8 +295,8 @@ def test_diff_name_status_preserves_unicode_spaces_and_rename_paths(tmp_path):
 
 
 def test_worktree_matches_uses_final_non_ignored_files_without_changing_index(
-    tmp_path,
-):
+    tmp_path: Any,
+) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / ".gitignore").write_text("Ignored.txt\n", encoding="utf-8")
     deck = tmp_path / "Deck.md"
@@ -329,7 +336,9 @@ def test_worktree_matches_uses_final_non_ignored_files_without_changing_index(
     assert not repository.worktree_matches("HEAD")
 
 
-def test_worktree_matches_does_not_write_an_untracked_symlink_target(tmp_path):
+def test_worktree_matches_does_not_write_an_untracked_symlink_target(
+    tmp_path: Any,
+) -> None:
     _init_git_repo(tmp_path)
     (tmp_path / ".gitignore").write_text("Private.txt\n", encoding="utf-8")
     (tmp_path / "Baseline.md").write_text("baseline\n", encoding="utf-8")
@@ -356,14 +365,16 @@ def test_worktree_matches_does_not_write_an_untracked_symlink_target(tmp_path):
     )
 
 
-def test_git_snapshot_propagates_checkpoint_failure(tmp_path, monkeypatch):
+def test_git_snapshot_propagates_checkpoint_failure(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     _init_git_repo(tmp_path)
     tracked = tmp_path / "Deck.md"
     tracked.write_text("old\n", encoding="utf-8")
     _commit_all(tmp_path, "root")
     tracked.write_text("new\n", encoding="utf-8")
 
-    def fail_commit(*_args, **_kwargs):
+    def fail_commit(*_args: Any, **_kwargs: Any) -> Any:
         raise subprocess.CalledProcessError(1, ["git", "commit"])
 
     monkeypatch.setattr(GitRepository, "run", fail_commit)

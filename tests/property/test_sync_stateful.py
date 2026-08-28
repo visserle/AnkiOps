@@ -6,6 +6,7 @@ import re
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -61,7 +62,7 @@ def _assert_db_bijection(db_path: Path) -> None:
     assert len(ids) == len(set(ids))
 
 
-def _sync_import(anki, fs, db, collection_root: Path):
+def _sync_import(anki: Any, fs: Any, db: Any, collection_root: Path) -> Any:
     return sync_collection_to_anki(
         anki=anki,
         state=db,
@@ -69,7 +70,7 @@ def _sync_import(anki, fs, db, collection_root: Path):
     )
 
 
-def _sync_export(anki, fs, db, collection_root: Path):
+def _sync_export(anki: Any, fs: Any, db: Any, collection_root: Path) -> Any:
     return sync_collection_from_anki(
         anki=anki,
         state=db,
@@ -96,7 +97,7 @@ def _assert_mapping_invariants(
 
 @given(ops=_OPS)
 @settings(max_examples=40, deadline=None)
-def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]):
+def test_sync_sequences_preserve_key_and_mapping_invariants(ops: list[str]) -> None:
     with tempfile.TemporaryDirectory() as tdir:
         collection_root = Path(tdir)
         deck_file = collection_root / f"{deck_name_to_file_stem('StatefulDeck')}.md"

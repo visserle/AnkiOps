@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -13,26 +14,26 @@ from ankiops.note_types_command import run as run_note_type
 from tests.support.deck_files import DeckFileHarness
 
 
-def _seed_note_types(note_types_dir):
+def _seed_note_types(note_types_dir: Any) -> Any:
     DeckFileHarness().eject_default_note_types(note_types_dir)
 
 
 class _FakeNoteTypeAnki:
-    def __init__(self, model_names=None, model_states=None):
+    def __init__(self: Any, model_names: Any = None, model_states: Any = None) -> None:
         self.model_names = model_names or []
         self.model_states = model_states or {}
 
-    def get_active_profile(self):
+    def get_active_profile(self: Any) -> Any:
         return "TestProfile"
 
-    def fetch_note_type_names(self):
+    def fetch_note_type_names(self: Any) -> Any:
         return self.model_names
 
-    def fetch_note_type_states(self, model_names):
+    def fetch_note_type_states(self: Any, model_names: Any) -> Any:
         return {name: self.model_states[name] for name in model_names}
 
 
-def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
+def test_note_types_import_writes_files_and_summary(tmp_path: Any, caplog: Any) -> None:
     _seed_note_types(tmp_path / "note_types")
 
     fake_anki = _FakeNoteTypeAnki(
@@ -86,7 +87,9 @@ def test_note_types_import_writes_files_and_summary(tmp_path, caplog):
     ]
 
 
-def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, caplog):
+def test_note_types_import_reprompts_on_identifying_label_conflict(
+    tmp_path: Any, caplog: Any
+) -> None:
     _seed_note_types(tmp_path / "note_types")
 
     fake_anki = _FakeNoteTypeAnki(
@@ -126,7 +129,9 @@ def test_note_types_import_reprompts_on_identifying_label_conflict(tmp_path, cap
     }
 
 
-def test_note_types_import_reprompts_on_invalid_label(tmp_path, caplog):
+def test_note_types_import_reprompts_on_invalid_label(
+    tmp_path: Any, caplog: Any
+) -> None:
     _seed_note_types(tmp_path / "note_types")
 
     fake_anki = _FakeNoteTypeAnki(
@@ -166,7 +171,7 @@ def test_note_types_import_reprompts_on_invalid_label(tmp_path, caplog):
     ]
 
 
-def test_note_types_import_rejects_unknown_model(tmp_path):
+def test_note_types_import_rejects_unknown_model(tmp_path: Any) -> None:
     fake_anki = _FakeNoteTypeAnki(["AnkiOpsQA"])
 
     with (
@@ -183,7 +188,7 @@ def test_note_types_import_rejects_unknown_model(tmp_path):
     assert exc.value.code == 1
 
 
-def test_note_types_import_rejects_existing_target_folder(tmp_path):
+def test_note_types_import_rejects_existing_target_folder(tmp_path: Any) -> None:
     existing = tmp_path / "note_types" / "MyType"
     existing.mkdir(parents=True, exist_ok=True)
 

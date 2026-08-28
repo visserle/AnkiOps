@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
 
@@ -11,7 +12,7 @@ from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteField, NoteType
 
 
 @pytest.fixture
-def write_file():
+def write_file() -> Any:
     def _write_file(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(dedent(content).strip() + "\n", encoding="utf-8")
@@ -20,7 +21,7 @@ def write_file():
 
 
 @pytest.fixture
-def llm_collection(tmp_path: Path, write_file):
+def llm_collection(tmp_path: Path, write_file: Any) -> Any:
     write_file(
         tmp_path / "llm/_models.yaml",
         """

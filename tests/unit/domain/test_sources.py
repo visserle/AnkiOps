@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,7 +16,7 @@ from ankiops.git import GitRepository
 from tests.support.deck_files import DeckFileHarness
 
 
-def test_discover_deck_sources_includes_local_and_collab(tmp_path):
+def test_discover_deck_sources_includes_local_and_collab(tmp_path: Any) -> None:
     (tmp_path / "note_types").mkdir()
     (tmp_path / "collab" / "owner" / "repo" / "note_types").mkdir(parents=True)
     (tmp_path / "collab" / "other" / "deck" / "note_types").mkdir(parents=True)
@@ -33,7 +34,9 @@ def test_discover_deck_sources_includes_local_and_collab(tmp_path):
     assert sources[2].github_url == "https://github.com/owner/repo.git"
 
 
-def test_discover_deck_sources_rejects_non_repository_collab_directory(tmp_path):
+def test_discover_deck_sources_rejects_non_repository_collab_directory(
+    tmp_path: Any,
+) -> None:
     invalid_root = tmp_path / "collab" / "owner" / "repo"
     invalid_root.mkdir(parents=True)
 
@@ -45,12 +48,14 @@ def test_discover_deck_sources_rejects_non_repository_collab_directory(tmp_path)
     "relative_path",
     [Path("owner/repo"), Path("collab/owner"), Path("collab/../repo")],
 )
-def test_deck_source_rejects_noncanonical_relative_paths(tmp_path, relative_path):
+def test_deck_source_rejects_noncanonical_relative_paths(
+    tmp_path: Any, relative_path: Any
+) -> None:
     with pytest.raises(ValueError, match="Expected .*source|Invalid collab deck"):
         DeckSource(tmp_path, relative_path)
 
 
-def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path):
+def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path: Any) -> None:
     local_source = DeckSource.local(tmp_path)
     collab_source = DeckSource.collab(tmp_path, "owner/repo")
     collab_source.root.mkdir(parents=True)
@@ -73,7 +78,7 @@ def test_markdown_files_ignore_reserved_docs_in_all_sources(tmp_path):
     ]
 
 
-def test_ambiguous_deck_file_names_raise(tmp_path):
+def test_ambiguous_deck_file_names_raise(tmp_path: Any) -> None:
     source = DeckSource.local(tmp_path)
     (tmp_path / "a___b.md").write_text("Q: local\nA: deck", encoding="utf-8")
 
@@ -81,7 +86,7 @@ def test_ambiguous_deck_file_names_raise(tmp_path):
         source.deck_files()
 
 
-def test_collab_configs_are_scoped_by_source(tmp_path):
+def test_collab_configs_are_scoped_by_source(tmp_path: Any) -> None:
     source = DeckSource.collab(tmp_path, "owner/repo")
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
 
@@ -91,7 +96,9 @@ def test_collab_configs_are_scoped_by_source(tmp_path):
     assert "AnkiOpsQA" not in names
 
 
-def test_collection_note_types_include_local_and_scoped_collab_configs(tmp_path):
+def test_collection_note_types_include_local_and_scoped_collab_configs(
+    tmp_path: Any,
+) -> None:
     harness = DeckFileHarness()
     harness.eject_default_note_types(tmp_path / "note_types")
     collab_source = DeckSource.collab(tmp_path, "owner/repo")
@@ -104,7 +111,7 @@ def test_collection_note_types_include_local_and_scoped_collab_configs(tmp_path)
     assert "collab/owner/repo/AnkiOpsQA" in names
 
 
-def test_collab_note_type_names_are_path_like(tmp_path):
+def test_collab_note_type_names_are_path_like(tmp_path: Any) -> None:
     source = DeckSource.collab(tmp_path, "owner/repo")
 
     assert source.scope_note_type_name("AnkiOpsQA") == ("collab/owner/repo/AnkiOpsQA")
@@ -116,7 +123,7 @@ def test_collab_note_type_names_are_path_like(tmp_path):
     )
 
 
-def test_source_location_and_kind_are_derived_from_identity(tmp_path):
+def test_source_location_and_kind_are_derived_from_identity(tmp_path: Any) -> None:
     local = DeckSource.local(tmp_path)
     collab = DeckSource.collab(tmp_path, "owner/repo")
 
@@ -136,7 +143,9 @@ def test_source_location_and_kind_are_derived_from_identity(tmp_path):
     assert collab.is_collab
 
 
-def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(tmp_path):
+def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(
+    tmp_path: Any,
+) -> None:
     source = DeckSource.collab(tmp_path, "owner/repo")
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
     (source.root / "Deck.md").write_text(
@@ -164,7 +173,9 @@ def test_anki_applicable_paths_contains_only_files_used_by_loaded_decks(tmp_path
     )
 
 
-def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(tmp_path):
+def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(
+    tmp_path: Any,
+) -> None:
     source = DeckSource.local(tmp_path)
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
     deck = source.root / "Deck.md"
@@ -191,7 +202,7 @@ def test_anki_applicable_paths_keeps_removed_references_relevant_to_update(tmp_p
     assert "media/private.png" not in applicable
 
 
-def test_parse_source_reads_each_deck_once(tmp_path, monkeypatch):
+def test_parse_source_reads_each_deck_once(tmp_path: Any, monkeypatch: Any) -> None:
     source = DeckSource.local(tmp_path)
     DeckFileHarness().eject_default_note_types(source.note_types_dir)
     for name in ("First.md", "Second.md"):
@@ -200,10 +211,10 @@ def test_parse_source_reads_each_deck_once(tmp_path, monkeypatch):
             encoding="utf-8",
         )
 
-    actual_read = interchange.read_deck_file
+    actual_read = getattr(interchange, "read_deck_file")
     calls = []
 
-    def counting_read(path, **kwargs):
+    def counting_read(path: Any, **kwargs: Any) -> Any:
         calls.append(path)
         return actual_read(path, **kwargs)
 

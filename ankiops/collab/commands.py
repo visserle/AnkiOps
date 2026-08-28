@@ -196,6 +196,14 @@ def _conflict_directory(collection_root: Path, source: DeckSource) -> Path:
     return collection_root / ".ankiops" / "conflicts" / owner / repo_name
 
 
+def _remove_directory(path: Path, *, ignore_errors: bool = False) -> None:
+    try:
+        shutil.rmtree(path, ignore_errors=ignore_errors)
+    except OSError:
+        if not ignore_errors:
+            raise
+
+
 def _conflict_retry_command(source: DeckSource, kind: str) -> str:
     return shlex.join(["ankiops", "collab", kind, source.display_name])
 
@@ -215,7 +223,7 @@ def _load_conflict_state(
     if not metadata_path.exists() and not any(commits.values()):
         return None
     if metadata_path.exists() and not any(commits.values()):
-        shutil.rmtree(root)
+        _remove_directory(root)
         return None
     if not metadata_path.exists() or not all(commits.values()):
         raise ValueError(
@@ -272,7 +280,7 @@ def _clear_conflict_state(
     source_git.delete_refs(
         (CONFLICT_BASE_REF, CONFLICT_LOCAL_REF, CONFLICT_UPSTREAM_REF)
     )
-    shutil.rmtree(conflict_root, ignore_errors=True)
+    _remove_directory(conflict_root, ignore_errors=True)
 
 
 def _read_repository_version(
@@ -296,7 +304,7 @@ def _save_conflict_copies(
     requested_title: str | None,
 ) -> Path:
     conflict_root = _conflict_directory(collection_root, source)
-    shutil.rmtree(conflict_root, ignore_errors=True)
+    _remove_directory(conflict_root, ignore_errors=True)
     for rel_path in source_git.unmerged_paths():
         versions: dict[str, bytes] = {}
         for stage, label in ((1, "base"), (2, "local"), (3, "upstream")):
@@ -462,11 +470,12 @@ def _resolve_frozen_conflict(
                     f"Resolve frozen upstream conflict for {source.display_name}",
                 ]
             )
-            result_tree = source_git.tree("HEAD")
-            if result_tree is None:
+            resolved_tree = source_git.tree("HEAD")
+            if resolved_tree is None:
                 raise ValueError(
                     f"Could not read the resolved content for {source.display_name}."
                 )
+            result_tree = resolved_tree
         parsed_source = _finish_content_merge(
             source,
             source_git,
@@ -640,7 +649,7 @@ def run_subscribe(args: SimpleNamespace) -> None:
         require_note_keys(deck.parsed for deck in parsed_source.decks)
     except BaseException:
         if source.root.exists():
-            shutil.rmtree(source.root)
+            _remove_directory(source.root, ignore_errors=True)
         raise
     _log_result(
         "subscribe",
@@ -880,11 +889,16 @@ def run_submit(args: SimpleNamespace) -> None:
             f"ankiops collab submit {source.display_name}. Details: {error}"
         ) from error
     if submission.phase == _SubmissionPhase.MERGED:
+        pull_request = submission.pull_request
+        if pull_request is None:
+            raise ValueError(
+                f"Merged submission for {source.display_name} has no pull request."
+            )
         _log_result(
             "submit",
             source,
             "pull request merged",
-            details=[f"Pull request: {submission.pull_request.url}"],
+            details=[f"Pull request: {pull_request.url}"],
             next_steps=[
                 f"Integrate the merged contribution: ankiops collab update "
                 f"{source.display_name}"
@@ -1049,6 +1063,13 @@ def run_submit(args: SimpleNamespace) -> None:
     )
 
 
+def _parse_commit_count(raw_count: str) -> int:
+    try:
+        return int(raw_count)
+    except ValueError as error:
+        raise ValueError("Git returned an invalid commit count.") from error
+
+
 def _repository_state(source_git: GitRepository) -> _RepositoryState:
     upstream_ref = _upstream_ref(source_git)
     upstream_tree = source_git.tree(upstream_ref)
@@ -1064,13 +1085,13 @@ def _repository_state(source_git: GitRepository) -> _RepositoryState:
         raise ValueError("Could not read the integrated content tree.")
     local_content = not source_git.worktree_matches(INTEGRATED_REF)
     if source_git.is_ancestor(integrated_ref, upstream_ref):
-        upstream_commits = int(
+        upstream_commits = _parse_commit_count(
             source_git.run(
                 ["rev-list", "--count", f"{integrated_ref}..{upstream_ref}"]
             ).stdout.strip()
         )
     else:
-        upstream_commits = int(
+        upstream_commits = _parse_commit_count(
             source_git.run(
                 ["rev-list", "--count", upstream_ref, f"^{integrated_ref}"]
             ).stdout.strip()

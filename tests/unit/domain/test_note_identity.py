@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.notes import AnkiNote
@@ -11,22 +13,22 @@ from ankiops.sync.identity import (
 
 class FakeAnkiIdentity:
     def __init__(
-        self,
+        self: Any,
         notes: dict[int, AnkiNote],
         *,
         model_note_ids: list[int] | None = None,
         note_ids_by_key: dict[str, list[int]] | None = None,
-    ):
+    ) -> None:
         self.notes = notes
         self.model_note_ids = model_note_ids or []
         self.note_ids_by_key = note_ids_by_key or {}
         self.key_field_lookup_calls: list[set[str]] = []
 
-    def fetch_all_note_ids(self, required_types: list[str]) -> list[int]:
-        return self.model_note_ids
+    def fetch_all_note_ids(self: Any, required_types: list[str]) -> list[int]:
+        return [int(note_id) for note_id in self.model_note_ids]
 
     def fetch_note_ids_by_note_keys(
-        self,
+        self: Any,
         note_keys: set[str],
     ) -> dict[str, list[int]]:
         self.key_field_lookup_calls.append(set(note_keys))
@@ -34,7 +36,7 @@ class FakeAnkiIdentity:
             note_key: self.note_ids_by_key.get(note_key, []) for note_key in note_keys
         }
 
-    def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]:
+    def fetch_notes_info(self: Any, note_ids: list[int]) -> dict[int, AnkiNote]:
         return {
             note_id: self.notes[note_id]
             for note_id in note_ids
@@ -43,10 +45,10 @@ class FakeAnkiIdentity:
 
 
 class FakeDbIdentity:
-    def __init__(self, mappings: dict[str, int]):
+    def __init__(self: Any, mappings: dict[str, int]) -> None:
         self.mappings = mappings
 
-    def resolve_note_ids(self, note_keys: set[str]) -> dict[str, int]:
+    def resolve_note_ids(self: Any, note_keys: set[str]) -> dict[str, int]:
         return {
             note_key: note_id
             for note_key, note_id in self.mappings.items()
@@ -67,7 +69,7 @@ def _note(
     )
 
 
-def test_resolves_healthy_db_mapping_without_key_field_lookup():
+def test_resolves_healthy_db_mapping_without_key_field_lookup() -> None:
     anki = FakeAnkiIdentity(
         {101: _note(101)},
         model_note_ids=[101],
@@ -86,7 +88,7 @@ def test_resolves_healthy_db_mapping_without_key_field_lookup():
     assert anki.key_field_lookup_calls == []
 
 
-def test_indexes_missing_db_mapping_from_configured_model_snapshot():
+def test_indexes_missing_db_mapping_from_configured_model_snapshot() -> None:
     anki = FakeAnkiIdentity(
         {101: _note(101)},
         model_note_ids=[101],
@@ -105,7 +107,7 @@ def test_indexes_missing_db_mapping_from_configured_model_snapshot():
     assert anki.key_field_lookup_calls == []
 
 
-def test_uses_db_mapped_note_even_when_old_model_is_not_configured():
+def test_uses_db_mapped_note_even_when_old_model_is_not_configured() -> None:
     anki = FakeAnkiIdentity(
         {101: _note(101, note_type="OldQA")},
         model_note_ids=[],
@@ -124,7 +126,7 @@ def test_uses_db_mapped_note_even_when_old_model_is_not_configured():
     assert anki.key_field_lookup_calls == []
 
 
-def test_uses_key_field_lookup_only_for_unresolved_identity():
+def test_uses_key_field_lookup_only_for_unresolved_identity() -> None:
     anki = FakeAnkiIdentity(
         {101: _note(101, note_type="OldQA")},
         model_note_ids=[],
@@ -144,7 +146,7 @@ def test_uses_key_field_lookup_only_for_unresolved_identity():
     assert anki.key_field_lookup_calls == [{"key-1"}]
 
 
-def test_blocks_when_key_field_lookup_would_duplicate_existing_key():
+def test_blocks_when_key_field_lookup_would_duplicate_existing_key() -> None:
     anki = FakeAnkiIdentity(
         {
             101: _note(101, note_key=""),
@@ -166,7 +168,7 @@ def test_blocks_when_key_field_lookup_would_duplicate_existing_key():
     assert anki.key_field_lookup_calls == [{"key-1"}]
 
 
-def test_export_identity_blocks_duplicate_embedded_keys():
+def test_export_identity_blocks_duplicate_embedded_keys() -> None:
     notes = {
         101: _note(101, note_key="key-1"),
         202: _note(202, note_key="key-1"),
@@ -179,7 +181,7 @@ def test_export_identity_blocks_duplicate_embedded_keys():
         )
 
 
-def test_export_identity_blocks_db_mapping_and_embedded_key_collision():
+def test_export_identity_blocks_db_mapping_and_embedded_key_collision() -> None:
     notes = {
         101: _note(101, note_key=""),
         202: _note(202, note_key="key-1"),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -24,7 +25,7 @@ def _write_basic_template_pair(note_type_dir: Path) -> None:
     )
 
 
-def test_label_reuse_same_field_and_identifying_is_allowed():
+def test_label_reuse_same_field_and_identifying_is_allowed() -> None:
     """Label reuse is allowed globally when field and identifying are identical."""
     config_a = NoteType(
         name="TypeA",
@@ -40,7 +41,7 @@ def test_label_reuse_same_field_and_identifying_is_allowed():
     NoteType.validate_configs([config_a, config_b])
 
 
-def test_label_reuse_conflicting_identifying_fails():
+def test_label_reuse_conflicting_identifying_fails() -> None:
     config_a = NoteType(
         name="TypeA",
         fields=[NoteField("Extra", "E:", identifying=True)],
@@ -53,7 +54,7 @@ def test_label_reuse_conflicting_identifying_fails():
         NoteType.validate_configs([config_a, config_b])
 
 
-def test_register_conflict_with_reserved():
+def test_register_conflict_with_reserved() -> None:
     """Ensure we can register a custom type with AnkiOps Key if it's identical."""
     config = NoteType(
         name="ConflictType",
@@ -63,7 +64,7 @@ def test_register_conflict_with_reserved():
     NoteType.validate_configs([config])
 
 
-def test_mandatory_set_collision():
+def test_mandatory_set_collision() -> None:
     """Ensure two note types cannot have identical identifying fields."""
     config1 = NoteType(
         name="AnkiOpsType1",
@@ -84,7 +85,7 @@ def test_mandatory_set_collision():
         NoteType.validate_configs([config1, config2])
 
 
-def test_load_custom_from_dir():
+def test_load_custom_from_dir() -> None:
     """Runtime loading uses local note_types only."""
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
@@ -131,13 +132,13 @@ def test_load_custom_from_dir():
         )
 
 
-def test_note_type_load_missing_dir_fails(tmp_path):
+def test_note_type_load_missing_dir_fails(tmp_path: Any) -> None:
     fs = DeckFileHarness()
     with pytest.raises(ValueError, match="directory not found"):
         fs.load_note_types(tmp_path / "missing_note_types")
 
 
-def test_note_type_load_empty_dir_fails(tmp_path):
+def test_note_type_load_empty_dir_fails(tmp_path: Any) -> None:
     note_types = tmp_path / "note_types"
     note_types.mkdir(parents=True, exist_ok=True)
 
@@ -146,7 +147,7 @@ def test_note_type_load_empty_dir_fails(tmp_path):
         fs.load_note_types(note_types)
 
 
-def test_note_type_subdir_missing_note_type_yaml_fails(tmp_path):
+def test_note_type_subdir_missing_note_type_yaml_fails(tmp_path: Any) -> None:
     note_types = tmp_path / "note_types"
     missing_config = note_types / "BadType"
     missing_config.mkdir(parents=True, exist_ok=True)
@@ -156,7 +157,7 @@ def test_note_type_subdir_missing_note_type_yaml_fails(tmp_path):
         fs.load_note_types(note_types)
 
 
-def test_require_styling_key():
+def test_require_styling_key() -> None:
     """Test that missing mandatory styling in per-folder YAML raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
@@ -172,7 +173,7 @@ def test_require_styling_key():
             fs.load_note_types(note_types)
 
 
-def test_require_styling_key_for_ankiops_name_too():
+def test_require_styling_key_for_ankiops_name_too() -> None:
     """No namespace-based exception: AnkiOps* names still require styling."""
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
@@ -199,7 +200,7 @@ def test_require_styling_key_for_ankiops_name_too():
             fs.load_note_types(note_types)
 
 
-def test_reject_name_key_in_note_type_yaml():
+def test_reject_name_key_in_note_type_yaml() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         note_types = Path(tmpdir)
         subdir = note_types / "BadType"
@@ -222,7 +223,7 @@ def test_reject_name_key_in_note_type_yaml():
             fs.load_note_types(note_types)
 
 
-def test_missing_styling_file_fails(tmp_path):
+def test_missing_styling_file_fails(tmp_path: Any) -> None:
     note_types = tmp_path / "note_types"
     subdir = note_types / "BrokenType"
     subdir.mkdir(parents=True, exist_ok=True)
@@ -242,7 +243,7 @@ def test_missing_styling_file_fails(tmp_path):
         fs.load_note_types(note_types)
 
 
-def test_missing_template_file_fails(tmp_path):
+def test_missing_template_file_fails(tmp_path: Any) -> None:
     note_types = tmp_path / "note_types"
     subdir = note_types / "BrokenType"
     subdir.mkdir(parents=True, exist_ok=True)
@@ -270,7 +271,7 @@ def test_missing_template_file_fails(tmp_path):
         fs.load_note_types(note_types)
 
 
-def test_template_requires_both_sides(tmp_path):
+def test_template_requires_both_sides(tmp_path: Any) -> None:
     note_types = tmp_path / "note_types"
     subdir = note_types / "BrokenType"
     subdir.mkdir(parents=True)
@@ -291,7 +292,7 @@ def test_template_requires_both_sides(tmp_path):
         DeckFileHarness().load_note_types(note_types)
 
 
-def test_label_collision_different_field():
+def test_label_collision_different_field() -> None:
     """A label cannot map to two different field names globally."""
     config1 = NoteType(
         name="Type1",
@@ -305,7 +306,7 @@ def test_label_collision_different_field():
         NoteType.validate_configs([config1, config2])
 
 
-def test_label_sharing_same_field_and_identifying_is_valid():
+def test_label_sharing_same_field_and_identifying_is_valid() -> None:
     """Sharing a label is valid when both field name and identifying match."""
     config1 = NoteType(
         name="Type1",
@@ -321,7 +322,7 @@ def test_label_sharing_same_field_and_identifying_is_valid():
     NoteType.validate_configs([config1, config2])
 
 
-def test_subset_inference():
+def test_subset_inference() -> None:
     """Register a type that is a superset of another, verify inference."""
     base_domain = NoteType(
         name="BaseType",
@@ -352,7 +353,7 @@ def test_subset_inference():
     assert fs._infer_note_type(fields_base) == "BaseType"
 
 
-def test_reserved_ankiops_key():
+def test_reserved_ankiops_key() -> None:
     """Ensure reserved AnkiOps Key name cannot be used."""
     config = NoteType(
         name="BadName",
@@ -362,7 +363,7 @@ def test_reserved_ankiops_key():
         NoteType.validate_configs([config])
 
 
-def test_duplicate_field_names_within_note_type_fail():
+def test_duplicate_field_names_within_note_type_fail() -> None:
     config = NoteType(
         name="DuplicateNames",
         fields=[
@@ -374,7 +375,7 @@ def test_duplicate_field_names_within_note_type_fail():
         NoteType.validate_configs([config])
 
 
-def test_duplicate_field_labels_within_note_type_fail():
+def test_duplicate_field_labels_within_note_type_fail() -> None:
     config = NoteType(
         name="DuplicateLabels",
         fields=[
@@ -389,7 +390,7 @@ def test_duplicate_field_labels_within_note_type_fail():
 # --- Inference Tests ---
 
 
-def test_inference_qa_vs_choice():
+def test_inference_qa_vs_choice() -> None:
     """Verify {Q, A} matches QA (tighter) over Choice."""
     qa = NoteType(
         "QA",
@@ -420,7 +421,7 @@ def test_inference_qa_vs_choice():
     assert fs._infer_note_type(choice_fields) == "Choice"
 
 
-def test_inference_choice_resilience():
+def test_inference_choice_resilience() -> None:
     """Verify Choice note is detected even if some choices are missing."""
     choice = NoteType(
         "Choice",
@@ -443,7 +444,7 @@ def test_inference_choice_resilience():
     assert fs._infer_note_type(note_fields) == "Choice"
 
 
-def test_inference_with_non_identifying_fields():
+def test_inference_with_non_identifying_fields() -> None:
     """Verify non-identifying fields don't interfere with inference."""
     qa = NoteType(
         "QA",
@@ -462,7 +463,7 @@ def test_inference_with_non_identifying_fields():
     assert fs._infer_note_type(note_fields) == "QA"
 
 
-def test_inference_unknown_field_fails():
+def test_inference_unknown_field_fails() -> None:
     """Verify that unknown fields cause inference failure."""
     qa = NoteType(
         "QA",
@@ -481,7 +482,7 @@ def test_inference_unknown_field_fails():
         fs._infer_note_type(note_fields)
 
 
-def test_choice_validation_requires_choice_field_name():
+def test_choice_validation_requires_choice_field_name() -> None:
     config = NoteType(
         name="BadChoice",
         is_choice=True,
@@ -494,7 +495,7 @@ def test_choice_validation_requires_choice_field_name():
         NoteType.validate_configs([config])
 
 
-def test_choice_validation_requires_identifying_non_choice_field():
+def test_choice_validation_requires_identifying_non_choice_field() -> None:
     config = NoteType(
         name="BadChoice",
         is_choice=True,
@@ -507,7 +508,7 @@ def test_choice_validation_requires_identifying_non_choice_field():
         NoteType.validate_configs([config])
 
 
-def test_choice_validation_requires_identifying_choice_field():
+def test_choice_validation_requires_identifying_choice_field() -> None:
     config = NoteType(
         name="BadChoice",
         is_choice=True,
@@ -520,7 +521,7 @@ def test_choice_validation_requires_identifying_choice_field():
         NoteType.validate_configs([config])
 
 
-def test_choice_validation_passes_with_identifying_base_and_choice():
+def test_choice_validation_passes_with_identifying_base_and_choice() -> None:
     config = NoteType(
         name="GoodChoice",
         is_choice=True,

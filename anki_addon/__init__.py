@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import Any
+
 
 def _setup() -> None:
-    from aqt import gui_hooks, mw
+    aqt: Any = import_module("aqt")
+    gui_hooks = aqt.gui_hooks
+    mw = aqt.mw
 
     from .highlights import add_highlight_shortcut
     from .host import AnkiOpsConnectHost
@@ -17,7 +22,7 @@ def _setup() -> None:
         run_on_main=mw.taskman.run_on_main,
     )
 
-    def on_toolbar_init(links, toolbar) -> None:
+    def on_toolbar_init(links: list[Any], toolbar: Any) -> None:
         add_toolbar_links(links, toolbar, toolbar_runner)
 
     def start_ankiops_connect() -> None:

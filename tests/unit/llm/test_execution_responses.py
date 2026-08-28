@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -18,7 +19,7 @@ from ankiops.llm.planning import EligibleBatch, EligibleCandidate, NotePayload
 from ankiops.llm.tasks import TaskConfig
 
 
-def _parsed_response(*updates, tag_updates=()):
+def _parsed_response(*updates: Any, tag_updates: Any = ()) -> Any:
     return SimpleNamespace(
         updates=[
             SimpleNamespace(note_key=note_key, field=field, value=value)
@@ -31,7 +32,7 @@ def _parsed_response(*updates, tag_updates=()):
     )
 
 
-def _candidate(llm_qa_config) -> EligibleCandidate:
+def _candidate(llm_qa_config: Any) -> EligibleCandidate:
     return EligibleCandidate(
         item_id=1,
         source="local",
@@ -57,7 +58,7 @@ def _candidate(llm_qa_config) -> EligibleCandidate:
 
 
 def _tag_candidate(
-    llm_qa_config,
+    llm_qa_config: Any,
     *,
     editable: bool = True,
     read_only: bool = False,
@@ -111,7 +112,9 @@ def _task() -> TaskConfig:
     )
 
 
-def test_build_request_content_preserves_text_input_without_files(llm_qa_config):
+def test_build_request_content_preserves_text_input_without_files(
+    llm_qa_config: Any,
+) -> None:
     instructions, user_input = _build_request_content(
         task=_task(),
         batch=_batch(_candidate(llm_qa_config)),
@@ -123,7 +126,7 @@ def test_build_request_content_preserves_text_input_without_files(llm_qa_config)
     assert '"user_prompt": "user"' in user_input
 
 
-def test_build_request_content_places_files_before_text(llm_qa_config):
+def test_build_request_content_places_files_before_text(llm_qa_config: Any) -> None:
     instructions, user_input = _build_request_content(
         task=_task(),
         batch=_batch(_candidate(llm_qa_config)),
@@ -151,7 +154,7 @@ def test_build_request_content_places_files_before_text(llm_qa_config):
     ]
 
 
-def test_response_model_accepts_only_known_note_keys_and_editable_fields():
+def test_response_model_accepts_only_known_note_keys_and_editable_fields() -> None:
     response_model = build_response_model(
         note_type="AnkiOpsQA",
         payloads=[
@@ -176,7 +179,7 @@ def test_response_model_accepts_only_known_note_keys_and_editable_fields():
         )
 
 
-def test_response_model_accepts_tag_only_updates():
+def test_response_model_accepts_tag_only_updates() -> None:
     response_model = build_response_model(
         note_type="AnkiOpsQA",
         payloads=[
@@ -203,7 +206,7 @@ def test_response_model_accepts_tag_only_updates():
         )
 
 
-def test_response_model_accepts_mixed_field_and_tag_updates():
+def test_response_model_accepts_mixed_field_and_tag_updates() -> None:
     response_model = build_response_model(
         note_type="AnkiOpsQA",
         payloads=[
@@ -228,7 +231,9 @@ def test_response_model_accepts_mixed_field_and_tag_updates():
         )
 
 
-def test_apply_batch_parsed_response_updates_editable_fields(llm_qa_config):
+def test_apply_batch_parsed_response_updates_editable_fields(
+    llm_qa_config: Any,
+) -> None:
     candidate = _candidate(llm_qa_config)
 
     results = _apply_batch_parsed_response(
@@ -248,7 +253,7 @@ def test_apply_batch_parsed_response_updates_editable_fields(llm_qa_config):
     }
 
 
-def test_apply_batch_parsed_response_updates_editable_tags(llm_qa_config):
+def test_apply_batch_parsed_response_updates_editable_tags(llm_qa_config: Any) -> None:
     candidate = _tag_candidate(llm_qa_config, tags=["old"])
 
     results = _apply_batch_parsed_response(
@@ -262,7 +267,7 @@ def test_apply_batch_parsed_response_updates_editable_tags(llm_qa_config):
     assert candidate.serialized_note["tags"] == ["a", "z"]
 
 
-def test_apply_batch_parsed_response_can_clear_tags(llm_qa_config):
+def test_apply_batch_parsed_response_can_clear_tags(llm_qa_config: Any) -> None:
     candidate = _tag_candidate(llm_qa_config, tags=["old"])
 
     results = _apply_batch_parsed_response(
@@ -275,7 +280,9 @@ def test_apply_batch_parsed_response_can_clear_tags(llm_qa_config):
     assert candidate.serialized_note["tags"] == []
 
 
-def test_apply_batch_parsed_response_normalizes_unchanged_tags(llm_qa_config):
+def test_apply_batch_parsed_response_normalizes_unchanged_tags(
+    llm_qa_config: Any,
+) -> None:
     candidate = _tag_candidate(llm_qa_config, tags=["a", "z"])
 
     results = _apply_batch_parsed_response(
@@ -288,7 +295,9 @@ def test_apply_batch_parsed_response_normalizes_unchanged_tags(llm_qa_config):
     assert candidate.serialized_note["tags"] == ["a", "z"]
 
 
-def test_apply_batch_parsed_response_rejects_unexpected_note_key(llm_qa_config):
+def test_apply_batch_parsed_response_rejects_unexpected_note_key(
+    llm_qa_config: Any,
+) -> None:
     with pytest.raises(ValueError, match="unexpected note_key 'nk-2'"):
         _apply_batch_parsed_response(
             parsed_response=_parsed_response(("nk-2", "Question", "Fixed question")),
@@ -317,10 +326,10 @@ def test_apply_batch_parsed_response_rejects_unexpected_note_key(llm_qa_config):
     ],
 )
 def test_apply_batch_parsed_response_marks_unsafe_candidate_updates(
-    llm_qa_config,
-    updates,
-    expected_error,
-):
+    llm_qa_config: Any,
+    updates: Any,
+    expected_error: Any,
+) -> None:
     results = _apply_batch_parsed_response(
         parsed_response=_parsed_response(*updates),
         batch=_batch(_candidate(llm_qa_config)),
@@ -341,10 +350,10 @@ def test_apply_batch_parsed_response_marks_unsafe_candidate_updates(
     ],
 )
 def test_apply_batch_parsed_response_marks_unsafe_tag_updates(
-    llm_qa_config,
-    candidate_kwargs,
-    expected_error,
-):
+    llm_qa_config: Any,
+    candidate_kwargs: Any,
+    expected_error: Any,
+) -> None:
     results = _apply_batch_parsed_response(
         parsed_response=_parsed_response(tag_updates=[("nk-1", ["new"])]),
         batch=_batch(_tag_candidate(llm_qa_config, **candidate_kwargs)),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,20 +18,20 @@ from ankiops.sync.state import SyncState
 
 
 class _FakeMediaAnki:
-    def __init__(self, media_dir: Path):
+    def __init__(self: Any, media_dir: Path) -> None:
         self._media_dir = media_dir
         self.push_count = 0
         self.pull_count = 0
 
-    def get_media_dir(self) -> Path:
-        return self._media_dir
+    def get_media_dir(self: Any) -> Path:
+        return Path(self._media_dir)
 
-    def push_media(self, local_path: Path, remote_filename: str) -> None:
+    def push_media(self: Any, local_path: Path, remote_filename: str) -> None:
         self.push_count += 1
         target = self._media_dir / remote_filename
         target.write_bytes(local_path.read_bytes())
 
-    def pull_media(self, remote_filename: str, local_path: Path) -> bool:
+    def pull_media(self: Any, remote_filename: str, local_path: Path) -> bool:
         source = self._media_dir / remote_filename
         if not source.exists():
             return False
@@ -39,11 +40,11 @@ class _FakeMediaAnki:
         local_path.write_bytes(source.read_bytes())
         return True
 
-    def delete_media_file(self, remote_filename: str) -> None:
+    def delete_media_file(self: Any, remote_filename: str) -> None:
         (self._media_dir / remote_filename).unlink(missing_ok=True)
 
 
-def _sync_to_anki(collection_root: Path, anki: _FakeMediaAnki):
+def _sync_to_anki(collection_root: Path, anki: _FakeMediaAnki) -> Any:
     db = SyncState.open(collection_root)
     try:
         return sync_media_to_anki(anki, DeckSource.local(collection_root), db)
@@ -51,7 +52,9 @@ def _sync_to_anki(collection_root: Path, anki: _FakeMediaAnki):
         db.close()
 
 
-def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path):
+def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(
+    tmp_path: Any,
+) -> None:
     root_media = tmp_path / LOCAL_MEDIA_DIR
     root_media.mkdir()
     (root_media / "image.png").write_bytes(b"root image")
@@ -94,7 +97,7 @@ def test_sync_all_media_to_anki_resolves_media_relative_to_each_source(tmp_path)
     )
 
 
-def test_sync_all_media_deletes_unreferenced_managed_anki_media(tmp_path):
+def test_sync_all_media_deletes_unreferenced_managed_anki_media(tmp_path: Any) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "remove.png").write_bytes(b"managed image")
@@ -117,7 +120,7 @@ def test_sync_all_media_deletes_unreferenced_managed_anki_media(tmp_path):
     assert result.summary.deleted == 1
 
 
-def test_sync_media_to_anki_does_not_rewrite_readme_references(tmp_path):
+def test_sync_media_to_anki_does_not_rewrite_readme_references(tmp_path: Any) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "image.png").write_bytes(b"deck image")
@@ -141,7 +144,9 @@ def test_sync_media_to_anki_does_not_rewrite_readme_references(tmp_path):
     assert "media/image.png" in readme_content
 
 
-def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_path):
+def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(
+    tmp_path: Any,
+) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "a(b).jpg").write_bytes(b"paren image")
@@ -177,8 +182,8 @@ def test_sync_media_to_anki_handles_markdown_html_audio_and_external_refs(tmp_pa
 
 @pytest.mark.parametrize("destination", ["<>", "<media/>"])
 def test_sync_media_to_anki_ignores_an_empty_markdown_image_placeholder(
-    tmp_path, destination
-):
+    tmp_path: Any, destination: Any
+) -> None:
     deck = tmp_path / "Deck.md"
     content = f"Q: Empty image slot\nA: ![]({destination}){{width=799}}\n"
     deck.write_text(content, encoding="utf-8")
@@ -195,7 +200,7 @@ def test_sync_media_to_anki_ignores_an_empty_markdown_image_placeholder(
     assert deck.read_text(encoding="utf-8") == content
 
 
-def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path):
+def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path: Any) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "img.png").write_bytes(b"image-content")
@@ -224,7 +229,7 @@ def test_sync_media_to_anki_cache_persists_across_db_connections(tmp_path):
     assert anki.push_count == 1
 
 
-def test_sync_media_prunes_deleted_markdown_cache_rows(tmp_path):
+def test_sync_media_prunes_deleted_markdown_cache_rows(tmp_path: Any) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "img.png").write_bytes(b"image-content")
@@ -249,7 +254,7 @@ def test_sync_media_prunes_deleted_markdown_cache_rows(tmp_path):
         db.close()
 
 
-def test_sync_media_to_anki_reports_missing_local_references(tmp_path):
+def test_sync_media_to_anki_reports_missing_local_references(tmp_path: Any) -> None:
     media_dir = tmp_path / LOCAL_MEDIA_DIR
     media_dir.mkdir()
     (media_dir / "present.png").write_bytes(b"image-content")

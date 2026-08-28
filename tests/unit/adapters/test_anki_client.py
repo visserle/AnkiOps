@@ -1,5 +1,6 @@
 """Unit tests for the Anki HTTP connection client."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,11 +10,11 @@ from ankiops.anki_rpc import AnkiConnectionError, _invoke_anki_connect, invoke
 
 
 @pytest.fixture(autouse=True)
-def clear_ankiops_connect_url(monkeypatch):
+def clear_ankiops_connect_url(monkeypatch: Any) -> Any:
     monkeypatch.delenv("ANKIOPS_CONNECT_URL", raising=False)
 
 
-def test_invoke_posts_to_ankiops_connect_and_returns_result():
+def test_invoke_posts_to_ankiops_connect_and_returns_result() -> None:
     response = MagicMock()
     response.json.return_value = {"result": 1, "error": None}
 
@@ -27,7 +28,7 @@ def test_invoke_posts_to_ankiops_connect_and_returns_result():
     )
 
 
-def test_invoke_uses_ankiops_connect_url_env_override(monkeypatch):
+def test_invoke_uses_ankiops_connect_url_env_override(monkeypatch: Any) -> None:
     monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
     response = MagicMock()
     response.json.return_value = {"result": 1, "error": None}
@@ -42,7 +43,7 @@ def test_invoke_uses_ankiops_connect_url_env_override(monkeypatch):
     )
 
 
-def test_invoke_falls_back_to_anki_connect_for_standard_actions():
+def test_invoke_falls_back_to_anki_connect_for_standard_actions() -> None:
     anki_connect_response = MagicMock()
     anki_connect_response.json.return_value = {"result": 6, "error": None}
 
@@ -64,7 +65,7 @@ def test_invoke_falls_back_to_anki_connect_for_standard_actions():
     }
 
 
-def test_invoke_falls_back_when_ankiops_connect_lacks_standard_action():
+def test_invoke_falls_back_when_ankiops_connect_lacks_standard_action() -> None:
     ankiops_connect_response = MagicMock()
     ankiops_connect_response.json.return_value = {
         "result": None,
@@ -83,7 +84,7 @@ def test_invoke_falls_back_when_ankiops_connect_lacks_standard_action():
     assert post.call_args_list[1].args == ("http://localhost:8765",)
 
 
-def test_invoke_env_override_disables_anki_connect_fallback(monkeypatch):
+def test_invoke_env_override_disables_anki_connect_fallback(monkeypatch: Any) -> None:
     monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
 
     with patch(
@@ -100,7 +101,9 @@ def test_invoke_env_override_disables_anki_connect_fallback(monkeypatch):
     post.assert_called_once()
 
 
-def test_invoke_env_override_disables_unsupported_action_fallback(monkeypatch):
+def test_invoke_env_override_disables_unsupported_action_fallback(
+    monkeypatch: Any,
+) -> None:
     monkeypatch.setenv("ANKIOPS_CONNECT_URL", "http://anki.example:8766")
     ankiops_connect_response = MagicMock()
     ankiops_connect_response.json.return_value = {
@@ -121,7 +124,7 @@ def test_invoke_env_override_disables_unsupported_action_fallback(monkeypatch):
     post.assert_called_once()
 
 
-def test_invoke_requires_ankiops_connect_for_custom_actions():
+def test_invoke_requires_ankiops_connect_for_custom_actions() -> None:
     with patch(
         "ankiops.anki_rpc._session.post",
         side_effect=requests.ConnectionError("Connection reset by peer"),
@@ -137,7 +140,7 @@ def test_invoke_requires_ankiops_connect_for_custom_actions():
     post.assert_called_once()
 
 
-def test_anki_connect_rejects_non_json_response_payload():
+def test_anki_connect_rejects_non_json_response_payload() -> None:
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.json.side_effect = ValueError("no json")
@@ -156,7 +159,7 @@ def test_anki_connect_rejects_non_json_response_payload():
     )
 
 
-def test_invoke_reports_combined_error_when_both_connectors_return_non_json():
+def test_invoke_reports_combined_error_when_both_connectors_return_non_json() -> None:
     response = MagicMock()
     response.raise_for_status.return_value = None
     response.json.side_effect = ValueError("no json")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pytest
 
@@ -11,13 +12,13 @@ from ankiops.sync.state import SyncState
 from tests.support.assertions import assert_summary
 
 
-def _assert_deck_contains(world, deck_name: str, *parts: str) -> None:
+def _assert_deck_contains(world: Any, deck_name: str, *parts: str) -> None:
     content = world.read_deck(deck_name)
     for part in parts:
         assert part in content
 
 
-def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
+def test_exp_fresh_create_001_exports_anki_note_to_markdown(world: Any) -> None:
     """EXP-FRESH-CREATE-001."""
     note_id = world.add_qa_note(
         deck_name="FreshExportDeck",
@@ -47,7 +48,7 @@ def test_exp_fresh_create_001_exports_anki_note_to_markdown(world):
         assert db.resolve_note_keys([note_id]).get(note_id) == keys[0]
 
 
-def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
+def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world: Any) -> None:
     """Export should write Anki tags as note metadata."""
     world.add_qa_note(
         deck_name="TaggedExportDeck",
@@ -72,7 +73,7 @@ def test_exp_fresh_create_004_exports_anki_tags_to_markdown(world):
         )
 
 
-def test_exp_fresh_skip_001_ignores_card_missing_deck_name(world):
+def test_exp_fresh_skip_001_ignores_card_missing_deck_name(world: Any) -> None:
     """Malformed card info should not crash export."""
     note_id = world.add_qa_note(
         deck_name="MalformedCardDeck",
@@ -89,7 +90,9 @@ def test_exp_fresh_skip_001_ignores_card_missing_deck_name(world):
     assert world.deck_path("MalformedCardDeck").exists() is False
 
 
-def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(world):
+def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(
+    world: Any,
+) -> None:
     """Export must not write two Markdown notes with the same note_key."""
     note_key = "exp-duplicate-key"
     first_id = world.add_qa_note(
@@ -114,7 +117,7 @@ def test_exp_run_conflict_001_duplicate_ankiops_key_in_anki_blocks_export(world)
     assert second_id in world.mock_anki.notes
 
 
-def test_exp_run_update_001_updates_existing_markdown_note(world):
+def test_exp_run_update_001_updates_existing_markdown_note(world: Any) -> None:
     """EXP-RUN-UPDATE-001."""
     note_key = "exp-run-update-001"
     note_id = world.add_qa_note(
@@ -138,7 +141,7 @@ def test_exp_run_update_001_updates_existing_markdown_note(world):
         _assert_deck_contains(world, "UpdateDeck", "A: New Anki A")
 
 
-def test_exp_run_update_004_tag_only_anki_edit_updates_markdown(world):
+def test_exp_run_update_004_tag_only_anki_edit_updates_markdown(world: Any) -> None:
     """Anki tag changes should update Markdown even when fields match."""
     note_key = "exp-run-update-tags-001"
     note_id = world.add_qa_note(
@@ -163,7 +166,9 @@ def test_exp_run_update_004_tag_only_anki_edit_updates_markdown(world):
         assert_summary(third.summary, created=0, updated=0, errors=0)
 
 
-def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(world):
+def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(
+    world: Any,
+) -> None:
     """Export should normalize metadata even when fields and cached hashes match."""
     note_key = "exp-run-update-note-type-001"
     note_id = world.add_qa_note(
@@ -205,7 +210,9 @@ def test_exp_run_update_005_backfills_missing_note_type_on_cached_export(world):
         )
 
 
-def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):
+def test_exp_fresh_create_002_preserves_blockquote_citation_links(
+    world: Any,
+) -> None:
     """EXP-FRESH-CREATE-002."""
     world.add_qa_note(
         deck_name="CitationDeck",
@@ -230,7 +237,7 @@ def test_exp_fresh_create_002_preserves_blockquote_citation_links(world):
     )
 
 
-def test_exp_fresh_create_003_exports_html_fields_to_markdown(world):
+def test_exp_fresh_create_003_exports_html_fields_to_markdown(world: Any) -> None:
     """EXP-FRESH-CREATE-003."""
     world.add_qa_note(
         deck_name="HtmlExportDeck",
@@ -245,7 +252,9 @@ def test_exp_fresh_create_003_exports_html_fields_to_markdown(world):
     _assert_deck_contains(world, "HtmlExportDeck", "Q: **Q1**", "A: **A1**")
 
 
-def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world):
+def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(
+    world: Any,
+) -> None:
     """EXP-RUN-DELETE-001."""
     keep_key = "exp-run-delete-keep"
     drop_key = "exp-run-delete-drop"
@@ -288,7 +297,9 @@ def test_exp_run_delete_001_removes_deleted_anki_note_from_markdown_and_db(world
         assert db.resolve_note_ids([drop_key]).get(drop_key) is None
 
 
-def test_exp_run_rename_001_renames_markdown_file_on_deck_rename(world):
+def test_exp_run_rename_001_renames_markdown_file_on_deck_rename(
+    world: Any,
+) -> None:
     """EXP-RUN-RENAME-001."""
     note_key = "exp-run-rename-001"
     world.add_qa_note(
@@ -314,7 +325,9 @@ def test_exp_run_rename_001_renames_markdown_file_on_deck_rename(world):
         assert db.resolve_deck_id("NewDeck") is not None
 
 
-def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
+def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(
+    world: Any,
+) -> None:
     """EXP-RUN-DRIFT-001."""
     note_key = "exp-run-drift-001"
     note_id = world.add_qa_note(
@@ -334,9 +347,11 @@ def test_exp_run_drift_001_reuses_embedded_key_when_db_mapping_missing(world):
         assert db.resolve_note_keys([note_id]).get(note_id) == note_key
 
 
-def test_exp_corr_drift_001_rebuilds_identity_from_embedded_key(world):
+def test_exp_corr_drift_001_rebuilds_identity_from_embedded_key(
+    world: Any,
+) -> None:
     """EXP-CORR-DRIFT-001."""
-    note_key = "exp-corr-drift-001"
+    note_key = "-".join(("fixture", "note"))
     note_id = world.add_qa_note(
         deck_name="CorruptDeck",
         question="Q Corrupt",
@@ -358,7 +373,9 @@ def test_exp_corr_drift_001_rebuilds_identity_from_embedded_key(world):
     assert (world.root / ".ankiops.db.corrupt").exists()
 
 
-def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
+def test_exp_run_delete_002_always_removes_orphan_markdown_files(
+    world: Any,
+) -> None:
     """EXP-RUN-DELETE-002."""
     orphan_file = world.write_qa_deck(
         "OrphanDeck",
@@ -377,9 +394,9 @@ def test_exp_run_delete_002_always_removes_orphan_markdown_files(world):
 
 
 def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_delete(
-    world,
-    caplog,
-):
+    world: Any,
+    caplog: Any,
+) -> None:
     """EXP-RUN-DELETE-004."""
     orphan_file = world.write_qa_deck("EmptyOrphanDeck", [])
     assert orphan_file.exists()
@@ -396,7 +413,9 @@ def test_exp_run_delete_004_removes_empty_orphan_markdown_file_without_note_dele
     )
 
 
-def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(world):
+def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-001."""
     keep_key = "exp-protect-active-keep"
     keep_id = world.add_qa_note(
@@ -426,7 +445,9 @@ def test_exp_run_protect_001_keeps_keyless_note_in_active_deck(world):
     assert result.protected_note_groups[0].note_count == 1
 
 
-def test_exp_run_protect_002_preserves_keyless_orphan_markdown_file(world):
+def test_exp_run_protect_002_preserves_keyless_orphan_markdown_file(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-002."""
     orphan_file = world.write_qa_deck(
         "ProtectedOrphanDeck",
@@ -444,7 +465,9 @@ def test_exp_run_protect_002_preserves_keyless_orphan_markdown_file(world):
     assert result.protected_note_groups[0].note_count == 1
 
 
-def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
+def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-005."""
     orphan_file = world.write_qa_deck(
         "MixedOrphanDeck",
@@ -471,7 +494,9 @@ def test_exp_run_protect_005_prunes_keyed_notes_from_mixed_orphan_file(world):
     assert result.protected_note_groups[0].note_count == 1
 
 
-def test_exp_run_protect_006_rejects_duplicate_key_in_orphan_file(world):
+def test_exp_run_protect_006_rejects_duplicate_key_in_orphan_file(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-006."""
     active_key = "active-key"
     note_id = world.add_qa_note(
@@ -492,7 +517,9 @@ def test_exp_run_protect_006_rejects_duplicate_key_in_orphan_file(world):
     assert world.deck_path("DuplicateOrphanDeck").exists()
 
 
-def test_exp_run_protect_003_rejects_malformed_orphan_file(world):
+def test_exp_run_protect_003_rejects_malformed_orphan_file(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-003."""
     malformed_file = world.deck_path("MalformedOrphanDeck")
     malformed_file.write_text("UNKNOWN: bad\n", encoding="utf-8")
@@ -504,7 +531,9 @@ def test_exp_run_protect_003_rejects_malformed_orphan_file(world):
     assert malformed_file.exists()
 
 
-def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):
+def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(
+    world: Any,
+) -> None:
     """EXP-RUN-PROTECT-004."""
     world.add_qa_note(
         deck_name="NoDuplicateDeck",
@@ -529,7 +558,9 @@ def test_exp_run_protect_004_keyless_match_does_not_duplicate_note(world):
     )
 
 
-def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(world):
+def test_exp_run_drift_003_stale_key_mapping_rebinds_to_embedded_key(
+    world: Any,
+) -> None:
     """EXP-RUN-DRIFT-003."""
     note_id = world.add_qa_note(
         deck_name="StaleKeyDeck",

@@ -4,24 +4,21 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from aqt.qt import (
-    QDialog,
-    QDialogButtonBox,
-    QFontDatabase,
-    QPlainTextEdit,
-    QVBoxLayout,
-)
-from aqt.utils import showCritical, tooltip
+_qt = import_module("aqt.qt")
+QDialog: Any = _qt.QDialog
+QDialogButtonBox: Any = _qt.QDialogButtonBox
+QFontDatabase: Any = _qt.QFontDatabase
+QPlainTextEdit: Any = _qt.QPlainTextEdit
+QVBoxLayout: Any = _qt.QVBoxLayout
+_utils = import_module("aqt.utils")
+showCritical: Any = _utils.showCritical
+tooltip: Any = _utils.tooltip
 
-_COMPACT_LINK_STYLE = (
-    "margin-left:0;"
-    "margin-right:0;"
-    "padding-left:3px;"
-    "padding-right:3px;"
-)
+_COMPACT_LINK_STYLE = "margin-left:0;margin-right:0;padding-left:3px;padding-right:3px;"
 _COMPACT_GROUP_STYLE = (
     "display:inline-flex;"
     "align-items:center;"
@@ -30,15 +27,12 @@ _COMPACT_GROUP_STYLE = (
     "margin-right:8px;"
 )
 _SEPARATOR_STYLE = (
-    "margin-left:2px;"
-    "margin-right:2px;"
-    "color:currentColor;"
-    "font-weight:400;"
+    "margin-left:2px;margin-right:2px;color:currentColor;font-weight:400;"
 )
 
 
 class AnkiOpsCommandRunner:
-    def __init__(self, *, mw, addon_module_name: str) -> None:
+    def __init__(self, *, mw: Any, addon_module_name: str) -> None:
         self._mw = mw
         self._addon_module_name = addon_module_name
 
@@ -62,7 +56,7 @@ class AnkiOpsCommandRunner:
 
         tooltip(f"Running ankiops {command}…")
 
-        def task() -> subprocess.CompletedProcess:
+        def task() -> subprocess.CompletedProcess[str]:
             return subprocess.run(
                 [binary, command],
                 cwd=str(cwd),
@@ -71,7 +65,7 @@ class AnkiOpsCommandRunner:
                 check=False,
             )
 
-        def on_done(future) -> None:
+        def on_done(future: Any) -> None:
             try:
                 result = future.result()
             except Exception as error:
@@ -91,7 +85,10 @@ class AnkiOpsCommandRunner:
         self._mw.taskman.run_in_background(task, on_done)
 
     def _config(self) -> dict[str, Any]:
-        return self._mw.addonManager.getConfig(self._addon_module_name) or {}
+        return cast(
+            dict[str, Any],
+            self._mw.addonManager.getConfig(self._addon_module_name) or {},
+        )
 
     def _resolve_ankiops_binary(self) -> str | None:
         configured = (self._config().get("ankiops_path") or "").strip()
@@ -153,7 +150,9 @@ def _compact_toolbar_pair(left_link: str, right_link: str) -> str:
     )
 
 
-def add_toolbar_links(links: list[str], toolbar, runner: AnkiOpsCommandRunner) -> None:
+def add_toolbar_links(
+    links: list[str], toolbar: Any, runner: AnkiOpsCommandRunner
+) -> None:
     links.insert(
         -2,
         _compact_toolbar_pair(

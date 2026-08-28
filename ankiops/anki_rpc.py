@@ -33,7 +33,7 @@ def _ankiops_connect_url() -> tuple[str, bool]:
     return url, True
 
 
-def invoke(action: str, **params) -> Any:
+def invoke(action: str, **params: Any) -> Any:
     """Send a request through AnkiOpsConnect, falling back to AnkiConnect.
 
     Raises AnkiConnectionError when Anki returns an error.
@@ -73,17 +73,17 @@ def _invoke_ankiops_connect(
             json={"action": action, "params": params},
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
-    except requests.RequestException as error:
+    except requests.RequestException as request_error:
         raise _AnkiOpsConnectUnavailable(
-            f"Unable to reach AnkiOpsConnect at {ankiops_connect_url}: {error}"
-        ) from error
+            f"Unable to reach AnkiOpsConnect at {ankiops_connect_url}: {request_error}"
+        ) from request_error
 
     try:
         result = response.json()
-    except ValueError as error:
+    except ValueError as json_error:
         raise _AnkiOpsConnectUnavailable(
             "AnkiOpsConnect returned a non-JSON response."
-        ) from error
+        ) from json_error
 
     if result.get("error"):
         error = str(result["error"])
@@ -104,17 +104,17 @@ def _invoke_anki_connect(action: str, params: dict[str, Any]) -> Any:
             json={"action": action, "version": 6, "params": params},
             timeout=DEFAULT_TIMEOUT_SECONDS,
         )
-    except requests.RequestException as error:
+    except requests.RequestException as request_error:
         raise AnkiConnectionError(
-            f"Unable to reach AnkiConnect at {ANKI_CONNECT_URL}: {error}"
-        ) from error
+            f"Unable to reach AnkiConnect at {ANKI_CONNECT_URL}: {request_error}"
+        ) from request_error
 
     try:
         result = response.json()
-    except ValueError as error:
+    except ValueError as json_error:
         raise AnkiConnectionError(
             "AnkiConnect returned a non-JSON response."
-        ) from error
+        ) from json_error
 
     if result.get("error"):
         raise AnkiConnectionError(result["error"])

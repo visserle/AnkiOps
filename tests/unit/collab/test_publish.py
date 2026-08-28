@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -11,11 +12,15 @@ from tests.support.deck_files import DeckFileHarness
 
 
 class _ObservedRemote:
-    def __init__(self, result: subprocess.CompletedProcess[str]):
+    def __init__(
+        self: _ObservedRemote, result: subprocess.CompletedProcess[str]
+    ) -> None:
         self.result = result
-        self.calls = []
+        self.calls: list[tuple[list[str], bool]] = []
 
-    def run(self, args, *, check=True):
+    def run(
+        self: _ObservedRemote, args: list[str], *, check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         self.calls.append((args, check))
         return self.result
 
@@ -30,7 +35,9 @@ class _ObservedRemote:
         ),
     ],
 )
-def test_publish_remote_is_observed_once(tmp_path, stdout, expected):
+def test_publish_remote_is_observed_once(
+    tmp_path: Path, stdout: str, expected: str | None
+) -> None:
     remote = _ObservedRemote(
         subprocess.CompletedProcess(["git", "ls-remote"], 0, stdout, "")
     )
@@ -46,7 +53,9 @@ def test_publish_remote_is_observed_once(tmp_path, stdout, expected):
     assert remote.calls == [(["ls-remote", "upstream"], False)]
 
 
-def test_publish_remote_refuses_unrelated_content_after_one_observation(tmp_path):
+def test_publish_remote_refuses_unrelated_content_after_one_observation(
+    tmp_path: Path,
+) -> None:
     remote = _ObservedRemote(
         subprocess.CompletedProcess(
             ["git", "ls-remote"],
@@ -66,7 +75,9 @@ def test_publish_remote_refuses_unrelated_content_after_one_observation(tmp_path
     assert remote.calls == [(["ls-remote", "upstream"], False)]
 
 
-def test_publish_remote_reports_unavailable_after_one_observation(tmp_path):
+def test_publish_remote_reports_unavailable_after_one_observation(
+    tmp_path: Path,
+) -> None:
     remote = _ObservedRemote(
         subprocess.CompletedProcess(
             ["git", "ls-remote"],
@@ -86,13 +97,13 @@ def test_publish_remote_reports_unavailable_after_one_observation(tmp_path):
     assert remote.calls == [(["ls-remote", "upstream"], False)]
 
 
-def test_prepare_publish_plan_strips_leech_tags(tmp_path):
+def test_prepare_publish_plan_strips_leech_tags(tmp_path: Path) -> None:
     harness = DeckFileHarness()
     harness.eject_default_note_types(tmp_path / "note_types")
     (tmp_path / "Shared.md").write_text(
         "\n".join(
             [
-                "<!-- note_key: publish-key-1 -->",
+                "<!-- note_key: p1 -->",
                 "<!-- note_type: AnkiOpsQA -->",
                 "<!-- tags: leech shared -->",
                 "Q: Q1",

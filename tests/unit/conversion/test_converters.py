@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.html_to_markdown import HTMLToMarkdown
@@ -9,12 +11,12 @@ from ankiops.markdown_to_html import MarkdownToHTML
 
 
 @pytest.fixture
-def html_to_md():
+def html_to_md() -> Any:
     return HTMLToMarkdown()
 
 
 @pytest.fixture
-def md_to_html():
+def md_to_html() -> Any:
     return MarkdownToHTML()
 
 
@@ -32,13 +34,15 @@ def md_to_html():
         ("A =/= B", "A \u2260 B"),
     ],
 )
-def test_markdown_to_html_uses_anki_block_model(md_to_html, markdown, expected_html):
+def test_markdown_to_html_uses_anki_block_model(
+    md_to_html: Any, markdown: Any, expected_html: Any
+) -> None:
     assert md_to_html.convert(markdown) == expected_html
 
 
 def test_media_references_use_local_anki_filenames_and_roundtrip_widths(
-    md_to_html, html_to_md
-):
+    md_to_html: Any, html_to_md: Any
+) -> None:
     markdown = "![Alt](<media/photo.jpg>){width=300}"
 
     html = md_to_html.convert(markdown)
@@ -47,8 +51,8 @@ def test_media_references_use_local_anki_filenames_and_roundtrip_widths(
 
 
 def test_external_image_urls_roundtrip_without_a_local_media_prefix(
-    md_to_html, html_to_md
-):
+    md_to_html: Any, html_to_md: Any
+) -> None:
     html = (
         '<img src="http://ww3.haverford.edu/psychology/ble/continuous_ios/'
         'gfx/IOS-original.gif" alt="">'
@@ -64,8 +68,8 @@ def test_external_image_urls_roundtrip_without_a_local_media_prefix(
 
 
 def test_empty_image_placeholder_roundtrips_without_becoming_local_media(
-    md_to_html, html_to_md
-):
+    md_to_html: Any, html_to_md: Any
+) -> None:
     markdown = "![](<>){width=799}"
 
     html = md_to_html.convert(markdown)
@@ -75,8 +79,8 @@ def test_empty_image_placeholder_roundtrips_without_becoming_local_media(
 
 
 def test_links_with_parentheses_are_wrapped_for_stable_roundtrips(
-    md_to_html, html_to_md
-):
+    md_to_html: Any, html_to_md: Any
+) -> None:
     markdown = "[Wiki](https://example.com/Python_(programming_language))"
 
     html = md_to_html.convert(markdown)
@@ -98,15 +102,15 @@ def test_links_with_parentheses_are_wrapped_for_stable_roundtrips(
     ],
 )
 def test_html_text_that_looks_like_markdown_stays_literal(
-    md_to_html, html_to_md, html_text, expected_markdown
-):
+    md_to_html: Any, html_to_md: Any, html_text: Any, expected_markdown: Any
+) -> None:
     markdown = html_to_md.convert(html_text)
 
     assert markdown == expected_markdown
     assert md_to_html.convert(markdown) == html_text
 
 
-def test_blockquote_citation_links_keep_quote_continuation(html_to_md):
+def test_blockquote_citation_links_keep_quote_continuation(html_to_md: Any) -> None:
     html = (
         '<blockquote><p>called. <a href="https://en.wikipedia.org/wiki/Pygmalion'
         '#cite_note-13">[13]</a><br>aus Pygmalion von George Bernard Shaw'
@@ -119,7 +123,7 @@ def test_blockquote_citation_links_keep_quote_continuation(html_to_md):
     )
 
 
-def test_math_block_end_is_not_rewritten_as_link(html_to_md):
+def test_math_block_end_is_not_rewritten_as_link(html_to_md: Any) -> None:
     html = (
         r"<div>\["
         "\n"
@@ -159,8 +163,8 @@ def test_math_block_end_is_not_rewritten_as_link(html_to_md):
     ],
 )
 def test_display_math_delimiters_are_canonicalized_without_shortening(
-    md_to_html, html_to_md, markdown
-):
+    md_to_html: Any, html_to_md: Any, markdown: Any
+) -> None:
     expected_math = (
         r"\[\sigma^2=\frac{1}{N} "
         r"\sum_{i=1}^N\left(x_i-\mu\right)^2\]"
@@ -181,8 +185,8 @@ def test_display_math_delimiters_are_canonicalized_without_shortening(
     ],
 )
 def test_escaped_bracket_suffix_roundtrip_stays_stable(
-    md_to_html, html_to_md, markdown
-):
+    md_to_html: Any, html_to_md: Any, markdown: Any
+) -> None:
 
     first = html_to_md.convert(md_to_html.convert(markdown))
     second = html_to_md.convert(md_to_html.convert(first))
@@ -190,21 +194,21 @@ def test_escaped_bracket_suffix_roundtrip_stays_stable(
     assert first == second
 
 
-def test_cloze_syntax_is_left_for_anki(md_to_html, html_to_md):
+def test_cloze_syntax_is_left_for_anki(md_to_html: Any, html_to_md: Any) -> None:
     markdown = "{{c1::hidden}}"
 
     assert md_to_html.convert(markdown) == markdown
     assert html_to_md.convert(markdown) == markdown
 
 
-def test_underlines_remain_explicit_html(md_to_html, html_to_md):
+def test_underlines_remain_explicit_html(md_to_html: Any, html_to_md: Any) -> None:
     markdown = html_to_md.convert("<u>underlined</u>")
 
     assert markdown == "<u>underlined</u>"
     assert md_to_html.convert(markdown) == "<u>underlined</u>"
 
 
-def test_html_tables_export_in_compact_markdown(html_to_md):
+def test_html_tables_export_in_compact_markdown(html_to_md: Any) -> None:
     html = (
         "<table><thead><tr><th>Short</th><th>Long heading</th></tr></thead>"
         "<tbody><tr><td>a</td><td>bbb</td></tr></tbody></table>"
@@ -215,7 +219,7 @@ def test_html_tables_export_in_compact_markdown(html_to_md):
     )
 
 
-def test_html_table_escaped_pipes_stay_in_their_cells(html_to_md):
+def test_html_table_escaped_pipes_stay_in_their_cells(html_to_md: Any) -> None:
     html = (
         "<table><tr><th>A</th><th>B</th></tr>"
         "<tr><td>a | b</td><td><code>c | d</code></td></tr></table>"
@@ -224,7 +228,9 @@ def test_html_table_escaped_pipes_stay_in_their_cells(html_to_md):
     assert html_to_md.convert(html) == "| A | B |\n| --- | --- |\n| a \\| b | `c | d` |"
 
 
-def test_python_code_blocks_keep_language_and_text(md_to_html, html_to_md):
+def test_python_code_blocks_keep_language_and_text(
+    md_to_html: Any, html_to_md: Any
+) -> None:
     markdown = "```python\nprint('hello')\n```"
 
     html = md_to_html.convert(markdown)
@@ -236,7 +242,9 @@ def test_python_code_blocks_keep_language_and_text(md_to_html, html_to_md):
     assert "'hello'" in back_to_markdown
 
 
-def test_bullet_html_with_line_breaks_and_images_is_exported_readably(html_to_md):
+def test_bullet_html_with_line_breaks_and_images_is_exported_readably(
+    html_to_md: Any,
+) -> None:
     html = (
         "<div>Gipfel:</div><div><div class='centeredbox'><div class='leftalign'>"
         "<span class='font_size_80'>\u2022 Anorexie 16-17 Jahre</span><br>"

@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -81,12 +82,18 @@ def _checkout_source(collection: Path, remote: Path) -> Path:
     return source
 
 
-def _redirect_clone(monkeypatch, upstream: Path) -> None:
-    original_clone = GitRepository.clone.__func__
+def _redirect_clone(monkeypatch: Any, upstream: Path) -> None:
+    original_clone = GitRepository.clone
 
-    def local_clone(cls, _url, target, *, remote="upstream", anonymous=False):
+    def local_clone(
+        _cls: type[GitRepository],
+        _url: str,
+        target: Path,
+        *,
+        remote: str = "upstream",
+        anonymous: bool = False,
+    ) -> GitRepository:
         return original_clone(
-            cls,
             str(upstream),
             target,
             remote=remote,
@@ -97,8 +104,8 @@ def _redirect_clone(monkeypatch, upstream: Path) -> None:
 
 
 def test_subscribe_rejects_a_tracked_deck_symlink_before_reading_it(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     collection = _collection(tmp_path)
     remote = _safe_remote(tmp_path)
     attacker = tmp_path / "attacker"
@@ -130,8 +137,8 @@ def test_subscribe_rejects_a_tracked_deck_symlink_before_reading_it(
     ],
 )
 def test_subscribe_rejects_symlinked_note_type_inputs(
-    tmp_path: Path, monkeypatch, unsafe_path: str
-):
+    tmp_path: Path, monkeypatch: Any, unsafe_path: str
+) -> None:
     collection = _collection(tmp_path)
     remote = _safe_remote(tmp_path)
     attacker = tmp_path / "attacker"
@@ -157,8 +164,8 @@ def test_subscribe_rejects_symlinked_note_type_inputs(
 
 
 def test_update_rejects_an_upstream_deck_symlink_before_applying_it(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     collection = _collection(tmp_path)
     remote = _safe_remote(tmp_path)
     source = _checkout_source(collection, remote)
@@ -183,8 +190,8 @@ def test_update_rejects_an_upstream_deck_symlink_before_applying_it(
 
 
 def test_update_rejects_an_upstream_note_type_path_escape_before_applying_it(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: Any
+) -> None:
     collection = _collection(tmp_path)
     remote = _safe_remote(tmp_path)
     source = _checkout_source(collection, remote)

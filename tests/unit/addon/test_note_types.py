@@ -4,7 +4,7 @@ from anki_addon.actions import dispatch_action
 from tests.unit.addon.fakes import _FakeCollection
 
 
-def test_dispatch_action_reads_model_state():
+def test_dispatch_action_reads_model_state() -> None:
     col = _FakeCollection()
     col.old_model["flds"][0]["description"] = "Prompt"
     col.old_model["flds"][0]["size"] = 14
@@ -44,7 +44,7 @@ def test_dispatch_action_reads_model_state():
     }
 
 
-def test_dispatch_action_creates_and_updates_model_state():
+def test_dispatch_action_creates_and_updates_model_state() -> None:
     col = _FakeCollection()
 
     assert (

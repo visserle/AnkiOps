@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -69,7 +70,9 @@ def _raw_note(
     return "\n".join(lines) + "\n"
 
 
-def test_flush_writes_persists_assigned_note_key_and_note_type_metadata(tmp_path):
+def test_flush_writes_persists_assigned_note_key_and_note_type_metadata(
+    tmp_path: Any,
+) -> None:
     note = _note("Question", "Answer")
     deck_path = tmp_path / "Deck.md"
     deck_path.write_text("Q: Question\nA: Answer\n", encoding="utf-8")
@@ -91,7 +94,7 @@ def test_flush_writes_persists_assigned_note_key_and_note_type_metadata(tmp_path
     )
 
 
-def test_flush_writes_does_not_touch_current_metadata(tmp_path):
+def test_flush_writes_does_not_touch_current_metadata(tmp_path: Any) -> None:
     note = _note("Question", "Answer", note_key="existing-key")
     raw_content = _raw_note("Question", "Answer", note_key="existing-key")
     deck_path = tmp_path / "Deck.md"
@@ -107,7 +110,7 @@ def test_flush_writes_does_not_touch_current_metadata(tmp_path):
     assert deck_path.read_text(encoding="utf-8") == raw_content
 
 
-def test_flush_writes_fails_when_note_blocks_and_parsed_notes_diverge():
+def test_flush_writes_fails_when_note_blocks_and_parsed_notes_diverge() -> None:
     file_state = DeckFile(
         file_path=Path("Deck.md"),
         raw_content="Q: One\nA: One\n",
@@ -121,7 +124,7 @@ def test_flush_writes_fails_when_note_blocks_and_parsed_notes_diverge():
         flush_deck_metadata_writes([PendingDeckWrite(file_state, [])])
 
 
-def test_export_skip_gate_requires_current_note_type_metadata():
+def test_export_skip_gate_requires_current_note_type_metadata() -> None:
     note = _note("Question", "Answer", note_key="stable-key")
     fs = DeckFile(
         file_path=Path("Deck.md"),
@@ -145,7 +148,7 @@ def test_export_skip_gate_requires_current_note_type_metadata():
     )
 
 
-def test_export_skip_gate_requires_same_note_objects():
+def test_export_skip_gate_requires_same_note_objects() -> None:
     existing = _note("Question", "Answer", note_key="stable-key")
     replacement = _note("Question", "Answer", note_key="stable-key")
     fs = DeckFile(
@@ -165,7 +168,7 @@ def test_export_skip_gate_requires_same_note_objects():
     )
 
 
-def test_export_skip_gate_allows_true_noop_with_current_metadata():
+def test_export_skip_gate_allows_true_noop_with_current_metadata() -> None:
     note = _note("Question", "Answer", note_key="stable-key")
     fs = DeckFile(
         file_path=Path("Deck.md"),
@@ -184,7 +187,7 @@ def test_export_skip_gate_allows_true_noop_with_current_metadata():
     )
 
 
-def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
+def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path: Any) -> None:
     deck_path = tmp_path / "Deck.md"
     deck_path.write_text(
         _raw_note("Original", "Old answer", note_key="stable-key"),
@@ -230,7 +233,7 @@ def test_sync_deck_writes_markdown_when_anki_note_changes(tmp_path):
     assert pending_fingerprints
 
 
-def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path):
+def test_sync_deck_preserves_keyless_local_notes_during_export(tmp_path: Any) -> None:
     deck_path = tmp_path / "Deck.md"
     deck_path.write_text(
         NOTE_SEPARATOR.join(

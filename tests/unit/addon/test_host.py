@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import io
+from http.server import BaseHTTPRequestHandler
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from anki_addon.host import AnkiOpsConnectHost
 
 
-def test_host_dispatches_on_main_thread():
+def test_host_dispatches_on_main_thread() -> None:
     collection = object()
     ran_on_main = []
     calls = []
 
-    def run_on_main(work):
+    def run_on_main(work: Any) -> Any:
         ran_on_main.append(True)
         work()
 
-    def dispatch_action(col, action, params):
+    def dispatch_action(col: Any, action: Any, params: Any) -> Any:
         calls.append((col, action, params))
         return {"ok": True}
 
@@ -34,7 +36,7 @@ def test_host_dispatches_on_main_thread():
     assert calls == [(collection, "version", {"x": 1})]
 
 
-def test_host_returns_structured_errors():
+def test_host_returns_structured_errors() -> None:
     host = AnkiOpsConnectHost(
         get_collection=lambda: None,
         run_on_main=lambda work: work(),
@@ -46,7 +48,7 @@ def test_host_returns_structured_errors():
     }
 
 
-def test_host_validates_payload_shape():
+def test_host_validates_payload_shape() -> None:
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
@@ -58,34 +60,40 @@ def test_host_validates_payload_shape():
     }
 
 
-def test_host_reads_json_request_body():
+def test_host_reads_json_request_body() -> None:
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
     )
     body = b'{"action": "version", "params": {}}'
-    handler = SimpleNamespace(
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "Content-Length": str(len(body)),
-        },
-        rfile=io.BytesIO(body),
+    handler = cast(
+        BaseHTTPRequestHandler,
+        SimpleNamespace(
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Content-Length": str(len(body)),
+            },
+            rfile=io.BytesIO(body),
+        ),
     )
 
     assert host.read_payload(handler) == {"action": "version", "params": {}}
 
 
-def test_host_rejects_invalid_content_length():
+def test_host_rejects_invalid_content_length() -> None:
     host = AnkiOpsConnectHost(
         get_collection=lambda: object(),
         run_on_main=lambda work: work(),
     )
-    handler = SimpleNamespace(
-        headers={
-            "Content-Type": "application/json",
-            "Content-Length": "chunked",
-        },
-        rfile=io.BytesIO(b""),
+    handler = cast(
+        BaseHTTPRequestHandler,
+        SimpleNamespace(
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": "chunked",
+            },
+            rfile=io.BytesIO(b""),
+        ),
     )
 
     with pytest.raises(ValueError, match="Invalid Content-Length header"):

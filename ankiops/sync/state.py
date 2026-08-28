@@ -7,11 +7,13 @@ import sqlite3
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, TypeVar, cast
 
 from ankiops.collection import ANKIOPS_DB
 from ankiops.sync.state_schema import DB_SCHEMA
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 
 def _normalize_sql(sql: str) -> str:
@@ -21,7 +23,7 @@ def _normalize_sql(sql: str) -> str:
 class SyncState:
     """Persistent note/deck identity, sync cache, and media cache state."""
 
-    def __init__(self, conn: sqlite3.Connection, db_path: Path):
+    def __init__(self, conn: sqlite3.Connection, db_path: Path) -> None:
         self._conn = conn
         self._db_path = db_path
         self._tx_depth = 0
@@ -161,14 +163,14 @@ class SyncState:
             if is_outer:
                 self._conn.commit()
 
-    def _write(self, sql: str, params: tuple = ()) -> None:
+    def _write(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         if self._tx_depth > 0:
             self._conn.execute(sql, params)
         else:
             with self._conn:
                 self._conn.execute(sql, params)
 
-    def _write_many(self, statements: Iterable[tuple[str, tuple]]) -> None:
+    def _write_many(self, statements: Iterable[tuple[str, tuple[Any, ...]]]) -> None:
         if self._tx_depth > 0:
             for sql, params in statements:
                 self._conn.execute(sql, params)
@@ -177,7 +179,7 @@ class SyncState:
                 for sql, params in statements:
                     self._conn.execute(sql, params)
 
-    def _write_singleton(self, sql: str, params: tuple = ()) -> None:
+    def _write_singleton(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         if self._tx_depth > 0:
             cursor = self._conn.execute(sql, params)
         else:
@@ -186,7 +188,7 @@ class SyncState:
         if cursor.rowcount != 1:
             raise sqlite3.DatabaseError("Missing singleton app_state row")
 
-    def _executemany(self, sql: str, rows: list[tuple]) -> None:
+    def _executemany(self, sql: str, rows: list[tuple[Any, ...]]) -> None:
         if not rows:
             return
         if self._tx_depth > 0:
@@ -196,7 +198,7 @@ class SyncState:
                 self._conn.executemany(sql, rows)
 
     @staticmethod
-    def _chunked(items: list, chunk_size: int = 500) -> Iterator[list]:
+    def _chunked(items: list[_T], chunk_size: int = 500) -> Iterator[list[_T]]:
         for start_index in range(0, len(items), chunk_size):
             yield items[start_index : start_index + chunk_size]
 
@@ -305,7 +307,7 @@ class SyncState:
         note_key_list = list(note_keys)
         if not note_key_list:
             return
-        statements: list[tuple[str, tuple]] = []
+        statements: list[tuple[str, tuple[Any, ...]]] = []
         for chunk in self._chunked(note_key_list):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
@@ -545,7 +547,7 @@ class SyncState:
         path_list = list(md_paths)
         if not path_list:
             return
-        statements: list[tuple[str, tuple]] = []
+        statements: list[tuple[str, tuple[Any, ...]]] = []
         for chunk in self._chunked(path_list):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
@@ -638,7 +640,7 @@ class SyncState:
         name_list = list(names)
         if not name_list:
             return
-        statements: list[tuple[str, tuple]] = []
+        statements: list[tuple[str, tuple[Any, ...]]] = []
         for chunk in self._chunked(name_list):
             placeholders = ",".join("?" * len(chunk))
             statements.append(
@@ -720,7 +722,7 @@ class SyncState:
         row = cursor.fetchone()
         if row is None:
             raise sqlite3.DatabaseError("Missing singleton app_state row")
-        return row[0]
+        return cast(str | None, row[0])
 
     def set_profile_name(self, profile_name: str) -> None:
         self._write_singleton(

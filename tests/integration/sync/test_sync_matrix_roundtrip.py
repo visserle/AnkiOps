@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.collection import ANKIOPS_DB
@@ -9,7 +11,7 @@ from ankiops.notes import note_fingerprint
 from tests.support.assertions import assert_summary
 
 
-def test_rt_fresh_create_001_import_export_import_is_idempotent(world):
+def test_rt_fresh_create_001_import_export_import_is_idempotent(world: Any) -> None:
     """RT-FRESH-CREATE-001."""
     world.write_qa_deck("RoundTripFresh", [("RT Q1", "RT A1", None)])
 
@@ -34,7 +36,9 @@ def test_rt_fresh_create_001_import_export_import_is_idempotent(world):
         assert len(world.mock_anki.notes) == 1
 
 
-def test_rt_run_update_001_anki_change_then_export_then_import_noops(world):
+def test_rt_run_update_001_anki_change_then_export_then_import_noops(
+    world: Any,
+) -> None:
     """RT-RUN-UPDATE-001."""
     world.write_qa_deck("RoundTripRun", [("Run Q", "Run A", None)])
 
@@ -60,7 +64,9 @@ def test_rt_run_update_001_anki_change_then_export_then_import_noops(world):
         )
 
 
-def test_rt_run_update_002_anki_literal_highlight_roundtrip_rehydrates_mark_html(world):
+def test_rt_run_update_002_anki_literal_highlight_roundtrip_rehydrates_mark_html(
+    world: Any,
+) -> None:
     """RT-RUN-UPDATE-002."""
     world.write_qa_deck("RoundTripHighlight", [("Run Q", "Run A", None)])
 
@@ -94,7 +100,7 @@ def test_rt_run_update_002_anki_literal_highlight_roundtrip_rehydrates_mark_html
         assert "A: Run A with ==highlight==" in world.read_deck("RoundTripHighlight")
 
 
-def test_rt_run_update_003_directional_cache_isolation(world):
+def test_rt_run_update_003_directional_cache_isolation(world: Any) -> None:
     """RT-RUN-UPDATE-003."""
     world.write_qa_deck("RoundTripCacheIso", [("Iso Q", "Iso A0", None)])
 
@@ -145,7 +151,9 @@ def test_rt_run_update_003_directional_cache_isolation(world):
         assert world.mock_anki.notes[note_id]["fields"]["Answer"]["value"] == "Iso A2"
 
 
-def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_identity(world):
+def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_identity(
+    world: Any,
+) -> None:
     """RT-CORR-DRIFT-001."""
     world.write_qa_deck("RoundTripCorrupt", [("Corrupt Q", "Corrupt A", None)])
 
@@ -166,7 +174,7 @@ def test_rt_corr_drift_001_corrupt_db_between_cycles_recovers_identity(world):
     assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
 
 
-def test_rt_run_delete_001_roundtrip_preserves_delete(world):
+def test_rt_run_delete_001_roundtrip_preserves_delete(world: Any) -> None:
     """RT-RUN-DELETE-001."""
     world.write_qa_deck("RoundTripDelete", [("Delete Q", "Delete A", None)])
 
@@ -185,7 +193,9 @@ def test_rt_run_delete_001_roundtrip_preserves_delete(world):
         assert not world.deck_path("RoundTripDelete").exists()
 
 
-def test_rt_run_orphan_001_mixed_orphan_export_does_not_resurrect_keyed_note(world):
+def test_rt_run_orphan_001_mixed_orphan_export_does_not_resurrect_keyed_note(
+    world: Any,
+) -> None:
     """RT-RUN-ORPHAN-001."""
     world.write_qa_deck(
         "RoundTripMixedOrphan",
@@ -215,7 +225,7 @@ def test_rt_run_orphan_001_mixed_orphan_export_does_not_resurrect_keyed_note(wor
         assert "stale-orphan-key" not in world.read_deck("RoundTripMixedOrphan")
 
 
-def test_rt_run_move_001_roundtrip_preserves_move(world):
+def test_rt_run_move_001_roundtrip_preserves_move(world: Any) -> None:
     """RT-RUN-MOVE-001."""
     world.write_qa_deck("RoundTripMoveA", [("Move Q", "Move A", None)])
 
@@ -237,7 +247,9 @@ def test_rt_run_move_001_roundtrip_preserves_move(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "RoundTripMoveB"
 
 
-def test_rt_fresh_update_001_export_import_export_keeps_markdown_winner(world):
+def test_rt_fresh_update_001_export_import_export_keeps_markdown_winner(
+    world: Any,
+) -> None:
     """RT-FRESH-UPDATE-001."""
     world.mock_anki.add_note(
         "RoundTripFreshUpdate",
@@ -272,7 +284,9 @@ def test_rt_fresh_update_001_export_import_export_keeps_markdown_winner(world):
     ["update", "move"],
     ids=["RT-CORR-UPDATE-001", "RT-CORR-MOVE-001"],
 )
-def test_rt_corr_operations_rebuild_identity_after_db_corruption(operation, world):
+def test_rt_corr_operations_rebuild_identity_after_db_corruption(
+    operation: Any, world: Any
+) -> None:
     world.write_qa_deck("RoundTripCorrA", [("Corr Q", "Corr A", None)])
 
     with world.db_session() as db:
@@ -299,7 +313,7 @@ def test_rt_corr_operations_rebuild_identity_after_db_corruption(operation, worl
     assert (world.root / f"{ANKIOPS_DB}.corrupt").exists()
 
 
-def test_rt_run_conflict_001_last_sync_direction_wins(world):
+def test_rt_run_conflict_001_last_sync_direction_wins(world: Any) -> None:
     """RT-RUN-CONFLICT-001."""
     world.write_qa_deck("RoundTripConflict", [("CQ", "Base", None)])
 

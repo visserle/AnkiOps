@@ -1,5 +1,7 @@
 """Tests for note type parsing, validation, and inference."""
 
+from typing import Any
+
 import pytest
 
 from ankiops.notes import Note
@@ -8,7 +10,7 @@ from ankiops.notes import Note
 class TestParseChoiceBlock:
     """Test DeckFileHarness.read_deck_file with AnkiOpsChoice blocks."""
 
-    def test_choice_with_note_id(self, fs, tmp_path):
+    def test_choice_with_note_id(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- note_key: key-1 -->\n"
@@ -26,14 +28,16 @@ class TestParseChoiceBlock:
         assert note.fields["Choice 2"] == "Paris"
         assert note.fields["Answer"] == "1"
 
-    def test_choice_without_id_detected_from_label(self, fs, tmp_path):
+    def test_choice_without_id_detected_from_label(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nC1: A\nC2: B\nA: 2")
         result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.note_type == "AnkiOpsChoice"
 
-    def test_choice_with_all_fields(self, fs, tmp_path):
+    def test_choice_with_all_fields(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "Q: What?\n"
@@ -59,7 +63,7 @@ class TestParseChoiceBlock:
 class TestValidateChoiceNote:
     """Test Note.validate() for AnkiOpsChoice notes."""
 
-    def test_valid_single_choice(self, choice_config):
+    def test_valid_single_choice(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -67,7 +71,7 @@ class TestValidateChoiceNote:
         )
         assert note.validate(choice_config) == []
 
-    def test_valid_multiple_choice(self, choice_config):
+    def test_valid_multiple_choice(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -80,7 +84,7 @@ class TestValidateChoiceNote:
         )
         assert note.validate(choice_config) == []
 
-    def test_missing_mandatory_question(self, choice_config):
+    def test_missing_mandatory_question(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -92,7 +96,7 @@ class TestValidateChoiceNote:
             for error in errors
         )
 
-    def test_missing_mandatory_choice(self, choice_config):
+    def test_missing_mandatory_choice(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -101,7 +105,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("at least 2 choices" in error for error in errors)
 
-    def test_only_one_choice(self, choice_config):
+    def test_only_one_choice(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -110,7 +114,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("at least 2 choices" in error for error in errors)
 
-    def test_missing_mandatory_answer(self, choice_config):
+    def test_missing_mandatory_answer(self: Any, choice_config: Any) -> None:
         note = Note(
             note_key=None,
             note_type="AnkiOpsChoice",
@@ -122,7 +126,7 @@ class TestValidateChoiceNote:
             for error in errors
         )
 
-    def test_answer_out_of_range_too_high(self, choice_config):
+    def test_answer_out_of_range_too_high(self: Any, choice_config: Any) -> None:
         """Answer references choice number that doesn't exist."""
         note = Note(
             note_key=None,
@@ -132,7 +136,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("3" in error and "2 choice" in error for error in errors)
 
-    def test_answer_out_of_range_zero(self, choice_config):
+    def test_answer_out_of_range_zero(self: Any, choice_config: Any) -> None:
         """Answer with 0 is invalid (choices start at 1)."""
         note = Note(
             note_key=None,
@@ -144,7 +148,7 @@ class TestValidateChoiceNote:
 
     # -- Restored edge cases (dropped during Hexagonal Architecture refactor) --
 
-    def test_invalid_answer_not_integer(self, choice_config):
+    def test_invalid_answer_not_integer(self: Any, choice_config: Any) -> None:
         """Non-integer answer should produce validation error."""
         note = Note(
             note_key=None,
@@ -154,7 +158,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("integer" in error.lower() for error in errors)
 
-    def test_invalid_answer_mixed_content(self, choice_config):
+    def test_invalid_answer_mixed_content(self: Any, choice_config: Any) -> None:
         """Mixed content in multi-answer should produce validation error."""
         note = Note(
             note_key=None,
@@ -169,7 +173,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("integer" in error.lower() for error in errors)
 
-    def test_answer_out_of_range_negative(self, choice_config):
+    def test_answer_out_of_range_negative(self: Any, choice_config: Any) -> None:
         """Negative answer is invalid."""
         note = Note(
             note_key=None,
@@ -179,7 +183,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert len(errors) > 0
 
-    def test_valid_with_seven_choices(self, choice_config):
+    def test_valid_with_seven_choices(self: Any, choice_config: Any) -> None:
         """All 7 choices can be used."""
         note = Note(
             note_key=None,
@@ -198,7 +202,7 @@ class TestValidateChoiceNote:
         )
         assert note.validate(choice_config) == []
 
-    def test_answer_exceeds_seven(self, choice_config):
+    def test_answer_exceeds_seven(self: Any, choice_config: Any) -> None:
         """Answer > 7 is always invalid."""
         note = Note(
             note_key=None,
@@ -208,7 +212,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert len(errors) > 0
 
-    def test_valid_sparse_choices(self, choice_config):
+    def test_valid_sparse_choices(self: Any, choice_config: Any) -> None:
         """Choices don't have to be consecutive (e.g., C1, C2, C4)."""
         note = Note(
             note_key=None,
@@ -224,7 +228,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert errors == []
 
-    def test_multiple_answers_one_out_of_range(self, choice_config):
+    def test_multiple_answers_one_out_of_range(self: Any, choice_config: Any) -> None:
         """If any answer in multi-choice is out of range, it's an error."""
         note = Note(
             note_key=None,
@@ -240,7 +244,7 @@ class TestValidateChoiceNote:
         errors = note.validate(choice_config)
         assert any("3 choice" in error for error in errors)
 
-    def test_valid_multiple_choice_three_answers(self, choice_config):
+    def test_valid_multiple_choice_three_answers(self: Any, choice_config: Any) -> None:
         """Three valid answers in multi-choice."""
         note = Note(
             note_key=None,
@@ -256,7 +260,7 @@ class TestValidateChoiceNote:
         )
         assert note.validate(choice_config) == []
 
-    def test_answer_with_spaces(self, choice_config):
+    def test_answer_with_spaces(self: Any, choice_config: Any) -> None:
         """Answer field can have spaces around commas."""
         note = Note(
             note_key=None,
@@ -275,7 +279,7 @@ class TestValidateChoiceNote:
 class TestParseChoiceEdgeCases:
     """Test parsing edge cases for choice notes."""
 
-    def test_choice_multiline_question(self, fs, tmp_path):
+    def test_choice_multiline_question(self: Any, fs: Any, tmp_path: Any) -> None:
         """Multiline questions should be parsed correctly."""
         md = tmp_path / "deck.md"
         md.write_text("Q: First line\nSecond line\nC1: A\nC2: B\nA: 1")
@@ -288,7 +292,7 @@ class TestParseChoiceEdgeCases:
 class TestParseClozeBlock:
     """Test DeckFileHarness.read_deck_file with AnkiOpsCloze blocks."""
 
-    def test_cloze_with_note_id(self, fs, tmp_path):
+    def test_cloze_with_note_id(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("<!-- note_key: key-1 -->\nT: This is a {{c1::cloze}} deletion")
         result = fs.read_deck_file(md)
@@ -297,19 +301,21 @@ class TestParseClozeBlock:
         assert note.note_type == "AnkiOpsCloze"
         assert "{{c1::cloze}}" in note.fields["Text"]
 
-    def test_cloze_without_id_detected_from_label(self, fs, tmp_path):
+    def test_cloze_without_id_detected_from_label(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("T: This is {{c1::a test}}")
         result = fs.read_deck_file(md)
         assert result.notes[0].note_type == "AnkiOpsCloze"
 
-    def test_cloze_with_hint(self, fs, tmp_path):
+    def test_cloze_with_hint(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("T: The {{c1::sun::star}} is bright")
         result = fs.read_deck_file(md)
         assert "{{c1::sun::star}}" in result.notes[0].fields["Text"]
 
-    def test_cloze_all_fields(self, fs, tmp_path):
+    def test_cloze_all_fields(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("T: {{c1::text}}\nE: extra info")
         result = fs.read_deck_file(md)
@@ -317,7 +323,9 @@ class TestParseClozeBlock:
         assert note.fields["Text"] == "{{c1::text}}"
         assert note.fields["Extra"] == "extra info"
 
-    def test_unknown_label_before_first_field_fails(self, fs, tmp_path):
+    def test_unknown_label_before_first_field_fails(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("RANDOMLABEL: {{c1::text}}\nE: extra info")
         with pytest.raises(
@@ -326,7 +334,9 @@ class TestParseClozeBlock:
         ):
             fs.read_deck_file(md)
 
-    def test_duplicate_field_reports_exact_line(self, fs, tmp_path):
+    def test_duplicate_field_reports_exact_line(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: First\nQ: Duplicate\nA: Answer")
         with pytest.raises(
@@ -339,7 +349,7 @@ class TestParseClozeBlock:
 class TestParseQABlock:
     """Test DeckFileHarness.read_deck_file with AnkiOpsQA blocks."""
 
-    def test_qa_with_note_id(self, fs, tmp_path):
+    def test_qa_with_note_id(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("<!-- note_key: key-1 -->\nQ: What is 2+2?\nA: 4")
         result = fs.read_deck_file(md)
@@ -349,7 +359,7 @@ class TestParseQABlock:
         assert note.fields["Question"] == "What is 2+2?"
         assert note.fields["Answer"] == "4"
 
-    def test_qa_without_id(self, fs, tmp_path):
+    def test_qa_without_id(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nA: Answer")
         result = fs.read_deck_file(md)
@@ -357,14 +367,16 @@ class TestParseQABlock:
         assert note.note_key is None
         assert note.note_type == "AnkiOpsQA"
 
-    def test_qa_with_extra(self, fs, tmp_path):
+    def test_qa_with_extra(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: Question\nA: Answer\nE: Extra notes")
         result = fs.read_deck_file(md)
         note = result.notes[0]
         assert note.fields["Extra"] == "Extra notes"
 
-    def test_qa_with_cloze_syntax_fails_validation(self, fs, tmp_path):
+    def test_qa_with_cloze_syntax_fails_validation(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: {{c1::Question}}\nA: Answer")
         with pytest.raises(
@@ -374,8 +386,8 @@ class TestParseQABlock:
             fs.read_deck_file(md)
 
     def test_note_type_inference_error_uses_basename_without_context_root(
-        self, fs, tmp_path
-    ):
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "broken-note.md"
         md.write_text("Q: Question only")
         with pytest.raises(
@@ -388,8 +400,8 @@ class TestParseQABlock:
             fs.read_deck_file(md)
 
     def test_note_type_inference_error_uses_relative_path_with_context_root(
-        self, fs, tmp_path
-    ):
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         nested_dir = tmp_path / "nested"
         nested_dir.mkdir()
         md = nested_dir / "broken-note.md"
@@ -403,7 +415,9 @@ class TestParseQABlock:
         ):
             fs.read_deck_file(md, context_root=tmp_path)
 
-    def test_note_type_inference_line_ignores_note_key_comment(self, fs, tmp_path):
+    def test_note_type_inference_line_ignores_note_key_comment(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "broken-note.md"
         md.write_text("<!-- note_key: key-1 -->\nQ: Question only")
         with pytest.raises(
@@ -415,7 +429,9 @@ class TestParseQABlock:
         ):
             fs.read_deck_file(md)
 
-    def test_qa_with_note_type_metadata_uses_explicit_type(self, fs, tmp_path):
+    def test_qa_with_note_type_metadata_uses_explicit_type(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- note_key: key-1 -->\n"
@@ -428,7 +444,9 @@ class TestParseQABlock:
         assert note.note_key == "key-1"
         assert note.note_type == "AnkiOpsQA"
 
-    def test_unknown_note_type_metadata_fails(self, fs, tmp_path):
+    def test_unknown_note_type_metadata_fails(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- note_key: key-1 -->\n"
@@ -440,7 +458,7 @@ class TestParseQABlock:
         with pytest.raises(ValueError, match="Unknown note type 'StaleType'"):
             fs.read_deck_file(md)
 
-    def test_qa_with_tags_metadata(self, fs, tmp_path):
+    def test_qa_with_tags_metadata(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- note_key: key-1 -->\n"
@@ -453,7 +471,7 @@ class TestParseQABlock:
         assert note.note_key == "key-1"
         assert note.tags == ("high-yield", "topic::subtopic", "z")
 
-    def test_qa_with_tags_before_note_key(self, fs, tmp_path):
+    def test_qa_with_tags_before_note_key(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- tags: anatomy -->\n<!-- note_key: key-1 -->\nQ: What?\nA: Answer"
@@ -463,7 +481,9 @@ class TestParseQABlock:
         assert note.note_key == "key-1"
         assert note.tags == ("anatomy",)
 
-    def test_qa_missing_or_empty_tags_are_empty(self, fs, tmp_path):
+    def test_qa_missing_or_empty_tags_are_empty(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text(
             "<!-- tags: -->\n"
@@ -477,7 +497,9 @@ class TestParseQABlock:
         assert result.notes[0].tags == ()
         assert result.notes[1].tags == ()
 
-    def test_tags_comment_inside_code_block_is_field_content(self, fs, tmp_path):
+    def test_tags_comment_inside_code_block_is_field_content(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: What?\nA:\n```\n<!-- tags: not-metadata -->\n```")
         result = fs.read_deck_file(md)
@@ -489,7 +511,7 @@ class TestParseQABlock:
 class TestMultiNoteFile:
     """Test parsing files with multiple notes separated by ---."""
 
-    def test_two_notes(self, fs, tmp_path):
+    def test_two_notes(self: Any, fs: Any, tmp_path: Any) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: Q1\nA: A1\n\n---\n\nQ: Q2\nA: A2")
         result = fs.read_deck_file(md)
@@ -497,7 +519,9 @@ class TestMultiNoteFile:
         assert result.notes[0].fields["Question"] == "Q1"
         assert result.notes[1].fields["Question"] == "Q2"
 
-    def test_error_context_uses_second_note_line(self, fs, tmp_path):
+    def test_error_context_uses_second_note_line(
+        self: Any, fs: Any, tmp_path: Any
+    ) -> None:
         md = tmp_path / "deck.md"
         md.write_text("Q: Q1\nA: A1\n\n---\n\nQ: Question only")
         with pytest.raises(
@@ -513,25 +537,25 @@ class TestMultiNoteFile:
 class TestNoteInference:
     """Test note type inference from field names/labels."""
 
-    def test_infer_qa(self, fs):
+    def test_infer_qa(self: Any, fs: Any) -> None:
         assert fs._infer_note_type({"Question": "q", "Answer": "a"}) == "AnkiOpsQA"
 
-    def test_infer_cloze(self, fs):
+    def test_infer_cloze(self: Any, fs: Any) -> None:
         assert fs._infer_note_type({"Text": "t"}, labels={"T:"}) == "AnkiOpsCloze"
 
-    def test_infer_text_without_label_is_ambiguous(self, fs):
+    def test_infer_text_without_label_is_ambiguous(self: Any, fs: Any) -> None:
         with pytest.raises(ValueError, match="Ambiguous note type"):
             fs._infer_note_type({"Text": "t"})
 
-    def test_infer_choice(self, fs):
+    def test_infer_choice(self: Any, fs: Any) -> None:
         fields = {"Question": "q", "Answer": "a", "Choice 1": "c1", "Choice 2": "c2"}
         assert fs._infer_note_type(fields) == "AnkiOpsChoice"
 
-    def test_infer_input(self, fs):
+    def test_infer_input(self: Any, fs: Any) -> None:
         # AnkiOpsInput requires Question + Input (both identifying)
         fields = {"Question": "q", "Input": "i"}
         assert fs._infer_note_type(fields) == "AnkiOpsInput"
 
-    def test_unknown_fails(self, fs):
+    def test_unknown_fails(self: Any, fs: Any) -> None:
         with pytest.raises(ValueError, match="Cannot determine note type"):
             fs._infer_note_type({"Unknown": "v", "Random": "r"})

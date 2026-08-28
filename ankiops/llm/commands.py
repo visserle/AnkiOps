@@ -9,7 +9,7 @@ import shlex
 import shutil
 import sys
 import textwrap
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -31,7 +31,7 @@ from ankiops.collection import (
 )
 from ankiops.deck_sources import load_note_types_for_collection
 
-from .execution import TaskExecutionProgress, run_task
+from .execution import ProgressReporter, TaskExecutionProgress, run_task
 from .jobs import LlmJobRequestNoteRef, show_job
 from .jobs import list_jobs as list_llm_jobs
 from .models import MODEL_REGISTRY_FILE_NAME
@@ -582,7 +582,7 @@ def _format_progress_stats(progress: TaskExecutionProgress) -> str:
 
 
 @contextmanager
-def _llm_progress_callback():
+def _llm_progress_callback() -> Iterator[ProgressReporter | None]:
     if not _is_progress_render_enabled():
         yield None
         return

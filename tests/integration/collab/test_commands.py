@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -93,7 +94,7 @@ def _setup_source(tmp_path: Path, collection: Path) -> tuple[Path, Path]:
 
 
 @pytest.fixture(scope="session")
-def collab_world_template(tmp_path_factory):
+def collab_world_template(tmp_path_factory: Any) -> Any:
     root = tmp_path_factory.mktemp("collab-world-template")
     collection = _setup_collection(root)
     _setup_source(root, collection)
@@ -102,7 +103,7 @@ def collab_world_template(tmp_path_factory):
 
 
 @pytest.fixture
-def collab_world(tmp_path, monkeypatch, collab_world_template):
+def collab_world(tmp_path: Any, monkeypatch: Any, collab_world_template: Any) -> Any:
     shutil.copytree(collab_world_template, tmp_path, dirs_exist_ok=True)
     collection = tmp_path / "collection"
     source = collection / "collab" / "owner" / "repo"
@@ -138,7 +139,7 @@ def _conflict_root(collection: Path) -> Path:
     return collection / ".ankiops" / "conflicts" / "owner" / "repo"
 
 
-def test_clean_update_is_a_noop(collab_world, capsys):
+def test_clean_update_is_a_noop(collab_world: Any, capsys: Any) -> None:
     _collection, source, _remote = collab_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
 
@@ -149,8 +150,8 @@ def test_clean_update_is_a_noop(collab_world, capsys):
 
 
 def test_update_recommends_fa_for_anki_applicable_changes(
-    collab_world, tmp_path, capsys
-):
+    collab_world: Any, tmp_path: Any, capsys: Any
+) -> None:
     _collection, _source, remote = collab_world
     _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
 
@@ -162,8 +163,8 @@ def test_update_recommends_fa_for_anki_applicable_changes(
 
 
 def test_update_rejects_invalid_source_before_git_operations(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, remote = collab_world
     upstream = _upstream_edit(tmp_path, remote, "upstream answer", "updated answer")
     config = source / "note_types" / "AnkiOpsQA" / "note_type.yaml"
@@ -180,7 +181,7 @@ def test_update_rejects_invalid_source_before_git_operations(
     status_before = _git(source, "status", "--short").stdout
     config_before = config.read_text(encoding="utf-8")
 
-    def unexpected_git_operation(*_args, **_kwargs):
+    def unexpected_git_operation(*_args: Any, **_kwargs: Any) -> Any:
         pytest.fail("Git activity started before source parsing completed")
 
     monkeypatch.setattr(GitRepository, "checkpoint", unexpected_git_operation)
@@ -198,8 +199,8 @@ def test_update_rejects_invalid_source_before_git_operations(
 
 
 def test_update_rejects_unknown_source_without_touching_another_repository(
-    collab_world,
-):
+    collab_world: Any,
+) -> None:
     _collection, source, _remote = collab_world
     other_deck = source / "Deck.md"
     other_deck.write_text(
@@ -221,8 +222,8 @@ def test_update_rejects_unknown_source_without_touching_another_repository(
 
 
 def test_update_commits_staged_unstaged_and_untracked_changes(
-    collab_world, tmp_path, capsys
-):
+    collab_world: Any, tmp_path: Any, capsys: Any
+) -> None:
     _collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
@@ -253,8 +254,8 @@ def test_update_commits_staged_unstaged_and_untracked_changes(
 
 
 def test_text_conflict_commits_local_checkpoint_and_preserves_evidence(
-    collab_world, tmp_path
-):
+    collab_world: Any, tmp_path: Any
+) -> None:
     collection, source, remote = collab_world
     before = _git(source, "rev-parse", "HEAD").stdout.strip()
     deck = source / "Deck.md"
@@ -286,8 +287,8 @@ def test_text_conflict_commits_local_checkpoint_and_preserves_evidence(
 
 
 def test_conflict_retry_uses_frozen_upstream_then_recommends_next_update(
-    collab_world, tmp_path, capsys
-):
+    collab_world: Any, tmp_path: Any, capsys: Any
+) -> None:
     collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
@@ -323,8 +324,8 @@ def test_conflict_retry_uses_frozen_upstream_then_recommends_next_update(
 
 
 def test_submit_conflict_keeps_requested_title_across_newer_update(
-    collab_world, tmp_path, monkeypatch, capsys
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     collection, source, remote = collab_world
     publish = tmp_path / "title-fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -357,9 +358,9 @@ def test_submit_conflict_keeps_requested_title_across_newer_update(
     repository = GitRepository(source)
     snapshot = repository.ref_sha(SUBMISSION_REF)
     assert snapshot is not None
-    assert repository.commit_message(snapshot).splitlines()[0] == (
-        "Keep this exact title"
-    )
+    message = repository.commit_message(snapshot)
+    assert message is not None
+    assert message.splitlines()[0] == "Keep this exact title"
     assert repository.ref_sha(INTEGRATED_REF) == frozen
     assert repository.remote_url("publish") is None
     output = capsys.readouterr().out
@@ -373,7 +374,9 @@ def test_submit_conflict_keeps_requested_title_across_newer_update(
     assert pull["title"] == "Keep this exact title"
 
 
-def test_source_edits_are_rejected_while_conflict_is_pending(collab_world, tmp_path):
+def test_source_edits_are_rejected_while_conflict_is_pending(
+    collab_world: Any, tmp_path: Any
+) -> None:
     _collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(
@@ -391,7 +394,9 @@ def test_source_edits_are_rejected_while_conflict_is_pending(collab_world, tmp_p
         run_update(SimpleNamespace(repository="owner/repo"))
 
 
-def test_binary_conflict_uses_placeholder_and_raw_evidence(collab_world, tmp_path):
+def test_binary_conflict_uses_placeholder_and_raw_evidence(
+    collab_world: Any, tmp_path: Any
+) -> None:
     collection, source, remote = collab_world
     seed = tmp_path / "binary-seed"
     _git(tmp_path, "clone", str(remote), str(seed))
@@ -417,7 +422,9 @@ def test_binary_conflict_uses_placeholder_and_raw_evidence(collab_world, tmp_pat
     assert (root / "asset.bin.upstream").read_bytes() == b"remote\x00bytes"
 
 
-def test_delete_modify_conflict_can_resolve_to_deletion(collab_world, tmp_path):
+def test_delete_modify_conflict_can_resolve_to_deletion(
+    collab_world: Any, tmp_path: Any
+) -> None:
     collection, source, remote = collab_world
     seed = tmp_path / "delete-seed"
     _git(tmp_path, "clone", str(remote), str(seed))
@@ -439,7 +446,9 @@ def test_delete_modify_conflict_can_resolve_to_deletion(collab_world, tmp_path):
     assert _git(source, "status", "--short").stdout == ""
 
 
-def test_rename_conflict_preserves_both_names_and_accepts_one(collab_world, tmp_path):
+def test_rename_conflict_preserves_both_names_and_accepts_one(
+    collab_world: Any, tmp_path: Any
+) -> None:
     collection, source, remote = collab_world
     _git(source, "mv", "Deck.md", "Local.md")
     upstream = tmp_path / "rename-upstream"
@@ -487,10 +496,10 @@ def _setup_publish_deck(tmp_path: Path) -> tuple[Path, Path, Path]:
     return collection, deck, remote
 
 
-def _redirect_publish_remote(monkeypatch, remote: Path) -> None:
+def _redirect_publish_remote(monkeypatch: Any, remote: Path) -> None:
     original = GitRepository.set_remote
 
-    def local_remote(repository, name, _url):
+    def local_remote(repository: Any, name: Any, _url: Any) -> Any:
         original(repository, name, str(remote))
 
     monkeypatch.setattr(GitRepository, "set_remote", local_remote)
@@ -501,8 +510,8 @@ def _redirect_publish_remote(monkeypatch, remote: Path) -> None:
 
 
 def test_publish_handoff_is_git_native_and_clears_preparation(
-    tmp_path, monkeypatch, capsys
-):
+    tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -520,7 +529,7 @@ def test_publish_handoff_is_git_native_and_clears_preparation(
     assert "ankiops fa" not in capsys.readouterr().out
 
 
-def test_publish_retry_adopts_completed_push(tmp_path, monkeypatch):
+def test_publish_retry_adopts_completed_push(tmp_path: Any, monkeypatch: Any) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -529,7 +538,9 @@ def test_publish_retry_adopts_completed_push(tmp_path, monkeypatch):
     original_push = GitRepository.push
     failed = False
 
-    def push_then_interrupt(repository, remote_name, source_ref, branch):
+    def push_then_interrupt(
+        repository: Any, remote_name: Any, source_ref: Any, branch: Any
+    ) -> Any:
         nonlocal failed
         original_push(repository, remote_name, source_ref, branch)
         if not failed:
@@ -550,7 +561,9 @@ def test_publish_retry_adopts_completed_push(tmp_path, monkeypatch):
     assert source.ref_sha(PUBLISH_PREPARED_REF) is None
 
 
-def test_status_reports_prepared_publish_and_exact_retry(tmp_path, monkeypatch, capsys):
+def test_status_reports_prepared_publish_and_exact_retry(
+    tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     collection, _deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -574,7 +587,9 @@ def test_status_reports_prepared_publish_and_exact_retry(tmp_path, monkeypatch, 
     assert "Retry publish: ankiops collab publish Deck owner/repo" in output
 
 
-def test_publish_retry_finishes_interrupted_ownership_transfer(tmp_path, monkeypatch):
+def test_publish_retry_finishes_interrupted_ownership_transfer(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -585,7 +600,7 @@ def test_publish_retry_finishes_interrupted_ownership_transfer(tmp_path, monkeyp
     original_transfer = publish_module._transfer_sync_ownership
     failed = False
 
-    def fail_once(root, plan):
+    def fail_once(root: Any, plan: Any) -> Any:
         nonlocal failed
         if not failed:
             failed = True
@@ -608,7 +623,9 @@ def test_publish_retry_finishes_interrupted_ownership_transfer(tmp_path, monkeyp
         state.close()
 
 
-def test_publish_retry_finishes_after_root_removal(tmp_path, monkeypatch):
+def test_publish_retry_finishes_after_root_removal(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -617,7 +634,7 @@ def test_publish_retry_finishes_after_root_removal(tmp_path, monkeypatch):
     original_commit_paths = GitRepository.commit_paths
     interrupted = False
 
-    def interrupt_collection_commit(repository, paths, message):
+    def interrupt_collection_commit(repository: Any, paths: Any, message: Any) -> Any:
         nonlocal interrupted
         if repository.root == collection and not interrupted:
             interrupted = True
@@ -636,7 +653,9 @@ def test_publish_retry_finishes_after_root_removal(tmp_path, monkeypatch):
     assert source.ref_sha(PUBLISH_PREPARED_REF) is None
 
 
-def test_publish_retry_finishes_interrupted_preparation_cleanup(tmp_path, monkeypatch):
+def test_publish_retry_finishes_interrupted_preparation_cleanup(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     _redirect_publish_remote(monkeypatch, remote)
     monkeypatch.setattr(
@@ -645,7 +664,7 @@ def test_publish_retry_finishes_interrupted_preparation_cleanup(tmp_path, monkey
     original_unset = GitRepository.config_unset
     interrupted = False
 
-    def interrupt_cleanup(repository, key):
+    def interrupt_cleanup(repository: Any, key: Any) -> Any:
         nonlocal interrupted
         if key == PUBLISH_DECK_CONFIG and not interrupted:
             interrupted = True
@@ -667,8 +686,8 @@ def test_publish_retry_finishes_interrupted_preparation_cleanup(tmp_path, monkey
 
 
 def test_publish_never_overwrites_unrelated_local_or_remote_repository(
-    tmp_path, monkeypatch
-):
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     collection, deck, remote = _setup_publish_deck(tmp_path)
     source = collection / "collab" / "owner" / "repo"
     source.mkdir(parents=True)
@@ -695,7 +714,7 @@ def test_publish_never_overwrites_unrelated_local_or_remote_repository(
     assert (source / "Deck.md").exists()
 
 
-def _mock_submission_github(monkeypatch, publish: Path):
+def _mock_submission_github(monkeypatch: Any, publish: Path) -> Any:
     original_set_remote = GitRepository.set_remote
     pull = {
         "state": None,
@@ -703,7 +722,7 @@ def _mock_submission_github(monkeypatch, publish: Path):
         "title": None,
     }
 
-    def local_publish(repository, name, _url):
+    def local_publish(repository: Any, name: Any, _url: Any) -> Any:
         original_set_remote(repository, name, str(publish))
 
     def remote_sha() -> str:
@@ -712,7 +731,7 @@ def _mock_submission_github(monkeypatch, publish: Path):
         )
         return result.stdout.strip() if result.returncode == 0 else ""
 
-    def pull_request(*_args):
+    def pull_request(*_args: Any) -> Any:
         if pull["state"] is None:
             return None
         return PullRequestInfo(
@@ -722,12 +741,12 @@ def _mock_submission_github(monkeypatch, publish: Path):
             head_sha=remote_sha(),
         )
 
-    def create_pr(*_args, **kwargs):
+    def create_pr(*_args: Any, **kwargs: Any) -> Any:
         pull["state"] = "OPEN"
         pull["title"] = kwargs["title"]
         return pull["url"]
 
-    def update_pr(_self, _url, *, title):
+    def update_pr(_self: Any, _url: Any, *, title: Any) -> Any:
         pull["title"] = title
 
     monkeypatch.setattr(GitRepository, "set_remote", local_publish)
@@ -748,8 +767,8 @@ def _mock_submission_github(monkeypatch, publish: Path):
 
 
 def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
-    collab_world, tmp_path, monkeypatch, capsys
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -772,9 +791,9 @@ def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
         publish, "rev-parse", f"refs/heads/{CONTRIBUTION_BRANCH}"
     ).stdout.strip()
     assert repository.ref_sha(SUBMISSION_REF) == remote
-    assert repository.commit_message(SUBMISSION_REF).splitlines()[0] == (
-        "Improve shared deck"
-    )
+    message = repository.commit_message(SUBMISSION_REF)
+    assert message is not None
+    assert message.splitlines()[0] == "Improve shared deck"
     assert _git(publish, "show", f"{remote}:draft.txt").stdout == "untracked\n"
     assert _git(publish, "show", f"{remote}:scratch.tmp", check=False).returncode != 0
     assert pull["state"] == "OPEN"
@@ -785,8 +804,8 @@ def test_submit_commits_all_nonignored_changes_to_deterministic_branch(
 
 
 def test_submit_retry_force_pushes_again_after_interrupted_push(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -800,7 +819,9 @@ def test_submit_retry_force_pushes_again_after_interrupted_push(
     interrupted = False
     pushes = 0
 
-    def push_then_interrupt(repository, remote_name, source_ref, branch):
+    def push_then_interrupt(
+        repository: Any, remote_name: Any, source_ref: Any, branch: Any
+    ) -> Any:
         nonlocal interrupted, pushes
         pushes += 1
         original_push(repository, remote_name, source_ref, branch)
@@ -824,8 +845,8 @@ def test_submit_retry_force_pushes_again_after_interrupted_push(
 
 
 def test_submit_retry_reuses_pr_created_before_interruption(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -839,11 +860,13 @@ def test_submit_retry_reuses_pr_created_before_interruption(
     pushes = []
     original_push = GitRepository.push_force
 
-    def record_push(repository, remote_name, source_ref, branch):
+    def record_push(
+        repository: Any, remote_name: Any, source_ref: Any, branch: Any
+    ) -> Any:
         pushes.append(source_ref)
         original_push(repository, remote_name, source_ref, branch)
 
-    def create_then_interrupt(*_args, **kwargs):
+    def create_then_interrupt(*_args: Any, **kwargs: Any) -> Any:
         nonlocal interrupted
         pull["state"] = "OPEN"
         pull["title"] = kwargs["title"]
@@ -866,8 +889,8 @@ def test_submit_retry_reuses_pr_created_before_interruption(
 
 
 def test_submit_retry_restores_title_after_interrupted_pr_update(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -886,7 +909,7 @@ def test_submit_retry_restores_title_after_interrupted_pr_update(
     original_update = GitHubHost.update_pr
     interrupted = False
 
-    def interrupt_update(host, url, *, title):
+    def interrupt_update(host: Any, url: Any, *, title: Any) -> Any:
         nonlocal interrupted
         if not interrupted:
             interrupted = True
@@ -904,8 +927,8 @@ def test_submit_retry_restores_title_after_interrupted_pr_update(
 
 
 def test_new_submission_retry_ignores_historic_merged_pr(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, upstream_remote = collab_world
     publish = tmp_path / "reused-fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -940,7 +963,9 @@ def test_new_submission_retry_ignores_historic_merged_pr(
     original_push = GitRepository.push_force
     interrupted = False
 
-    def interrupt_before_push(repository, remote_name, source_ref, branch):
+    def interrupt_before_push(
+        repository: Any, remote_name: Any, source_ref: Any, branch: Any
+    ) -> Any:
         nonlocal interrupted
         if branch == CONTRIBUTION_BRANCH and not interrupted:
             interrupted = True
@@ -960,8 +985,8 @@ def test_new_submission_retry_ignores_historic_merged_pr(
 
 
 def test_closed_submission_reuses_the_managed_branch(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "closed-fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -990,8 +1015,8 @@ def test_closed_submission_reuses_the_managed_branch(
 
 
 def test_submit_force_replaces_managed_branch_and_reuses_open_pr(
-    collab_world, tmp_path, monkeypatch, capsys
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -1021,8 +1046,8 @@ def test_submit_force_replaces_managed_branch_and_reuses_open_pr(
 
 
 def test_status_reports_open_and_locally_revised_submission(
-    collab_world, tmp_path, monkeypatch, capsys
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any, capsys: Any
+) -> None:
     _collection, source, _remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -1048,8 +1073,8 @@ def test_status_reports_open_and_locally_revised_submission(
 
 
 def test_merged_submission_updates_from_snapshot_base_and_clears_local_ref(
-    collab_world, tmp_path, monkeypatch
-):
+    collab_world: Any, tmp_path: Any, monkeypatch: Any
+) -> None:
     _collection, source, upstream_remote = collab_world
     publish = tmp_path / "fork.git"
     _git(tmp_path, "init", "--bare", "-b", "main", str(publish))
@@ -1086,7 +1111,9 @@ def test_merged_submission_updates_from_snapshot_base_and_clears_local_ref(
     assert "submitted answer" in deck.read_text(encoding="utf-8")
 
 
-def test_status_reports_frozen_conflict_and_exact_retry(collab_world, tmp_path, capsys):
+def test_status_reports_frozen_conflict_and_exact_retry(
+    collab_world: Any, tmp_path: Any, capsys: Any
+) -> None:
     _collection, source, remote = collab_world
     deck = source / "Deck.md"
     deck.write_text(

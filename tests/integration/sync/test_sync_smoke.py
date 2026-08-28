@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from contextlib import contextmanager
+from typing import Any
 
 from ankiops.anki import Anki
 from ankiops.collection import NOTE_TYPES_DIR, deck_name_to_file_stem
@@ -18,7 +19,7 @@ _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
 
 
 @contextmanager
-def _ports(collection_root, mock_anki, *, preload_configs: bool):
+def _ports(collection_root: Any, mock_anki: Any, *, preload_configs: bool) -> Any:
     anki = Anki(invoke_func=mock_anki.invoke)
     fs = DeckFileHarness()
     note_types_dir = collection_root / NOTE_TYPES_DIR
@@ -33,7 +34,9 @@ def _ports(collection_root, mock_anki, *, preload_configs: bool):
         db.close()
 
 
-def _run_import(collection_root, mock_anki, *, preload_configs: bool = True):
+def _run_import(
+    collection_root: Any, mock_anki: Any, *, preload_configs: bool = True
+) -> Any:
     with _ports(collection_root, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
@@ -47,7 +50,9 @@ def _run_import(collection_root, mock_anki, *, preload_configs: bool = True):
         )
 
 
-def _run_export(collection_root, mock_anki, *, preload_configs: bool = False):
+def _run_export(
+    collection_root: Any, mock_anki: Any, *, preload_configs: bool = False
+) -> Any:
     with _ports(collection_root, mock_anki, preload_configs=preload_configs) as (
         anki,
         fs,
@@ -62,8 +67,13 @@ def _run_export(collection_root, mock_anki, *, preload_configs: bool = False):
 
 
 def _insert_mock_note(
-    mock_anki, *, deck_name: str, note_id: int, card_id: int, fields: dict[str, str]
-):
+    mock_anki: Any,
+    *,
+    deck_name: str,
+    note_id: int,
+    card_id: int,
+    fields: dict[str, str],
+) -> Any:
     if deck_name not in mock_anki.decks:
         mock_anki.invoke("createDeck", deck=deck_name)
     mock_anki.notes[note_id] = {
@@ -87,7 +97,7 @@ def _extract_note_key_order(content: str) -> list[str]:
     return _NOTE_KEY_RE.findall(content)
 
 
-def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki):
+def test_export_from_anki_creates_markdown_files(tmp_path: Any, mock_anki: Any) -> None:
     """Export should materialize one markdown file per deck."""
     mock_anki.add_note("Deck A", "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
     mock_anki.add_note("Deck B", "AnkiOpsQA", {"Question": "Q2", "Answer": "A2"})
@@ -109,7 +119,7 @@ def test_export_from_anki_creates_markdown_files(tmp_path, mock_anki):
     assert "Q: Q2" in content_b
 
 
-def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki):
+def test_export_escapes_slash_in_deck_filename(tmp_path: Any, mock_anki: Any) -> None:
     """Export should escape slash deck names into a single markdown filename."""
     deck_name = "EEG/MEG I"
     mock_anki.add_note(deck_name, "AnkiOpsQA", {"Question": "Q1", "Answer": "A1"})
@@ -123,7 +133,7 @@ def test_export_escapes_slash_in_deck_filename(tmp_path, mock_anki):
     assert "Q: Q1" in md_file.read_text(encoding="utf-8")
 
 
-def test_export_first_time_orders_by_note_id(tmp_path, mock_anki):
+def test_export_first_time_orders_by_note_id(tmp_path: Any, mock_anki: Any) -> None:
     """First export should use note_id ascending as creation-time ordering."""
     deck_name = "OrderFreshDeck"
     _insert_mock_note(
@@ -157,7 +167,7 @@ def test_export_first_time_orders_by_note_id(tmp_path, mock_anki):
     assert _extract_note_key_order(content) == ["fresh-k-101", "fresh-k-202"]
 
 
-def test_export_existing_keeps_markdown_order(tmp_path, mock_anki):
+def test_export_existing_keeps_markdown_order(tmp_path: Any, mock_anki: Any) -> None:
     """Existing deck export should preserve markdown order for existing notes."""
     deck_name = "OrderRunDeck"
     _insert_mock_note(
@@ -206,7 +216,9 @@ def test_export_existing_keeps_markdown_order(tmp_path, mock_anki):
     assert _extract_note_key_order(content) == ["run-k-2", "run-k-1"]
 
 
-def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki):
+def test_export_existing_appends_new_notes_by_note_id(
+    tmp_path: Any, mock_anki: Any
+) -> None:
     """Existing deck export should append unseen notes in note_id order."""
     deck_name = "OrderAppendDeck"
     _insert_mock_note(
@@ -282,7 +294,7 @@ def test_export_existing_appends_new_notes_by_note_id(tmp_path, mock_anki):
     ]
 
 
-def test_all_note_types_integration(tmp_path, mock_anki):
+def test_all_note_types_integration(tmp_path: Any, mock_anki: Any) -> None:
     """Import + export should preserve all supported note-type content."""
     deck_name = "AllTypes"
     md_file = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
@@ -364,7 +376,7 @@ def test_all_note_types_integration(tmp_path, mock_anki):
     assert "IO_QM:" in new_content
 
 
-def test_ankiops_id_populated_on_update(tmp_path, mock_anki):
+def test_ankiops_id_populated_on_update(tmp_path: Any, mock_anki: Any) -> None:
     """Import update should backfill missing AnkiOps Key on existing note."""
     note_key = "notekeyexisting"
     note_id = 999
@@ -395,7 +407,9 @@ def test_ankiops_id_populated_on_update(tmp_path, mock_anki):
     assert updated_note["fields"]["AnkiOps Key"]["value"] == note_key
 
 
-def test_import_note_key_placement_trailing_space(tmp_path, mock_anki):
+def test_import_note_key_placement_trailing_space(
+    tmp_path: Any, mock_anki: Any
+) -> None:
     """Generated note_key comment should sit immediately above the note label."""
     deck_file = tmp_path / f"{deck_name_to_file_stem('TrailingSpaceDeck')}.md"
     deck_file.write_text(
@@ -420,7 +434,9 @@ def test_import_note_key_placement_trailing_space(tmp_path, mock_anki):
     assert lines[key_line_idx + 2].startswith("Q: Trailing Space Question ")
 
 
-def test_import_key_insertion_preserves_note_block_order(tmp_path, mock_anki):
+def test_import_key_insertion_preserves_note_block_order(
+    tmp_path: Any, mock_anki: Any
+) -> None:
     """Import should insert note_key comments without reordering note blocks."""
     deck_file = tmp_path / f"{deck_name_to_file_stem('OrderPreserveDeck')}.md"
     deck_file.write_text(

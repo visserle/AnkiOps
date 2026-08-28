@@ -12,32 +12,32 @@ from ankiops.notes import normalize_tags
 class MockAnki:
     """Stateful mock of Anki's HTTP action dispatcher."""
 
-    def __init__(self):
-        self.decks = {"Default": 1}  # Name -> ID
-        self.notes = {}  # ID -> Note dict
-        self.cards = {}  # ID -> Card dict
+    def __init__(self: MockAnki) -> None:
+        self.decks: dict[str, int] = {"Default": 1}  # Name -> ID
+        self.notes: dict[int, dict[str, Any]] = {}  # ID -> Note dict
+        self.cards: dict[int, dict[str, Any]] = {}  # ID -> Card dict
         self.next_note_id = 100
         self.next_card_id = 1000
         self.next_deck_id = 10
-        self.calls = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
         self.active_profile = "TestProfile"
         self.media_dir: Path | None = None
         self.fail_actions: dict[str, Exception] = {}
 
-    def _base_model_name(self, model_name: str | None) -> str | None:
+    def _base_model_name(self: Any, model_name: str | None) -> str | None:
         if model_name == "RenamedQA":
             return "AnkiOpsQA"
         if model_name and model_name.startswith("collab/"):
             return model_name.split("/")[-1]
         return model_name
 
-    def _search_value(self, term: str) -> str:
+    def _search_value(self: Any, term: str) -> str:
         value = term.split(":", 1)[1]
         if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
             return value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
         return value
 
-    def invoke(self, action: str, **params) -> Any:
+    def invoke(self: Any, action: str, **params: Any) -> Any:
         self.calls.append((action, params))
         if action in self.fail_actions:
             raise self.fail_actions[action]
@@ -362,12 +362,12 @@ class MockAnki:
                 return None
 
     def add_note(
-        self,
+        self: Any,
         deck_name: str,
         note_type: str,
-        fields: dict,
-        tags=(),
-    ):
+        fields: dict[str, str],
+        tags: Any = (),
+    ) -> None:
         """Convenience helper for test setup."""
         if deck_name not in self.decks:
             self.invoke("createDeck", deck=deck_name)
@@ -383,7 +383,7 @@ class MockAnki:
         )
 
     def convert_notes_to_note_type(
-        self,
+        self: Any,
         note_ids: list[int],
         old_note_type: str,
         new_note_type: str,

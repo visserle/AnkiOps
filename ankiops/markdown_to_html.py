@@ -1,6 +1,7 @@
 """Markdown to HTML converter for Anki import."""
 
 import re
+from typing import Any, cast
 
 import mistune
 from mistune.plugins.formatting import mark, strikethrough, subscript, superscript
@@ -38,14 +39,14 @@ class AnkiRenderer(mistune.HTMLRenderer):
     - Syntax highlighting via Pygments
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(escape=False, allow_harmful_protocols=True)
 
-    def __call__(self, tokens, state):
+    def __call__(self, tokens: Any, state: Any) -> str:
         parts = list(self.iter_tokens(tokens, state))
         return self._join_blocks(parts)
 
-    def _join_blocks(self, parts):
+    def _join_blocks(self, parts: list[str]) -> str:
         """Join block-level HTML parts with <br> separators (Anki style)."""
         output = []
         for part in parts:
@@ -60,24 +61,24 @@ class AnkiRenderer(mistune.HTMLRenderer):
         html = re.sub(r"(<br>){3,}", "<br><br>", html)
         return html
 
-    def text(self, text):
+    def text(self, text: str) -> str:
         return text
 
-    def heading(self, text, level, **attrs):
+    def heading(self, text: str, level: int, **attrs: Any) -> str:
         return f"<h{level}>{text}</h{level}>"
 
-    def softbreak(self):
+    def softbreak(self) -> str:
         return "<br>"
 
-    def paragraph(self, text):
+    def paragraph(self, text: str) -> str:
         return text
 
-    def image(self, text, url, title=None):
+    def image(self, text: str, url: str, title: str | None = None) -> str:
         if url.startswith(f"{LOCAL_MEDIA_DIR}/"):
             url = url[len(LOCAL_MEDIA_DIR) + 1 :]
         return '<img src="' + url + '" alt="' + text + '">'
 
-    def block_code(self, code, info=None):
+    def block_code(self, code: str, info: str | None = None) -> str:
         code = code.rstrip("\n")
         if not code.strip():
             return ""
@@ -86,7 +87,7 @@ class AnkiRenderer(mistune.HTMLRenderer):
             lang = info.strip().split(None, 1)[0]
             try:
                 lexer = get_lexer_by_name(lang)
-                highlighted = highlight(code, lexer, _PYGMENTS_FORMATTER)
+                highlighted = cast(str, highlight(code, lexer, _PYGMENTS_FORMATTER))
                 return (
                     f'<pre><code class="language-{lang}">'
                     + highlighted
@@ -100,7 +101,7 @@ class AnkiRenderer(mistune.HTMLRenderer):
 class MarkdownToHTML:
     """Convert Markdown back to HTML for Anki."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._md = mistune.create_markdown(
             renderer=AnkiRenderer(),
             plugins=[

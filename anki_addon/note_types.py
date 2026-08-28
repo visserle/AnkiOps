@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .protocol import AnkiOpsConnectActionError
 
 
-def note_type_names_action(col, _params: dict) -> list[str]:
+def note_type_names_action(col: Any, _params: dict[str, Any]) -> list[str]:
     models = col.models
     if hasattr(models, "all_names"):
         return list(models.all_names())
@@ -14,17 +16,19 @@ def note_type_names_action(col, _params: dict) -> list[str]:
     raise AnkiOpsConnectActionError("Cannot read Anki note type names.")
 
 
-def note_type_field_names_action(col, params: dict) -> list[str]:
+def note_type_field_names_action(col: Any, params: dict[str, Any]) -> list[str]:
     return field_names(required_note_type(col, params.get("modelName") or ""))
 
 
-def note_type_styling_action(col, params: dict) -> dict[str, str]:
+def note_type_styling_action(col: Any, params: dict[str, Any]) -> dict[str, str]:
     model_name = params.get("modelName") or ""
     model = required_note_type(col, model_name)
     return {"name": model_name, "css": model.get("css", "")}
 
 
-def note_type_templates_action(col, params: dict) -> dict[str, dict[str, str]]:
+def note_type_templates_action(
+    col: Any, params: dict[str, Any]
+) -> dict[str, dict[str, str]]:
     model = required_note_type(col, params.get("modelName") or "")
     return {
         template.get("name", ""): {
@@ -35,12 +39,14 @@ def note_type_templates_action(col, params: dict) -> dict[str, dict[str, str]]:
     }
 
 
-def note_type_field_descriptions_action(col, params: dict) -> list[str]:
+def note_type_field_descriptions_action(col: Any, params: dict[str, Any]) -> list[str]:
     model = required_note_type(col, params.get("modelName") or "")
     return [field.get("description", "") for field in model.get("flds", [])]
 
 
-def note_type_field_fonts_action(col, params: dict) -> dict[str, dict[str, int | str]]:
+def note_type_field_fonts_action(
+    col: Any, params: dict[str, Any]
+) -> dict[str, dict[str, int | str]]:
     model = required_note_type(col, params.get("modelName") or "")
     return {
         field.get("name", ""): {
@@ -51,7 +57,7 @@ def note_type_field_fonts_action(col, params: dict) -> dict[str, dict[str, int |
     }
 
 
-def create_note_type_action(col, params: dict) -> None:
+def create_note_type_action(col: Any, params: dict[str, Any]) -> None:
     model_name = params.get("modelName") or ""
     if not model_name:
         raise AnkiOpsConnectActionError("modelName is required.")
@@ -69,14 +75,14 @@ def create_note_type_action(col, params: dict) -> None:
     return None
 
 
-def note_type_field_add_action(col, params: dict) -> None:
+def note_type_field_add_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     _add_field_to_note_type(col.models, model, params.get("fieldName") or "")
     save_note_type(col.models, model)
     return None
 
 
-def note_type_field_remove_action(col, params: dict) -> None:
+def note_type_field_remove_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     field = _required_field(model, params.get("fieldName") or "")
     _remove_field_from_note_type(col.models, model, field)
@@ -84,15 +90,19 @@ def note_type_field_remove_action(col, params: dict) -> None:
     return None
 
 
-def note_type_field_reposition_action(col, params: dict) -> None:
+def note_type_field_reposition_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     field = _required_field(model, params.get("fieldName") or "")
-    _move_field_in_note_type(col.models, model, field, int(params.get("index") or 0))
+    try:
+        index = int(params.get("index") or 0)
+    except (TypeError, ValueError) as error:
+        raise AnkiOpsConnectActionError("index must be an integer.") from error
+    _move_field_in_note_type(col.models, model, field, index)
     save_note_type(col.models, model)
     return None
 
 
-def note_type_field_set_description_action(col, params: dict) -> None:
+def note_type_field_set_description_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     field = _required_field(model, params.get("fieldName") or "")
     field["description"] = params.get("description") or ""
@@ -100,15 +110,19 @@ def note_type_field_set_description_action(col, params: dict) -> None:
     return None
 
 
-def note_type_field_set_font_size_action(col, params: dict) -> None:
+def note_type_field_set_font_size_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     field = _required_field(model, params.get("fieldName") or "")
-    field["size"] = int(params.get("fontSize") or 0)
+    try:
+        font_size = int(params.get("fontSize") or 0)
+    except (TypeError, ValueError) as error:
+        raise AnkiOpsConnectActionError("fontSize must be an integer.") from error
+    field["size"] = font_size
     save_note_type(col.models, model)
     return None
 
 
-def update_note_type_styling_action(col, params: dict) -> None:
+def update_note_type_styling_action(col: Any, params: dict[str, Any]) -> None:
     payload = params.get("model") or {}
     model = required_note_type(col, payload.get("name") or "")
     model["css"] = payload.get("css") or ""
@@ -116,7 +130,7 @@ def update_note_type_styling_action(col, params: dict) -> None:
     return None
 
 
-def note_type_template_rename_action(col, params: dict) -> None:
+def note_type_template_rename_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     template = _required_template(model, params.get("oldTemplateName") or "")
     template["name"] = params.get("newTemplateName") or ""
@@ -124,14 +138,14 @@ def note_type_template_rename_action(col, params: dict) -> None:
     return None
 
 
-def note_type_template_add_action(col, params: dict) -> None:
+def note_type_template_add_action(col: Any, params: dict[str, Any]) -> None:
     model = required_note_type(col, params.get("modelName") or "")
     _add_template_to_note_type(col.models, model, params.get("template") or {})
     save_note_type(col.models, model)
     return None
 
 
-def update_note_type_templates_action(col, params: dict) -> None:
+def update_note_type_templates_action(col: Any, params: dict[str, Any]) -> None:
     payload = params.get("model") or {}
     model = required_note_type(col, payload.get("name") or "")
     templates = payload.get("templates") or {}
@@ -143,63 +157,63 @@ def update_note_type_templates_action(col, params: dict) -> None:
     return None
 
 
-def note_type_by_name(models, name: str):
+def note_type_by_name(models: Any, name: str) -> Any:
     return models.by_name(name)
 
 
-def required_note_type(col, name: str):
+def required_note_type(col: Any, name: str) -> Any:
     model = note_type_by_name(col.models, name)
     if model is None:
         raise AnkiOpsConnectActionError(f"Note type not found: {name}")
     return model
 
 
-def note_type_id(model) -> int:
+def note_type_id(model: Any) -> int:
     try:
         return int(model["id"])
     except Exception as error:
         raise AnkiOpsConnectActionError("Note type is missing an id.") from error
 
 
-def field_names(model) -> list[str]:
+def field_names(model: Any) -> list[str]:
     return [_item_name(field) for field in model.get("flds", [])]
 
 
-def template_names(model) -> list[str]:
+def template_names(model: Any) -> list[str]:
     return [_item_name(template) for template in model.get("tmpls", [])]
 
 
-def _item_name(item) -> str:
+def _item_name(item: Any) -> str:
     return item.get("name") or ""
 
 
-def _required_field(model, field_name: str):
+def _required_field(model: Any, field_name: str) -> Any:
     for field in model.get("flds", []):
         if _item_name(field) == field_name:
             return field
     raise AnkiOpsConnectActionError(f"Field not found: {field_name}")
 
 
-def _required_template(model, template_name: str):
+def _required_template(model: Any, template_name: str) -> Any:
     for template in model.get("tmpls", []):
         if _item_name(template) == template_name:
             return template
     raise AnkiOpsConnectActionError(f"Template not found: {template_name}")
 
 
-def _new_note_type(models, model_name: str):
+def _new_note_type(models: Any, model_name: str) -> Any:
     if hasattr(models, "new"):
         return models.new(model_name)
     return {"name": model_name, "flds": [], "tmpls": [], "css": ""}
 
 
-def _new_field(models, field_name: str):
+def _new_field(models: Any, field_name: str) -> Any:
     if hasattr(models, "new_field"):
         return models.new_field(field_name)
     return {"name": field_name, "description": "", "font": "", "size": 0}
 
 
-def _add_field_to_note_type(models, model, field_name: str) -> None:
+def _add_field_to_note_type(models: Any, model: Any, field_name: str) -> None:
     if not field_name:
         raise AnkiOpsConnectActionError("fieldName is required.")
     field = _new_field(models, field_name)
@@ -211,14 +225,14 @@ def _add_field_to_note_type(models, model, field_name: str) -> None:
         model.setdefault("flds", []).append(field)
 
 
-def _remove_field_from_note_type(models, model, field) -> None:
+def _remove_field_from_note_type(models: Any, model: Any, field: Any) -> None:
     if hasattr(models, "remove_field"):
         models.remove_field(model, field)
     else:
         model["flds"] = [item for item in model.get("flds", []) if item is not field]
 
 
-def _move_field_in_note_type(models, model, field, index: int) -> None:
+def _move_field_in_note_type(models: Any, model: Any, field: Any, index: int) -> None:
     if hasattr(models, "reposition_field"):
         models.reposition_field(model, field, index)
     else:
@@ -227,17 +241,19 @@ def _move_field_in_note_type(models, model, field, index: int) -> None:
         fields.insert(index, field)
 
 
-def _template_payload_name(template: dict) -> str:
+def _template_payload_name(template: dict[str, Any]) -> str:
     return template.get("Name") or template.get("name") or ""
 
 
-def _new_template(models, template_name: str):
+def _new_template(models: Any, template_name: str) -> Any:
     if hasattr(models, "new_template"):
         return models.new_template(template_name)
     return {"name": template_name, "qfmt": "", "afmt": ""}
 
 
-def _add_template_to_note_type(models, model, template_payload: dict) -> None:
+def _add_template_to_note_type(
+    models: Any, model: Any, template_payload: dict[str, Any]
+) -> None:
     template_name = _template_payload_name(template_payload)
     if not template_name:
         raise AnkiOpsConnectActionError("template name is required.")
@@ -250,13 +266,13 @@ def _add_template_to_note_type(models, model, template_payload: dict) -> None:
         model.setdefault("tmpls", []).append(template)
 
 
-def _add_note_type(models, model) -> None:
+def _add_note_type(models: Any, model: Any) -> None:
     if hasattr(models, "add"):
         models.add(model)
     else:
         save_note_type(models, model)
 
 
-def save_note_type(models, model) -> None:
+def save_note_type(models: Any, model: Any) -> None:
     if hasattr(models, "save"):
         models.save(model)

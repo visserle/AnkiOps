@@ -25,7 +25,7 @@ FIELD_DESCRIPTIONS = {
 }
 
 
-def _action(action_str: str, **params) -> dict:
+def _action(action_str: str, **params: Any) -> dict[str, Any]:
     return {"action": action_str, "params": params}
 
 
@@ -67,14 +67,14 @@ class Anki:
 
     def get_version(self) -> int:
         """Get the active Anki connection version."""
-        return self._invoke("version")
+        return cast(int, self._invoke("version"))
 
     def get_active_profile(self) -> str:
         """Get the currently active Anki profile name."""
-        return self._invoke("getActiveProfile")
+        return cast(str, self._invoke("getActiveProfile"))
 
     def fetch_deck_names_and_ids(self) -> dict[str, int]:
-        return self._invoke("deckNamesAndIds")
+        return cast(dict[str, int], self._invoke("deckNamesAndIds"))
 
     def fetch_card_ids_in_deck(self, deck_name: str) -> list[int]:
         return cast(
@@ -92,7 +92,7 @@ class Anki:
         query = " OR ".join(
             f"note:{_quote_search_value(model_name)}" for model_name in required_types
         )
-        return self._invoke("findNotes", query=query)
+        return cast(list[int], self._invoke("findNotes", query=query))
 
     def fetch_note_ids_by_note_keys(self, note_keys: set[str]) -> dict[str, list[int]]:
         if not note_keys:
@@ -106,7 +106,7 @@ class Anki:
             for note_key in keys
         ]
         results = self._invoke("multi", actions=actions)
-        note_ids_by_key = {}
+        note_ids_by_key: dict[str, list[int]] = {}
         for note_key, result in zip(keys, results):
             if isinstance(result, str):
                 raise AnkiConnectionError(
@@ -115,21 +115,27 @@ class Anki:
             note_ids_by_key[note_key] = list(result or [])
         return note_ids_by_key
 
-    def fetch_cards_info(self, card_ids: list[int]) -> dict[int, dict]:
+    def fetch_cards_info(self, card_ids: list[int]) -> dict[int, dict[str, Any]]:
         if not card_ids:
             return {}
-        cards = self._invoke("cardsInfo", cards=card_ids)
+        cards = cast(
+            list[dict[str, Any] | None], self._invoke("cardsInfo", cards=card_ids)
+        )
         return {card["cardId"]: card for card in cards if card}
 
     def fetch_notes_info(self, note_ids: list[int]) -> dict[int, AnkiNote]:
         if not note_ids:
             return {}
-        notes = self._invoke("notesInfo", notes=note_ids)
-        notes_by_id = {}
+        notes = cast(
+            list[dict[str, Any] | None], self._invoke("notesInfo", notes=note_ids)
+        )
+        notes_by_id: dict[int, AnkiNote] = {}
         for note_data in notes:
             if not note_data:
                 continue
-            fields = {name: data["value"] for name, data in note_data["fields"].items()}
+            fields: dict[str, str] = {
+                name: data["value"] for name, data in note_data["fields"].items()
+            }
             notes_by_id[note_data["noteId"]] = AnkiNote(
                 note_id=note_data["noteId"],
                 note_type=note_data.get("modelName", ""),
@@ -141,12 +147,14 @@ class Anki:
 
     # Models are Anki's note types
     def fetch_note_type_names(self) -> list[str]:
-        return self._invoke("modelNames")
+        return cast(list[str], self._invoke("modelNames"))
 
-    def fetch_note_type_states(self, note_type_names: list[str]) -> dict[str, dict]:
+    def fetch_note_type_states(
+        self, note_type_names: list[str]
+    ) -> dict[str, dict[str, Any]]:
         if not note_type_names:
             return {}
-        read_actions = []
+        read_actions: list[dict[str, Any]] = []
         for name in note_type_names:
             read_actions.append(_action("modelFieldNames", modelName=name))
             read_actions.append(_action("modelStyling", modelName=name))
@@ -154,17 +162,17 @@ class Anki:
             read_actions.append(_action("modelFieldDescriptions", modelName=name))
             read_actions.append(_action("modelFieldFonts", modelName=name))
 
-        read_results = self._invoke("multi", actions=read_actions)
-        states = {}
+        read_results = cast(list[Any], self._invoke("multi", actions=read_actions))
+        states: dict[str, dict[str, Any]] = {}
         for model_index, name in enumerate(note_type_names):
             base = model_index * 5
-            field_names = read_results[base]
+            field_names = cast(list[str], read_results[base])
             styling = _normalize_model_styling_payload(
                 read_results[base + 1],
                 model_name=name,
             )
-            raw_desc = read_results[base + 3]
-            descriptions = dict(zip(field_names, raw_desc))
+            raw_desc = cast(list[str | None], read_results[base + 3])
+            descriptions: dict[str, str | None] = dict(zip(field_names, raw_desc))
             states[name] = {
                 "fields": field_names,
                 "styling": styling,
@@ -177,7 +185,7 @@ class Anki:
     def create_note_types(self, note_types: list[NoteType]) -> None:
         if not note_types:
             return
-        actions = []
+        actions: list[dict[str, Any]] = []
         for model_config in note_types:
             fields = [field.name for field in model_config.fields]
             actions.append(
@@ -224,15 +232,15 @@ class Anki:
             raise AnkiConnectionError(f"Failed to create models: {errors}")
 
     def update_note_types(
-        self, note_types: list[NoteType], states: dict[str, dict]
+        self, note_types: list[NoteType], states: dict[str, dict[str, Any]]
     ) -> None:
         if not note_types:
             return
-        actions = []
+        actions: list[dict[str, Any]] = []
         for model_config in note_types:
             state = states[model_config.name]
             expected_fields = [field.name for field in model_config.fields]
-            current_fields = state["fields"]
+            current_fields = cast(list[str], state["fields"])
 
             for field_name in expected_fields:
                 if field_name not in current_fields:
@@ -272,7 +280,8 @@ class Anki:
             )
 
             # Templates
-            current_names = list(state["templates"].keys())
+            current_templates = cast(dict[str, Any], state["templates"])
+            current_names = list(current_templates.keys())
             for template_index, expected in enumerate(model_config.templates):
                 if (
                     template_index < len(current_names)
@@ -288,7 +297,7 @@ class Anki:
                     )
                     current_names[template_index] = expected.name
 
-            templates_dict = {}
+            templates_dict: dict[str, dict[str, str]] = {}
             for template_index, expected in enumerate(model_config.templates):
                 if template_index < len(current_names):
                     templates_dict[current_names[template_index]] = {
@@ -313,8 +322,8 @@ class Anki:
                 )
 
             # Descriptions and Fonts
-            current_desc = state["descriptions"]
-            current_fonts = state["fonts"]
+            current_desc = cast(dict[str, str | None], state["descriptions"])
+            current_fonts = cast(dict[str, dict[str, Any]], state["fonts"])
 
             for field_name, desc in FIELD_DESCRIPTIONS.items():
                 if (
@@ -345,7 +354,7 @@ class Anki:
                     )
 
         if actions:
-            results = self._invoke("multi", actions=actions)
+            results = cast(list[Any], self._invoke("multi", actions=actions))
             errors = [
                 result
                 for result in results
@@ -363,9 +372,9 @@ class Anki:
         deletes: list[Change],
         cards_to_move: list[int],
     ) -> tuple[list[int | None], list[str]]:
-        actions = []
-        action_tags = []
-        errors = []
+        actions: list[dict[str, Any]] = []
+        action_tags: list[str] = []
+        errors: list[str] = []
         created_ids: list[int | None] = []
         create_deck_failed = False
 
@@ -406,7 +415,7 @@ class Anki:
 
         if actions:
             try:
-                results = self._invoke("multi", actions=actions)
+                results = cast(list[Any], self._invoke("multi", actions=actions))
                 update_idx = 0
                 for tag, action_result in zip(action_tags, results):
                     if tag == "update":
@@ -441,7 +450,9 @@ class Anki:
 
         return created_ids, errors
 
-    def _build_create_note_payload(self, deck_name: str, change: Change) -> dict:
+    def _build_create_note_payload(
+        self, deck_name: str, change: Change
+    ) -> dict[str, Any]:
         note = change.context.get("note")
         fields = dict(change.context.get("html_fields", {}))
         note_type = note.note_type if note else ""
@@ -520,7 +531,10 @@ class Anki:
             ]
 
     def find_notes_by_ankiops_note_key(self, note_key: str) -> list[int]:
-        return self._invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"')
+        return cast(
+            list[int],
+            self._invoke("findNotes", query=f'"{ANKIOPS_KEY_FIELD.name}:{note_key}"'),
+        )
 
     def convert_notes_to_note_type(
         self,

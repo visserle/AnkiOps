@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.llm.models import ModelRegistryError, _parse_registry
 
 
-def test_model_registry_rejects_base_url_with_responses_suffix(tmp_path):
+def test_model_registry_rejects_base_url_with_responses_suffix(tmp_path: Any) -> None:
     path = tmp_path / "_models.yaml"
     path.write_text(
         """
@@ -23,7 +25,7 @@ def test_model_registry_rejects_base_url_with_responses_suffix(tmp_path):
         _parse_registry(path)
 
 
-def test_model_registry_accepts_base_url_with_trailing_slash(tmp_path):
+def test_model_registry_accepts_base_url_with_trailing_slash(tmp_path: Any) -> None:
     path = tmp_path / "_models.yaml"
     path.write_text(
         """
@@ -37,4 +39,6 @@ def test_model_registry_accepts_base_url_with_trailing_slash(tmp_path):
 
     registry = _parse_registry(path)
 
-    assert registry.parse("test").base_url == "https://api.openai.com/v1"
+    spec = registry.parse("test")
+    assert spec is not None
+    assert spec.base_url == "https://api.openai.com/v1"

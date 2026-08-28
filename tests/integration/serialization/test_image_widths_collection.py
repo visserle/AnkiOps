@@ -1,3 +1,5 @@
+from typing import Any
+
 from ankiops.collection import deck_name_to_file_stem
 from ankiops.git import GitRepository
 from ankiops.image_widths import fix_image_widths_collection
@@ -5,7 +7,7 @@ from ankiops.sync.state import SyncState
 from tests.support.deck_files import DeckFileHarness
 
 
-def _make_collection(tmp_path):
+def _make_collection(tmp_path: Any) -> Any:
     db = SyncState.open(tmp_path)
     try:
         db.set_profile_name("test")
@@ -18,7 +20,7 @@ def _make_collection(tmp_path):
     return note_types_dir
 
 
-def _write_qa_deck(tmp_path, deck_name: str, answer: str):
+def _write_qa_deck(tmp_path: Any, deck_name: str, answer: str) -> Any:
     path = tmp_path / f"{deck_name_to_file_stem(deck_name)}.md"
     note_key = deck_name.replace("::", "-").replace(" ", "-")
     path.write_text(
@@ -28,7 +30,9 @@ def _write_qa_deck(tmp_path, deck_name: str, answer: str):
     return path
 
 
-def test_fix_image_widths_collection_includes_subdecks_by_default(tmp_path):
+def test_fix_image_widths_collection_includes_subdecks_by_default(
+    tmp_path: Any,
+) -> None:
     _make_collection(tmp_path)
     parent = _write_qa_deck(
         tmp_path,
@@ -59,7 +63,7 @@ def test_fix_image_widths_collection_includes_subdecks_by_default(tmp_path):
     assert "{width=204}" in other.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
+def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path: Any) -> None:
     _make_collection(tmp_path)
     parent = _write_qa_deck(
         tmp_path,
@@ -84,7 +88,7 @@ def test_fix_image_widths_collection_can_exclude_subdecks(tmp_path):
     assert "{width=304}" in child.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_rewrites_collab_deck(tmp_path):
+def test_fix_image_widths_collection_rewrites_collab_deck(tmp_path: Any) -> None:
     _make_collection(tmp_path)
     fs = DeckFileHarness()
     collab_root = tmp_path / "collab" / "owner" / "repo"
@@ -110,7 +114,7 @@ def test_fix_image_widths_collection_rewrites_collab_deck(tmp_path):
     assert "{width=404}" not in collab_file.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
+def test_fix_image_widths_collection_ignores_readme_docs(tmp_path: Any) -> None:
     _make_collection(tmp_path)
     deck_file = _write_qa_deck(
         tmp_path,
@@ -134,7 +138,7 @@ def test_fix_image_widths_collection_ignores_readme_docs(tmp_path):
     assert "{width=404}" in readme.read_text(encoding="utf-8")
 
 
-def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path):
+def test_fix_image_widths_collection_updates_unkeyed_notes(tmp_path: Any) -> None:
     _make_collection(tmp_path)
     deck_file = tmp_path / "Broken.md"
     deck_file.write_text(

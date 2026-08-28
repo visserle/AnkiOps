@@ -1,7 +1,11 @@
+from typing import Any
+
 from ankiops.collab.commands import _contains_conflict_markers
 
 
-def test_conflict_marker_detection_requires_a_complete_marker_triplet(tmp_path):
+def test_conflict_marker_detection_requires_a_complete_marker_triplet(
+    tmp_path: Any,
+) -> None:
     explanation = tmp_path / "Deck.md"
     explanation.write_text(
         "A: The values are ======= by definition.\n", encoding="utf-8"

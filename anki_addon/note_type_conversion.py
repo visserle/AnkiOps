@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .collection import card_snapshot, load_notes, note_field_values, note_type_name
 from .note_types import field_names, note_type_by_name, note_type_id, template_names
 from .protocol import ANKIOPS_KEY_FIELD_NAME, AnkiOpsConnectActionError
 
 
-def convert_notes_to_note_type_action(col, params: dict) -> dict:
+def convert_notes_to_note_type_action(
+    col: Any, params: dict[str, Any]
+) -> dict[str, int]:
     return convert_notes_to_note_type(
         col=col,
         note_ids=params.get("noteIds") or [],
@@ -17,12 +21,15 @@ def convert_notes_to_note_type_action(col, params: dict) -> dict:
 
 
 def convert_notes_to_note_type(
-    col,
-    note_ids,
+    col: Any,
+    note_ids: list[Any],
     old_note_type: str,
     new_note_type: str,
-) -> dict:
-    note_ids = [int(note_id) for note_id in note_ids]
+) -> dict[str, int]:
+    try:
+        note_ids = [int(note_id) for note_id in note_ids]
+    except (TypeError, ValueError) as error:
+        raise AnkiOpsConnectActionError("noteIds must contain integers.") from error
     if not note_ids:
         return {"changed": 0}
     if not old_note_type or not new_note_type:
@@ -78,7 +85,7 @@ def convert_notes_to_note_type(
 
     after_notes = load_notes(col, note_ids)
     after_cards = card_snapshot(col, note_ids)
-    failures = []
+    failures: list[str] = []
     for note_id, note in after_notes.items():
         actual_note_type = note_type_name(note)
         if actual_note_type != new_note_type:
@@ -112,6 +119,6 @@ def _exact_name_map(old_names: list[str], new_names: list[str], kind: str) -> li
     return [old_names.index(name) for name in new_names]
 
 
-def _replace_repeated(target, values: list[int]) -> None:
+def _replace_repeated(target: Any, values: list[int]) -> None:
     del target[:]
     target.extend(values)

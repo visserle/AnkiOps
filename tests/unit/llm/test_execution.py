@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 from ankiops.collection import LLM_DB_FILENAME
 from ankiops.llm.execution import OpenAIResult, _validate_cloze_text_fields, run_task
@@ -15,10 +16,10 @@ from tests.support.deck_files import DeckFileHarness
 
 
 class _FakeFiles:
-    def __init__(self) -> None:
+    def __init__(self: Any) -> None:
         self.created: list[tuple[str, bytes]] = []
 
-    async def create(self, *, file, purpose, expires_after):
+    async def create(self: Any, *, file: Any, purpose: Any, expires_after: Any) -> Any:
         assert purpose == "user_data"
         assert expires_after == {"anchor": "created_at", "seconds": 3600}
         content = file.read()
@@ -30,15 +31,15 @@ class _FakeFiles:
 class _FakeAsyncOpenAI:
     instances: list[_FakeAsyncOpenAI] = []
 
-    def __init__(self, **_kwargs) -> None:
+    def __init__(self: Any, **_kwargs: Any) -> None:
         self.files = _FakeFiles()
         self.instances.append(self)
 
-    async def close(self) -> None:
+    async def close(self: Any) -> None:
         pass
 
 
-def _init_collection(collection_root) -> None:
+def _init_collection(collection_root: Any) -> None:
     db = SyncState.open(collection_root)
     try:
         db.set_profile_name("test")
@@ -51,7 +52,7 @@ def _init_collection(collection_root) -> None:
     )
 
 
-def _init_git_repo(collection_root) -> None:
+def _init_git_repo(collection_root: Any) -> None:
     subprocess.run(
         ["git", "init"], cwd=collection_root, check=True, capture_output=True
     )
@@ -67,7 +68,7 @@ def _init_git_repo(collection_root) -> None:
     )
 
 
-def _commit_all(collection_root, message="root") -> None:
+def _commit_all(collection_root: Any, message: Any = "root") -> None:
     subprocess.run(["git", "add", "-A", "."], cwd=collection_root, check=True)
     subprocess.run(
         ["git", "commit", "-m", message],
@@ -77,7 +78,7 @@ def _commit_all(collection_root, message="root") -> None:
     )
 
 
-def _head_name_status(collection_root) -> str:
+def _head_name_status(collection_root: Any) -> str:
     return subprocess.run(
         ["git", "show", "--name-status", "--format=", "HEAD"],
         cwd=collection_root,
@@ -87,7 +88,7 @@ def _head_name_status(collection_root) -> str:
     ).stdout
 
 
-def _parsed_response(*updates, tag_updates=()):
+def _parsed_response(*updates: Any, tag_updates: Any = ()) -> Any:
     return SimpleNamespace(
         updates=[
             SimpleNamespace(note_key=note_key, field=field, value=value)
@@ -101,7 +102,9 @@ def _parsed_response(*updates, tag_updates=()):
     )
 
 
-def _success(parsed_response, *, input_tokens: int, output_tokens: int) -> OpenAIResult:
+def _success(
+    parsed_response: Any, *, input_tokens: int, output_tokens: int
+) -> OpenAIResult:
     return OpenAIResult(
         parsed_response=parsed_response,
         request_json={"model": "gpt-test"},
@@ -131,10 +134,10 @@ def _fatal_error() -> OpenAIResult:
 
 
 def test_executor_persists_successful_field_updates(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -170,7 +173,7 @@ def test_executor_persists_successful_field_updates(
         """,
     )
 
-    async def fake_call_openai(*, batch, **_kwargs):
+    async def fake_call_openai(*, batch: Any, **_kwargs: Any) -> Any:
         assert [candidate.payload.note_key for candidate in batch.candidates] == [
             "nk-1",
             "nk-2",
@@ -206,10 +209,10 @@ def test_executor_persists_successful_field_updates(
 
 
 def test_executor_uploads_expiring_input_file_once_for_multiple_batches(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -244,7 +247,7 @@ def test_executor_uploads_expiring_input_file_once_for_multiple_batches(
     )
     seen_file_ids: list[tuple[str, ...]] = []
 
-    async def fake_call_openai(*, input_file_ids, **_kwargs):
+    async def fake_call_openai(*, input_file_ids: Any, **_kwargs: Any) -> Any:
         seen_file_ids.append(input_file_ids)
         return _success(_parsed_response(), input_tokens=5, output_tokens=1)
 
@@ -271,12 +274,14 @@ def test_executor_uploads_expiring_input_file_once_for_multiple_batches(
 
 
 def test_executor_partial_uploads_expire_after_upload_failure(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     class _FailingFiles(_FakeFiles):
-        async def create(self, *, file, purpose, expires_after):
+        async def create(
+            self: Any, *, file: Any, purpose: Any, expires_after: Any
+        ) -> Any:
             if self.created:
                 raise RuntimeError("upload failed")
             return await super().create(
@@ -286,7 +291,7 @@ def test_executor_partial_uploads_expire_after_upload_failure(
             )
 
     class _FailingAsyncOpenAI(_FakeAsyncOpenAI):
-        def __init__(self, **_kwargs) -> None:
+        def __init__(self: Any, **_kwargs: Any) -> None:
             self.files = _FailingFiles()
             self.instances.append(self)
 
@@ -334,10 +339,10 @@ def test_executor_partial_uploads_expire_after_upload_failure(
 
 
 def test_executor_uses_expiring_files_before_fatal_request_error(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -365,7 +370,7 @@ def test_executor_uses_expiring_files_before_fatal_request_error(
         """,
     )
 
-    async def fake_call_openai(**_kwargs):
+    async def fake_call_openai(**_kwargs: Any) -> Any:
         return _fatal_error()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -384,10 +389,10 @@ def test_executor_uses_expiring_files_before_fatal_request_error(
 
 
 def test_executor_does_not_upload_files_without_eligible_notes(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -413,7 +418,7 @@ def test_executor_does_not_upload_files_without_eligible_notes(
         """,
     )
 
-    def fail_if_created(**_kwargs):
+    def fail_if_created(**_kwargs: Any) -> Any:
         raise AssertionError("OpenAI client should not be created")
 
     monkeypatch.setattr("ankiops.llm.execution.AsyncOpenAI", fail_if_created)
@@ -430,10 +435,10 @@ def test_executor_does_not_upload_files_without_eligible_notes(
 
 
 def test_executor_snapshots_only_queued_local_deck_paths(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -470,7 +475,7 @@ def test_executor_snapshots_only_queued_local_deck_paths(
     )
     write_file(llm_collection / "Other.txt", "changed\n")
 
-    async def fake_call_openai(*, batch, **_kwargs):
+    async def fake_call_openai(*, batch: Any, **_kwargs: Any) -> Any:
         assert [candidate.payload.note_key for candidate in batch.candidates] == [
             "nk-1"
         ]
@@ -508,10 +513,10 @@ def test_executor_snapshots_only_queued_local_deck_paths(
 
 
 def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     collab_root = llm_collection / "collab" / "owner" / "repo"
     DeckFileHarness().eject_default_note_types(collab_root / "note_types")
@@ -552,7 +557,7 @@ def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
     )
     write_file(llm_collection / "Other.txt", "also changed\n")
 
-    async def fake_call_openai(*, batch, **_kwargs):
+    async def fake_call_openai(*, batch: Any, **_kwargs: Any) -> Any:
         return _success(
             _parsed_response(("nk-1", "Question", "Fixed question")),
             input_tokens=12,
@@ -578,10 +583,10 @@ def test_executor_uses_broad_snapshot_with_collab_without_committing_llm_db(
 
 
 def test_executor_persists_successful_tag_updates(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -608,7 +613,7 @@ def test_executor_persists_successful_tag_updates(
         """,
     )
 
-    async def fake_call_openai(*, batch, **_kwargs):
+    async def fake_call_openai(*, batch: Any, **_kwargs: Any) -> Any:
         assert batch.candidates[0].payload.editable_tags == ("old",)
         return _success(
             _parsed_response(tag_updates=[("nk-1", ["new", "old", "new"])]),
@@ -634,10 +639,10 @@ def test_executor_persists_successful_tag_updates(
 
 
 def test_executor_cancels_queued_items_after_fatal_error(
-    llm_collection,
-    write_file,
-    monkeypatch,
-):
+    llm_collection: Any,
+    write_file: Any,
+    monkeypatch: Any,
+) -> None:
     _init_collection(llm_collection)
     write_file(
         llm_collection / "Deck.md",
@@ -678,7 +683,7 @@ def test_executor_cancels_queued_items_after_fatal_error(
         """,
     )
 
-    async def fake_call_openai(**_kwargs):
+    async def fake_call_openai(**_kwargs: Any) -> Any:
         return _fatal_error()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -698,7 +703,9 @@ def test_executor_cancels_queued_items_after_fatal_error(
     assert "Q: Broken" in (llm_collection / "Deck.md").read_text(encoding="utf-8")
 
 
-def test_validate_cloze_text_fields_uses_template_cloze_sources(llm_qa_config):
+def test_validate_cloze_text_fields_uses_template_cloze_sources(
+    llm_qa_config: Any,
+) -> None:
     config = replace(
         llm_qa_config,
         is_cloze=True,

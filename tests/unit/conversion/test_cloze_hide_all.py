@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,8 +21,8 @@ def template_dir() -> Path:
     ],
 )
 def test_templates_keep_one_rendered_cloze_probe_and_one_raw_source(
-    template_dir, filename, raw_field_tag
-):
+    template_dir: Any, filename: Any, raw_field_tag: Any
+) -> None:
     template = (template_dir / filename).read_text(encoding="utf-8")
 
     assert template.count("{{cloze:Text}}") == 1
@@ -31,7 +32,7 @@ def test_templates_keep_one_rendered_cloze_probe_and_one_raw_source(
     assert 'id="content_display"' in template
 
 
-def test_back_template_keeps_show_all_toggle(template_dir):
+def test_back_template_keeps_show_all_toggle(template_dir: Any) -> None:
     template = (template_dir / "Back.template.anki").read_text(encoding="utf-8")
 
     assert 'id="cloze_toggle"' in template
@@ -41,8 +42,8 @@ def test_back_template_keeps_show_all_toggle(template_dir):
 
 @pytest.mark.parametrize("filename", ["Front.template.anki", "Back.template.anki"])
 def test_templates_prefer_anki_cloze_ordinal_before_body_class_fallback(
-    template_dir, filename
-):
+    template_dir: Any, filename: Any
+) -> None:
     template = (template_dir / filename).read_text(encoding="utf-8")
 
     ordinal_pos = template.index("activeOrdinalFromRendered")
@@ -55,8 +56,8 @@ def test_templates_prefer_anki_cloze_ordinal_before_body_class_fallback(
 
 @pytest.mark.parametrize("filename", ["Front.template.anki", "Back.template.anki"])
 def test_templates_use_anki_ordinal_only_for_active_known_clozes(
-    template_dir, filename
-):
+    template_dir: Any, filename: Any
+) -> None:
     template = (template_dir / filename).read_text(encoding="utf-8")
 
     assert 'querySelectorAll(".cloze[data-ordinal]")' in template
@@ -72,8 +73,8 @@ def test_templates_use_anki_ordinal_only_for_active_known_clozes(
     ],
 )
 def test_templates_preserve_active_cloze_boundaries_for_duplicate_content_detection(
-    template_dir, filename, simulation
-):
+    template_dir: Any, filename: Any, simulation: Any
+) -> None:
     template = (template_dir / filename).read_text(encoding="utf-8")
 
     rendered_signature = "var renderedSig = normalizeSignature(rendered)"

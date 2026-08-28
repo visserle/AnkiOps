@@ -20,14 +20,20 @@ logger = logging.getLogger(__name__)
 
 
 def _positive_int(value: str) -> int:
-    parsed = int(value)
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return parsed
 
 
 def _non_negative_int(value: str) -> int:
-    parsed = int(value)
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be a non-negative integer")
     return parsed
@@ -47,7 +53,7 @@ def _get_cli_version() -> str:
         return "unknown"
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="AnkiOps – A bridge between Anki and your filesystem..",
     )

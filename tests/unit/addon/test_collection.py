@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from anki_addon.actions import dispatch_action
@@ -7,7 +9,7 @@ from anki_addon.protocol import AnkiOpsConnectActionError
 from tests.unit.addon.fakes import _ReadFakeCollection, _WriteFakeCollection
 
 
-def test_dispatch_action_reads_collection_state():
+def test_dispatch_action_reads_collection_state() -> None:
     col = _ReadFakeCollection()
 
     assert dispatch_action(col, "getActiveProfile", {}) == "TestProfile"
@@ -44,7 +46,7 @@ def test_dispatch_action_reads_collection_state():
     assert dispatch_action(col, "findCards", {"query": "nid:101"}) == [1001]
 
 
-def test_dispatch_action_imports_notes_and_media(tmp_path):
+def test_dispatch_action_imports_notes_and_media(tmp_path: Any) -> None:
     col = _WriteFakeCollection(tmp_path / "collection.media")
 
     assert dispatch_action(col, "createDeck", {"deck": "Imported"}) == 3
@@ -132,7 +134,7 @@ def test_dispatch_action_imports_notes_and_media(tmp_path):
     )
 
 
-def test_delete_decks_requires_explicit_card_deletion_permission(tmp_path):
+def test_delete_decks_requires_explicit_card_deletion_permission(tmp_path: Any) -> None:
     col = _WriteFakeCollection(tmp_path / "collection.media")
     dispatch_action(col, "createDeck", {"deck": "Keep"})
 

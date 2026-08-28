@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ankiops.git import GitRepository
 from ankiops.markdown import NOTE_SEPARATOR
 from tests.support.deck_files import DeckFileHarness
@@ -9,7 +11,7 @@ from tests.support.deck_files import DeckFileHarness
 _COLLAB_NOTE_TYPE = "collab/owner/repo/AnkiOpsQA"
 
 
-def _setup_collab_root(world):
+def _setup_collab_root(world: Any) -> Any:
     collab_root = world.root / "collab" / "owner" / "repo"
     DeckFileHarness().eject_default_note_types(collab_root / "note_types")
     collab_root.mkdir(parents=True, exist_ok=True)
@@ -17,7 +19,7 @@ def _setup_collab_root(world):
     return collab_root
 
 
-def _write_collab_deck(collab_root, deck_name: str, tags, answer: str):
+def _write_collab_deck(collab_root: Any, deck_name: str, tags: Any, answer: str) -> Any:
     lines = [
         "<!-- note_key: leech-key -->",
         f"<!-- note_type: {_COLLAB_NOTE_TYPE} -->",
@@ -30,7 +32,7 @@ def _write_collab_deck(collab_root, deck_name: str, tags, answer: str):
     return path
 
 
-def test_export_strips_leech_tag_from_collab_deck(world):
+def test_export_strips_leech_tag_from_collab_deck(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     _write_collab_deck(collab_root, "CollabDeck", tags="shared", answer="Old Collab A")
     note_id = world.add_anki_note(
@@ -55,7 +57,7 @@ def test_export_strips_leech_tag_from_collab_deck(world):
     assert "<!-- tags: leech" not in content
 
 
-def test_export_keeps_leech_tag_for_local_decks(world):
+def test_export_keeps_leech_tag_for_local_decks(world: Any) -> None:
     world.add_qa_note(
         deck_name="LocalDeck",
         question="Local Q",
@@ -71,7 +73,7 @@ def test_export_keeps_leech_tag_for_local_decks(world):
     assert "<!-- tags: leech shared -->" in content
 
 
-def test_import_never_applies_leech_tag_from_collab_file(world):
+def test_import_never_applies_leech_tag_from_collab_file(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     _write_collab_deck(
         collab_root, "CollabDeck", tags="leech shared", answer="Collab A"
@@ -89,7 +91,7 @@ def test_import_never_applies_leech_tag_from_collab_file(world):
     assert world.mock_anki.notes[created_id]["tags"] == ["shared"]
 
 
-def test_import_preserves_local_leech_tag_on_update(world):
+def test_import_preserves_local_leech_tag_on_update(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     note_id = world.add_anki_note(
         deck_name="CollabDeck",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from re import escape
+from typing import Any
 
 import pytest
 
@@ -15,7 +16,7 @@ def _start_job(db: LlmJobStore) -> int:
     return db.start_job(task_name="grammar", model="test", model_id="gpt-test")
 
 
-def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
+def test_resolve_job_id_accepts_numeric_and_latest(tmp_path: Any) -> None:
     db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
@@ -29,7 +30,7 @@ def test_resolve_job_id_accepts_numeric_and_latest(tmp_path):
         db.close()
 
 
-def test_open_rejects_old_job_item_schema_without_source(tmp_path):
+def test_open_rejects_old_job_item_schema_without_source(tmp_path: Any) -> None:
     llm_dir = tmp_path / LLM_DIR
     llm_dir.mkdir()
     db_path = llm_dir / LLM_DB_FILENAME
@@ -59,7 +60,7 @@ def test_open_rejects_old_job_item_schema_without_source(tmp_path):
         LlmJobStore.open(tmp_path)
 
 
-def test_write_tx_rolls_back_request(tmp_path):
+def test_write_tx_rolls_back_request(tmp_path: Any) -> None:
     db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
@@ -102,7 +103,7 @@ def test_write_tx_rolls_back_request(tmp_path):
         db.close()
 
 
-def test_get_job_detail_reports_usage_at_request_level(tmp_path):
+def test_get_job_detail_reports_usage_at_request_level(tmp_path: Any) -> None:
     db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)
@@ -169,7 +170,7 @@ def test_get_job_detail_reports_usage_at_request_level(tmp_path):
     ]
 
 
-def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path):
+def test_mark_unfinished_items_canceled_only_updates_queued(tmp_path: Any) -> None:
     db = LlmJobStore.open(tmp_path)
     try:
         job_id = _start_job(db)

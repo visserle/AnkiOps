@@ -1,7 +1,9 @@
+from typing import Any
+
 from ankiops.markdown import write_deck_file
 
 
-def test_write_deck_file_adds_final_newline_to_non_empty_content(tmp_path):
+def test_write_deck_file_adds_final_newline_to_non_empty_content(tmp_path: Any) -> None:
     path = tmp_path / "Deck.md"
 
     write_deck_file(path, "Q: Question")
@@ -9,7 +11,7 @@ def test_write_deck_file_adds_final_newline_to_non_empty_content(tmp_path):
     assert path.read_text(encoding="utf-8") == "Q: Question\n"
 
 
-def test_write_deck_file_keeps_existing_final_newline(tmp_path):
+def test_write_deck_file_keeps_existing_final_newline(tmp_path: Any) -> None:
     path = tmp_path / "Deck.md"
 
     write_deck_file(path, "Q: Question\n")
@@ -17,7 +19,7 @@ def test_write_deck_file_keeps_existing_final_newline(tmp_path):
     assert path.read_text(encoding="utf-8") == "Q: Question\n"
 
 
-def test_write_deck_file_keeps_empty_content_empty(tmp_path):
+def test_write_deck_file_keeps_empty_content_empty(tmp_path: Any) -> None:
     path = tmp_path / "Deck.md"
 
     write_deck_file(path, "")

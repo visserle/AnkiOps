@@ -4,34 +4,35 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 
-def _load_toolbar_module(monkeypatch):
+def _load_toolbar_module(monkeypatch: Any) -> Any:
     aqt = ModuleType("aqt")
-    qt = ModuleType("aqt.qt")
-    utils = ModuleType("aqt.utils")
+    qt: Any = ModuleType("aqt.qt")
+    utils: Any = ModuleType("aqt.utils")
 
     class _DummyDialog:
-        def __init__(self, *args, **kwargs):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def setWindowTitle(self, title):
+        def setWindowTitle(self: Any, title: Any) -> Any:
             pass
 
-        def resize(self, width, height):
+        def resize(self: Any, width: Any, height: Any) -> Any:
             pass
 
-        def exec(self):
+        def exec(self: Any) -> Any:
             pass
 
     class _DummyButtonBox:
         class StandardButton:
             Ok = object()
 
-        def __init__(self, *args, **kwargs):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
             self.accepted = self
 
-        def connect(self, callback):
+        def connect(self: Any, callback: Any) -> Any:
             pass
 
     class _DummyFontDatabase:
@@ -39,33 +40,33 @@ def _load_toolbar_module(monkeypatch):
             FixedFont = object()
 
         @staticmethod
-        def systemFont(font):
+        def systemFont(font: Any) -> Any:
             return object()
 
     class _DummyPlainTextEdit:
         class LineWrapMode:
             NoWrap = object()
 
-        def __init__(self, *args, **kwargs):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def setReadOnly(self, value):
+        def setReadOnly(self: Any, value: Any) -> Any:
             pass
 
-        def setPlainText(self, value):
+        def setPlainText(self: Any, value: Any) -> Any:
             pass
 
-        def setFont(self, value):
+        def setFont(self: Any, value: Any) -> Any:
             pass
 
-        def setLineWrapMode(self, value):
+        def setLineWrapMode(self: Any, value: Any) -> Any:
             pass
 
     class _DummyLayout:
-        def __init__(self, *args, **kwargs):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def addWidget(self, widget):
+        def addWidget(self: Any, widget: Any) -> Any:
             pass
 
     qt.QDialog = _DummyDialog
@@ -91,10 +92,12 @@ def _load_toolbar_module(monkeypatch):
 
 
 class _FakeToolbar:
-    def __init__(self):
-        self.handlers = {}
+    def __init__(self: Any) -> None:
+        self.handlers: dict[str, Any] = {}
 
-    def create_link(self, *, cmd, label, func, tip=None, id=None):
+    def create_link(
+        self: Any, *, cmd: Any, label: Any, func: Any, tip: Any = None, id: Any = None
+    ) -> Any:
         self.handlers[cmd] = func
         title_attr = f'title="{tip}"' if tip else ""
         id_attr = f'id="{id}"' if id else ""
@@ -106,14 +109,16 @@ class _FakeToolbar:
 
 
 class _FakeRunner:
-    def __init__(self):
-        self.commands = []
+    def __init__(self: Any) -> None:
+        self.commands: list[str] = []
 
-    def run(self, command):
+    def run(self: Any, command: str) -> None:
         self.commands.append(command)
 
 
-def test_add_toolbar_links_groups_af_and_fa_with_readable_spacing(monkeypatch):
+def test_add_toolbar_links_groups_af_and_fa_with_readable_spacing(
+    monkeypatch: Any,
+) -> None:
     toolbar_module = _load_toolbar_module(monkeypatch)
     links = ["Decks", "Add", "Browse", "Stats", "Sync"]
     toolbar = _FakeToolbar()

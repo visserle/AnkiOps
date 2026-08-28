@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -10,8 +11,8 @@ from ankiops.git import GitRepository
 
 
 def test_af_rejects_collab_media_traversal_before_reading_anki_or_writing_files(
-    world,
-):
+    world: Any,
+) -> None:
     world.init_git()
     collection_head = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -73,7 +74,9 @@ def test_af_rejects_collab_media_traversal_before_reading_anki_or_writing_files(
         "prefixed-external",
     ],
 )
-def test_fa_rejects_every_unsupported_media_path_before_snapshot(world, kind):
+def test_fa_rejects_every_unsupported_media_path_before_snapshot(
+    world: Any, kind: Any
+) -> None:
     world.init_git()
     private_file = world.root / "private.txt"
     private_file.write_bytes(b"private")

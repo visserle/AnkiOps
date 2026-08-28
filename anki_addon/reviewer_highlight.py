@@ -2,23 +2,28 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any, Optional
 
-from aqt import gui_hooks
-from aqt.reviewer import Reviewer
-from aqt.webview import WebContent
+_aqt = import_module("aqt")
+gui_hooks: Any = _aqt.gui_hooks
+Reviewer: Any = import_module("aqt.reviewer").Reviewer
+WebContent: Any = import_module("aqt.webview").WebContent
 
 try:
-    from aqt.previewer import MultiCardPreviewer
+    MultiCardPreviewer: Any = import_module("aqt.previewer").MultiCardPreviewer
 except ImportError:  # pragma: no cover - not present on older Anki versions
-    MultiCardPreviewer = None  # type: ignore
+    MultiCardPreviewer = None
 
 
 _HIGHLIGHT_SHORTCUT_SCRIPT = """
 <script>
 (function () {
     function register() {
-        if (typeof window.EFDRC === "undefined" || typeof window.EFDRC.registerShortcut !== "function") {
+        if (
+            typeof window.EFDRC === "undefined" ||
+            typeof window.EFDRC.registerShortcut !== "function"
+        ) {
             return false;
         }
         window.EFDRC.registerShortcut("Ctrl+J", function (event, elem) {
@@ -84,9 +89,7 @@ _HIGHLIGHT_SHORTCUT_SCRIPT = """
 """
 
 
-def _on_webview_will_set_content(
-    web_content: WebContent, context: Optional[Any]
-) -> None:
+def _on_webview_will_set_content(web_content: Any, context: Optional[Any]) -> None:
     if isinstance(context, Reviewer):
         web_content.body += _HIGHLIGHT_SHORTCUT_SCRIPT
     elif MultiCardPreviewer is not None and isinstance(context, MultiCardPreviewer):

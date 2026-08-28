@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from pathlib import Path
+from subprocess import CalledProcessError
+from typing import Any
 
 from rich.markup import escape as rich_escape
 
+from ankiops.anki import Anki
 from ankiops.collab import run as run_collab_impl
 from ankiops.collab.source_security import validate_collection_collab_sources
 from ankiops.collection import (
@@ -53,7 +55,9 @@ sync_media_from_anki = sync_all_media_from_anki
 sync_media_to_anki = sync_all_media_to_anki
 
 
-def _sync_note_types(anki, parsed_sources: tuple[ParsedSource, ...], state: SyncState):
+def _sync_note_types(
+    anki: Anki, parsed_sources: tuple[ParsedSource, ...], state: SyncState
+) -> str | None:
     return sync_note_type_configs(
         anki,
         [
@@ -93,7 +97,7 @@ def _deleted_local_markdown_paths(collection_root: Path) -> list[Path]:
     if result.returncode != 0:
         return []
 
-    paths = []
+    paths: list[Path] = []
     for rel_path in result.stdout.split("\0"):
         if not rel_path:
             continue
@@ -107,7 +111,7 @@ def _is_local_markdown_deck_path(collection_root: Path, path: Path) -> bool:
     return path.parent == collection_root and is_deck_markdown_filename(path.name)
 
 
-def run_init(args):
+def run_init(args: Any) -> None:
     """Initialize the current directory as an AnkiOps collection."""
     anki = connect_or_exit()
     profile = anki.get_active_profile()
@@ -125,7 +129,7 @@ def run_init(args):
     )
 
 
-def run_af(args):
+def run_af(args: Any) -> None:
     """Anki -> files: sync Anki changes into local files."""
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
@@ -155,7 +159,7 @@ def run_af(args):
         state.close()
 
 
-def _run_af_with_state(anki, state: SyncState, collection_root: Path) -> None:
+def _run_af_with_state(anki: Anki, state: SyncState, collection_root: Path) -> None:
     logger.debug("Starting note sync (Anki -> files)")
     parsed_sources = parse_collection(collection_root)
     export_summary: CollectionReport = sync_collection_from_anki(
@@ -226,7 +230,7 @@ def _log_files_to_anki_errors(import_summary: CollectionReport) -> None:
             )
 
 
-def run_fa(args):
+def run_fa(args: Any) -> None:
     """Files -> Anki: sync local file changes into Anki."""
     anki = connect_or_exit()
     active_profile = anki.get_active_profile()
@@ -258,7 +262,7 @@ def run_fa(args):
         state.close()
 
 
-def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
+def _run_fa_with_state(anki: Anki, state: SyncState, collection_root: Path) -> None:
     try:
         logger.debug("Starting media push (local -> Anki)")
         media_result = sync_media_to_anki(anki, collection_root, state)
@@ -329,7 +333,7 @@ def _run_fa_with_state(anki, state: SyncState, collection_root: Path) -> None:
         )
 
 
-def run_serialize(args):
+def run_serialize(args: Any) -> None:
     """Serialize collection to JSON format."""
     if args.no_subdecks and not args.deck:
         logger.error("--no-subdecks requires --deck")
@@ -359,7 +363,7 @@ def run_serialize(args):
         raise SystemExit(1) from error
 
 
-def run_deserialize(args):
+def run_deserialize(args: Any) -> None:
     """Deserialize collection from JSON/ZIP format to target directory."""
     if args.input:
         serialized_file = Path(args.input)
@@ -392,7 +396,7 @@ def run_deserialize(args):
     )
 
 
-def run_fix_image_widths(args):
+def run_fix_image_widths(args: Any) -> None:
     """Fix Markdown image width annotations in local deck files."""
     if args.no_subdecks and not args.deck:
         logger.error("--no-subdecks requires --deck")
@@ -451,18 +455,20 @@ def run_fix_image_widths(args):
         logger.info("Only Markdown files were edited. Run 'ankiops fa' to sync.")
 
 
-def run_note_type(args):
+def run_note_type(args: Any) -> None:
     run_note_type_impl(args)
 
 
-def run_collab(args):
+def run_collab(args: Any) -> None:
     try:
         run_collab_impl(args)
-    except ValueError as error:
-        print_error(str(error))
-        logger.debug("Collab command failed", exc_info=True)
-        raise SystemExit(1) from error
-    except subprocess.CalledProcessError as error:
+    except BaseException as error:
+        if isinstance(error, ValueError):
+            print_error(str(error))
+            logger.debug("Collab command failed", exc_info=True)
+            raise SystemExit(1) from error
+        if not isinstance(error, CalledProcessError):
+            raise
         output = ((error.stdout or "") + (error.stderr or "")).strip()
         print_error(output or f"Git command failed with exit {error.returncode}.")
         logger.debug("Collab Git command failed", exc_info=True)

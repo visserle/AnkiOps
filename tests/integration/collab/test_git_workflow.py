@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from ankiops.collab.commands import run_update
 from ankiops.sync.state import SyncState
@@ -27,7 +28,9 @@ def _commit(root: Path, message: str) -> str:
     return _git(root, "rev-parse", "HEAD")
 
 
-def test_collab_update_preserves_dirty_private_root(tmp_path, monkeypatch):
+def test_collab_update_preserves_dirty_private_root(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     collection = tmp_path / "collection"
     collection.mkdir()
     _git(collection, "init", "-b", "main")

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Final
 
 from ankiops.anki import Anki
 from ankiops.collab.tags import exclude_leech_tags
@@ -39,9 +40,9 @@ from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
 
-_RESOLVED_NOTE_KEY = 0
-_RESOLVED_NOTE_ID = 1
-_RESOLVED_NOTE_VALUE = 2
+_RESOLVED_NOTE_KEY: Final = 0
+_RESOLVED_NOTE_ID: Final = 1
+_RESOLVED_NOTE_VALUE: Final = 2
 _ResolvedDeckNote = tuple[str, int, Note]
 _SYNC_ORDER = (
     ChangeType.DELETE,
@@ -268,14 +269,14 @@ def _order_resolved_notes(
         resolved[_RESOLVED_NOTE_KEY]: resolved for resolved in resolved_notes
     }
     resolved_by_fingerprint: dict[str, list[_ResolvedDeckNote]] = {}
-    for resolved in resolved_notes:
-        resolved_note = resolved[_RESOLVED_NOTE_VALUE]
+    for resolved_entry in resolved_notes:
+        resolved_note = resolved_entry[_RESOLVED_NOTE_VALUE]
         resolved_hash = note_fingerprint(
             resolved_note.note_type,
             resolved_note.fields,
             tags=resolved_note.tags,
         )
-        resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved)
+        resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved_entry)
 
     consumed_note_keys: set[str] = set()
     ordered_notes: list[Note] = []
@@ -536,7 +537,7 @@ def sync_collection_from_anki(
             all_card_ids.extend(anki_note.card_ids)
         anki_cards = anki.fetch_cards_info(all_card_ids)
 
-        notes_by_deck = {}
+        notes_by_deck: dict[str, list[AnkiNote]] = {}
         for note_id, anki_note in anki_notes.items():
             if not anki_note.card_ids:
                 continue
@@ -671,17 +672,19 @@ def sync_collection_from_anki(
                 continue
             mappings: list[tuple[str, int]] = []
             for note in notes:
-                note_key = note_keys_by_id.get(note.note_id)
-                if not note_key:
-                    note_key = note.fields.get(ANKIOPS_KEY_FIELD.name, "").strip()
-                if note_key:
-                    note_id = pending_by_key.get(note_key, note.note_id)
-                    mappings.append((note_key, note_id))
+                mapped_note_key = note_keys_by_id.get(note.note_id)
+                if not mapped_note_key:
+                    mapped_note_key = note.fields.get(
+                        ANKIOPS_KEY_FIELD.name, ""
+                    ).strip()
+                if mapped_note_key:
+                    note_id = pending_by_key.get(mapped_note_key, note.note_id)
+                    mappings.append((mapped_note_key, note_id))
             state.upsert_note_links(mappings, source_path=owner_source.source_path)
         if pending_export_fingerprints:
             state.upsert_export_hashes(pending_export_fingerprints)
 
-        extra_changes = []
+        extra_changes: list[Change] = []
         active_files = {
             sync_result.file_path for sync_result in results if sync_result.file_path
         }

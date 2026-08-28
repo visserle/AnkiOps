@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -14,17 +15,21 @@ from ankiops.collection import (
 from ankiops.sync.state import SyncState
 
 
-def _init_git(path):
+def _init_git(path: Any) -> Any:
     subprocess.run(["git", "init", "-b", "main"], cwd=path, check=True)
 
 
-def test_get_collection_root_is_current_directory(tmp_path, monkeypatch):
+def test_get_collection_root_is_current_directory(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     monkeypatch.chdir(tmp_path)
 
     assert get_collection_root() == tmp_path
 
 
-def test_require_collection_root_exits_when_profile_is_unset(tmp_path, monkeypatch):
+def test_require_collection_root_exits_when_profile_is_unset(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
@@ -36,8 +41,8 @@ def test_require_collection_root_exits_when_profile_is_unset(tmp_path, monkeypat
 
 
 def test_require_collection_root_exits_on_profile_mismatch(
-    tmp_path, monkeypatch, caplog
-):
+    tmp_path: Any, monkeypatch: Any, caplog: Any
+) -> None:
     monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
@@ -55,7 +60,9 @@ def test_require_collection_root_exits_on_profile_mismatch(
     assert ".venv/bin/ankiops" not in caplog.text
 
 
-def test_require_collection_root_returns_path_on_profile_match(tmp_path, monkeypatch):
+def test_require_collection_root_returns_path_on_profile_match(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
 
     db = SyncState.open(tmp_path)
@@ -69,7 +76,9 @@ def test_require_collection_root_returns_path_on_profile_match(tmp_path, monkeyp
     assert require_collection_root("Work") == tmp_path
 
 
-def test_require_collection_root_exits_without_root_git(tmp_path, monkeypatch):
+def test_require_collection_root_exits_without_root_git(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     monkeypatch.setattr("ankiops.collection.get_collection_root", lambda: tmp_path)
     db = SyncState.open(tmp_path)
     db.close()
@@ -78,7 +87,9 @@ def test_require_collection_root_exits_without_root_git(tmp_path, monkeypatch):
         require_collection_root()
 
 
-def test_collection_gitignore_excludes_nested_repositories_and_recovery(tmp_path):
+def test_collection_gitignore_excludes_nested_repositories_and_recovery(
+    tmp_path: Any,
+) -> None:
     _setup_gitignore(tmp_path)
 
     entries = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,11 +14,11 @@ from ankiops.sync.report import Change, ChangeType
 
 
 class _InvokeRecorder:
-    def __init__(self, *results):
+    def __init__(self, *results: Any) -> None:
         self.results = list(results)
-        self.calls = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    def __call__(self, action: str, **params):
+    def __call__(self, action: str, **params: Any) -> Any:
         self.calls.append((action, params))
         if not self.results:
             return None
@@ -53,7 +54,7 @@ def _make_create_change(entity_repr: str = "note_key: create") -> Change:
     )
 
 
-def test_apply_note_changes_collects_partial_errors():
+def test_apply_note_changes_collects_partial_errors() -> None:
     fake_non_create_result = [
         None,
         "change deck failed",
@@ -84,7 +85,7 @@ def test_apply_note_changes_collects_partial_errors():
     assert any("Failed delete" in error for error in errors)
 
 
-def test_apply_note_changes_surfaces_connection_exception():
+def test_apply_note_changes_surfaces_connection_exception() -> None:
     adapter = Anki(invoke_func=_InvokeRecorder(AnkiConnectionError("boom")))
 
     created_ids, errors = adapter.apply_note_changes(
@@ -100,7 +101,7 @@ def test_apply_note_changes_surfaces_connection_exception():
     assert errors == ["boom"]
 
 
-def test_apply_note_changes_preflight_reports_create_context():
+def test_apply_note_changes_preflight_reports_create_context() -> None:
     invoke = _InvokeRecorder(
         [
             {
@@ -127,7 +128,7 @@ def test_apply_note_changes_preflight_reports_create_context():
     assert [call[0] for call in invoke.calls] == ["canAddNotesWithErrorDetail"]
 
 
-def test_apply_note_changes_bulk_create_exception_keeps_create_context():
+def test_apply_note_changes_bulk_create_exception_keeps_create_context() -> None:
     adapter = Anki(
         invoke_func=_InvokeRecorder(
             [{"canAdd": True}],
@@ -150,7 +151,7 @@ def test_apply_note_changes_bulk_create_exception_keeps_create_context():
     ]
 
 
-def test_fetch_notes_info_maps_tags():
+def test_fetch_notes_info_maps_tags() -> None:
     adapter = Anki(
         invoke_func=_InvokeRecorder(
             [
@@ -173,7 +174,7 @@ def test_fetch_notes_info_maps_tags():
     assert notes[101].tags == ("a", "z")
 
 
-def test_convert_notes_to_note_type_calls_ankiops_connect_action():
+def test_convert_notes_to_note_type_calls_ankiops_connect_action() -> None:
     invoke = _InvokeRecorder()
     adapter = Anki(invoke_func=invoke)
 
@@ -191,7 +192,7 @@ def test_convert_notes_to_note_type_calls_ankiops_connect_action():
     ]
 
 
-def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model():
+def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model() -> None:
     invoke = _InvokeRecorder([[101], [201, 202]])
     adapter = Anki(invoke_func=invoke)
 
@@ -206,7 +207,7 @@ def test_fetch_note_ids_by_note_keys_searches_key_field_independent_of_model():
     ]
 
 
-def test_apply_note_changes_updates_fields_and_tags_with_update_note():
+def test_apply_note_changes_updates_fields_and_tags_with_update_note() -> None:
     invoke = _InvokeRecorder([None])
     adapter = Anki(invoke_func=invoke)
     update_change = Change(
@@ -239,7 +240,7 @@ def test_apply_note_changes_updates_fields_and_tags_with_update_note():
     }
 
 
-def test_apply_note_changes_bulk_create_includes_tags():
+def test_apply_note_changes_bulk_create_includes_tags() -> None:
     invoke = _InvokeRecorder(
         [{"canAdd": True}],
         [303],
@@ -276,7 +277,7 @@ def test_apply_note_changes_bulk_create_includes_tags():
     assert note_payload["tags"] == ["a", "z"]
 
 
-def test_fetch_note_type_states_normalizes_dict_styling_payload():
+def test_fetch_note_type_states_normalizes_dict_styling_payload() -> None:
     adapter = Anki(
         invoke_func=_InvokeRecorder(
             [
@@ -294,7 +295,7 @@ def test_fetch_note_type_states_normalizes_dict_styling_payload():
     assert states["MyType"]["styling"] == ".card { color: red; }"
 
 
-def test_fetch_note_type_states_preserves_string_styling_payload():
+def test_fetch_note_type_states_preserves_string_styling_payload() -> None:
     adapter = Anki(
         invoke_func=_InvokeRecorder(
             [
@@ -312,7 +313,7 @@ def test_fetch_note_type_states_preserves_string_styling_payload():
     assert states["MyType"]["styling"] == ".card { color: blue; }"
 
 
-def test_fetch_note_type_states_raises_on_malformed_styling_payload():
+def test_fetch_note_type_states_raises_on_malformed_styling_payload() -> None:
     adapter = Anki(
         invoke_func=_InvokeRecorder(
             [
@@ -332,7 +333,9 @@ def test_fetch_note_type_states_raises_on_malformed_styling_payload():
         adapter.fetch_note_type_states(["MyType"])
 
 
-def test_adapter_media_operations_accept_regular_flat_media_files(tmp_path: Path):
+def test_adapter_media_operations_accept_regular_flat_media_files(
+    tmp_path: Path,
+) -> None:
     source_media = tmp_path / "source" / "media"
     source_media.mkdir(parents=True)
     source = source_media / "shared image.png"

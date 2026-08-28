@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from ankiops.git import GitRepository
@@ -7,7 +9,7 @@ from ankiops.markdown import NOTE_SEPARATOR
 from tests.support.deck_files import DeckFileHarness
 
 
-def _setup_collab_root(world):
+def _setup_collab_root(world: Any) -> Any:
     collab_root = world.root / "collab" / "owner" / "repo"
     DeckFileHarness().eject_default_note_types(collab_root / "note_types")
     collab_root.mkdir(parents=True, exist_ok=True)
@@ -16,12 +18,12 @@ def _setup_collab_root(world):
 
 
 def _write_collab_qa_deck(
-    collab_root,
+    collab_root: Any,
     deck_name: str,
     question: str,
     answer: str,
     note_key: str,
-):
+) -> Any:
     path = collab_root / f"{deck_name}.md"
     path.write_text(
         "\n".join(
@@ -38,7 +40,7 @@ def _write_collab_qa_deck(
     return path
 
 
-def test_import_syncs_root_and_collab_sources_as_one_collection(world):
+def test_import_syncs_root_and_collab_sources_as_one_collection(world: Any) -> None:
     collab_root = _setup_collab_root(world)
 
     root_id = world.add_qa_note(
@@ -83,7 +85,9 @@ def test_import_syncs_root_and_collab_sources_as_one_collection(world):
     assert collab_id in world.mock_anki.notes
 
 
-def test_import_converts_root_note_to_scoped_collab_type_without_duplicate(world):
+def test_import_converts_root_note_to_scoped_collab_type_without_duplicate(
+    world: Any,
+) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "created-key-1"
     world.mock_anki.add_note(
@@ -123,7 +127,7 @@ def test_import_converts_root_note_to_scoped_collab_type_without_duplicate(world
     ) in world.mock_anki.calls
 
 
-def test_import_rejects_implicit_cross_source_move(world):
+def test_import_rejects_implicit_cross_source_move(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "cross-source-key"
     _write_collab_qa_deck(
@@ -143,7 +147,9 @@ def test_import_rejects_implicit_cross_source_move(world):
             world.sync_import(db)
 
 
-def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(world):
+def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(
+    world: Any,
+) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "created-key-ankiops-connect-down"
     world.mock_anki.add_note(
@@ -176,7 +182,7 @@ def test_import_ankiops_connect_failure_blocks_conversion_without_duplicate(worl
     assert world.mock_anki.notes[note_id]["modelName"] == "AnkiOpsQA"
 
 
-def test_import_blocks_cross_collab_conversion_without_duplicate(world):
+def test_import_blocks_cross_collab_conversion_without_duplicate(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "created-key-wrong-collab"
     world.mock_anki.add_note(
@@ -205,7 +211,7 @@ def test_import_blocks_cross_collab_conversion_without_duplicate(world):
     assert world.mock_anki.notes[note_id]["modelName"] == ("collab/owner/old/AnkiOpsQA")
 
 
-def test_import_rejects_duplicate_deck_names_across_sources(world):
+def test_import_rejects_duplicate_deck_names_across_sources(world: Any) -> None:
     collab_root = _setup_collab_root(world)
 
     world.write_qa_deck("Deck", [("Root Q", "Root A", "root-key-1")])
@@ -231,7 +237,9 @@ def test_import_rejects_duplicate_deck_names_across_sources(world):
             world.sync_import(db)
 
 
-def test_import_rejects_duplicate_ankiops_key_across_root_and_collab_models(world):
+def test_import_rejects_duplicate_ankiops_key_across_root_and_collab_models(
+    world: Any,
+) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "collab-duplicate-key"
 
@@ -268,7 +276,9 @@ def test_import_rejects_duplicate_ankiops_key_across_root_and_collab_models(worl
     assert collab_id in world.mock_anki.notes
 
 
-def test_export_rejects_duplicate_ankiops_key_across_root_and_collab_models(world):
+def test_export_rejects_duplicate_ankiops_key_across_root_and_collab_models(
+    world: Any,
+) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "collab-export-duplicate-key"
 
@@ -299,7 +309,7 @@ def test_export_rejects_duplicate_ankiops_key_across_root_and_collab_models(worl
     assert collab_id in world.mock_anki.notes
 
 
-def test_import_deletes_root_orphan_without_deleting_collab_note(world):
+def test_import_deletes_root_orphan_without_deleting_collab_note(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     root_id = world.add_qa_note(
         deck_name="RootDeck",
@@ -339,7 +349,7 @@ def test_import_deletes_root_orphan_without_deleting_collab_note(world):
     assert collab_id in world.mock_anki.notes
 
 
-def test_import_deletes_collab_orphan_without_deleting_root_note(world):
+def test_import_deletes_collab_orphan_without_deleting_root_note(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     root_id = world.add_qa_note(
         deck_name="RootDeck",
@@ -373,7 +383,7 @@ def test_import_deletes_collab_orphan_without_deleting_root_note(world):
     assert collab_id not in world.mock_anki.notes
 
 
-def test_export_writes_anki_edits_back_to_collab_source(world):
+def test_export_writes_anki_edits_back_to_collab_source(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     _write_collab_qa_deck(
         collab_root,
@@ -406,7 +416,7 @@ def test_export_writes_anki_edits_back_to_collab_source(world):
     assert not world.deck_path("CollabDeck").exists()
 
 
-def test_export_blocks_pending_collab_note_type_conversion(world):
+def test_export_blocks_pending_collab_note_type_conversion(world: Any) -> None:
     collab_root = _setup_collab_root(world)
     note_key = "pending-conversion-export-key"
     deck = _write_collab_qa_deck(

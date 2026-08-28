@@ -8,7 +8,7 @@ from ankiops.sync.report import (
 )
 
 
-def test_note_summary_prefers_higher_priority_change_per_entity():
+def test_note_summary_prefers_higher_priority_change_per_entity() -> None:
     result = SyncReport.for_notes(name="Deck", file_path=None)
     result.changes = [
         Change(ChangeType.SKIP, 1, "note_key: one"),
@@ -28,7 +28,7 @@ def test_note_summary_prefers_higher_priority_change_per_entity():
     assert summary.total == 3
 
 
-def test_media_summary_tracks_sync_and_hash_with_deduplication():
+def test_media_summary_tracks_sync_and_hash_with_deduplication() -> None:
     result = SyncReport.for_media()
     result.changes = [
         Change(ChangeType.HASH, "a.png", "a.png"),
@@ -44,7 +44,7 @@ def test_media_summary_tracks_sync_and_hash_with_deduplication():
     assert summary.total == 2
 
 
-def test_collection_export_extra_note_changes_update_counters_not_total():
+def test_collection_export_extra_note_changes_update_counters_not_total() -> None:
     deck_result = SyncReport.for_notes(name="Deck", file_path=None)
     deck_result.changes = [Change(ChangeType.CREATE, 1, "note_key: one")]
     export_result = CollectionReport.for_export(

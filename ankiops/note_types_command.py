@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import yaml
 from rich import get_console as rich_get_console
@@ -239,7 +240,7 @@ def _normalize_styling_payload(styling: object, *, note_type_name: str) -> str:
     )
 
 
-def run(args) -> None:
+def run(args: Any) -> None:
     """Handle note-types CLI actions."""
     add_name = (getattr(args, "add_name", None) or "").strip()
     action_value = getattr(args, "action", "list")
@@ -312,7 +313,7 @@ def run(args) -> None:
         existing_configs
     )
 
-    fields = []
+    fields: list[NoteField] = []
     used_labels: set[str] = set()
     logger.info(f"Copying note type '{note_type_name}' from Anki.")
     for field_name in state["fields"]:
@@ -371,7 +372,7 @@ def run(args) -> None:
     destination_dir.mkdir(parents=True, exist_ok=False)
 
     yaml_templates, template_files = _build_template_output_files(templates)
-    yaml_data = {
+    yaml_data: dict[str, Any] = {
         "styling": "Styling.css",
         "templates": yaml_templates,
         "fields": [

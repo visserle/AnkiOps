@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from ankiops.collection import (
     ANKIOPS_DB,
@@ -227,7 +227,7 @@ def _raise_source_parse_error(
     source: DeckSource,
     md_file: Path,
     error: Exception,
-) -> None:
+) -> NoReturn:
     identity = re.search(
         r"Unknown note type 'collab/([^/']+)/([^/']+)/",
         str(error),
@@ -402,7 +402,7 @@ def _write_validated_decks(
                 note_key=cast(str | None, note["note_key"]),
                 note_type=cast(str, note["note_type"]),
                 fields=cast(dict[str, str], note["fields"]),
-                tags=cast(list[str], note["tags"]),
+                tags=tuple(cast(list[str], note["tags"])),
             )
             for note in deck.notes
         ]
@@ -460,23 +460,27 @@ def _validate_serialized_data(
     sources = discover_deck_sources(collection_root)
     source_by_name = {_source_name(source): source for source in sources}
     configs_by_source: dict[str, dict[str, NoteType]] = {}
-    referenced_sources = {
-        deck.get("source")
-        for deck in raw_decks
-        if isinstance(deck, dict) and isinstance(deck.get("source"), str)
-    }
+    referenced_sources: set[str] = set()
+    for raw_deck in raw_decks:
+        if not isinstance(raw_deck, dict):
+            continue
+        source_name = raw_deck.get("source")
+        if isinstance(source_name, str):
+            referenced_sources.add(source_name)
     for source_name in sorted(referenced_sources):
         source = source_by_name.get(source_name)
         if source is None:
             continue
         try:
-            configs = load_note_types_for_source(source)
+            loaded_configs = load_note_types_for_source(source)
         except Exception as error:
             errors.append(
                 f"Source '{source_name}' note_types/ cannot be loaded: {error}"
             )
             continue
-        configs_by_source[source_name] = {config.name: config for config in configs}
+        configs_by_source[source_name] = {
+            config.name: config for config in loaded_configs
+        }
 
     seen_decks: dict[str, int] = {}
     seen_note_keys: dict[str, tuple[str, int, int]] = {}

@@ -4,13 +4,13 @@ from ankiops.markdown import format_tags_comment, parse_tags_comment
 from ankiops.notes import normalize_tags
 
 
-def test_normalize_tags_handles_empty_input():
+def test_normalize_tags_handles_empty_input() -> None:
     assert normalize_tags(None) == ()
     assert normalize_tags("") == ()
     assert normalize_tags(["", "   "]) == ()
 
 
-def test_normalize_tags_dedupes_trims_and_sorts():
+def test_normalize_tags_dedupes_trims_and_sorts() -> None:
     assert normalize_tags([" z ", "a", "z", "topic::subtopic"]) == (
         "a",
         "topic::subtopic",
@@ -18,7 +18,7 @@ def test_normalize_tags_dedupes_trims_and_sorts():
     )
 
 
-def test_normalize_tags_accepts_whitespace_separated_string():
+def test_normalize_tags_accepts_whitespace_separated_string() -> None:
     assert normalize_tags("z a topic::subtopic a") == (
         "a",
         "topic::subtopic",
@@ -26,7 +26,7 @@ def test_normalize_tags_accepts_whitespace_separated_string():
     )
 
 
-def test_parse_tags_comment():
+def test_parse_tags_comment() -> None:
     assert parse_tags_comment("<!-- tags: z a topic::subtopic -->") == (
         "a",
         "topic::subtopic",
@@ -36,6 +36,6 @@ def test_parse_tags_comment():
     assert parse_tags_comment("Q: Not a tag comment") is None
 
 
-def test_format_tags_comment_omits_empty_tags():
+def test_format_tags_comment_omits_empty_tags() -> None:
     assert format_tags_comment(()) is None
     assert format_tags_comment(["z", "a"]) == "<!-- tags: a z -->"

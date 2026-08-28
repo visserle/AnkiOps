@@ -3,12 +3,12 @@
 import logging
 import re
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import unquote
 
 from blake3 import blake3
 from rich.markup import escape as rich_escape
 
-from ankiops.anki import Anki
 from ankiops.collection import LOCAL_MEDIA_DIR
 from ankiops.console import clickable_path
 from ankiops.deck_sources import (
@@ -19,6 +19,17 @@ from ankiops.sync.report import Change, ChangeType, SyncReport
 from ankiops.sync.state import SyncState
 
 logger = logging.getLogger(__name__)
+
+
+class _MediaClient(Protocol):
+    def get_media_dir(self) -> Path: ...
+
+    def push_media(self, local_path: Path, remote_filename: str) -> None: ...
+
+    def pull_media(self, remote_filename: str, local_path: Path) -> bool: ...
+
+    def delete_media_file(self, remote_filename: str) -> None: ...
+
 
 HASH_SUFFIX_PATTERN = re.compile(r"_([a-f0-9]{8})\.[^.]+$")
 ANKI_SOUND_PATTERN = r"\[sound:([^\]]+)\]"
@@ -133,9 +144,12 @@ def extract_media_references(text: str) -> set[str]:
 
 def calculate_blake3(file_path: Path) -> str:
     hash_state = blake3()
-    with open(file_path, "rb") as file_handle:
-        for chunk in iter(lambda: file_handle.read(65536), b""):
-            hash_state.update(chunk)
+    try:
+        with open(file_path, "rb") as file_handle:
+            for chunk in iter(lambda: file_handle.read(65536), b""):
+                hash_state.update(chunk)
+    except OSError as error:
+        raise ValueError(f"Could not read media file {file_path}: {error}") from error
     return hash_state.hexdigest(length=4)
 
 
@@ -155,7 +169,7 @@ def update_references(
         r"|(\[sound:)(.+?)(\])"
     )
 
-    def replace_callback(match: re.Match) -> str:
+    def replace_callback(match: re.Match[str]) -> str:
         if match.group(1) is not None:
             opener = match.group(1)
             path = match.group(2) or match.group(3)
@@ -386,7 +400,7 @@ def hash_and_update_references(
 
 
 def sync_media_to_anki(
-    anki: Anki,
+    anki: _MediaClient,
     source: DeckSource,
     state: SyncState,
 ) -> SyncReport:
@@ -396,7 +410,7 @@ def sync_media_to_anki(
 
 
 def _sync_media_to_anki(
-    anki: Anki,
+    anki: _MediaClient,
     source: DeckSource,
     state: SyncState,
 ) -> SyncReport:
@@ -540,7 +554,7 @@ def _sync_media_to_anki(
 
 
 def sync_media_from_anki(
-    anki: Anki,
+    anki: _MediaClient,
     source: DeckSource,
     state: SyncState,
 ) -> SyncReport:
@@ -550,7 +564,7 @@ def sync_media_from_anki(
 
 
 def _sync_media_from_anki(
-    anki: Anki,
+    anki: _MediaClient,
     source: DeckSource,
     state: SyncState,
 ) -> SyncReport:
@@ -612,7 +626,7 @@ def _prune_media_cache_for_sources(
 
 
 def sync_all_media_to_anki(
-    anki: Anki,
+    anki: _MediaClient,
     collection_root: Path,
     state: SyncState,
 ) -> SyncReport:
@@ -655,7 +669,7 @@ def sync_all_media_to_anki(
 
 
 def sync_all_media_from_anki(
-    anki: Anki,
+    anki: _MediaClient,
     collection_root: Path,
     state: SyncState,
 ) -> SyncReport:

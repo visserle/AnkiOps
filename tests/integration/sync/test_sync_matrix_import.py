@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import logging
 import shutil
+from typing import Any
 
 import pytest
 
 from tests.support.assertions import assert_summary
 
 
-def _copy_qa_note_type(world, new_name: str) -> None:
+def _copy_qa_note_type(world: Any, new_name: str) -> None:
     shutil.copytree(
         world.note_types_dir / "AnkiOpsQA",
         world.note_types_dir / new_name,
     )
 
 
-def _write_explicit_qa_deck(world, deck_name: str, note_type: str, note_key: str):
+def _write_explicit_qa_deck(
+    world: Any, deck_name: str, note_type: str, note_key: str
+) -> Any:
     world.deck_path(deck_name).write_text(
         "\n".join(
             [
@@ -32,7 +35,7 @@ def _write_explicit_qa_deck(world, deck_name: str, note_type: str, note_key: str
     )
 
 
-def _ankiops_key_find_note_queries(world) -> list[str]:
+def _ankiops_key_find_note_queries(world: Any) -> list[str]:
     return [
         params.get("query", "")
         for action, params in world.mock_anki.calls
@@ -40,7 +43,7 @@ def _ankiops_key_find_note_queries(world) -> list[str]:
     ]
 
 
-def test_imp_fresh_create_001_creates_note_and_writes_key(world):
+def test_imp_fresh_create_001_creates_note_and_writes_key(world: Any) -> None:
     """IMP-FRESH-CREATE-001."""
     world.write_qa_deck("FreshDeck", [("Fresh Q", "Fresh A", None)])
 
@@ -64,7 +67,7 @@ def test_imp_fresh_create_001_creates_note_and_writes_key(world):
         assert db.resolve_note_ids([note_keys[0]]).get(note_keys[0]) == note_id
 
 
-def test_imp_fresh_create_002_creates_note_with_tags(world):
+def test_imp_fresh_create_002_creates_note_with_tags(world: Any) -> None:
     """Import should create Anki notes with Markdown tags."""
     world.write_qa_deck(
         "TaggedFreshDeck",
@@ -84,7 +87,7 @@ def test_imp_fresh_create_002_creates_note_with_tags(world):
         assert content.index("<!-- note_type:") < content.index("<!-- tags:")
 
 
-def test_imp_fresh_create_003_ignores_readme_docs(world):
+def test_imp_fresh_create_003_ignores_readme_docs(world: Any) -> None:
     """Import should not treat README docs as decks."""
     world.write_qa_deck("FreshDeck", [("Fresh Q", "Fresh A", None)])
     (world.root / "README.md").write_text(
@@ -106,7 +109,9 @@ def test_imp_fresh_create_003_ignores_readme_docs(world):
         assert deck_names == {"FreshDeck"}
 
 
-def test_imp_fresh_create_004_assigns_keys_to_duplicate_first_line_notes(world):
+def test_imp_fresh_create_004_assigns_keys_to_duplicate_first_line_notes(
+    world: Any,
+) -> None:
     """Import should key repeated prompts without merging their note blocks."""
     world.write_qa_deck(
         "DuplicateFirstLineDeck",
@@ -128,7 +133,7 @@ def test_imp_fresh_create_004_assigns_keys_to_duplicate_first_line_notes(world):
     assert len(world.mock_anki.notes) == 2
 
 
-def test_imp_run_update_001_updates_existing_note(world):
+def test_imp_run_update_001_updates_existing_note(world: Any) -> None:
     """IMP-RUN-UPDATE-001."""
     note_key = "imp-run-update-001"
     note_id = world.add_qa_note(
@@ -154,7 +159,7 @@ def test_imp_run_update_001_updates_existing_note(world):
         assert _ankiops_key_find_note_queries(world) == []
 
 
-def test_imp_run_update_003_tag_only_edit_updates_existing_note(world):
+def test_imp_run_update_003_tag_only_edit_updates_existing_note(world: Any) -> None:
     """Markdown tag changes should update Anki even when fields match."""
     note_key = "imp-run-update-tags-001"
     note_id = world.add_qa_note(
@@ -180,7 +185,7 @@ def test_imp_run_update_003_tag_only_edit_updates_existing_note(world):
         assert world.mock_anki.notes[note_id]["tags"] == ["new", "z"]
 
 
-def test_imp_run_update_004_missing_tags_comment_clears_anki_tags(world):
+def test_imp_run_update_004_missing_tags_comment_clears_anki_tags(world: Any) -> None:
     """Markdown without tags should make Anki tags empty."""
     note_key = "imp-run-update-tags-002"
     note_id = world.add_qa_note(
@@ -203,7 +208,7 @@ def test_imp_run_update_004_missing_tags_comment_clears_anki_tags(world):
         assert world.mock_anki.notes[note_id]["tags"] == []
 
 
-def test_imp_run_move_001_moves_note_between_decks(world):
+def test_imp_run_move_001_moves_note_between_decks(world: Any) -> None:
     """IMP-RUN-MOVE-001."""
     note_key = "imp-run-move-001"
     note_id = world.add_qa_note(
@@ -228,7 +233,7 @@ def test_imp_run_move_001_moves_note_between_decks(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "TargetDeck"
 
 
-def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
+def test_imp_run_delete_001_deletes_orphaned_anki_note(world: Any) -> None:
     """IMP-RUN-DELETE-001."""
     note_key = "imp-run-delete-001"
     note_id = world.add_qa_note(
@@ -251,7 +256,9 @@ def test_imp_run_delete_001_deletes_orphaned_anki_note(world):
         assert note_id not in world.mock_anki.notes
 
 
-def test_imp_run_delete_002_deleted_deck_file_removes_only_managed_notes(world):
+def test_imp_run_delete_002_deleted_deck_file_removes_only_managed_notes(
+    world: Any,
+) -> None:
     note_key = "imp-run-delete-file-002"
     managed_note_id = world.add_qa_note(
         deck_name="DeletedFileDeck",
@@ -289,7 +296,9 @@ def test_imp_run_delete_002_deleted_deck_file_removes_only_managed_notes(world):
         assert db.resolve_deck_id("DeletedFileDeck") is None
 
 
-def test_imp_run_delete_003_deleted_deck_file_removes_empty_anki_deck(world):
+def test_imp_run_delete_003_deleted_deck_file_removes_empty_anki_deck(
+    world: Any,
+) -> None:
     note_key = "imp-run-delete-file-003"
     note_id = world.add_qa_note(
         deck_name="DeletedFileDeck",
@@ -320,7 +329,7 @@ def test_imp_run_delete_003_deleted_deck_file_removes_empty_anki_deck(world):
         assert db.resolve_deck_id("DeletedFileDeck") is None
 
 
-def test_imp_run_protect_001_keeps_keyless_orphaned_anki_note(world):
+def test_imp_run_protect_001_keeps_keyless_orphaned_anki_note(world: Any) -> None:
     """IMP-RUN-PROTECT-001."""
     note_id = world.add_qa_note(
         deck_name="ProtectDeck",
@@ -348,7 +357,9 @@ def test_imp_run_protect_001_keeps_keyless_orphaned_anki_note(world):
         assert sync_result.protected_keyless_notes == 1
 
 
-def test_imp_run_drift_001_recovers_missing_mapping_from_embedded_key(world):
+def test_imp_run_drift_001_recovers_missing_mapping_from_embedded_key(
+    world: Any,
+) -> None:
     """IMP-RUN-DRIFT-001."""
     note_key = "imp-run-drift-001"
     note_id = world.add_qa_note(
@@ -368,7 +379,7 @@ def test_imp_run_drift_001_recovers_missing_mapping_from_embedded_key(world):
         assert db.resolve_note_ids([note_key]).get(note_key) == note_id
 
 
-def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
+def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world: Any) -> None:
     """IMP-RUN-DRIFT-002."""
     note_key = "imp-run-drift-002"
     real_note_id = world.add_qa_note(
@@ -389,7 +400,9 @@ def test_imp_run_drift_002_stale_mapping_rebinds_without_duplicate(world):
         assert db.resolve_note_ids([note_key]).get(note_key) == real_note_id
 
 
-def test_imp_run_drift_004_stale_existing_mapping_does_not_hijack_wrong_note(world):
+def test_imp_run_drift_004_stale_existing_mapping_does_not_hijack_wrong_note(
+    world: Any,
+) -> None:
     """IMP-RUN-DRIFT-004."""
     target_note_key = "imp-run-drift-004"
     wrong_note_key = "imp-run-drift-004-wrong"
@@ -423,7 +436,7 @@ def test_imp_run_drift_004_stale_existing_mapping_does_not_hijack_wrong_note(wor
         )
 
 
-def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
+def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world: Any) -> None:
     """IMP-RUN-CONFLICT-001."""
     duplicate_note_key = "duplicate-key"
 
@@ -436,8 +449,8 @@ def test_imp_run_conflict_001_duplicate_note_keys_fail_fast(world):
 
 
 def test_imp_run_conflict_002_local_note_type_path_change_does_not_duplicate_key(
-    world,
-):
+    world: Any,
+) -> None:
     """A renamed compatible local note type converts the existing keyed Anki note."""
     note_key = "local-path-change-key"
     _copy_qa_note_type(world, "RenamedQA")
@@ -470,8 +483,8 @@ def test_imp_run_conflict_002_local_note_type_path_change_does_not_duplicate_key
 
 
 def test_imp_run_conflict_003_duplicate_ankiops_key_across_local_note_types_blocks(
-    world,
-):
+    world: Any,
+) -> None:
     """If a previous path edit already duplicated a key, import must stop."""
     note_key = "local-duplicate-key"
     _copy_qa_note_type(world, "RenamedQA")
@@ -503,7 +516,9 @@ def test_imp_run_conflict_003_duplicate_ankiops_key_across_local_note_types_bloc
     assert new_note_id in world.mock_anki.notes
 
 
-def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(world):
+def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(
+    world: Any,
+) -> None:
     """IMP-RUN-UPDATE-002."""
     note_key = "imp-run-type-mismatch-001"
     world.mock_anki.add_note(
@@ -528,7 +543,7 @@ def test_imp_run_update_002_note_type_mismatch_records_error_and_skips_update(wo
         assert world.mock_anki.notes[note_id]["modelName"] == "AnkiOpsCloze"
 
 
-def test_imp_run_drift_003_reports_untracked_anki_decks(world):
+def test_imp_run_drift_003_reports_untracked_anki_decks(world: Any) -> None:
     """IMP-RUN-DRIFT-003."""
     world.mock_anki.add_note(
         "AnkiOnlyDeck",
@@ -547,7 +562,7 @@ def test_imp_run_drift_003_reports_untracked_anki_decks(world):
         assert note_id in untracked.note_ids
 
 
-def test_imp_fresh_create_002_literal_double_underscore_deck_name(world):
+def test_imp_fresh_create_002_literal_double_underscore_deck_name(world: Any) -> None:
     """IMP-FRESH-CREATE-002."""
     world.write_qa_deck("Literal__Deck", [("Q", "A", None)])
 
@@ -563,7 +578,7 @@ def test_imp_fresh_create_002_literal_double_underscore_deck_name(world):
         assert "Literal::Deck" not in world.mock_anki.decks
 
 
-def test_imp_fresh_create_003_display_math_is_not_shortened(world):
+def test_imp_fresh_create_003_display_math_is_not_shortened(world: Any) -> None:
     """IMP-FRESH-CREATE-003."""
     markdown = (
         r"\\[\sigma^2=\frac{1}{N} "
@@ -587,7 +602,9 @@ def test_imp_fresh_create_003_display_math_is_not_shortened(world):
         assert "<sup>" not in value
 
 
-def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
+def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(
+    world: Any,
+) -> None:
     """IMP-RUN-RENAME-001."""
     note_key = "imp-run-rename-001"
     note_id = world.add_qa_note(
@@ -615,7 +632,9 @@ def test_imp_run_rename_001_tracks_deck_rename_from_markdown_filename(world):
         assert world.mock_anki.cards[card_id]["deckName"] == "NewDeck"
 
 
-def test_imp_run_rename_004_finalizes_persisted_unicode_sibling_rename(world, caplog):
+def test_imp_run_rename_004_finalizes_persisted_unicode_sibling_rename(
+    world: Any, caplog: Any
+) -> None:
     """A real file rename drains and removes its persisted predecessor deck."""
     note_key = "imp-run-rename-004"
     old_deck = "Release Collab::Child — Déck Ω — Final"
@@ -661,7 +680,9 @@ def test_imp_run_rename_004_finalizes_persisted_unicode_sibling_rename(world, ca
     )
 
 
-def test_imp_run_rename_005_does_not_recreate_absent_persisted_predecessor(world):
+def test_imp_run_rename_005_does_not_recreate_absent_persisted_predecessor(
+    world: Any,
+) -> None:
     """A deleted placeholder never recreates an already-absent Anki deck."""
     note_key = "imp-run-rename-005"
     persisted_deck = "Release Collab::Child — Déck Ω — Verified"
@@ -692,7 +713,9 @@ def test_imp_run_rename_005_does_not_recreate_absent_persisted_predecessor(world
         assert db.resolve_deck_id(target_deck) == world.mock_anki.decks[target_deck]
 
 
-def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(world):
+def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(
+    world: Any,
+) -> None:
     """IMP-RUN-RENAME-002."""
     moved_note_key = "imp-run-rename-002-moved"
     leftover_note_key = "imp-run-rename-002-leftover"
@@ -739,7 +762,7 @@ def test_imp_run_rename_002_keeps_untracked_old_deck_when_source_has_leftovers(w
         assert world.mock_anki.cards[moved_card_id]["deckName"] == "NewDeck"
 
 
-def test_imp_run_rename_003_keeps_old_deck_with_unmanaged_card(world):
+def test_imp_run_rename_003_keeps_old_deck_with_unmanaged_card(world: Any) -> None:
     note_key = "imp-run-rename-003-moved"
     moved_note_id = world.add_qa_note(
         deck_name="OldDeck",
@@ -763,7 +786,7 @@ def test_imp_run_rename_003_keeps_old_deck_with_unmanaged_card(world):
         assert "OldDeck" in world.mock_anki.decks
 
 
-def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world):
+def test_imp_run_move_002_ignores_source_deck_emptied_by_moves(world: Any) -> None:
     """IMP-RUN-MOVE-002."""
     moved_note_key = "imp-run-move-002-moved"
     existing_note_key = "imp-run-move-002-existing"

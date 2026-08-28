@@ -1,6 +1,7 @@
 import io
 import logging
 import sys
+from typing import Any
 
 from rich.console import Console
 
@@ -8,7 +9,7 @@ import ankiops.console as console_module
 from ankiops.console import clickable_path, configure_logging
 
 
-def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):
+def test_clickable_path_encodes_file_uri(tmp_path: Any, monkeypatch: Any) -> None:
     file_path = tmp_path / "Deck A #1.md"
     file_path.write_text("x", encoding="utf-8")
     monkeypatch.delenv("NO_COLOR", raising=False)
@@ -21,7 +22,7 @@ def test_clickable_path_encodes_file_uri(tmp_path, monkeypatch):
     assert "%23" in file_uri
 
 
-def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
+def test_clickable_path_handles_missing_path(tmp_path: Any, monkeypatch: Any) -> None:
     file_path = tmp_path / "Missing Deck.md"
     monkeypatch.delenv("NO_COLOR", raising=False)
 
@@ -30,7 +31,9 @@ def test_clickable_path_handles_missing_path(tmp_path, monkeypatch):
     assert rendered == f"[link={file_path.resolve().as_uri()}]{file_path.name}[/link]"
 
 
-def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
+def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(
+    monkeypatch: Any,
+) -> None:
     stream = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stream)
 
@@ -48,7 +51,7 @@ def test_configure_logging_quiets_sdk_logs_but_keeps_ankiops_debug(monkeypatch):
     assert logging.getLogger("urllib3.connectionpool").level == logging.WARNING
 
 
-def test_configure_logging_compact_uses_rich_level_column(monkeypatch):
+def test_configure_logging_compact_uses_rich_level_column(monkeypatch: Any) -> None:
     stream = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stream)
 
@@ -65,7 +68,7 @@ def test_configure_logging_compact_uses_rich_level_column(monkeypatch):
     assert "WARNING:" not in rendered
 
 
-def test_configure_logging_requires_per_record_markup_opt_in(monkeypatch):
+def test_configure_logging_requires_per_record_markup_opt_in(monkeypatch: Any) -> None:
     stream = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stream)
 
@@ -80,7 +83,7 @@ def test_configure_logging_requires_per_record_markup_opt_in(monkeypatch):
     assert "[bold]rendered[/bold]" not in rendered
 
 
-def test_terminal_messages_keep_long_commands_copyable(monkeypatch):
+def test_terminal_messages_keep_long_commands_copyable(monkeypatch: Any) -> None:
     stream = io.StringIO()
     console = Console(file=stream, width=20, color_system=None)
     monkeypatch.setattr(console_module, "rich_get_console", lambda: console)
@@ -91,7 +94,7 @@ def test_terminal_messages_keep_long_commands_copyable(monkeypatch):
     assert stream.getvalue() == f"{command}\n"
 
 
-def test_terminal_errors_keep_long_details_copyable(monkeypatch):
+def test_terminal_errors_keep_long_details_copyable(monkeypatch: Any) -> None:
     stream = io.StringIO()
     console = Console(file=stream, width=20, color_system=None)
     monkeypatch.setattr(console_module, "Console", lambda **_kwargs: console)

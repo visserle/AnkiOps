@@ -2,6 +2,8 @@
 
 import re
 import warnings
+from collections.abc import Callable
+from typing import cast
 
 from bs4 import BeautifulSoup, MarkupResemblesLocatorWarning
 from html_to_markdown import ConversionOptions
@@ -139,13 +141,21 @@ def _prepare_custom_tag_placeholders(html: str) -> tuple[str, dict[str, str]]:
         return token
 
     for image in soup.find_all("img"):
-        src = image.get("src", "")
-        alt = image.get("alt", "")
-        style = image.get("style", "")
+        raw_src = image.get("src", "")
+        raw_alt = image.get("alt", "")
+        raw_style = image.get("style", "")
+        src = raw_src if isinstance(raw_src, str) else ""
+        alt = raw_alt if isinstance(raw_alt, str) else ""
+        style = raw_style if isinstance(raw_style, str) else ""
         width_match = re.search(r"width:\s*([\d.]+)px", style)
-        width_attr = (
-            f"{{width={int(float(width_match.group(1)))}}}" if width_match else ""
-        )
+        width_attr = ""
+        if width_match:
+            try:
+                width = int(float(width_match.group(1)))
+            except ValueError:
+                pass
+            else:
+                width_attr = f"{{width={width}}}"
         token = _token()
         if not src or src.lower().startswith(("http://", "https://")):
             markdown_src = src
@@ -290,7 +300,13 @@ def _enforce_link_angle_brackets(md: str) -> str:
 class HTMLToMarkdown:
     """Convert HTML to clean Markdown."""
 
-    _OPTIONS = ConversionOptions(
+    # Some installed type metadata omits this runtime-supported keyword. Cast
+    # only the third-party factory so the frozen options object is configured at
+    # construction time instead of being mutated afterward.
+    _OPTIONS = cast(
+        Callable[..., ConversionOptions],
+        ConversionOptions,
+    )(
         heading_style="atx",
         bullets="-",
         list_indent_width=3,

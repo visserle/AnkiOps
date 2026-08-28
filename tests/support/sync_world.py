@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 import subprocess
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TypeAlias
 from unittest.mock import patch
 
 from ankiops.anki import Anki
@@ -21,17 +23,23 @@ from ankiops.collection import (
 from ankiops.interchange import parse_collection
 from ankiops.markdown import NOTE_SEPARATOR, format_tags_comment
 from ankiops.sync.from_anki import sync_collection_from_anki
+from ankiops.sync.report import CollectionReport, SyncReport
 from ankiops.sync.state import SyncState
 from ankiops.sync.to_anki import sync_collection_to_anki
 from tests.support.deck_files import DeckFileHarness
+from tests.support.fake_anki import MockAnki
 
 _NOTE_KEY_RE = re.compile(r"<!--\s*note_key:\s*([a-zA-Z0-9-]+)\s*-->")
+_NoteData: TypeAlias = (
+    tuple[str, str, str | None]
+    | tuple[str, str, str | None, Iterable[str] | str | None]
+)
 
 
 class SyncWorld:
     """High-level helper to keep scenario tests concise and explicit."""
 
-    def __init__(self, root: Path, mock_anki):
+    def __init__(self, root: Path, mock_anki: MockAnki) -> None:
         self.root = root
         self.mock_anki = mock_anki
         self.anki = Anki(invoke_func=self.mock_anki.invoke)
@@ -77,7 +85,7 @@ class SyncWorld:
         *,
         note_map: dict[str, int] | None = None,
         deck_map: dict[str, int] | None = None,
-    ):
+    ) -> Iterator[SyncState]:
         """Open and auto-close a DB prepared for the requested collection state."""
         db = self.db_for_state(state, note_map=note_map, deck_map=deck_map)
         try:
@@ -85,26 +93,26 @@ class SyncWorld:
         finally:
             db.close()
 
-    def sync_import(self, db: SyncState):
+    def sync_import(self, db: SyncState) -> CollectionReport:
         return sync_collection_to_anki(
             anki=self.anki,
             state=db,
             parsed_sources=parse_collection(self.root),
         )
 
-    def sync_export(self, db: SyncState):
+    def sync_export(self, db: SyncState) -> CollectionReport:
         return sync_collection_from_anki(
             anki=self.anki,
             state=db,
             parsed_sources=parse_collection(self.root),
         )
 
-    def sync_media_to_anki(self, db: SyncState):
+    def sync_media_to_anki(self, db: SyncState) -> SyncReport:
         from ankiops.media import sync_all_media_to_anki
 
         return sync_all_media_to_anki(self.anki, self.root, db)
 
-    def sync_media_from_anki(self, db: SyncState):
+    def sync_media_from_anki(self, db: SyncState) -> SyncReport:
         from ankiops.media import sync_all_media_from_anki
 
         return sync_all_media_from_anki(self.anki, self.root, db)
@@ -162,7 +170,7 @@ class SyncWorld:
         path.write_text(content + suffix, encoding="utf-8")
         return path
 
-    def write_qa_deck(self, deck_name: str, notes: list[tuple]) -> Path:
+    def write_qa_deck(self, deck_name: str, notes: list[_NoteData]) -> Path:
         path = self.deck_path(deck_name)
         if not notes:
             path.write_text("", encoding="utf-8")
@@ -208,7 +216,7 @@ class SyncWorld:
         question: str,
         answer: str,
         note_key: str | None = None,
-        tags=(),
+        tags: Iterable[str] | str | None = (),
     ) -> int:
         fields = {"Question": question, "Answer": answer}
         if note_key is not None:
@@ -221,8 +229,8 @@ class SyncWorld:
         *,
         deck_name: str,
         note_type: str = "AnkiOpsQA",
-        fields: dict | None = None,
-        tags=(),
+        fields: dict[str, str] | None = None,
+        tags: Iterable[str] | str | None = (),
         note_key: str | None = None,
     ) -> int:
         resolved_fields = dict(fields or {"Question": "Q", "Answer": "A"})

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 import pytest
 
@@ -10,7 +11,9 @@ from ankiops.collection import ANKIOPS_DB
 from ankiops.sync.state import SyncState
 
 
-def test_unreadable_database_is_backed_up_and_recreated(tmp_path, caplog):
+def test_unreadable_database_is_backed_up_and_recreated(
+    tmp_path: Any, caplog: Any
+) -> None:
     db_path = tmp_path / ANKIOPS_DB
     db_path.write_bytes(b"not a sqlite database")
     original = db_path.read_bytes()
@@ -26,7 +29,7 @@ def test_unreadable_database_is_backed_up_and_recreated(tmp_path, caplog):
     assert "ankiops init" in caplog.text
 
 
-def test_old_schema_is_backed_up_and_recreated(tmp_path):
+def test_old_schema_is_backed_up_and_recreated(tmp_path: Any) -> None:
     db_path = tmp_path / ANKIOPS_DB
     connection = sqlite3.connect(db_path)
     connection.execute("CREATE TABLE old_notes (note_key TEXT PRIMARY KEY)")
@@ -46,7 +49,9 @@ def test_old_schema_is_backed_up_and_recreated(tmp_path):
         connection.close()
 
 
-def test_existing_backup_file_is_replaced_by_latest_corrupt_database(tmp_path):
+def test_existing_backup_file_is_replaced_by_latest_corrupt_database(
+    tmp_path: Any,
+) -> None:
     db_path = tmp_path / ANKIOPS_DB
     backup = tmp_path / f"{ANKIOPS_DB}.corrupt"
     db_path.write_bytes(b"invalid")
@@ -59,11 +64,13 @@ def test_existing_backup_file_is_replaced_by_latest_corrupt_database(tmp_path):
     assert backup.read_bytes() == b"invalid"
 
 
-def test_second_database_creation_failure_is_propagated(tmp_path, monkeypatch):
+def test_second_database_creation_failure_is_propagated(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
     db_path = tmp_path / ANKIOPS_DB
     db_path.write_bytes(b"invalid")
 
-    def fail_connect(*_args, **_kwargs):
+    def fail_connect(*_args: Any, **_kwargs: Any) -> Any:
         raise sqlite3.DatabaseError("still broken")
 
     monkeypatch.setattr("ankiops.sync.state.sqlite3.connect", fail_connect)

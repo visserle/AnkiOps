@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from ankiops.anki import Anki
 from ankiops.collab.tags import LEECH_TAG, exclude_leech_tags
@@ -219,7 +220,9 @@ def _anki_note_match(
     return _html_match(html, anki) and anki.tags == tags
 
 
-def group_note_ids_by_deck_name(anki_cards: dict[int, dict]) -> dict[str, set[int]]:
+def group_note_ids_by_deck_name(
+    anki_cards: dict[int, dict[str, Any]],
+) -> dict[str, set[int]]:
     note_ids_by_deck_name: dict[str, set[int]] = {}
     for card_info in anki_cards.values():
         deck_name = card_info.get("deckName")
@@ -310,16 +313,16 @@ def _sync_keyed_note(
     deck_name: str,
     markdown_to_html: MarkdownToHTML,
     anki_notes: dict[int, AnkiNote],
-    anki_cards: dict[int, dict],
+    anki_cards: dict[int, dict[str, Any]],
     note_ids_by_note_key: dict[str, int],
     note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
     result: SyncReport,
     cards_to_move: list[int],
     moved_from_decks: set[str],
     note_type_conversions: list[_NoteTypeConversion],
-    queue_note_mapping,
-    clear_note_mapping,
-    queue_import_fingerprint,
+    queue_note_mapping: Callable[[str, int], None],
+    clear_note_mapping: Callable[[str], None],
+    queue_import_fingerprint: Callable[[str, str, str], None],
 ) -> None:
     note_key = parsed_note.note_key
     if note_key is None:
@@ -380,7 +383,8 @@ def _sync_keyed_note(
         )
         return
 
-    cards_to_move_for_note = []
+    assert note_id is not None
+    cards_to_move_for_note: list[int] = []
     for card_id in anki_note.card_ids:
         card_info = anki_cards.get(card_id)
         if card_info and card_info.get("deckName") != deck_name:
@@ -603,7 +607,7 @@ def _apply_note_type_conversions(
     *,
     anki: Anki,
     conversions: list[_NoteTypeConversion],
-    queue_import_fingerprint,
+    queue_import_fingerprint: Callable[[str, str, str], None],
 ) -> list[str]:
     if not conversions:
         return []
@@ -647,8 +651,8 @@ def _apply_changes_and_update_state(
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
-    queue_note_mapping,
-    queue_import_fingerprint,
+    queue_note_mapping: Callable[[str, int], None],
+    queue_import_fingerprint: Callable[[str, str, str], None],
 ) -> list[tuple[Note, str]]:
     if not deck_context.deck_name:
         return []
@@ -704,11 +708,12 @@ def _apply_changes_and_update_state(
 
     if deletes and not delete_failed:
         delete_note_keys = [
-            delete_change.context.get("note_key")
+            note_key
             for delete_change in deletes
             if delete_change.context
+            and isinstance(note_key := delete_change.context.get("note_key"), str)
+            and note_key
         ]
-        delete_note_keys = [note_key for note_key in delete_note_keys if note_key]
         if delete_note_keys:
             # note_state row deletion also clears export-direction fingerprints.
             state.delete_note_links_by_keys(delete_note_keys)
@@ -749,7 +754,7 @@ def sync_deck_to_anki(
     deck_names_by_id: dict[int, str],
     deck_ids_by_name: dict[str, int],
     anki_notes: dict[int, AnkiNote],
-    anki_cards: dict[int, dict],
+    anki_cards: dict[int, dict[str, Any]],
     note_ids_by_note_key: dict[str, int],
     pending_note_mappings: list[tuple[str, int]],
     note_import_fingerprints_by_note_key: dict[str, tuple[str, str]],
