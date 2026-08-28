@@ -451,7 +451,7 @@ class Anki:
             "deckName": deck_name,
             "modelName": note_type,
             "fields": fields,
-            "tags": list(note.tags) if note else [],
+            "tags": list(change.context.get("tags", note.tags if note else ())),
             "options": {"allowDuplicate": False},
         }
 

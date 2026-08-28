@@ -14,6 +14,7 @@ from ankiops.collab.git_state import (
     PUBLISH_PREPARED_REF,
 )
 from ankiops.collab.hosting import GitHubHost
+from ankiops.collab.tags import exclude_leech_tags
 from ankiops.collection import LOCAL_MEDIA_DIR, NOTE_TYPES_DIR, file_stem_to_deck_name
 from ankiops.deck_sources import DeckSource
 from ankiops.git import GitRepository
@@ -274,6 +275,7 @@ def _prepare_publish_plan(
     for parsed_deck in selected_decks:
         for note in parsed_deck.parsed.notes:
             note.note_type = source.scope_note_type_name(note.note_type)
+            note.tags = exclude_leech_tags(note.tags)
         rendered_files.append(
             _RenderedPublishFile(
                 source_path=parsed_deck.path,

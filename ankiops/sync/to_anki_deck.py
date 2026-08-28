@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from ankiops.anki import Anki
+from ankiops.collab.tags import LEECH_TAG, exclude_leech_tags
 from ankiops.collection import file_stem_to_deck_name
 from ankiops.markdown import (
     NOTE_SEPARATOR,
@@ -21,6 +22,7 @@ from ankiops.note_types import ANKIOPS_KEY_FIELD, NoteType
 from ankiops.notes import (
     AnkiNote,
     Note,
+    normalize_tags,
     note_fingerprint,
 )
 from ankiops.sync.report import (
@@ -303,6 +305,8 @@ def _sync_keyed_note(
     parsed_note: Note,
     cfg: NoteType,
     md_hash: str,
+    sync_tags: tuple[str, ...],
+    is_collab: bool,
     deck_name: str,
     markdown_to_html: MarkdownToHTML,
     anki_notes: dict[int, AnkiNote],
@@ -340,6 +344,14 @@ def _sync_keyed_note(
             note_id = None
             anki_note = None
 
+    # Leech tags are personal state: for shared decks, keep the local leech
+    # tag when the note already carries it, and never import one from files.
+    tags = sync_tags
+    if is_collab and anki_note is not None:
+        tags = normalize_tags(
+            (*tags, *(tag for tag in anki_note.tags if tag == LEECH_TAG))
+        )
+
     if not anki_note:
         html_fields = _to_html(parsed_note, cfg, markdown_to_html)
         html_fields[ANKIOPS_KEY_FIELD.name] = note_key
@@ -356,9 +368,9 @@ def _sync_keyed_note(
                     "import_anki_hash": note_fingerprint(
                         parsed_note.note_type,
                         html_fields,
-                        tags=parsed_note.tags,
+                        tags=tags,
                     ),
-                    "tags": parsed_note.tags,
+                    "tags": tags,
                 },
             )
         )
@@ -405,7 +417,7 @@ def _sync_keyed_note(
     target_anki_hash = note_fingerprint(
         parsed_note.note_type,
         html_fields,
-        tags=parsed_note.tags,
+        tags=tags,
     )
 
     if needs_note_type_conversion:
@@ -447,15 +459,13 @@ def _sync_keyed_note(
         )
 
     if not needs_note_type_conversion and _anki_note_match(
-        html_fields, parsed_note.tags, anki_note
+        html_fields, tags, anki_note
     ):
         result.add_change(Change(ChangeType.SKIP, note_id, parsed_note.identifier))
         queue_import_fingerprint(note_key, md_hash, current_anki_hash)
         return
 
-    if needs_note_type_conversion and _anki_note_match(
-        html_fields, parsed_note.tags, anki_note
-    ):
+    if needs_note_type_conversion and _anki_note_match(html_fields, tags, anki_note):
         return
 
     result.add_change(
@@ -468,7 +478,7 @@ def _sync_keyed_note(
                 "note_key": note_key,
                 "md_hash": md_hash,
                 "import_anki_hash": target_anki_hash,
-                "tags": parsed_note.tags,
+                "tags": tags,
             },
         )
     )
@@ -484,6 +494,7 @@ def _sync_new_note(
     parsed_note: Note,
     cfg: NoteType,
     md_hash: str,
+    sync_tags: tuple[str, ...],
     state: SyncState,
     markdown_to_html: MarkdownToHTML,
     result: SyncReport,
@@ -504,9 +515,9 @@ def _sync_new_note(
                 "import_anki_hash": note_fingerprint(
                     parsed_note.note_type,
                     html_fields,
-                    tags=parsed_note.tags,
+                    tags=sync_tags,
                 ),
-                "tags": parsed_note.tags,
+                "tags": sync_tags,
             },
         )
     )
@@ -746,6 +757,7 @@ def sync_deck_to_anki(
     global_note_keys: set[str],
     global_mapped_note_ids: set[int],
     all_anki_note_ids: set[int],
+    is_collab: bool = False,
 ) -> tuple[SyncReport, PendingDeckWrite, set[str]]:
     deck_context = _resolve_deck_context(fs, deck_ids_by_name, state)
     result = SyncReport.for_notes(name=deck_context.deck_name, file_path=fs.file_path)
@@ -787,12 +799,17 @@ def sync_deck_to_anki(
             parsed_note.fields,
             tags=parsed_note.tags,
         )
+        sync_tags = (
+            exclude_leech_tags(parsed_note.tags) if is_collab else parsed_note.tags
+        )
 
         if parsed_note.note_key:
             _sync_keyed_note(
                 parsed_note=parsed_note,
                 cfg=cfg,
                 md_hash=md_hash,
+                sync_tags=sync_tags,
+                is_collab=is_collab,
                 deck_name=deck_context.deck_name,
                 markdown_to_html=markdown_to_html,
                 anki_notes=anki_notes,
@@ -812,6 +829,7 @@ def sync_deck_to_anki(
                 parsed_note=parsed_note,
                 cfg=cfg,
                 md_hash=md_hash,
+                sync_tags=sync_tags,
                 state=state,
                 markdown_to_html=markdown_to_html,
                 result=result,

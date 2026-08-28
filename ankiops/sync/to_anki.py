@@ -194,6 +194,7 @@ def sync_collection_to_anki(
                 global_note_keys,
                 global_mapped_note_ids,
                 file_anki_note_ids,
+                is_collab=_source.is_collab,
             )
 
             # Track filename-based deck rename candidates, but defer applying

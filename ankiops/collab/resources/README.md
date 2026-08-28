@@ -36,6 +36,8 @@ Before checking GitHub, `collab update` commits every non-ignored local change i
 
 Resolve only the editable conflict copies and run the exact retry command AnkiOps reports. The retry always resolves against the frozen upstream commit that caused the conflict. If newer GitHub work arrived meanwhile, AnkiOps finishes the frozen resolution first and then recommends one more update.
 
+The `leech` tag is personal scheduling state: it is never shared through collab sync, and each subscriber's own `leech` tags stay local.
+
 ## Contribute to this deck
 
 Submitting requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated.

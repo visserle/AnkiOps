@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from ankiops.anki import Anki
+from ankiops.collab.tags import exclude_leech_tags
 from ankiops.collection import (
     deck_name_to_file_stem,
     file_stem_to_deck_name,
@@ -111,6 +112,7 @@ def _resolve_deck_notes(
     pending_export_fingerprints: list[tuple[str, str, str]],
     local_notes_by_note_key: dict[str, Note],
     local_notes_by_content: dict[str, Note],
+    exclude_leech: bool = False,
 ) -> tuple[list[_ResolvedDeckNote], list[str]]:
     errors: list[str] = []
     resolved_notes: list[_ResolvedDeckNote] = []
@@ -177,6 +179,8 @@ def _resolve_deck_notes(
             continue
 
         domain_note = _from_html(anki_note, cfg, html_to_markdown)
+        if exclude_leech:
+            domain_note.tags = exclude_leech_tags(domain_note.tags)
 
         if not note_key:
             # Match by content when no mapped/embedded note_key exists.
@@ -391,6 +395,7 @@ def _sync_deck(
     pending_note_mappings: list[tuple[str, int]],
     note_export_fingerprints_by_note_key: dict[str, tuple[str, str]],
     pending_export_fingerprints: list[tuple[str, str, str]],
+    exclude_leech: bool = False,
 ) -> SyncReport:
     result = SyncReport.for_notes(
         name=deck_name,
@@ -426,6 +431,7 @@ def _sync_deck(
         pending_export_fingerprints=pending_export_fingerprints,
         local_notes_by_note_key=local_notes_by_note_key,
         local_notes_by_content=local_notes_by_content,
+        exclude_leech=exclude_leech,
     )
     result.errors.extend(resolve_errors)
     if resolve_errors:
@@ -635,6 +641,7 @@ def sync_collection_from_anki(
                 pending_note_mappings,
                 note_export_fingerprints_by_note_key,
                 pending_export_fingerprints,
+                exclude_leech=target_source.is_collab,
             )
             state.upsert_deck(
                 deck_name,
