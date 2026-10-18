@@ -188,6 +188,7 @@ def _setup_vscode_settings(collection_root: Path) -> None:
     settings.update(
         {
             "git.repositoryScanMaxDepth": 3,  # detect git repos from collab subfolders
+            "workbench.editorAssociations": {"*.md": "vscode.markdown.editor"},
             "[markdown]": {
                 "editor.formatOnSave": False,
                 "editor.wordWrap": "wordWrapColumn",
