@@ -56,49 +56,57 @@ def _looks_like_html(text: str) -> bool:
     return bool(_HTML_TAG_RE.search(text) or _HTML_ENTITY_RE.search(text))
 
 
-def _escape_special_chars(text: str) -> str:
-    """Escape markdown special chars while preserving explicit LaTeX math blocks."""
+def _escape_segment(segment: str) -> str:
+    preserved_runs: dict[str, str] = {}
+
+    def _preserve(match: re.Match[str]) -> str:
+        token = f"\u200dMDESCRBRACKET{len(preserved_runs)}\u200d"
+        preserved_runs[token] = match.group(1)
+        return token
+
+    # HTMLToMarkdown may already have emitted a stable escaped \] sequence on
+    # a previous pass. Preserve those runs so repeated roundtrips do not
+    # multiply backslashes after a preserved \[...\] math segment.
+    segment = _ESCAPED_RIGHT_BRACKET_RUN_RE.sub(_preserve, segment)
+    if "\\" in segment:
+        segment = segment.replace("\\", _MD_SPECIAL_CHARS["\\"])
+    for char, placeholder in _MD_SPECIAL_CHARS.items():
+        if char != "\\":
+            segment = segment.replace(char, placeholder)
+    for token, original in preserved_runs.items():
+        segment = segment.replace(token, original)
+    return segment
+
+
+def _escape_special_chars(text: str, preserved_math: dict[str, str]) -> str:
+    """Escape markdown special chars, keeping explicit LaTeX math opaque.
+
+    Math segments are swapped for placeholder tokens so the HTML-to-Markdown
+    conversion cannot escape their backslashes (e.g. LaTeX row breaks), which
+    would otherwise accumulate across roundtrips. ``preserved_math`` maps each
+    token to its original segment for restoration after conversion.
+    """
     text = normalize_escaped_math_delimiters(text)
 
-    def _escape_segment(segment: str) -> str:
-        preserved_runs: dict[str, str] = {}
+    def _preserve_math(match: re.Match[str]) -> str:
+        token = f"ANKIOPSMATH{len(preserved_math)}END"
+        preserved_math[token] = match.group(0)
+        return token
 
-        def _preserve(match: re.Match[str]) -> str:
-            token = f"\u200dMDESCRBRACKET{len(preserved_runs)}\u200d"
-            preserved_runs[token] = match.group(1)
-            return token
-
-        # HTMLToMarkdown may already have emitted a stable escaped \] sequence on
-        # a previous pass. Preserve those runs so repeated roundtrips do not
-        # multiply backslashes after a preserved \[...\] math segment.
-        segment = _ESCAPED_RIGHT_BRACKET_RUN_RE.sub(_preserve, segment)
-        if "\\" in segment:
-            segment = segment.replace("\\", _MD_SPECIAL_CHARS["\\"])
-        for char, placeholder in _MD_SPECIAL_CHARS.items():
-            if char != "\\":
-                segment = segment.replace(char, placeholder)
-        for token, original in preserved_runs.items():
-            segment = segment.replace(token, original)
-        return segment
-
-    # Skip escaping inside explicit LaTeX delimiters.
     if r"\(" not in text and r"\[" not in text:
         return _escape_segment(text)
-
-    parts = []
-    last_end = 0
-    for match in _MATH_PATTERN.finditer(text):
-        parts.append(_escape_segment(text[last_end : match.start()]))
-        parts.append(match.group(0))
-        last_end = match.end()
-    parts.append(_escape_segment(text[last_end:]))
-    return "".join(parts)
+    return _escape_segment(_MATH_PATTERN.sub(_preserve_math, text))
 
 
-def _protect_literal_chars(html: str) -> str:
-    """Replace special markdown chars in plain text with placeholders."""
+def _protect_literal_chars(html: str) -> tuple[str, dict[str, str]]:
+    """Replace special markdown chars in plain text with placeholders.
+
+    Also returns the LaTeX math segments that were swapped for placeholder
+    tokens and must be restored after HTML-to-Markdown conversion.
+    """
+    preserved_math: dict[str, str] = {}
     if not _looks_like_html(html):
-        return _escape_special_chars(html)
+        return _escape_special_chars(html, preserved_math), preserved_math
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
@@ -110,9 +118,9 @@ def _protect_literal_chars(html: str) -> str:
         if parent is not None and parent.name in _PROTECTED_TAGS:
             continue
 
-        text_node.replace_with(_escape_special_chars(str(text_node)))
+        text_node.replace_with(_escape_special_chars(str(text_node), preserved_math))
 
-    return str(soup)
+    return str(soup), preserved_math
 
 
 def _restore_escaped_chars(md: str) -> str:
@@ -332,7 +340,7 @@ class HTMLToMarkdown:
             )
 
         # Protect literal characters before conversion
-        html = _protect_literal_chars(html)
+        html, math_replacements = _protect_literal_chars(html)
 
         if is_html_input:
             html, replacements = _prepare_custom_tag_placeholders(html)
@@ -351,6 +359,13 @@ class HTMLToMarkdown:
 
         # Restore as escaped characters
         md = _restore_escaped_chars(md)
+
+        # Restore opaque LaTeX math segments, unchanged by conversion.
+        md = _restore_custom_tag_placeholders(md, math_replacements)
+
+        # Newer html-to-markdown versions escape math delimiters as \\[...\\];
+        # canonicalize them back to \[...\] so roundtrips stay stable.
+        md = normalize_escaped_math_delimiters(md)
 
         # Normalize NBSP to space
         md = md.replace("\u00a0", " ")

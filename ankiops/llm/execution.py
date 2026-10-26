@@ -1168,7 +1168,7 @@ def parsed_response_json(parsed_response: object) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _literal(values: list[str]) -> object:
+def _literal(values: list[str]) -> Any:
     if not values:
         raise ValueError("Literal requires at least one value")
     return Literal.__getitem__(tuple(values))

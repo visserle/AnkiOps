@@ -118,7 +118,9 @@ def test_blockquote_citation_links_keep_quote_continuation(html_to_md: Any) -> N
     )
 
     assert html_to_md.convert(html) == (
-        "> called. [[13]](<https://en.wikipedia.org/wiki/Pygmalion#cite_note-13>)\n"
+        # The <br> is a hard break: newer html-to-markdown emits it as trailing
+        # double spaces so the quote continuation survives the next roundtrip.
+        "> called. [[13]](<https://en.wikipedia.org/wiki/Pygmalion#cite_note-13>)  \n"
         "> aus Pygmalion von George Bernard Shaw"
     )
 
@@ -194,6 +196,24 @@ def test_escaped_bracket_suffix_roundtrip_stays_stable(
     assert first == second
 
 
+@pytest.mark.parametrize("br", [r"\\", r"\\\\"])
+def test_latex_array_row_breaks_do_not_gain_backslashes_during_roundtrip(
+    md_to_html: Any, html_to_md: Any, br: Any
+) -> None:
+    markdown = rf"""\(
+\begin{{array}}{{l|l}}
+r & \text {{ Interpretation }} {br}
+\hline \text {{ ab }} .1 \text {{ oder }}-.1 & \text {{ "kleiner" Effekt }} {br}
+\hline \text {{ ab }} .3 \text {{ oder }}-.3 & \text {{ "mittlerer" Effekt }} {br}
+\hline \text {{ ab }} .5 \text {{ oder }}-.5 & \text {{ "großer" Effekt }}
+\end{{array}}
+\)""".strip()
+
+    html = f"<div>{md_to_html.convert(markdown)}</div>"
+
+    assert html_to_md.convert(html) == markdown
+
+
 def test_cloze_syntax_is_left_for_anki(md_to_html: Any, html_to_md: Any) -> None:
     markdown = "{{c1::hidden}}"
 
@@ -225,7 +245,10 @@ def test_html_table_escaped_pipes_stay_in_their_cells(html_to_md: Any) -> None:
         "<tr><td>a | b</td><td><code>c | d</code></td></tr></table>"
     )
 
-    assert html_to_md.convert(html) == "| A | B |\n| --- | --- |\n| a \\| b | `c | d` |"
+    # Pipes inside code spans must be escaped too, otherwise the cell splits.
+    assert (
+        html_to_md.convert(html) == "| A | B |\n| --- | --- |\n| a \\| b | `c \\| d` |"
+    )
 
 
 def test_python_code_blocks_keep_language_and_text(
