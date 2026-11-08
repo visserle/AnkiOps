@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "ankiops"
-version = "0.6.6"
+version = "0.6.7"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

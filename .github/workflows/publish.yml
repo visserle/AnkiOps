@@ -17,8 +17,34 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      - name: Install build
-        run: python -m pip install build
+      - name: Install build tools
+        run: python -m pip install build packaging
+
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          import tomllib
+
+          from packaging.version import InvalidVersion, Version
+
+          tag = os.environ["RELEASE_TAG"]
+          with open("pyproject.toml", "rb") as file:
+              project_version = tomllib.load(file)["project"]["version"]
+          try:
+              matches = Version(tag) == Version(project_version)
+          except InvalidVersion as exc:
+              sys.exit(f"Invalid release or project version: {exc}")
+          if not matches:
+              sys.exit(
+                  f"Release tag {tag!r} does not match project version "
+                  f"{project_version!r}. Create a matching release tag."
+              )
+          print(f"Release tag {tag!r} matches project version {project_version!r}.")
+          PY
 
       - name: Build distributions
         run: python -m build
