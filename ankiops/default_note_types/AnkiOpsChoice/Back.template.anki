@@ -1,7 +1,32 @@
 {{edit:Question}}
 
 <div id="answer-count-hint"></div>
-<div id="choices"></div>
+<div id="choices">
+    {{#Choice 1}}
+    <div class="choice-item" data-num="1">{{Choice 1}}</div>
+    {{/Choice 1}}
+    {{#Choice 2}}
+    <div class="choice-item" data-num="2">{{Choice 2}}</div>
+    {{/Choice 2}}
+    {{#Choice 3}}
+    <div class="choice-item" data-num="3">{{Choice 3}}</div>
+    {{/Choice 3}}
+    {{#Choice 4}}
+    <div class="choice-item" data-num="4">{{Choice 4}}</div>
+    {{/Choice 4}}
+    {{#Choice 5}}
+    <div class="choice-item" data-num="5">{{Choice 5}}</div>
+    {{/Choice 5}}
+    {{#Choice 6}}
+    <div class="choice-item" data-num="6">{{Choice 6}}</div>
+    {{/Choice 6}}
+    {{#Choice 7}}
+    <div class="choice-item" data-num="7">{{Choice 7}}</div>
+    {{/Choice 7}}
+    {{#Choice 8}}
+    <div class="choice-item" data-num="8">{{Choice 8}}</div>
+    {{/Choice 8}}
+</div>
 
 <script>
     // Parse answer field to determine number of correct answers
@@ -17,32 +42,15 @@
         hintDiv.textContent = '1 answer';
     }
 
-    // Build choices array from fields
-    var choices = [];
-    {{#Choice 1}}
-    choices.push({num: 1, text: `{{Choice 1}}`});
-    {{/Choice 1}}
-    {{#Choice 2}}
-    choices.push({num: 2, text: `{{Choice 2}}`});
-    {{/Choice 2}}
-    {{#Choice 3}}
-    choices.push({num: 3, text: `{{Choice 3}}`});
-    {{/Choice 3}}
-    {{#Choice 4}}
-    choices.push({num: 4, text: `{{Choice 4}}`});
-    {{/Choice 4}}
-    {{#Choice 5}}
-    choices.push({num: 5, text: `{{Choice 5}}`});
-    {{/Choice 5}}
-    {{#Choice 6}}
-    choices.push({num: 6, text: `{{Choice 6}}`});
-    {{/Choice 6}}
-    {{#Choice 7}}
-    choices.push({num: 7, text: `{{Choice 7}}`});
-    {{/Choice 7}}
-    {{#Choice 8}}
-    choices.push({num: 8, text: `{{Choice 8}}`});
-    {{/Choice 8}}
+    // Move the field elements themselves; never interpolate field content into JS.
+    var container = document.getElementById('choices');
+    var choices = Array.prototype.map.call(container.children, function (element) {
+        return {
+            num: Number(element.getAttribute('data-num')),
+            text: element.innerHTML,
+            element: element
+        };
+    });
 
     // Get card ID and review counter for consistent shuffle matching front
     var cardId = document.documentElement.dataset.cid || '0';
@@ -80,22 +88,15 @@
         choices[swapIndex] = temp;
     }
 
-    // Create and append choice elements with styling
-    var container = document.getElementById('choices');
+    // Move existing elements into shuffled order and highlight answers.
     choices.forEach(function (choice) {
-        var div = document.createElement('div');
-        div.className = 'choice-item';
-        div.setAttribute('data-num', choice.num);
-        div.innerHTML = choice.text;
-
-        // Highlight correct answers
         if (correctAnswers.indexOf(String(choice.num)) !== -1) {
-            div.classList.add('choice-correct');
+            choice.element.classList.add('choice-correct');
         } else {
-            div.classList.add('choice-incorrect');
+            choice.element.classList.add('choice-incorrect');
         }
 
-        container.appendChild(div);
+        container.appendChild(choice.element);
     });
 </script>
 
