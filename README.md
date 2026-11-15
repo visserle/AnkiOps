@@ -223,7 +223,7 @@ You can migrate existing notes in three ways: write matching note type files in 
 For Anki browser conversion, use this workflow:
 
 1. Convert your existing notes to the matching AnkiOps note types via `Change Note Type…` in the Anki browser.
-2. Export your notes from Anki to Markdown using `ankiops am`.
+2. Export your notes from Anki to Markdown using `ankiops af`.
 3. Review the Git diff after the first re-import. Original Anki HTML may not match CommonMark, so the first Markdown-to-Anki sync can change formatting slightly. Formatting issues can be fixed by hand or via the LLM task fix-html.
 
 ### How can I make use of LLMs with AnkiOps?
@@ -232,7 +232,7 @@ If you want it simple, just prompt an LLM (Codex, Claude Code, etc.) to edit you
 
 ### How do I upgrade AnkiOps to the latest version?
 
-AnkiOps is in early development, so breaking changes are expected. Use `uv upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops am`. Since all files are git-tracked, you can easily spot any changes and roll back if needed.
+AnkiOps is in early development, so breaking changes are expected. Use `uv tool upgrade ankiops` to upgrade AnkiOps. Delete local AnkiOps support files except your Markdown decks, re-initialize the same folder with `ankiops init`, and export from Anki with `ankiops af`. Since all files are git-tracked, you can easily spot any changes and roll back if needed.
 
 ### What other features are there?
 
