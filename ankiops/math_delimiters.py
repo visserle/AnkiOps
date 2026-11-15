@@ -11,16 +11,23 @@ _BRACKET_DELIMITED_MATH_PATTERN = r"\\\[(?P<bracket_math_body>[\s\S]+?)\\\]"
 _BLOCK_BRACKET_DELIMITED_MATH_PATTERN = r"^\\\[(?P<block_math_body>[\s\S]+?)\\\][ \t]*$"
 # Nonempty bodies stop at the first matching closing delimiter. Delimiter
 # backslash runs may have been escaped by an HTML-to-Markdown converter.
+_PAREN_MATH_BODY = r"(?:(?!\\{1,}\))[\s\S])+?"
+_BRACKET_MATH_BODY = r"(?:(?!\\{1,}\])[\s\S])+?"
 _ESCAPED_PAREN_DELIMITED_MATH_RE = re.compile(
-    r"\\{1,}\((?P<escaped_paren_math_body>(?:(?!\\{1,}\))[\s\S])+?)\\{1,}\)"
+    r"\\{1,}\((?P<escaped_paren_math_body>" + _PAREN_MATH_BODY + r")\\{1,}\)"
 )
 _ESCAPED_BRACKET_DELIMITED_MATH_RE = re.compile(
-    r"\\{1,}\[(?P<escaped_bracket_math_body>(?:(?!\\{1,}\])[\s\S])+?)\\{1,}\]"
+    r"\\{1,}\[(?P<escaped_bracket_math_body>" + _BRACKET_MATH_BODY + r")\\{1,}\]"
 )
-# Unlike normalization, preservation also matches bodies without a LaTeX
-# content hint: even simple expressions need protection from Markdown escaping.
+# Preservation needs no captured bodies or content hint. Avoid captures here:
+# this pattern runs for every math segment during HTML-to-Markdown conversion.
 MATH_SEGMENT_RE = re.compile(
-    rf"(?:{_ESCAPED_PAREN_DELIMITED_MATH_RE.pattern}|{_ESCAPED_BRACKET_DELIMITED_MATH_RE.pattern})"
+    r"\\{1,}\("
+    + _PAREN_MATH_BODY
+    + r"\\{1,}\)|"
+    + r"\\{1,}\["
+    + _BRACKET_MATH_BODY
+    + r"\\{1,}\]"
 )
 _MATH_CONTENT_HINT_RE = re.compile(r"(\\[A-Za-z]+|[_^{}])")
 

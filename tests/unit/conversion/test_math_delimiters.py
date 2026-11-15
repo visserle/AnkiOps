@@ -33,6 +33,10 @@ def test_math_segment_substitution(text: str, segments: list[str]) -> None:
     assert result == expected
 
 
+def test_math_segment_pattern_avoids_unneeded_captures() -> None:
+    assert MATH_SEGMENT_RE.groups == 0
+
+
 def test_normalization_only_changes_segments_with_math_content_hints() -> None:
     text = r"\\(x\\) \\[y\\] \\(x_1\\) \\[\alpha\\]"
 
