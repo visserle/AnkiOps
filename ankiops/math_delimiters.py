@@ -19,8 +19,9 @@ _ESCAPED_PAREN_DELIMITED_MATH_RE = re.compile(
 _ESCAPED_BRACKET_DELIMITED_MATH_RE = re.compile(
     r"\\{1,}\[(?P<escaped_bracket_math_body>" + _BRACKET_MATH_BODY + r")\\{1,}\]"
 )
-# Preservation needs no captured bodies or content hint. Avoid captures here:
-# this pattern runs for every math segment during HTML-to-Markdown conversion.
+# Preserve entire segments, including those without LaTeX content hints.
+# Avoid capturing their bodies to reduce per-match overhead; normalization
+# uses separate patterns when it needs to inspect the body.
 MATH_SEGMENT_RE = re.compile(
     r"\\{1,}\("
     + _PAREN_MATH_BODY
