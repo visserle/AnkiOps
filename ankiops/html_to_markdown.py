@@ -10,7 +10,7 @@ from html_to_markdown import ConversionOptions
 from html_to_markdown import convert as convert_html_to_markdown
 
 from ankiops.collection import LOCAL_MEDIA_DIR
-from ankiops.math_delimiters import normalize_escaped_math_delimiters
+from ankiops.math_delimiters import MATH_SEGMENT_RE, normalize_escaped_math_delimiters
 
 # Use Unicode placeholders (zero-width joiners + unique pattern)
 _MD_SPECIAL_CHARS = {
@@ -41,13 +41,6 @@ _HTML_TAG_RE = re.compile(
     r"(?is)(<!--.*?-->|</?[a-z][a-z0-9-]*(?:\s[^<>]*?)?>|<!doctype\s+html[^>]*>)"
 )
 _HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z][a-zA-Z0-9]+|#\d+|#x[0-9A-Fa-f]+);")
-# Preserve only well-formed LaTeX delimiters. Reject sequences that contain an
-# unescaped closing delimiter inside, otherwise literals like \[\]\] are
-# misclassified as math and accumulate backslashes across roundtrips.
-_MATH_PATTERN = re.compile(
-    r"(\\{1,}\((?:(?!\\{1,}\))[\s\S])+?\\{1,}\)|\\{1,}\[(?:(?!\\{1,}\])[\s\S])+?\\{1,}\])",
-    re.DOTALL,
-)
 _ESCAPED_RIGHT_BRACKET_RUN_RE = re.compile(r"(\\{2,}\])")
 
 
@@ -95,7 +88,7 @@ def _escape_special_chars(text: str, preserved_math: dict[str, str]) -> str:
 
     if r"\(" not in text and r"\[" not in text:
         return _escape_segment(text)
-    return _escape_segment(_MATH_PATTERN.sub(_preserve_math, text))
+    return _escape_segment(MATH_SEGMENT_RE.sub(_preserve_math, text))
 
 
 def _protect_literal_chars(html: str) -> tuple[str, dict[str, str]]:

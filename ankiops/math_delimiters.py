@@ -1,4 +1,4 @@
-"""Helpers for normalizing escaped LaTeX math delimiters."""
+"""Helpers for preserving and normalizing LaTeX math delimiters."""
 
 from __future__ import annotations
 
@@ -9,11 +9,18 @@ from typing import Any
 _PAREN_DELIMITED_MATH_PATTERN = r"\\\((?P<paren_math_body>[\s\S]+?)\\\)"
 _BRACKET_DELIMITED_MATH_PATTERN = r"\\\[(?P<bracket_math_body>[\s\S]+?)\\\]"
 _BLOCK_BRACKET_DELIMITED_MATH_PATTERN = r"^\\\[(?P<block_math_body>[\s\S]+?)\\\][ \t]*$"
+# Nonempty bodies stop at the first matching closing delimiter. Delimiter
+# backslash runs may have been escaped by an HTML-to-Markdown converter.
 _ESCAPED_PAREN_DELIMITED_MATH_RE = re.compile(
     r"\\{1,}\((?P<escaped_paren_math_body>(?:(?!\\{1,}\))[\s\S])+?)\\{1,}\)"
 )
 _ESCAPED_BRACKET_DELIMITED_MATH_RE = re.compile(
     r"\\{1,}\[(?P<escaped_bracket_math_body>(?:(?!\\{1,}\])[\s\S])+?)\\{1,}\]"
+)
+# Unlike normalization, preservation also matches bodies without a LaTeX
+# content hint: even simple expressions need protection from Markdown escaping.
+MATH_SEGMENT_RE = re.compile(
+    rf"(?:{_ESCAPED_PAREN_DELIMITED_MATH_RE.pattern}|{_ESCAPED_BRACKET_DELIMITED_MATH_RE.pattern})"
 )
 _MATH_CONTENT_HINT_RE = re.compile(r"(\\[A-Za-z]+|[_^{}])")
 
