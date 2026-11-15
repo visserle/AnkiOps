@@ -156,35 +156,32 @@ def read_deck_file(
                 tags = tag_values
                 continue
 
-            matched_field = None
-            for label, field_name in label_to_field.items():
-                if line.startswith(label + " ") or line == label:
-                    if field_name in seen:
-                        raise ValueError(
-                            _with_parse_error_context(
-                                f"Duplicate field '{label}'.",
-                                display_path=display_path,
-                                line_number=current_line_number,
-                            )
+            label = line.partition(" ")[0]
+            if label in label_to_field:
+                field_name = label_to_field[label]
+                if field_name in seen:
+                    raise ValueError(
+                        _with_parse_error_context(
+                            f"Duplicate field '{label}'.",
+                            display_path=display_path,
+                            line_number=current_line_number,
                         )
-
-                    seen.add(field_name)
-                    seen_labels.add(label)
-                    if current_field:
-                        fields[current_field] = "\n".join(current_content).strip()
-
-                    matched_field = field_name
-                    current_content = (
-                        [line[len(label) + 1 :]] if line.startswith(label + " ") else []
                     )
-                    current_field = field_name
-                    if first_field_line is None:
-                        first_field_line = current_line_number
-                    break
 
-            if matched_field is None and current_field:
+                seen.add(field_name)
+                seen_labels.add(label)
+                if current_field:
+                    fields[current_field] = "\n".join(current_content).strip()
+
+                current_content = (
+                    [line[len(label) + 1 :]] if len(line) > len(label) else []
+                )
+                current_field = field_name
+                if first_field_line is None:
+                    first_field_line = current_line_number
+            elif current_field:
                 current_content.append(line)
-            elif matched_field is None:
+            else:
                 label_match = FIELD_LABEL_CANDIDATE_RE.match(stripped)
                 if label_match:
                     unknown_label = label_match.group(1)

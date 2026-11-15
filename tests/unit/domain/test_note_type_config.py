@@ -25,6 +25,28 @@ def _write_basic_template_pair(note_type_dir: Path) -> None:
     )
 
 
+def test_loading_note_type_rejects_labels_with_spaces(tmp_path: Path) -> None:
+    note_types = tmp_path / "note_types"
+    note_type_dir = note_types / "Custom"
+    note_type_dir.mkdir(parents=True)
+    (note_type_dir / "note_type.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "fields": [
+                    {"name": "Term", "label": "Term label:", "identifying": True}
+                ],
+                "styling": "style.css",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (note_type_dir / "style.css").write_text("", encoding="utf-8")
+    _write_basic_template_pair(note_type_dir)
+
+    with pytest.raises(ValueError, match="Field 'Term'.*must not contain spaces"):
+        DeckFileHarness().load_note_types(note_types)
+
+
 def test_label_reuse_same_field_and_identifying_is_allowed() -> None:
     """Label reuse is allowed globally when field and identifying are identical."""
     config_a = NoteType(

@@ -118,7 +118,7 @@ The `.ankiops.db` file is the heart of AnkiOps. It connects the `note_key` value
 > [!NOTE]
 > AnkiOps only acts on note types defined within the `note_types/` folder.
 
-AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. a note with the labels `Q:` for the field Question and `A:` for Answer dafults to `AnkiOpsQA`). For the inference, each note type must have unique sets of identifying labels. The labels are defined in the `note_type.yaml` file within each note type folder. In the yaml file, you define field names, field labels (identifying and non-identifying), card templates, and the styling. Note types are fully customizable.
+AnkiOps automatically infers the note type for each note by a set of identifying field labels (e.g. a note with the labels `Q:` for the field Question and `A:` for Answer dafults to `AnkiOpsQA`). For the inference, each note type must have unique sets of identifying labels. The labels are defined in the `note_type.yaml` file within each note type folder and must not contain spaces. In the yaml file, you define field names, field labels (identifying and non-identifying), card templates, and the styling. Note types are fully customizable.
 
 If you want AnkiOps to manage your own note types, create a folder in `note_types/` with the note type name and a `note_type.yaml` file and the required templates. The following table shows the default AnkiOps note types and their identifying labels, which can be changes as needed.
 

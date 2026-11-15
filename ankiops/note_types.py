@@ -25,11 +25,19 @@ _NOTE_TYPE_CACHE: dict[Path, _NoteTypeCacheValue] = {}
 
 @dataclass(frozen=True)
 class NoteField:
-    """Definition of a field in a note type."""
+    """Definition of a field in a note type.
+
+    Note that labels cannot contain spaces."""
 
     name: str
     label: str | None
     identifying: bool
+
+    def __post_init__(self) -> None:
+        if self.label is not None and " " in self.label:
+            raise ValueError(
+                f"Field '{self.name}' label {self.label!r} must not contain spaces."
+            )
 
 
 ANKIOPS_KEY_FIELD = NoteField("AnkiOps Key", None, identifying=False)
