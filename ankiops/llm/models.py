@@ -10,9 +10,9 @@ from typing import Any
 import yaml
 
 from ankiops.collection import LLM_DIR
+from ankiops.collection import MODEL_REGISTRY_FILE_NAME as MODEL_REGISTRY_FILE_NAME
 
 SYSTEM_PROMPT_FILE_NAME = "_system_prompt.md"
-MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 _SUPPORTED_MODEL_KEYS = {
     "model",
     "model_id",

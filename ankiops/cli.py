@@ -14,7 +14,7 @@ from ankiops.cli_commands import (
     run_serialize,
 )
 from ankiops.console import configure_logging, print_error
-from ankiops.llm.commands import configure_llm_parser, run_llm
+from ankiops.llm_parser import configure_llm_parser, run_llm
 
 logger = logging.getLogger(__name__)
 

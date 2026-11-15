@@ -268,15 +268,18 @@ def _order_resolved_notes(
     resolved_by_note_key = {
         resolved[_RESOLVED_NOTE_KEY]: resolved for resolved in resolved_notes
     }
+    # Content matching is only needed for local notes without a key. Keyed
+    # notes are matched by identity below; all resolved notes are still exported.
     resolved_by_fingerprint: dict[str, list[_ResolvedDeckNote]] = {}
-    for resolved_entry in resolved_notes:
-        resolved_note = resolved_entry[_RESOLVED_NOTE_VALUE]
-        resolved_hash = note_fingerprint(
-            resolved_note.note_type,
-            resolved_note.fields,
-            tags=resolved_note.tags,
-        )
-        resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved_entry)
+    if any(not note.note_key for note in existing_notes):
+        for resolved_entry in resolved_notes:
+            resolved_note = resolved_entry[_RESOLVED_NOTE_VALUE]
+            resolved_hash = note_fingerprint(
+                resolved_note.note_type,
+                resolved_note.fields,
+                tags=resolved_note.tags,
+            )
+            resolved_by_fingerprint.setdefault(resolved_hash, []).append(resolved_entry)
 
     consumed_note_keys: set[str] = set()
     ordered_notes: list[Note] = []

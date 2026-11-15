@@ -9,7 +9,7 @@ import shlex
 import shutil
 import sys
 import textwrap
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -25,63 +25,19 @@ from rich.progress import (
 )
 
 from ankiops.collection import (
-    LLM_DIR,
     file_stem_to_deck_name,
     require_collection_root,
 )
 from ankiops.deck_sources import load_note_types_for_collection
+from ankiops.llm_parser import configure_llm_parser as configure_llm_parser
 
 from .execution import ProgressReporter, TaskExecutionProgress, run_task
 from .jobs import LlmJobRequestNoteRef, show_job
 from .jobs import list_jobs as list_llm_jobs
-from .models import MODEL_REGISTRY_FILE_NAME
 from .planning import plan_task
 from .tasks import load_llm_task_catalog
 
 logger = logging.getLogger(__name__)
-
-
-def configure_llm_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-    *,
-    handler: Callable[[argparse.Namespace], None],
-) -> None:
-    llm_parser = subparsers.add_parser(
-        "llm",
-        help="Plan/run LLM jobs and inspect LLM job history",
-    )
-    llm_parser.add_argument("task_name", nargs="?", help="Task name to plan/run")
-    llm_parser.add_argument(
-        "--run",
-        action="store_true",
-        help="Run task job (default with task is dry-run plan)",
-    )
-    llm_parser.add_argument(
-        "--job",
-        dest="job_id",
-        help="Select one LLM job (numeric id or 'latest')",
-    )
-    llm_parser.add_argument(
-        "--model",
-        help=(
-            "Override model for this plan/run "
-            f"(must exist in {LLM_DIR}/{MODEL_REGISTRY_FILE_NAME})"
-        ),
-    )
-    llm_parser.add_argument(
-        "--deck",
-        help=(
-            "Override task scope to one exact deck (includes subdecks by default). "
-            "Accepts 'Parent::Child' or markdown alias 'Parent__Child[.md]'."
-        ),
-    )
-    llm_parser.add_argument(
-        "--no-auto-commit",
-        "-n",
-        action="store_true",
-        help="Skip automatic git snapshot (with <task> --run)",
-    )
-    llm_parser.set_defaults(handler=handler)
 
 
 def run_llm(

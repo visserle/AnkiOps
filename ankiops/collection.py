@@ -20,6 +20,7 @@ NOTE_TYPES_DIR = "note_types"
 LOCAL_MEDIA_DIR = "media"
 LLM_DIR = "llm"
 LLM_DB_FILENAME = ".llm.db"
+MODEL_REGISTRY_FILE_NAME = "_models.yaml"
 
 
 def sanitize_filename(deck_name: str) -> str:
@@ -240,10 +241,7 @@ def _setup_git(collection_root: Path) -> None:
 
 
 def _eject_llm_configs(collection_root: Path) -> None:
-    from ankiops.llm.models import (
-        MODEL_REGISTRY_FILE_NAME,
-        SYSTEM_PROMPT_FILE_NAME,
-    )
+    from ankiops.llm.models import SYSTEM_PROMPT_FILE_NAME
 
     llm_dir = collection_root / LLM_DIR
     llm_dir.mkdir(parents=True, exist_ok=True)

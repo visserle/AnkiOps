@@ -36,8 +36,7 @@ def get_active_profile_action(col: Any, _params: dict[str, Any]) -> str:
         aqt: Any = import_module("aqt")
     except Exception:
         return ""
-    profile_manager = getattr(aqt, "mw", None)
-
+    profile_manager = getattr(getattr(aqt, "mw", None), "pm", None)
     name = getattr(profile_manager, "name", "")
     if callable(name):
         return str(name())
@@ -88,18 +87,24 @@ def notes_info_action(col: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
 
 def cards_info_action(col: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
+    deck_names: dict[int, str] = {}
+    note_types: dict[int, str] = {}
     for card_id in params.get("cards") or []:
         card = _get_card_or_none(col, int(card_id))
         if card is None:
             continue
         note_id = _card_note_id(card)
-        note = _get_note_or_none(col, note_id)
+        deck_id = _card_deck_id(card)
+        if note_id not in note_types:
+            note_types[note_id] = note_type_name(_get_note_or_none(col, note_id))
+        if deck_id not in deck_names:
+            deck_names[deck_id] = _deck_name(col, deck_id)
         results.append(
             {
                 "cardId": int(card_id),
                 "note": note_id,
-                "deckName": _deck_name(col, _card_deck_id(card)),
-                "modelName": note_type_name(note) if note is not None else "",
+                "deckName": deck_names[deck_id],
+                "modelName": note_types[note_id],
             }
         )
     return results
